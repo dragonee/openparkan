@@ -14,8 +14,9 @@ use std::rc::Rc;
 
 use glam::Vec3;
 use parkan_formats::fxid::{
-    EMITTER_FLAG, EMITTER_LIGHT, EMITTER_SOUND, Effect, Emitter, FX_DELETE_AT_END, FX_PING_PONG,
-    FX_START_OFF, FX_TIMES_LINEAR, TIME_LOOP, TIME_ONCE, TIME_REVERSE,
+    EMITTER_FLAG, EMITTER_LIGHT, EMITTER_SOUND, Effect, Emitter, FX_DELETE_AT_END, FX_JITTER, FX_PING_PONG,
+    FX_START_OFF, FX_TIMES_LINEAR, TIME_LIFE_INVERSE, TIME_LOOP, TIME_MOTION, TIME_ONCE, TIME_POINT_INVERSE,
+    TIME_REVERSE, TIME_SPEED, TIME_SPIN,
 };
 
 /// Header flag 0x400: draw nothing while the tested point is hidden (`Effect.dll:0x10008016`).
@@ -109,10 +110,15 @@ pub struct Sprite {
     /// The texture's u runs along the quad's long side and v across it, as a bolt's sprites
     /// take theirs (`Effect.dll:0x10009b90`); otherwise u runs across.
     pub lengthwise: bool,
-    /// How long this sprite's own material has been running, ms: its track 0 is played from
-    /// here (docs/07, "Playing a track"). A stream's particle counts from when it left, and
-    /// everything else from the instance's start.
+    /// How long this sprite's own material has been running, ms. A stream's particle counts
+    /// from when it left, and everything else from the instance's start.
     pub age_ms: f32,
+    /// Where its material's animation stands, 0 to 1 of the track's whole length: the draw
+    /// hands this to the material manager's `GetMaterialPhase` (vtable slot 5,
+    /// `World3D.dll:0x10003680`), which multiplies it by the last key's time and takes the
+    /// two keys that bracket it. A fraction outside 0..1 becomes 0.5 there. See docs/11,
+    /// "A phase is where its material's animation stands".
+    pub phase: f32,
     /// Drawn as a hemisphere about `centre` instead of a quad: a type-9 emitter's shape.
     pub dome: Option<Dome>,
 }
@@ -140,6 +146,9 @@ struct Particle {
     born: f32,
     frame: Frame,
     life: f32,
+    /// The number drawn for it as it left (`Effect.dll:0x10011d84`), which its material's
+    /// animation stands at for its whole life when the block's +32 is negative.
+    drawn: f32,
 }
 
 /// A type-8 emitter's ring of particles, and when it last emitted one.
@@ -159,14 +168,34 @@ pub struct Instance {
     pub start_ms: f64,
     pub end_ms: f64,
     pub mode: u32,
-    /// The value mode 0 reads, and modes 4, 16 and 17 the owner's point value.
+    /// The value mode 0 reads, and modes 4, 16 and 17 the owner's point value. Mode 13
+    /// takes one minus it.
     pub value: f32,
-    /// The owner's speed as a fraction of its top speed, for modes 5–15.
+    /// The owner's speed over its top speed, which modes 5–8 read and mode 15 takes the
+    /// larger of (properties `0x21` and `0x11`, `Effect.dll:0x10005d56`).
     pub speed: f32,
+    /// Its spin over its top spin, the same way, for modes 9–12 and 15 (`0x10005e2e`).
+    ///
+    /// STAND-IN: docs/11-effects.md#how-an-effect-runs--read -- nothing sets it: no shipped
+    /// effect is in modes 9–12, and the 31 in mode 15 are dust and engine plumes whose
+    /// speed term is the one that moves.
+    pub spin: f32,
+    /// The owner's life over its life at load, property `0x31`, which mode 14 takes one
+    /// minus (`0x10005f2d`). 1 is undamaged, and a mode-14 effect then holds *t* at 0.
+    ///
+    /// STAND-IN: docs/11-effects.md#how-an-effect-runs--read -- nothing sets it: the eight
+    /// mode-14 effects are the burning trees and wrecks, which nothing here starts.
+    pub life: f32,
     /// Where a bolt starts: where the effect was when it started, or the manager's target
     /// point, which its owner hands it every tick when the header asks ([`FX_TARGET_POINT`]).
     pub start_point: Vec3,
     seed: u32,
+    /// The state header flag 1's jitter is drawn from, one per instance rather than the
+    /// module-wide one the game shares.
+    rng: Rng,
+    /// What flag 1 last moved *t* by: the game redraws it every time it works *t* out,
+    /// which is at most once per manager tick, so it is drawn on the update instead.
+    jitter: f32,
     /// The caller's number for the instance, which its sounds' keys carry.
     pub id: u64,
     /// Switched on (actions 18 and 19); header flag 0x40 starts it off. An instance
@@ -213,24 +242,93 @@ pub fn fade(start: f32, end: f32, power: f32, x: f32) -> f32 {
     start + (end - start) * x.max(0.0).powf(power)
 }
 
+/// The **phase** a sprite (types 3, 4 and 9) or a bolt runs, and the fraction of its
+/// material's animation the draw takes from it.
+///
+/// The phase is `base + (end − base) × x^power` with `base` the block's start held at 0
+/// when it is negative, and *x* the progress through the window — or the **seconds since
+/// the instance started** when that start is negative, which is how a phase outruns a
+/// window (`Effect.dll:0x100104d4`, `0x100105f0`; the bolt's at `0x100029f0`,
+/// `0x10002a5f`, whose power is fixed at 1). The draw hands on its **fractional part**
+/// (`0x10010817`, `0x10002f96`), so a phase of 9 plays the animation nine times over.
+pub fn phase_fraction(start: f32, end: f32, power: f32, x: f32, seconds: f32) -> f32 {
+    let base = start.max(0.0);
+    let x = if start < 0.0 { seconds } else { x };
+    let shaped = if power == 1.0 { x } else { x.max(0.0).powf(power) };
+    let v = base + (end - base) * shaped;
+    v - v.floor()
+}
+
+/// The same for a burst's particle (types 7 and 10, `Effect.dll:0x10001625`): its age over
+/// the block's `+32` when that is 1 or less, and the fractional part of age × `+32` when it
+/// is more. A value at 1 or over is held at **0.99**, and a negative `+32` — on 350 of the
+/// 1161 type-7 blocks — sends it negative, which the draw clamps to 0, so those particles
+/// never leave their material's first key.
+pub fn burst_fraction(age: f32, rate: f32) -> f32 {
+    let v = if rate <= 1.0 {
+        if rate == 0.0 { 0.0 } else { age / rate }
+    } else {
+        let scaled = age * rate;
+        scaled - scaled.floor()
+    };
+    if v >= 1.0 { 0.99 } else { v.clamp(0.0, 1.0) }
+}
+
 /// Where `t` is in `e`'s window, 0 to 1, or `None` outside it.
 fn progress(e: &Emitter, t: f32) -> Option<f32> {
     let (lo, hi) = e.window()?;
     (lo..=hi).contains(&t).then(|| if hi > lo { (t - lo) / (hi - lo) } else { 1.0 })
 }
 
-/// A repeatable number in 0..1 from three keys.
+/// The generator every random draw in `Effect.dll` comes from
+/// (`0x10002220`, and inlined at `0x10001ad7`, `0x10002dfc`, `0x10007f9b`, `0x1000bf8d`,
+/// `0x1000ec50`, `0x1000fa8e`): a 32-bit state read as two 16-bit halves, stepped
 ///
-/// STAND-IN: docs/11-effects.md#how-an-effect-runs--read -- the effect manager's random
-/// generator is not read: an integer hash of the instance's seed, the particle and the axis.
-fn noise(a: u32, b: u32, c: u32) -> f32 {
-    let mut x = a.wrapping_mul(0x9E37_79B9) ^ b.wrapping_mul(0x85EB_CA6B) ^ c.wrapping_mul(0xC2B2_AE35);
-    x ^= x >> 15;
-    x = x.wrapping_mul(0x2C1B_3C6D);
-    x ^= x >> 12;
-    x = x.wrapping_mul(0x297A_2D39);
-    x ^= x >> 15;
-    x as f32 / u32::MAX as f32
+/// ```text
+/// lo = (lo << 1) ^ hi;   hi = (hi >> 1) ^ lo;   draw = hi
+/// ```
+///
+/// It is linear over GF(2), so its cycle is exact: one transient step, then a period of
+/// 1_065_353_089 = 127 x 47 x 178_481, and a state of 0 is a fixed point that only ever
+/// draws 0. The module seeds thirteen copies of it from `ngiGetClocks` as it loads, one
+/// per translation unit (`0x10002660` and its twelve twins), and every manager, template
+/// and instance in the process shares them — so a draw cannot be reproduced from an
+/// instance's own state. See `docs/11-effects.md`, "The generator".
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct Rng {
+    lo: u16,
+    hi: u16,
+}
+
+impl Rng {
+    /// A state from a 32-bit seed, never the zero state the generator cannot leave.
+    pub const fn new(seed: u32) -> Rng {
+        let seed = if seed == 0 { 1 } else { seed };
+        Rng { lo: seed as u16, hi: (seed >> 16) as u16 }
+    }
+
+    /// The next draw, 0 to 65535 (`Effect.dll:0x10002220`).
+    pub fn next16(&mut self) -> u16 {
+        self.lo = (self.lo << 1) ^ self.hi;
+        self.hi = (self.hi >> 1) ^ self.lo;
+        self.hi
+    }
+
+    /// A uniform in 0..1: the draw over 65536, as every caller scales it.
+    pub fn unit(&mut self) -> f32 {
+        f32::from(self.next16()) / 65536.0
+    }
+
+    /// A uniform in +-half of `v`: `draw x v / 65536 - v / 2` (`Effect.dll:0x10002680`).
+    pub fn spread(&mut self, v: f32) -> f32 {
+        self.unit() * v - v * 0.5
+    }
+}
+
+/// A seed for one emitter's spawn draws: the game takes them from a state shared by the
+/// whole module, which nothing here can follow, so each burst gets its own stream.
+fn stream_seed(seed: u32, index: u32) -> u32 {
+    seed.wrapping_mul(0x9E37_79B9) ^ index.wrapping_mul(0x85EB_CA6B) | 1
 }
 
 /// The most particles one burst draws: a guard against a malformed block, since the
@@ -268,8 +366,12 @@ impl Instance {
             mode,
             value: 0.0,
             speed: 0.0,
+            spin: 0.0,
+            life: 1.0,
             start_point: frame.origin,
             seed,
+            rng: Rng::new(seed),
+            jitter: 0.0,
             id: 0,
             on,
             silent: false,
@@ -302,11 +404,13 @@ impl Instance {
             TIME_ONCE => linear,
             TIME_LOOP => linear - linear.floor(),
             TIME_REVERSE => 1.0 - linear,
-            // STAND-IN: docs/11-effects.md#how-an-effect-runs--read -- the owner values
-            // modes 5–15 read are not modelled one by one (speed per axis in 6–8, spin in
-            // 9–12, one minus a point's or property's value in 13 and 14): every one reads
-            // the owner's speed over its top speed, which the owner sets.
-            5..=15 => self.speed,
+            // Modes 6–8 are the speed on one axis and 10–12 the spin on one; both are
+            // taken whole here, and no shipped effect is in any of the six.
+            TIME_SPEED..=8 => self.speed,
+            TIME_SPIN..=12 => self.spin,
+            TIME_POINT_INVERSE => 1.0 - self.value,
+            TIME_LIFE_INVERSE => 1.0 - self.life,
+            TIME_MOTION => self.speed.max(self.spin),
             _ => self.value,
         };
         if self.effect.header.flags & FX_TIMES_LINEAR != 0 {
@@ -315,10 +419,9 @@ impl Instance {
         if self.effect.header.flags & FX_PING_PONG != 0 {
             t = if t < 0.5 { 2.0 * t } else { 2.0 * (1.0 - t) };
         }
-        // STAND-IN: docs/11-effects.md#how-an-effect-runs--read -- flag 1 moves t by up to
-        // ± half of +0xc from the effect manager's generator, which is not read; the jitter
-        // is left out (no Mission 01 effect carries the flag).
-        t.clamp(0.0, 1.0)
+        // Flag 1 moves t by a uniform in ± half of the header's +0xc and then clamps
+        // (`Effect.dll:0x1000830e`).
+        (t + self.jitter).clamp(0.0, 1.0)
     }
 
     /// Whether the header asks for the manager's target point every tick (flag 0x1000).
@@ -352,6 +455,12 @@ impl Instance {
         if !self.on {
             return;
         }
+        // Header flag 1's jitter on *t*, redrawn each tick (`Effect.dll:0x1000830e`): 58
+        // of the 923 effects carry it, and its spread is 0.05 to 0.4 on 56 of them.
+        if self.effect.header.flags & FX_JITTER != 0 {
+            let spread = self.effect.header.jitter;
+            self.jitter = self.rng.spread(spread);
+        }
         let t = self.t(now_ms);
         let seconds = self.seconds(now_ms);
         let origin = self.frame.origin;
@@ -371,7 +480,8 @@ impl Instance {
                 let share =
                     if seconds > then { ((next - then) / (seconds - then)).clamp(0.0, 1.0) } else { 1.0 };
                 let frame = Frame { origin: from.lerp(origin, share), axes: self.frame.axes };
-                stream.ring.push_back(Particle { born: next, frame, life: ring as f32 * interval });
+                let drawn = self.rng.unit();
+                stream.ring.push_back(Particle { born: next, frame, life: ring as f32 * interval, drawn });
                 if stream.ring.len() > ring as usize {
                     stream.ring.pop_front();
                 }
@@ -491,8 +601,8 @@ impl Instance {
             let first = out.len();
             let age_ms = seconds * 1000.0;
             match e.kind {
-                3 | 4 | 9 => self.sprite(e, p, age_ms, out),
-                5 => self.bolt(e, p, age_ms, out),
+                3 | 4 | 9 => self.sprite(e, p, age_ms, seconds, out),
+                5 => self.bolt(e, p, age_ms, seconds, out),
                 7 | 10 => self.burst(e, i as u32, p, age_ms, out),
                 8 => self.stream(i, e, seconds, out),
                 _ => {}
@@ -520,7 +630,17 @@ impl Instance {
     /// A quad at `local` in `frame`, `size` along its axes, both times the instance's
     /// scale: stretched along the frame's first axis when the first two sizes differ,
     /// and otherwise a square facing the camera.
-    fn quad(&self, e: &Emitter, frame: &Frame, local: Vec3, size: Vec3, alpha: f32, age_ms: f32) -> Sprite {
+    #[allow(clippy::too_many_arguments)]
+    fn quad(
+        &self,
+        e: &Emitter,
+        frame: &Frame,
+        local: Vec3,
+        size: Vec3,
+        alpha: f32,
+        age_ms: f32,
+        phase: f32,
+    ) -> Sprite {
         let (x, y) = (frame.axes[0], frame.axes[1]);
         let stretched = (size.x - size.y).abs() > f32::EPSILON;
         Sprite {
@@ -536,6 +656,7 @@ impl Instance {
             overlay: false,
             lengthwise: false,
             age_ms,
+            phase,
             dome: None,
         }
     }
@@ -545,12 +666,14 @@ impl Instance {
     /// It sits at lerp(+40, +52) in the frame and is lerp(+100, +112) in size along its
     /// axes, each axis by progress through the window raised to that axis's exponent —
     /// +64..+72 for the position, +124..+132 for the size (`0x100106f6`, `0x10010784`;
-    /// docs/11, "A channel is a (low, high, jitter, exponent) run"). The phase is
-    /// left to animated textures, which are not drawn.
-    fn sprite(&self, e: &Emitter, p: f32, age_ms: f32, out: &mut Vec<Sprite>) {
+    /// docs/11, "A channel is a (low, high, jitter, exponent) run"). Its **phase**, from
+    /// +8, +12 and +16, is where its material's animation stands ([`phase_fraction`]).
+    fn sprite(&self, e: &Emitter, p: f32, age_ms: f32, seconds: f32, out: &mut Vec<Sprite>) {
         let local = lerp3_axis(e.triple(40), e.triple(52), shaped(p, e.triple(64)));
         let size = lerp3_axis(e.triple(100), e.triple(112), shaped(p, e.triple(124)));
-        let mut sprite = self.quad(e, &self.frame, local, size, fade(e.f(20), e.f(24), e.f(28), p), age_ms);
+        let phase = phase_fraction(e.f(8), e.f(12), e.f(16), p, seconds);
+        let mut sprite =
+            self.quad(e, &self.frame, local, size, fade(e.f(20), e.f(24), e.f(28), p), age_ms, phase);
         if e.kind == 9 {
             sprite.dome = self.dome(e, size);
         }
@@ -584,8 +707,10 @@ impl Instance {
     ///
     /// STAND-IN: docs/11-effects.md#bolts-streams-and-fades--read-and-measured -- its texture
     /// repeats every +32 along the line (`0x10002e79`); here each sprite spans its cell once.
-    fn bolt(&self, e: &Emitter, p: f32, age_ms: f32, out: &mut Vec<Sprite>) {
+    fn bolt(&self, e: &Emitter, p: f32, age_ms: f32, seconds: f32, out: &mut Vec<Sprite>) {
         let line = self.frame.origin - self.start_point;
+        // Its phase is +40 to +44, its power fixed at 1 (`0x100029f0`).
+        let phase = phase_fraction(e.f(40), e.f(44), 1.0, p, seconds);
         let step = e.f(36);
         let n = if step > 0.0 { (line.length() / step) as u32 } else { 0 };
         let n = n.min(word(e, 20)).max(1);
@@ -600,6 +725,7 @@ impl Instance {
                 overlay: false,
                 lengthwise: true,
                 age_ms,
+                phase,
                 dome: None,
             });
         }
@@ -625,15 +751,16 @@ impl Instance {
             return;
         }
         let alpha = fade(e.f(8), e.f(12), e.f(16), age);
-        for k in 0..count {
-            let r = |axis: u32| noise(self.seed, index * 64 + k, axis) - 0.5;
-            let jitter = |at: usize, axis: u32| {
+        let phase = burst_fraction(age, e.f(32));
+        let mut rng = Rng::new(stream_seed(self.seed, index));
+        for _ in 0..count {
+            let jitter = |rng: &mut Rng, at: usize| {
                 let (hi, spread) = (e.triple(at), e.triple(at + 12));
-                [0, 1, 2].map(|i| hi[i] + r(axis + i as u32) * spread[i])
+                [0, 1, 2].map(|i| hi[i] + rng.spread(spread[i]))
             };
-            let local = lerp3_axis(e.triple(44), jitter(56, 0), shaped(age, e.triple(80)));
-            let size = lerp3_axis(e.triple(92), jitter(104, 3), shaped(age, e.triple(128)));
-            out.push(self.quad(e, &self.frame, local, size, alpha, age_ms));
+            let local = lerp3_axis(e.triple(44), jitter(&mut rng, 56), shaped(age, e.triple(80)));
+            let size = lerp3_axis(e.triple(92), jitter(&mut rng, 104), shaped(age, e.triple(128)));
+            out.push(self.quad(e, &self.frame, local, size, alpha, age_ms, phase));
         }
     }
 
@@ -660,7 +787,17 @@ impl Instance {
             let size = lerp3_axis(e.triple(136), e.triple(148), shaped(age, e.triple(172)));
             let alpha = fade(e.f(4), e.f(8), e.f(12), age);
             let since = (seconds - q.born).max(0.0) * 1000.0;
-            out.push(self.quad(e, &q.frame.turned(), local, size, alpha, since));
+            // Its material's animation stands at age^+32, or at the number drawn for the
+            // particle as it left when +32 is negative (`0x10012165`, `0x1001217f`).
+            let rate = e.f(32);
+            let phase = if rate < 0.0 {
+                q.drawn
+            } else if rate == 1.0 {
+                age
+            } else {
+                age.powf(rate)
+            };
+            out.push(self.quad(e, &q.frame.turned(), local, size, alpha, since, phase.clamp(0.0, 1.0)));
         }
     }
 }
@@ -668,7 +805,7 @@ impl Instance {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use parkan_formats::fxid::{Header, TIME_MANUAL, TIME_POINT, TIME_SPEED};
+    use parkan_formats::fxid::{Header, TIME_MANUAL, TIME_POINT};
     use parkan_formats::objects::ResourceRef;
 
     /// The cues that start or stop a sound, leaving out where the playing ones are.
@@ -953,11 +1090,25 @@ mod tests {
             3,
             200,
             &[
-                (32, 0.0), (36, 1.0), (20, 1.0), (24, 1.0), (28, 1.0),
-                (52, 4.0), (56, 4.0), (60, 4.0),
-                (68, 2.0), (72, 0.5),
-                (100, 1.0), (104, 1.0), (108, 1.0), (112, 3.0), (116, 3.0), (120, 3.0),
-                (124, 2.0), (128, 2.0), (132, 2.0),
+                (32, 0.0),
+                (36, 1.0),
+                (20, 1.0),
+                (24, 1.0),
+                (28, 1.0),
+                (52, 4.0),
+                (56, 4.0),
+                (60, 4.0),
+                (68, 2.0),
+                (72, 0.5),
+                (100, 1.0),
+                (104, 1.0),
+                (108, 1.0),
+                (112, 3.0),
+                (116, 3.0),
+                (120, 3.0),
+                (124, 2.0),
+                (128, 2.0),
+                (132, 2.0),
             ],
             "flash",
         );
@@ -985,8 +1136,19 @@ mod tests {
             7,
             208,
             &[
-                (20, 0.0), (24, 1.0), (28, 1.0), (8, 1.0), (12, 1.0), (16, 1.0),
-                (56, 2.0), (92, 1.0), (96, 1.0), (100, 1.0), (104, 5.0), (108, 5.0), (112, 5.0),
+                (20, 0.0),
+                (24, 1.0),
+                (28, 1.0),
+                (8, 1.0),
+                (12, 1.0),
+                (16, 1.0),
+                (56, 2.0),
+                (92, 1.0),
+                (96, 1.0),
+                (100, 1.0),
+                (104, 5.0),
+                (108, 5.0),
+                (112, 5.0),
             ],
             "fire",
         );
@@ -1059,7 +1221,8 @@ mod tests {
     #[test]
     fn a_bolts_sprites_are_as_wide_as_lerp_24_28_by_the_progress_through_its_window() {
         // `las_l_tail_g`'s wide beam: 1.5 at the window's start, 0.5 at its end.
-        let e = block(5, 112, &[(12, 0.0), (16, 1.0), (4, 1.0), (8, 1.0), (24, 1.5), (28, 0.5), (36, 50.0)], "L");
+        let e =
+            block(5, 112, &[(12, 0.0), (16, 1.0), (4, 1.0), (8, 1.0), (24, 1.5), (28, 0.5), (36, 50.0)], "L");
         let wide = with_word(e, 20, 20);
         let frame = Frame::along(Vec3::new(0.0, 100.0, 0.0), Vec3::Y, 1.0);
         let mut fx = Instance::new(effect(TIME_MANUAL, 1.0, 0, vec![wide]), frame, 10.0, 0.0, None, 1);
@@ -1192,6 +1355,130 @@ mod tests {
         assert_eq!(fx.t(100.0), 0.4);
         fx.speed = 1.2;
         assert_eq!(fx.t(100.0), 1.0);
+    }
+
+    /// The generator itself: the recurrence, and that its period is what the linear
+    /// algebra over GF(2) gives -- one transient step, then 127 x 47 x 178_481.
+    #[test]
+    fn the_generators_recurrence_and_its_cycle() {
+        // Stepped by hand from (0x1234, 0x5678), as `Effect.dll:0x10002220` does.
+        let mut rng = Rng::new(0x5678_1234);
+        let (mut lo, mut hi) = (0x1234u16, 0x5678u16);
+        for _ in 0..1000 {
+            lo = (lo << 1) ^ hi;
+            hi = (hi >> 1) ^ lo;
+            assert_eq!(rng.next16(), hi);
+        }
+        // A zero state is a fixed point, which is why the seed steps off it.
+        assert_ne!(Rng::new(0), Rng { lo: 0, hi: 0 });
+        // The cycle: stepping the period brings the state back, and no prime factor of it
+        // does. 1_065_353_089 draws is too many to walk, so the check is on the map's
+        // order, which the doc works out; here the sequence is only checked not to repeat
+        // early, over a window longer than the shortest factor.
+        let mut seen = std::collections::HashSet::new();
+        let mut rng = Rng::new(0xDEAD_BEEF);
+        for _ in 0..200_000 {
+            assert!(seen.insert(rng), "the state repeats inside 200000 steps");
+            rng.next16();
+        }
+        // Uniform: the mean of a long run sits on a half.
+        let mut rng = Rng::new(0x1234_5678);
+        let mean: f64 = (0..200_000).map(|_| f64::from(rng.unit())).sum::<f64>() / 200_000.0;
+        assert!((mean - 0.5).abs() < 0.01, "mean {mean}");
+        // And `spread` lands inside +-half of what it is given (`0x10002680`).
+        let mut rng = Rng::new(7);
+        for _ in 0..1000 {
+            let v = rng.spread(0.2);
+            assert!((-0.1..=0.1).contains(&v), "{v}");
+        }
+    }
+
+    /// Header flag 1 moves *t* by a uniform in +-half of the header's +0xc and clamps
+    /// (`Effect.dll:0x1000830e`), and does nothing without the flag.
+    #[test]
+    fn flag_1_jitters_effect_time_by_the_headers_spread() {
+        let frame = Frame::along(Vec3::ZERO, Vec3::X, 1.0);
+        let jittered = |flags: u32, spread: f32| {
+            let mut e = effect(TIME_MANUAL, 1.0, flags, Vec::new());
+            Rc::get_mut(&mut e).expect("one owner").header.jitter = spread;
+            let mut fx = Instance::new(e, frame, 1.0, 0.0, None, 12345);
+            let mut seen = Vec::new();
+            for step in 0..64 {
+                fx.value = 0.5;
+                fx.update(f64::from(step) * 100.0);
+                seen.push(fx.t(f64::from(step) * 100.0));
+            }
+            seen
+        };
+        let still = jittered(0, 0.2);
+        assert!(still.iter().all(|&t| t == 0.5), "no flag, no jitter");
+        let moved = jittered(FX_JITTER, 0.2);
+        assert!(moved.iter().any(|&t| t != 0.5), "flag 1 moves t");
+        assert!(moved.iter().all(|&t| (0.4..=0.6).contains(&t)), "inside +-0.1 of 0.5");
+        // It is clamped to 0..1 after the jitter, not before.
+        let mut e = effect(TIME_MANUAL, 1.0, FX_JITTER, Vec::new());
+        Rc::get_mut(&mut e).expect("one owner").header.jitter = 2.0;
+        let mut fx = Instance::new(e, frame, 1.0, 0.0, None, 99);
+        for step in 0..32 {
+            fx.value = 0.0;
+            fx.update(f64::from(step) * 100.0);
+            let t = fx.t(f64::from(step) * 100.0);
+            assert!((0.0..=1.0).contains(&t), "{t}");
+        }
+    }
+
+    /// Time mode 14 is one minus the owner's life fraction (property `0x31`,
+    /// `Effect.dll:0x10005f2d`), 13 one minus its point's value (`0x10005f06`), and 15 the
+    /// larger of the speed and the spin (`0x10005f50`).
+    #[test]
+    fn the_owner_values_of_the_later_time_modes() {
+        let frame = Frame::along(Vec3::ZERO, Vec3::X, 1.0);
+        let make = |mode| Instance::new(effect(mode, 1.0, 0, Vec::new()), frame, 1.0, 0.0, None, 0);
+
+        let mut burning = make(TIME_LIFE_INVERSE);
+        assert_eq!(burning.t(100.0), 0.0, "an undamaged owner holds a mode-14 effect at 0");
+        burning.life = 0.25;
+        assert_eq!(burning.t(100.0), 0.75, "three quarters gone, three quarters of the way on");
+
+        let mut point = make(TIME_POINT_INVERSE);
+        point.value = 0.3;
+        assert_eq!(point.t(100.0), 0.7);
+
+        let mut motion = make(TIME_MOTION);
+        motion.speed = 0.2;
+        motion.spin = 0.6;
+        assert_eq!(motion.t(100.0), 0.6, "mode 15 takes the larger");
+        motion.speed = 0.9;
+        assert_eq!(motion.t(100.0), 0.9);
+
+        let mut spinning = make(TIME_SPIN);
+        spinning.spin = 0.4;
+        spinning.speed = 1.0;
+        assert_eq!(spinning.t(100.0), 0.4, "modes 9-12 read the spin, not the speed");
+    }
+
+    /// A phase is where its material's animation stands: it runs from the block's +8 to
+    /// its +12 over the window, or in seconds when +8 is negative, and the draw takes its
+    /// fractional part (`Effect.dll:0x100104d4`, `0x10010817`).
+    #[test]
+    fn a_sprites_phase_runs_its_materials_animation() {
+        // (0, 1, 1) -- 1087 of the 2013 shipped sprite blocks -- plays it once across the
+        // window, ending just short of the last key.
+        assert_eq!(phase_fraction(0.0, 1.0, 1.0, 0.0, 0.0), 0.0);
+        assert_eq!(phase_fraction(0.0, 1.0, 1.0, 0.25, 0.0), 0.25);
+        assert_eq!(phase_fraction(0.0, 1.0, 1.0, 1.0, 0.0), 0.0, "1 wraps to the first key");
+        // (-1, 9, 1) -- 387 of them -- is clocked in seconds and plays nine times over.
+        assert_eq!(phase_fraction(-1.0, 9.0, 1.0, 0.5, 0.0), 0.0);
+        assert!((phase_fraction(-1.0, 9.0, 1.0, 0.5, 0.1) - 0.9).abs() < 1e-5);
+        assert!((phase_fraction(-1.0, 9.0, 1.0, 0.5, 0.25) - 0.25).abs() < 1e-5);
+        // A burst's rate is +32: 1.0 plays it once over the particle's life, a rate below
+        // 1 finishes early and holds at 0.99, and -1 -- 350 of the 1161 type-7 blocks --
+        // never leaves the first key.
+        assert_eq!(burst_fraction(0.4, 1.0), 0.4);
+        assert!((burst_fraction(0.3, 0.6) - 0.5).abs() < 1e-6);
+        assert_eq!(burst_fraction(0.9, 0.6), 0.99);
+        assert_eq!(burst_fraction(0.4, -1.0), 0.0);
+        assert!((burst_fraction(0.4, 1.5) - 0.6).abs() < 1e-6);
     }
 
     #[test]

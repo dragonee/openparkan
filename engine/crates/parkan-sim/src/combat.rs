@@ -415,6 +415,17 @@ impl Combat {
         self.nearest(ground, skip, p0, p1, radius, ROUND_SKIPS_FACE)
     }
 
+    /// Whether a clear line runs from `p0` to `p1`: the query an effect's view test makes.
+    ///
+    /// It goes into `IWorld` slot 7, the **sight ray's** own entry
+    /// (`Effect.dll:0x10007f7f`), with a record that excludes no face class at all, so
+    /// unlike a round's ground query it stops on a lake's surface; its one excluded world
+    /// flag is on 0 of the 275882 shipped faces (docs/11, "How often the point is tested,
+    /// and what the ray meets").
+    pub fn clear_line(&self, ground: &Ground, p0: Vec3, p1: Vec3) -> bool {
+        self.nearest_over(ground, None, p0, p1, 0.0, SIGHT_SKIPS_FACE, true).is_none()
+    }
+
     /// [`Combat::first_hit`], passing the triangles whose flags meet `passes`.
     fn nearest(
         &self,
@@ -1252,6 +1263,24 @@ mod tests {
         assert_eq!(ended.len(), 1, "{events:?}");
         assert_eq!(ended[0].1, RoundEnd::Range);
         assert!((ended[0].0 - (muzzle + Vec3::Y * 40.0)).length() < 1e-3, "{:?}", ended[0].0);
+    }
+
+    /// An effect's view test is the sight ray's query, so the water sheet hides a point
+    /// under it where a round's query goes through to the bed (docs/11, "How often the
+    /// point is tested, and what the ray meets").
+    #[test]
+    fn an_effects_view_test_is_stopped_by_water_where_a_rounds_query_is_not() {
+        let g = floor();
+        let c = Combat::default();
+        // The floor's first half carries a sheet at z 5; look down at a point under it.
+        let eye = Vec3::new(10.0, 10.0, 30.0);
+        let under = Vec3::new(10.0, 10.0, 2.0);
+        assert!(!c.clear_line(&g, eye, under), "the sheet hides it");
+        assert!(c.first_hit(&g, None, eye, under, 0.0).is_none(), "a round's query passes the same sheet");
+        // Over the sheet, nothing is in the way either way.
+        let over = Vec3::new(10.0, 10.0, 8.0);
+        assert!(c.clear_line(&g, eye, over));
+        assert!(c.first_hit(&g, None, eye, over, 0.0).is_none());
     }
 
     #[test]

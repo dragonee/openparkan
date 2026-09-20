@@ -923,3 +923,50 @@ fn mission_01s_trees_and_stones_carry_node_life_at_their_placement_scale_cubed()
     }
     assert!(play.deleted[tree] && play.killed.contains(&15), "the felled tree is removed");
 }
+
+/// A **building** answers for a strike's material exactly as a unit does: its agent
+/// forwards every interface query but `0x15` to the `CBuilding` that aggregates it
+/// (`AniMesh.dll:0x10001320`), and `CBuilding` answers only ids 0, 6, `0x11`, `0x17` and
+/// `0x18` itself and hands the rest -- `0xd`, the material manager, among them -- back to
+/// the agent's own table (`Terrain.dll:0x10057c20`, `0x10057cf6`). So a round that strikes
+/// a bridge picks the slot of the struck batch's material class, not slot 0.
+///
+/// *Measured* over `fortif.rlb`: 898 of its 34 building models' 1034 wear materials are
+/// class 5, so a strike on a building is the same sparks-on-metal a strike on a bot is
+/// (docs/11-effects.md, "What an explosion plays").
+#[test]
+#[ignore = "needs the game install"]
+fn a_strike_on_mission_01s_bridge_plays_the_machine_surface_a_strike_on_a_unit_does() {
+    use glam::Vec3;
+    use parkan_formats::mission::KIND_BUILDING;
+
+    let (play, _) = mission_01_play();
+    let buildings: Vec<usize> = (0..play.battle.combat.targets.len())
+        .filter(|&t| play.battle.placed_kinds.get(t) == Some(&KIND_BUILDING))
+        .collect();
+    assert_eq!(buildings.len(), 2, "Mission 01 places the two halves of a bridge");
+
+    // Drop a ray on each part from 300 m up: what it strikes names a wear entry, and the
+    // material that entry names carries the class the `.exp` slot is picked by.
+    let mut classes = Vec::new();
+    for t in buildings {
+        let centre = play.battle.combat.targets[t].centre;
+        for (part, p) in play.battle.combat.targets[t].parts.iter().enumerate() {
+            let Some(wear) = play.battle.wears.get(t).and_then(|w| w.get(part)) else { continue };
+            for step in 0..24 {
+                let k = step as f32 / 24.0;
+                let over = centre + Vec3::new((k * 19.0).sin() * 6.0, (k * 23.0).cos() * 6.0, 300.0);
+                let under = Vec3::new(over.x, over.y, centre.z - 300.0);
+                if parkan_world::play::struck_wear(p, wear, over, under).is_some() {
+                    // The query a strike makes, which no longer turns a building away.
+                    classes.push(play.class_struck_by(t, part, over, under));
+                }
+            }
+        }
+    }
+    assert!(!classes.is_empty(), "some ray goes through the bridge");
+    assert!(
+        classes.iter().all(|c| *c == Some(5)),
+        "every strike on the bridge is the machine surface: {classes:?}"
+    );
+}

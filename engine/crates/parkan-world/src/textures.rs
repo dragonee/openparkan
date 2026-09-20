@@ -136,9 +136,16 @@ impl Animation {
     /// `CHANNEL_MATERIAL` channel plays its node's material: the value is where the loop
     /// stands, not when it is (docs/28-chassis.md, "The belt is a material a channel plays").
     pub fn by_fraction(&self, fraction: f32) -> Phase {
+        self.at(self.time_of(fraction))
+    }
+
+    /// The time `by_fraction` plays: the period -- the last key's time -- times a fraction
+    /// held to 0..1, a fraction outside it becoming 0.5 (`World3D.dll:0x10003680`,
+    /// `0x100036cc`).
+    pub fn time_of(&self, fraction: f32) -> f64 {
         let fraction = if (0.0..=1.0).contains(&fraction) { fraction } else { 0.5 };
         let period = f64::from(self.keys.last().map_or(0.0, |k| k.1));
-        self.at(period * f64::from(fraction))
+        period * f64::from(fraction)
     }
 }
 

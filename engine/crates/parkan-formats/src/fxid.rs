@@ -25,8 +25,17 @@ pub const TIME_ONCE: u32 = 1;
 pub const TIME_LOOP: u32 = 2;
 pub const TIME_REVERSE: u32 = 3;
 pub const TIME_POINT: u32 = 4;
+/// Modes 5-8: the owner's speed over its top speed, whole and then per axis (properties
+/// `0x21` and `0x11`, `Effect.dll:0x10005d56`).
 pub const TIME_SPEED: u32 = 5;
+/// Modes 9-12: the same for its spin (property `0x24` over `0x11`, `0x10005e2e`).
 pub const TIME_SPIN: u32 = 9;
+/// One minus the value of the attach point the instance hangs on (`0x10005f06`).
+pub const TIME_POINT_INVERSE: u32 = 13;
+/// One minus the owner's life fraction, property `0x31` (`0x10005f2d`): a wreck's fire
+/// runs on how badly it is hurt.
+pub const TIME_LIFE_INVERSE: u32 = 14;
+/// The larger of modes 5 and 9 (`0x10005f50`).
 pub const TIME_MOTION: u32 = 15;
 
 pub const EMITTER_LIGHT: u8 = 1;

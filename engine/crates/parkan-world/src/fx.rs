@@ -11,7 +11,7 @@ use parkan_formats::exp::Explosion;
 use parkan_formats::fxid::{self, Effect};
 use parkan_formats::gamedir;
 use parkan_formats::nres::Archive;
-use parkan_sim::effects::{Cue, Frame, Instance, Sprite};
+use parkan_sim::effects::{Cue, Frame, Instance, Rng, Sprite};
 
 use crate::textures::{Animation, Phase, TextureStore};
 
@@ -54,6 +54,8 @@ pub struct Fx {
     archive: Archive,
     templates: HashMap<String, Option<Rc<Effect>>>,
     pub instances: Vec<(Owner, Instance)>,
+    /// The manager's own state of the game's generator, and the seed it last handed out.
+    rng: Rng,
     seed: u32,
     /// The number the next instance takes, and the loops its removals stopped.
     next_id: u64,
@@ -81,6 +83,7 @@ impl Fx {
             archive: Archive::open(&path)?,
             templates: HashMap::new(),
             instances: Vec::new(),
+            rng: Rng::new(0x5EED_1234),
             seed: 1,
             next_id: 1,
             stops: Vec::new(),
@@ -118,10 +121,13 @@ impl Fx {
         mode: Option<u32>,
     ) -> bool {
         let Some(effect) = self.template(name) else { return false };
-        // STAND-IN: docs/11-effects.md#how-an-effect-runs--read -- the effect manager's
-        // random generator is not read: each instance takes the next seed of a linear
-        // congruential sequence.
-        self.seed = self.seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+        // STAND-IN: docs/11-effects.md#the-generator--read-and-measured -- the game draws
+        // from thirteen states shared by the whole of Effect.dll, seeded from the clock as
+        // it loads, so what a particle gets depends on every draw every other effect in
+        // the process has already made. Here the manager keeps one state of that same
+        // generator and hands each instance a seed of its own, so a particle redrawn next
+        // frame gets the number it had.
+        self.seed = u32::from(self.rng.next16()) << 16 | u32::from(self.rng.next16());
         let mut instance = Instance::new(effect, frame, size, now_ms, mode, self.seed);
         instance.id = self.next_id;
         self.next_id += 1;
@@ -234,20 +240,21 @@ impl Fx {
         Ok(())
     }
 
-    /// The look `material` draws with `age_ms` into its own track (docs/07, "Playing a
-    /// track"): an effect sprite takes its material entry's texture, cell and colours as a
-    /// mesh batch does, and its track steps them as it plays. `smoke_fr_02`'s puff leaves a
-    /// chimney on `fire_smoke`'s first five cells, orange, each 50 ms, and is on its later,
-    /// black ones a quarter of a second on, as the recording's plumes are.
+    /// The look `material` draws at `phase`, where the sprite's own phase stands in its
+    /// track: the draw hands that fraction to the material manager's `GetMaterialPhase`
+    /// (vtable slot 5, `World3D.dll:0x10003680`), which multiplies it by the track's whole
+    /// length and takes the keys that bracket it (docs/11, "A phase is where its material's
+    /// animation stands"). So a sprite runs its animation over its **window**, not at the
+    /// track's own key rate, and a phase that runs past 1 plays it over again.
+    /// `smoke_fr_02`'s puff leaves a chimney on `fire_smoke`'s early, orange cells and is
+    /// on its later, black ones as it ages, as the recording's plumes are.
     ///
     /// STAND-IN: docs/07-objects.md#how-a-material-reaches-the-device--read-and-measured --
-    /// that the effect draw takes the entry's cell is not read, nor what a sprite's material
-    /// starts from: a stream's particle starts its own track when it leaves, and every other
-    /// sprite starts it with its instance. The masked colour lerp between two keys is not
-    /// drawn: a sprite takes the key it is in whole.
-    fn sprite_look(&self, material: &str, age_ms: f32) -> Option<usize> {
+    /// that the effect draw takes the entry's cell is not read. The masked colour lerp
+    /// between two keys is not drawn: a sprite takes the key it is in whole.
+    fn sprite_look(&self, material: &str, phase: f32) -> Option<usize> {
         let m = self.look_of.get(&key(material))?;
-        let k = m.animation.as_ref().map_or(0, |a| a.key_at(f64::from(age_ms)).0);
+        let k = m.animation.as_ref().map_or(0, |a| a.key_at(a.time_of(phase)).0);
         m.keys.get(k).copied()
     }
 
@@ -295,7 +302,7 @@ impl Fx {
         for (_, instance) in &self.instances {
             buffer.clear();
             instance.sprites(now_ms, instance.test_point().is_none_or(&in_view), &mut buffer);
-            out.extend(buffer.drain(..).filter_map(|s| Some((self.sprite_look(&s.material, s.age_ms)?, s))));
+            out.extend(buffer.drain(..).filter_map(|s| Some((self.sprite_look(&s.material, s.phase)?, s))));
         }
         out
     }

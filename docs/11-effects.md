@@ -248,8 +248,9 @@ them — `ngiGetClocks`, `ngiGetSinCos` and `g_FastProc`'s matrix routines.
 
 **The clock is a dead end.** All 13 of its call sites are the same three
 instructions — `call ngiGetClocks; mov [state], eax; ret` — seeding a
-pseudo-random generator. Nothing in the DLL compares a block float against
-elapsed time, so a lifetime cannot be found that way.
+pseudo-random generator, one per translation unit
+([below](#the-generator--read-and-measured)). Nothing in the DLL compares a block
+float against elapsed time, so a lifetime cannot be found that way.
 
 **`ngiGetSinCos` is called from exactly one place**, at `0x1000c293`, and that
 routine is the emitter's **random direction**: it draws from the generator,
@@ -300,10 +301,10 @@ record's id.
 
 | flag | effects | what it does |
 |---:|---:|---|
-| 0x1 | 58 | jitter *t* by +0xc |
+| 0x1 | 58 | **jitter *t*** by a uniform in ±half of +0xc, before the clamp (`0x1000830e`); the spread is 0.1 on 31, 0.2 on 23, and 0 on 2 ([below](#the-jitter-flag-1-and-the-dead-flag-8--read-and-measured)) |
 | 0x2 | 403 | **delete once *t* ≥ 1** (`0x100062a6`) |
 | 0x4 | 409 | **let go of the attach point**: after its first tick the instance bakes its world frame into its own and forgets the point (`0x10006324`), so an explosion stays where it went off; 402 of the 409 are time mode 1 |
-| 0x8 | 57 | a random offset (+0x18) |
+| 0x8 | 57 | a random offset of ±half of +0x18, +0x1c and +0x20 (`0x100083a0`) — **0 on all 923**, so it moves nothing ([below](#the-jitter-flag-1-and-the-dead-flag-8--read-and-measured)) |
 | 0x10 | 466 | keep running when the attach point is hidden |
 | 0x20 | 50 | ping-pong |
 | 0x40 | 8 | start switched off |
@@ -325,15 +326,26 @@ record's id.
 | 2 | its fractional part: looping |
 | 3 | 1 − mode 1 |
 | 4 | **the animation value of an owner's mesh node** (action 14), through the owner's interface `0xb`, slot 9 — [below](#time-mode-4-is-a-nodes-animation-value--read-and-measured) |
-| 5 | the owner's speed ÷ its top speed (properties `0x21` and `0x11`); 6–8 per axis |
-| 9–12 | the same for spin (property `0x24`) |
-| 13, 14 | 1 − an owner value (the attach point's; property `0x31`) |
-| 15 | the larger of modes 5 and 9 |
-| 16, 17 | mode 4 that only rises (or drops to 0) / only falls (or jumps to 1) |
+| 5 | **|v| ÷ |limits|**: the owner's velocity, property `0x21`, over the limits record property `0x11` returns, whose `+0x18`, `+0x1c`, `+0x20` are the top speed per axis (`0x10005d56`, `0x10005d8e`). 6, 7, 8 are the same axis by axis |
+| 9–12 | the same for **spin** (property `0x24` over the same record's `+0x24`, `+0x28`, `+0x2c`; `0x10005e2e`) |
+| 13 | 1 − the value of the **attach point** the instance hangs on (interface at `+0x24`, point id at `+0x58`, slot 3; `0x10005f06`) |
+| 14 | 1 − the owner's **life fraction**, property `0x31` — its control system's total life over its total at load ([35-hud.md](35-hud.md#total-health-the-teal-arc--read)) (`0x10005f2d`) |
+| 15 | the larger of modes 5 and 9 (`0x10005f50`) |
+| 16, 17 | mode 4 that only rises (or drops to 0) / only falls (or jumps to 1): the value is kept only when it moved the right way, or when it is exactly 0 for 16 and 1 for 17, and otherwise the previous one stands (`0x10006063`, `0x10006087`, against the record's `+0x34`) |
 
 then flag 0x200 multiplies it by mode 1, and flag 0x20 folds it
 (*t* < 0.5 ? 2*t* : 2(1 − *t*)). With flag 1, *t* moves by a random amount up to
-±half of +0xc before it is clamped to 0..1 (`0x10008317`).
+±half of +0xc before it is clamped to 0..1 (`0x1000830e`).
+
+***Measured*, which of the eighteen the library uses**: mode 1 on 540, 0 on 131,
+2 on 115, 4 on 47, **5 on 46**, **15 on 31**, **14 on 8**, 16 on 3 and 17 on 2 —
+and **modes 6–13 on 0 of the 923**. So the per-axis speeds, every spin mode and
+the attach point's inverse are shipped dead, and of modes 5 to 15 only three run.
+Mode 5 is the rounds' engine plumes and flamer jets, mode 15 the walkers' dust
+and engine glows, and **mode 14 is damage**: `aim_fire_S`, `smoke_fr_01`,
+`smoke_rtr_01`, `tree_flame`, `tree_flame_06`, `tree_flame_30` and the two
+`tree_flame_sound*` — a tree's or a wreck's fire runs *forward* as the thing
+burns down, since *t* is 1 − its life.
 
 **Every emitter has a window** of *t*, a `(low, high)` pair — the first thing
 each class's update compares — and does nothing outside it (table below). So an
@@ -358,6 +370,26 @@ action that calls each ([13-control.md](13-control.md#the-section-5-record--read
 update, or within 50 ms of a command to it. The emitters' own clock is
 **seconds since the instance started** (`0x1000846c`), which is what a phase
 "in seconds when negative" and a stream's interval count.
+
+### The jitter, flag 1, and the dead flag 8 — *read*, and *measured*
+
+Both header randomisations draw from the module's generator ([below](#the-generator--read-and-measured)).
+
+- **Flag 1** takes the header's `+0xc` as a spread, draws a uniform in ±half of
+  it through `0x10002680`, adds it to *t* and then clamps to 0..1
+  (`0x1000830e`–`0x10008364`). *Measured*: the flag is on **58** effects, and
+  their spread is 0.1 on 31, 0.2 on 23, 0.05 on 1, 0.4 on 1 and **0 on 2** — so
+  56 of the 58 really wobble. A further **137** effects carry a non-zero `+0xc`
+  without the flag, where nothing reads it. The flagged set is the burning and
+  smoking family — `tree_*`, `*smoke*`, `IFlame_Smoke`, `b_ruin_fire` — plus the
+  beacons `SignLight`, `PointerLight` and `HelperLight`: a jitter on *t* is how
+  a fire flickers and a lamp blinks unevenly.
+- **Flag 8** is the same shape on the *place* rather than the time: the same
+  block reads `+0x20`, `+0x1c` and `+0x18` and offsets the instance by ±half of
+  each (`0x100083a0`–`0x100083d9`). It is set on **57** effects — and the triple
+  at `+0x18` is `(0, 0, 0)` on **all 923**. **Nothing in the library moves by
+  it.** The control is flag 1 in the same header: the same scan finds 56 of its
+  58 spreads non-zero, so a zero here is the data's, not the reader's.
 
 ### Time mode 4 is a node's animation value — *read*, and *measured*
 
@@ -447,7 +479,8 @@ sprite and a bolt and the particle's age on a burst and a stream; an exponent of
 1.0 is taken straight rather than through `pow` (`0x10011170`). Where a jitter triple
 exists the spawn adds a uniform in ±half of it to the **high** end (`0x1000186a`,
 `0x1000195b`, `0x10011ee1`, `0x10011f60`; the generator at `0x10002680` returns
-`rand16 × v / 65536 − v / 2`). Types 3, 4 and 9 have a third channel at +76 → +88 with no
+`rand16 × v / 65536 − v / 2`, and `rand16` is
+[below](#the-generator--read-and-measured)). Types 3, 4 and 9 have a third channel at +76 → +88 with no
 exponent, and the run ends exactly where the block's `(archive, member)` pair begins —
 +136 for types 3, 4 and 9, +184 for type 8, which is `RESOURCE_AT` twice over.
 
@@ -463,6 +496,105 @@ its name: (0.5, 1, 1) on 134 blocks, (1.5, 1.5, 0.5) on
 `aim_light_L` and `aim_light_S`, the position of `env_lightning` — and **2** holds it near
 its low end almost to the end of the window, which is what `B_Sphere_Sign` and
 `B_Sphere_Start` open with.
+
+### The generator — *read*, and *measured*
+
+Every random number `Effect.dll` draws comes from one routine, `0x10002220`, and it
+is not a library `rand`. **It is the engine's house generator**, the same pair of
+16-bit words already read in two other modules — `Control.dll`'s animation jitter
+over the state at `0x10042230`
+([24-motion.md](24-motion.md#the-jitter-draws-from-a-pair-of-16-bit-words--read))
+and the patroller's draw over `0x10066bfc`
+([31-packages.md](31-packages.md#the-loop-of-points-0x1002dd90)) — reached here for
+the first time as a *routine* rather than inlined. It takes a pointer to a 32-bit state in `ecx`, reads
+it as two 16-bit halves, and steps
+
+```
+lo = (lo << 1) ^ hi
+hi = (hi >> 1) ^ lo
+```
+
+returning the new `hi`. That is the `rand16` every caller scales: `0x10002680` is
+the convenience wrapper this page already had — `rand16 × v / 65536 − v / 2`, a
+uniform in ±half of *v* — and the other callers inline the same step and scale it
+themselves (`0x10001ad7` for a burst's spawn, `0x10002dfc` for a bolt, `0x10007f9b`
+for the view test's next-test time, `0x1000bf8d` for the random direction,
+`0x1000ec50` for the settings page's LOD draw, `0x1000fa8e` for a light's colour
+and range jitter, `0x10011d84` for a stream particle's own number).
+
+**The state is a module global, not a per-manager one.** Thirteen copies of it sit
+in `.data`, one per translation unit — `0x10023688`, `0x100238c0`, `0x10023b48`,
+`0x10023ed8`, `0x10024110`, `0x10024810`, `0x10024a48`, `0x10024c80`, `0x10024eb8`,
+`0x100250f0`, `0x10025328`, `0x10025560`, `0x10026c40` — each with two scratch
+floats after it that the inlined scaling uses. Each has its own
+three-instruction **seeding stub** — `call ngiGetClocks; mov [state], eax; ret` —
+and those stubs are exactly the thirteen call sites of the clock import this page
+had already found and read as one seeding (`0x10002660` and its twelve twins).
+**No instruction in `.text` calls any of them**: a sweep for each stub's address
+over every immediate in the module returns nothing, and the address appears once
+apiece in a `.data` table at `0x10020058` and on that lists the module's functions
+in address order. They are **static initialisers**, which is what `Control.dll`'s
+twin of this generator was already read to be — a static initialiser at
+`0x10006330` writing its whole dword from `ngiGetClocks`
+([24-motion.md](24-motion.md#the-jitter-draws-from-a-pair-of-16-bit-words--read)) —
+and the consequence if they did not run is the one that page names: every state
+would stay 0, which is a fixed point of the recurrence that draws nothing but 0.
+
+Seven of the thirteen states are ever read; the other six are seeded and never
+drawn from. Nothing hands a
+manager, a template or an instance a state of its own, so **every effect in the
+process shares these seven streams** and a particular particle's jitter cannot be
+reproduced from anything the instance holds.
+
+*Measured* on the recurrence itself — and this holds for the other two copies
+too, since it is the same map: the map is linear over GF(2),
+its matrix has
+rank 31, and its minimal polynomial factors as *x* · (*x*+1) · (a degree-7
+irreducible) · (a degree-23 irreducible). So after **one** transient step the state
+runs a cycle of exactly **1 065 353 089 = 127 × 47 × 178 481** — verified by
+stepping the matrix that many times and by none of the three prime quotients
+closing it — and the zero state is a fixed point that only ever draws 0. Over a
+million draws the mean is 0.4995 of 65536 and the sixteen equal buckets hold
+61 728 to 63 034 against 62 500, so it is uniform enough for what it is asked to do.
+
+### A phase is where its material's animation stands — *read*, and *measured*
+
+Every drawing emitter keeps a **phase** beside its channels, and the phase is not a
+second clock: it is the position in its **material's own animation track** that the
+sprite draws at.
+
+The draw takes the phase's **fractional part** (`0x10010817` for a sprite,
+`0x10002f96` for a bolt) and hands it, with the material id, to the material
+manager's `GetMaterialPhase` — **vtable slot 5, `World3D.dll:0x10003680`**, the
+fetch [07-objects.md](07-objects.md#who-picks-an-object-meshs-material-track--read)
+names. There it is multiplied by
+**the last key's time**, the track's whole length (`0x1000374c`), and the two keys
+that bracket the product are interpolated. So the fraction is of the animation as a
+whole: 0 is its first key and 1 comes back round to it. A fraction outside 0..1 is
+replaced by **0.5** (`0x100036cc`), and the particle draw has already clamped it
+into range (`0x1000993f`).
+
+How each type works the phase out:
+
+| type | the phase | where |
+|---:|---|---|
+| 3, 4, 9 | `base + (+12 − base) × x^(+16)`, `base` = max(+8, 0), *x* the progress through the window — or **the seconds since the instance started** when +8 < 0 | `0x100104d4` (the load), `0x100105f0` (the update) |
+| 5 | the same from +40 and +44, its exponent fixed at 1.0 | `0x100029f0`, `0x10002a5f` |
+| 7, 10 | the particle's age over **+32** when +32 ≤ 1, else the fractional part of age × +32; a value at 1 or over is held at **0.99** | `0x10001625`–`0x10001664` |
+| 8 | the particle's age **to the power of +32** — or, when +32 < 0, a number drawn for the particle as it left and kept for its life (`0x10011d84`) | `0x10012165`, `0x1001217f` |
+
+*Measured*: **2062 of the 3577** material references the emitters make name a
+material whose track 0 has more than one key — 165 distinct materials, the longest
+26 frames — so most of what an effect draws is animated art, not a still. And the
+phase moves on **all 2013** type 3, 4 and 9 blocks: its end differs from its start
+on every one. The commonest settings are `(0, 1, 1)` on **1087** — one pass through
+the animation across the window — and `(−1, 9, 1)` on **387**, `(−1, 5, 1)` on 164
+and `(−1, 11, 1)` on 116, which are clocked in seconds and run the animation nine,
+five and eleven times a second. **832 of the 2013 are clocked in seconds** rather
+than by the window. Type 7's +32 is −1 on **350** of its 1161 blocks, which sends
+the fraction negative and pins those particles on their material's first key; 1.0
+on 131, 0.6 on 297, 0.8 on 159 and 1.5 on 118. All 160 type-10 blocks carry 1.0,
+and of the 237 streams 190 carry 1.0, 34 a −1 and 13 a 0.3.
 
 ### Type 1 is a light — *read*, and *measured*
 
@@ -972,6 +1104,62 @@ it off their origin. An impact is aimed along the struck face's vector
 (placement 7, below); if that vector becomes the effect's x axis, (1, 0, 0)
 keeps the test point clear of the face the effect sits on — a *guess*.
 
+### How often the point is tested, and what the ray meets — *read*
+
+**How often: every tick.** The instance's draw keeps a deadline at its `+0x30` and
+skips the test while the manager's clock `+0x38` has not passed it (`0x10007ea1`).
+After each test it sets the next one to
+
+```
+now + I + uniform(−I × 0.25 / 2, +I × 0.25 / 2)
+```
+
+— the interval `I` from `0x10026a7c`, the quarter from `0x1001e7c8`, and the
+uniform from the generator at state `0x10024110` inlined at `0x10007f9b`–`0x10008009`
+([above](#the-generator--read-and-measured)). **`0x10026a7c` is never written.** It
+is a `.data` float, zero at load, and the only two instructions in the module that
+name it are the two reads in this very sum (`0x10007fa4`, `0x1000800b`). So `I` is
+0, the jitter is ±0, and the deadline is set to *now*: the next draw with a later
+manager clock tests again. The control is the same sweep over the same computation
+— it finds the writer of every other global in it, the generator state at
+`0x10024110` and its two scratch slots at `0x10024114` and `0x10024118`, all
+written three instructions apart. The manager's clock is the millisecond count
+message 28 hands it (`0x10003d6e`), so the test runs **once per manager tick**.
+
+**What the ray meets**: the draw carries header +0x24 into the world through the
+instance's frame, builds a query record on its stack, and calls **`IWorld` slot 7**
+— `[manager + 0x34]`'s vtable `+0x1c` (`0x10007f7f`) — which is the entry the
+**sight ray** uses ([29-weapons.md](29-weapons.md#where-the-round-leaves-and-which-way)),
+not the slot-6 mesh test a round's ground query runs. The record is eight dwords,
+four written by the helper at `0x10008e90` and four beside it at
+`0x10007f5f`–`0x10007f6b`:
+
+| | effect's test | a round's ground query (`Control.dll:0x1001d9d0`) | a sight ray (`Control.dll:0x1002a68e`) |
+|---|---|---|---|
+| +0 class mask | **`0x40a`** (`0x1001e628`, `0x1001e610`, `0x1001e60c`, `0x1001e604` ORed: classes 1, 3, 4, 10) | `0x41e` (classes 1, 2, 3, 4, 10) | `0xfff`, every class |
+| +4..+0x10 | 0 | 0 | 0 |
+| +0x14 excluded world flags | **`8`** | `0x208` | 0 |
+| +0x18 | 0 | 0 | 0 |
+| +0x1c excluded class | **0** | `0x24` | 0 |
+
+Two differences carry the answer.
+
+- **It excludes no face class at all.** A round's excluded class `0x24` is what keeps
+  its ground test off the water: against the landscape that pair becomes the surface
+  word's `0x02` and `0x01`, and `0x02` is the water sheet on exactly 3630 of the
+  275882 shipped faces
+  ([26-damage.md](26-damage.md#the-query-record-and-what-a-round-excludes--read-and-measured)).
+  The effect's `+0x1c` is **0**, so nothing is excluded, and **a lake's surface stops
+  the effect's ray exactly as it stops a sight ray** — a glow under water, or seen
+  across a lake at a low angle, counts as hidden. Its one excluded world flag, `8`,
+  becomes the landscape flags word's `0x20`, which is on **0 of the 275882**, so that
+  exclusion does nothing against the ground either. This is the shape the answer was
+  expected to take, and it came out on the sight ray's side of the two.
+- **Its class mask is narrower than a round's**: `0x40a` drops class 2, which
+  `0x41e` holds, and far narrower than the sight ray's `0xfff`. It still admits the
+  landscape (1), buildings (3), units (4) and scenery (10), so everything a glow can
+  stand behind is tested. What class 2 is is not established here.
+
 ### A beacon light's glow — *read*, and *measured*
 
 The lamps buildings and robots carry are the other side of the test. *Measured*:
@@ -1041,6 +1229,41 @@ plays the slot of the **struck batch's material class**.
 unset on 92 (slot 0), 6 on 30, 8 on 25, 9 on 8, 10 on 2 and 1 on 1; the Mission
 01 dummies `r_h_01`, `r_h_03` and the hero's `r_h_02` are class 5 throughout,
 so a hit on them plays the **`mt`** effect (slot 6).
+
+**A building answers the same way** (*read*). Its agent's `QueryInterface` is the
+delegating one: with an outer object set, every id but `0x15` is forwarded to that
+outer object (`AniMesh.dll:0x10001320`). The outer object is the `CBuilding`, whose
+own `QueryInterface` (`Terrain.dll:0x10057d50`) hands the query to its inner
+interface at `+8` (`0x10057c20`), and **that one answers only five ids** — 0, 6,
+`0x11`, `0x17` and `0x18`, through a byte table at `0x10057d2b` over a jump table at
+`0x10057d13`. Everything else, `0xd` among them, falls to the default case, which
+forwards it to the object at the inner interface's `+0x2c` (`0x10057cf6`) — **the
+agent it aggregates**, whose non-delegating query then serves it out of the agent's
+own table (`AniMesh.dll:0x100012d0`, at `+0x68` of the interface sub-object rather
+than `+0x198` of the agent). So the loop closes on the same material manager a
+unit's query reaches, and **a strike on a building plays the slot of the struck
+batch's material class, exactly as on a unit**.
+
+*Measured* over `fortif.rlb`: its **34** building models carry **1034** wear
+materials — class 5 on **898**, unset on **92**, 8 on **25**, 6 on **18** and 10 on
+**1**. So 898 of a building's skins play slot 6, **`mt`**; the 92 unset ones fall to
+slot 0; the 25 class-8 skins, the main teleports' `B_MTP_*`, play slot 9 `al`; the
+18 foliage ones slot 7; and one skin slot 11 `sh`. A hit on a building is the same
+sparks-on-metal a hit on a bot is, except on a teleport's ring and a bunker's
+greenery.
+
+**A node's wear base is the wear list, not an offset into it** (*read*). The
+material id `GetWorldFace` returns is `[node's mesh + 0x10] | batch material byte`
+(`AniMesh.dll:0x100135c8`, and the same OR at `0x100135a0` and `0x100135b7` for the
+two neighbouring fields). That `+0x10` is written from an argument **shifted 16 up**
+(`0x1000a726`: `shl eax, 0x10`, then passed into the level's record at
+`0x100123e0`), and the manager splits an id back the same way — `id >> 16` picks the
+list it holds and `id & 0xffff` indexes into that list (`World3D.dll:0x10003697` and `0x100036a4`,
+`0x100036ee`; the same split in `GetMaterialPhase` and in the lightmap fetch
+[07-objects.md](07-objects.md#how-a-lightmapped-batch-is-drawn--read-and-measured)).
+So the base has a zero low word by construction, the OR only writes the byte into
+it, and **the batch's material byte alone indexes the model's own wear** — which is
+what the drawing does and what this project's reader already did.
 
 *Measured*, which surface each slot is — the material classes carry the tags'
 names:
@@ -1152,6 +1375,41 @@ Read one slot either way, none of the seven name witnesses agrees.
   negative exponent and none of the 21426 is. The page's `+0x14a4`, 50, 250 or 1000
   by preset, has no reader at all
   ([above](#which-effects-run-the-settings-switch--read-and-measured)).
+- ~~**The effect manager's random generator**, and whether its state is shared or
+  per manager.~~ Answered: one routine, `Effect.dll:0x10002220`, a pair of 16-bit
+  shift registers whose cycle is 1 065 353 089 after one transient step; thirteen
+  module-global copies of the state, seeded from `ngiGetClocks` as the DLL loads,
+  seven of them ever read, and **nothing per manager, template or instance**
+  ([The generator](#the-generator--read-and-measured)).
+- ~~**An effect's jitter (flag 1), and the owner values of time modes 5–15.**~~
+  Answered: flag 1 adds a uniform in ±half of the header's `+0xc` to *t* before the
+  clamp, on 58 effects of which 56 have a spread to draw, and its twin flag 8 has a
+  `(0, 0, 0)` amplitude on all 923 so it moves nothing; modes 5–8 read the velocity
+  over the per-axis top speed, 9–12 the spin, 13 one minus the attach point's value,
+  14 one minus the owner's **life fraction** and 15 the larger of 5 and 9 — and of
+  those, only 5, 14 and 15 are used, on 46, 8 and 31 effects, modes 6–13 on none
+  ([The jitter, flag 1, and the dead flag 8](#the-jitter-flag-1-and-the-dead-flag-8--read-and-measured)).
+- ~~**A phase's animated texture frames**: whether a phase ever advances past frame
+  0, and what drives it.~~ Answered: the phase's fractional part **is** the
+  fraction of its material's animation track the sprite draws at, through the
+  material manager's `GetMaterialPhase` (`World3D.dll:0x10003680`); 2062 of the 3577
+  material references an emitter makes name an animated material and every one of
+  the 2013 sprite blocks moves its phase
+  ([A phase is where its material's animation stands](#a-phase-is-where-its-materials-animation-stands--read-and-measured)).
+- ~~**How often an effect instance tests its point's view, and what that ray
+  meets.**~~ Answered: once per manager tick — the interval the next-test time is
+  built from, `Effect.dll:0x10026a7c`, is 0 and nothing in the module writes it —
+  and the ray goes into `IWorld` slot 7, the sight ray's own entry, with the query
+  `[0x40a, 0, 0, 0, 0, 8, 0, 0]`, which excludes **no face class**, so the water
+  sheet a round's excluded class `0x24` lets it through stops the effect's ray
+  ([How often the point is tested](#how-often-the-point-is-tested-and-what-the-ray-meets--read)).
+- ~~**What a building answers for a strike's material, and a node's wear base.**~~
+  Answered: a `CBuilding` answers five interface ids itself and forwards the rest,
+  `0xd` among them, to the agent it aggregates, so a building answers as a unit
+  does — 898 of `fortif.rlb`'s 1034 wear materials are class 5 and play `mt`; and
+  the wear base is the wear list's index shifted 16 up, so the batch's material byte
+  alone indexes the model's own wear
+  ([What an explosion plays](#what-an-explosion-plays--read-and-measured)).
 - Snow and rain are **not** here. There is no FXID whose name mentions either,
   and `sky.wea`'s slots name the materials `SNOWFLAKE` and `RAIN_DROP`
   directly — see [10-sky.md](10-sky.md).

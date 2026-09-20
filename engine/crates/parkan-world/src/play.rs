@@ -631,9 +631,11 @@ fn round_axes(r: &Round) -> [Vec3; 3] {
 /// batch, in its node's level-0 slot, names it by its material byte
 /// (`docs/11-effects.md`, "What an explosion plays").
 ///
-/// STAND-IN: docs/11-effects.md#what-an-explosion-plays--read-and-measured -- the node's
-/// wear base the material byte is ORed with is not read: the byte alone indexes the wear,
-/// as the drawing does.
+/// The **wear base** the material byte is ORed with (`AniMesh.dll:0x100135c8`) is the
+/// mesh's wear list in the material manager, shifted into the high 16 bits
+/// (`0x1000a726`), and the manager splits a material id back into that list and an index
+/// into it (`World3D.dll:0x10003697`). So the byte alone indexes the model's own wear,
+/// which is what this does (docs/11, "A node's wear base").
 pub fn struck_wear<'a>(part: &Part, wear: &'a [String], p0: Vec3, p1: Vec3) -> Option<&'a str> {
     let strike = part.segment(p0, p1, ROUND_SKIPS_FACE)?;
     let slot = part.mesh.slots.get(usize::from(part.slot(strike.node?)?))?;
@@ -1523,19 +1525,25 @@ impl Play {
     /// an explosion plays"). Scenery is built by the same agent loader with no outer
     /// object (`docs/22-settings.md`), and answers the same way.
     ///
-    /// STAND-IN: docs/11-effects.md#what-an-explosion-plays--read-and-measured -- what a
-    /// building, whose `CBuilding` aggregates its agent, answers for its material is not
-    /// read: a strike on a building plays slot 0.
+    /// **A building answers the same way too.** Its agent forwards every query but `0x15`
+    /// to the `CBuilding` that aggregates it (`AniMesh.dll:0x10001320`), and `CBuilding`
+    /// answers only ids 0, 6, `0x11`, `0x17` and `0x18` itself and hands the rest —
+    /// `0xd`, the material manager, among them — straight back to the agent's own table
+    /// (`Terrain.dll:0x10057c20`, its default case at `0x10057cf6`;
+    /// `AniMesh.dll:0x100012d0`).
     fn struck_class(&self, target: usize, part: usize, round: &Round, point: Vec3) -> Option<u8> {
-        if self.battle.placed_kinds.get(target) == Some(&KIND_BUILDING) {
-            return None;
-        }
+        self.class_struck_by(target, part, round.previous, point + round.forward * 0.01)
+    }
+
+    /// [`Play::struck_class`] for a plain segment: the material class a ray from `p0` to
+    /// `p1` strikes on part `part` of `target`, whatever kind of thing that target is.
+    pub fn class_struck_by(&self, target: usize, part: usize, p0: Vec3, p1: Vec3) -> Option<u8> {
         let p = self.battle.combat.target(target)?.parts.get(part)?;
         let wear = match self.battle.wears.get(target) {
             Some(wears) => wears.get(part)?,
             None => &self.hero.parts.get(part)?.mesh.wear.materials,
         };
-        let name = struck_wear(p, wear, round.previous, point + round.forward * 0.01)?;
+        let name = struck_wear(p, wear, p0, p1)?;
         self.materials.get(name).map(|m| m.surface)
     }
 
@@ -3675,14 +3683,13 @@ impl Play {
     /// its point casts a ray to it from the eye, and nothing struck is in view
     /// (`docs/11-effects.md`, "Bit 8 and the tested point").
     ///
-    /// STAND-IN: docs/11-effects.md#bit-8-and-the-tested-point--read-and-measured -- how
-    /// often an instance tests its point, and what the ray through the world meets, are
-    /// not read: every frame, against what a round meets (the ground less its water
-    /// surface, and every live object's level-0 mesh).
+    /// The game tests **once per manager tick** -- the interval its next-test time is
+    /// built from, `Effect.dll:0x10026a7c`, is 0 and nothing in the module writes it --
+    /// which is what a test per frame here comes to; and the ray is the **sight ray's**
+    /// query, which excludes no face class, so a lake surface hides what is behind it
+    /// (docs/11, "How often the point is tested, and what the ray meets").
     pub fn sprites(&self, eye: Vec3) -> Vec<(usize, Sprite)> {
-        self.fx.sprites(self.hero.time_ms, |point| {
-            self.battle.combat.first_hit(&self.ground, None, eye, point, 0.0).is_none()
-        })
+        self.fx.sprites(self.hero.time_ms, |point| self.battle.combat.clear_line(&self.ground, eye, point))
     }
 }
 

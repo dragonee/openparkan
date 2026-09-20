@@ -7134,6 +7134,106 @@ def check_effect_timing(check, game: Path) -> None:
           f"{len(flags[effects.FX_SECOND_PASS])}, 0x2000 on "
           f"{[fx.name for fx in flags[effects.FX_SHADE_FLAG]]}")
 
+    # Which of the eighteen time modes the library actually uses, and what the later
+    # ones read off the owner (Effect.dll:0x10005c60, its jump table at 0x10006100).
+    later = {m: sorted(fx.name for fx in library if fx.mode == m) for m in sorted(modes)
+             if m >= effects.TIME_SPEED}
+    unused = [m for m in range(effects.TIME_SPEED, effects.TIME_MOTION + 1)
+              if not modes.get(m)]
+    burning = later.get(effects.TIME_PROPERTY_INVERSE, [])
+    check("FXID: of time modes 5 to 15 the library uses 5, 14 and 15 and no other",
+          unused == [6, 7, 8, 9, 10, 11, 12, 13]
+          and modes[effects.TIME_SPEED] == 46 and len(burning) == 8
+          and modes[effects.TIME_MOTION] == 31
+          and all(n.startswith(("tree_", "smoke_", "aim_")) for n in burning),
+          f"mode 5 (the owner's speed over its top speed, properties "
+          f"{effects.TIME_PROPERTY_VELOCITY:#x} over {effects.TIME_PROPERTY_LIMITS:#x}, "
+          f"Effect.dll:0x10005d56) on {modes[effects.TIME_SPEED]}; mode 14 (one minus "
+          f"property {effects.TIME_PROPERTY_LIFE:#x}, the life fraction, 0x10005f2d) on "
+          f"{burning}; mode 15 (the larger of 5 and 9, 0x10005f50) on "
+          f"{modes[effects.TIME_MOTION]}; modes {unused} -- speed and spin per axis, and "
+          f"one minus a control point's value -- on 0 of {len(library)}")
+
+    # Header flag 1's jitter on t, and flag 8's random offset, which has nothing to move.
+    jittered = [fx for fx in library if fx.flags & effects.FX_JITTER]
+    spreads = Counter(round(struct.unpack_from("<f", fx.header, effects.HEADER_JITTER_AT)[0], 3)
+                      for fx in jittered)
+    idle_spread = sum(1 for fx in library
+                      if struct.unpack_from("<f", fx.header, effects.HEADER_JITTER_AT)[0]
+                      and not fx.flags & effects.FX_JITTER)
+    offset = [fx for fx in library if fx.flags & effects.FX_RANDOM_OFFSET]
+    moved = sum(1 for fx in library
+                if any(struct.unpack_from("<3f", fx.header, effects.HEADER_OFFSET_AT)))
+    check("FXID: flag 1's jitter has a spread to draw, flag 8's offset has none",
+          len(jittered) == 58 and spreads[0.0] == 2 and len(offset) == 57 and moved == 0,
+          f"flag 1 (Effect.dll:0x1000830e adds a uniform in +-half of +0xc to t and then "
+          f"clamps) on {len(jittered)} effects, spread {dict(sorted(spreads.items()))}; "
+          f"{idle_spread} more carry a spread the flag does not read; control on the same "
+          f"header: flag 8 (0x100083a0, an offset of +-half of +0x18..+0x20) on "
+          f"{len(offset)} effects, and {moved} of {len(library)} carry a non-zero "
+          f"amplitude -- so nothing in the library moves by it")
+
+    # The third triple of a channel is a jitter, on the types that have one.
+    slots = jitters = 0
+    per_type: Counter[tuple[int, str]] = Counter()
+    for fx in library:
+        for e in fx.emitters:
+            for which, table in (("position", effects.CHANNEL_POSITION),
+                                 ("size", effects.CHANNEL_SIZE)):
+                at = table.get(e.kind)
+                if at is None or at[2] is None:
+                    continue
+                slots += 1
+                if any(struct.unpack_from("<3f", e.body, at[2])):
+                    jitters += 1
+                    per_type[(e.kind, which)] += 1
+    check("FXID: a channel's jitter triple is set on nearly every channel that has one",
+          slots == 3116 and jitters == 2767,
+          f"{jitters} of the {slots} channels with a jitter slot -- types 7, 10 and 8 -- "
+          f"carry a non-zero one, by type and channel "
+          f"{ {f'{k[0]} {k[1]}': v for k, v in sorted(per_type.items())} }; the spawn adds "
+          f"a uniform in +-half of it to the channel's high end (Effect.dll:0x1000186a, "
+          f"0x1000195b, 0x10011ee1, 0x10011f60), drawn from the generator at 0x10002680")
+
+    # A phase is where its material's animation stands, so the frames do advance.
+    mats = materials.MaterialLibrary(game / "Material.lib")
+    refs = animated = 0
+    distinct: set[str] = set()
+    longest = 0
+    for fx in library:
+        for e in fx.emitters:
+            if e.is_sound or not e.resource.member:
+                continue
+            m = mats.get(e.resource.member)
+            if m is None:
+                continue
+            refs += 1
+            keys = len(m.tracks[0].keys) if m.tracks else 1
+            longest = max(longest, keys)
+            if keys > 1:
+                animated += 1
+                distinct.add(e.resource.member.upper())
+    moving = still = 0
+    for fx in library:
+        for e in fx.emitters:
+            at = effects.PHASE_AT.get(e.kind)
+            if at is None or e.kind == 5:
+                continue
+            start, end = struct.unpack_from("<2f", e.body, at[0])
+            moving += end != max(start, 0.0)
+            still += end == max(start, 0.0)
+    check("FXID: an effect's sprites play animated materials, and every phase moves",
+          refs == 3577 and animated == 2062 and len(distinct) == 165 and longest == 26
+          and still == 0 and moving == 2013,
+          f"{animated} of the {refs} material references an emitter makes name a material "
+          f"with more than one key on track 0 -- {len(distinct)} distinct materials, the "
+          f"longest {longest} frames; and on all {moving} type 3, 4 and 9 blocks the "
+          f"phase's end (+12) differs from its start (+8), so it moves. The draw hands the "
+          f"phase's fractional part to the material manager's GetMaterialPhase (vtable "
+          f"slot 5, World3D.dll:0x10003680), which multiplies it by the last key's time "
+          f"(0x1000374c) -- so the fraction is of the track's whole length, and a phase "
+          f"outside 0..1 is taken as 0.5 (0x100036cc)")
+
     # Type 1 is a light: its kind word and its attenuation terms.
     kinds = Counter()
     attenuation = Counter()
@@ -7245,6 +7345,38 @@ def check_effect_timing(check, game: Path) -> None:
         mission[stem] = sorted({mats.get(n).surface for n in
                                 objmesh.read_wea(opened[ref.library].read_name(ref.member))})
     total = sum(classes.values())
+    # A building answers for its material the same way a unit does: its agent forwards
+    # every query but 0x15 to the CBuilding that aggregates it (AniMesh.dll:0x10001320),
+    # and CBuilding answers only ids 0, 6, 0x11, 0x17 and 0x18 itself and hands the rest
+    # -- 0xd among them -- back to the agent's own table (Terrain.dll:0x10057c20, its
+    # default case at 0x10057cf6; AniMesh.dll:0x100012d0).
+    fortif: Counter[int] = Counter()
+    fortif_models = 0
+    for record in things.by_tag("BTLU"):
+        ref = record.textures
+        if ref is None or ref.library.lower() != "fortif.rlb":
+            continue
+        fortif_models += 1
+        for name in objmesh.read_wea(opened[ref.library].read_name(ref.member)):
+            m = mats.get(name)
+            if m is not None:
+                fortif[m.surface] += 1
+    fortif_total = sum(fortif.values())
+    check("fortif.rlb: a building's skins are the machine surface too, so a hit plays 'mt'",
+          fortif_models == 34 and fortif_total == 1034 and fortif[5] == 898
+          and fortif[255] == 92 and fortif[8] == 25 and fortif[6] == 18 and fortif[10] == 1,
+          f"the {fortif_total} wear materials of the {fortif_models} building models in "
+          f"fortif.rlb are class {dict(fortif.most_common())} -- {fortif[5]} play slot 6 "
+          f"{effects.SURFACE_TAGS[5]!r}, the {fortif[255]} unset ones slot 0, the "
+          f"{fortif[8]} class-8 teleport skins slot 9 {effects.SURFACE_TAGS[8]!r}, the "
+          f"{fortif[6]} foliage ones slot 7 and the one class-10 skin slot 11. A "
+          f"CBuilding answers ids 0, 6, 0x11, 0x17 and 0x18 itself "
+          f"(Terrain.dll:0x10057c20) and forwards the rest to the agent it aggregates "
+          f"(0x10057cf6), so interface 0xd reaches the same material manager a unit's "
+          f"does; and the wear base the batch's byte is ORed with "
+          f"(AniMesh.dll:0x100135c8) is the wear list's index shifted 16 up "
+          f"(0x1000a726), so the byte alone indexes the model's own wear")
+
     check("objects.rlb: a unit's skins are the machine surface, so a hit plays 'mt'",
           units == 63 and classes[5] > 0.8 * total
           and all(v == [5] for v in mission.values()),

@@ -73,3 +73,44 @@ def test_a_stream_and_a_particle_carry_their_rate_and_fade():
     assert stream.fade == (0.5, 0.0, 1.0)
     assert burst.fade == (1.0, 0.0, 4.0)
     assert sound.fade is None and burst.particle_lifetime is None
+
+
+def test_the_header_names_a_spread_for_flag_1_and_an_amplitude_for_flag_8():
+    blob = bytearray(header(flags=effects.FX_JITTER | effects.FX_RANDOM_OFFSET))
+    struct.pack_into("<f", blob, effects.HEADER_JITTER_AT, 0.2)
+    struct.pack_into("<3f", blob, effects.HEADER_OFFSET_AT, 1.0, 2.0, 3.0)
+    fx = effects.parse_effect(bytes(blob))
+    assert fx.flags & effects.FX_JITTER
+    assert struct.unpack_from("<f", fx.header, effects.HEADER_JITTER_AT)[0] == pytest.approx(0.2)
+    assert struct.unpack_from("<3f", fx.header, effects.HEADER_OFFSET_AT) == (1.0, 2.0, 3.0)
+    # The two never overlap, and neither touches the tested point.
+    assert effects.HEADER_JITTER_AT + 4 == effects.HEADER_FLAGS_AT
+    assert effects.HEADER_OFFSET_AT + 12 == effects.HEADER_POINT_AT
+
+
+def test_a_sprites_phase_sits_where_its_fade_and_window_do_not():
+    fx = effects.parse_effect(header(count=2) + block(3, o8=(-1.0, 9.0, 1.0))
+                              + block(7, o32=(0.6,)))
+    sprite, burst = fx.emitters
+    start, end, power = effects.PHASE_AT[3]
+    assert struct.unpack_from("<3f", sprite.body, start) == (-1.0, 9.0, 1.0)
+    assert (start, end, power) == (8, 12, 16)
+    # A sprite's phase runs before its fade (+20..+28) and its window (+32..+36),
+    # and a burst keeps an animation rate at +32 instead of a phase.
+    assert end < effects.SPRITE_FADE_AT[0] < effects.WINDOW_AT[3]
+    assert 3 not in effects.ANIMATION_RATE_TYPES
+    assert set(effects.ANIMATION_RATE_TYPES) == {7, 8, 10}
+    rate = struct.unpack_from("<f", burst.body, effects.ANIMATION_RATE_AT)[0]
+    assert rate == pytest.approx(0.6)
+
+
+def test_the_time_modes_name_the_owner_properties_they_read():
+    assert effects.TIME_PROPERTY_VELOCITY == 0x21
+    assert effects.TIME_PROPERTY_LIMITS == 0x11
+    assert effects.TIME_PROPERTY_SPIN == 0x24
+    assert effects.TIME_PROPERTY_LIFE == 0x31
+    assert effects.TIME_PROPERTY_INVERSE == 14
+    assert effects.TIME_POINT_INVERSE == 13
+    assert effects.TIME_MOTION == 15
+    fx = effects.parse_effect(header())
+    assert fx.mode == effects.TIME_POINT

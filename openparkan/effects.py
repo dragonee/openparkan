@@ -221,6 +221,34 @@ TIME_POINT_RISING = 16
 TIME_POINT_FALLING = 17
 TIME_MODES = 18
 
+#: The owner properties the later time modes read (``Effect.dll:0x10005c60``).
+#: Modes 5-8 divide the velocity (``0x21``) by the limits record's ``+0x18``,
+#: ``+0x1c``, ``+0x20`` (``0x11``), whole and then per axis; modes 9-12 the spin
+#: (``0x24``) by that record's ``+0x24``, ``+0x28``, ``+0x2c``; mode 14 takes one
+#: minus the **life fraction** (``0x31``), the control system's current total life
+#: over its total at load; mode 15 the larger of modes 5 and 9.
+TIME_PROPERTY_VELOCITY = 0x21
+TIME_PROPERTY_LIMITS = 0x11
+TIME_PROPERTY_SPIN = 0x24
+TIME_PROPERTY_LIFE = 0x31
+
+#: Emitter type -> ``(start, end, exponent)`` of its **phase**: the value whose
+#: fractional part the draw hands the material manager's ``GetMaterialPhase``
+#: (``World3D.dll:0x10003680``) as a fraction of the material track's whole length.
+#: The phase is ``max(start, 0) + (end - max(start, 0)) * x ** exponent``, *x* the
+#: progress through the window -- or the **seconds since the instance started** when
+#: ``start`` is negative (``Effect.dll:0x100104d4``, ``0x100105f0``; the bolt's
+#: ``0x100029f0``, whose exponent is fixed at 1).
+PHASE_AT = {3: (8, 12, 16), 4: (8, 12, 16), 9: (8, 12, 16), 5: (40, 44, None)}
+
+#: Types 7, 10 and 8 keep an animation **rate** at +32 instead: a burst particle's
+#: fraction is its age over the rate when the rate is 1 or less and the fractional
+#: part of age x rate when it is more, held below 1 at 0.99 (``0x10001625``); a
+#: stream particle's is its age to the power of the rate, or a number drawn for it as
+#: it left when the rate is negative (``0x10012165``, ``0x10011d84``).
+ANIMATION_RATE_AT = 32
+ANIMATION_RATE_TYPES = (7, 8, 10)
+
 #: Emitter type -> where the ``(low, high)`` span of effect time it is active
 #: in sits.  Outside it the emitter does nothing.  Type 2, the sound, is a
 #: one-shot at its low value or a loop inside the span, by ``SOUND_MODE_AT``.
