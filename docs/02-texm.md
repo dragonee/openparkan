@@ -195,12 +195,21 @@ even an alpha format to an opaque surface (`0x1000fe18`) — see [below](#who-lo
   takes the colour of the index named in the flags' low byte, at alpha
   7, 15, … 255.
 
-Neither case is reached on shipped data (*measured*):
+Neither case is reached **in `Textures.lib`** (*measured*):
 
-- no texture sets either bit, since `+0x14` is only 0 or `0x4000000`;
-- no palettised texture draws index 0 anyway.
+- none of its 393 sets either bit, since their `+0x14` is only 0 (312) or
+  `0x4000000` (81);
+- no palettised texture in it draws index 0 anyway.
 
-**So a palettised texture draws fully opaque**, and nothing is colour-keyed.
+**So a palettised texture out of `Textures.lib` draws fully opaque**, and
+nothing there is colour-keyed. *Corrected 2026-09-20*: this paragraph used to
+say "no texture sets either bit", which is false of the install as a whole —
+**all eleven font atlases set `0x1000000`**, the alpha-surface bit, and every
+one of them is palettised (format 0). On them the first case above *is*
+reached, index 0 is cleared to alpha 0, and that colour key is exactly how a
+glyph's background is cut out
+([12-rsli.md](12-rsli.md#how-the-text-is-coloured)). The measurement was
+right for the archive it was taken over and was stated of all textures.
 No module ever sets `D3DRENDERSTATE_COLORKEYENABLE` either: a sweep of
 `Terrain.dll`, `World3D.dll`, `AniMesh.dll`, `Effect.dll`, `Ngi32.dll` and
 `iron3d.dll` finds no push of state 41. The same sweep does find every fog
