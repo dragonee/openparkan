@@ -1242,15 +1242,49 @@ target the guns are pointed at (`0x100240a6`):
 
 It starts in mode 2. **A task asks for a mode when it starts**, and some again
 in their takt, through `0x10023f30` with {mode, logic id, 0.5}. The request is
-kept unless `+0x5c` or `+0x60` is set (by `0x10023fd0` and `0x10025a00`, not
-traced further). It also refreshes every gun's fire frequency with the difficulty
-profile's `Fire_FreqFactor` (`0x1001b650`). What the 0.5 does is not read.
+kept unless `+0x5c` or `+0x60` is set. It also refreshes every gun's fire
+frequency with the difficulty profile's `Fire_FreqFactor` (`0x1001b650`).
 
 | mode | asked by |
 |---:|---|
 | 1 | attack (start, takt and manoeuvre) |
 | 2 | stop, go, patrol, search, transport, random go, stay ground, follow, leave |
 | 0 | shutdown, migrate |
+
+**The 0.5 is the field's own value, and nothing reads it** (*read*). The
+request copies its three words into `+0x28`, `+0x2c` and `+0x30`
+(`0x10023f45`–`0x10023f55`), and the constructor has already put 2, −1 and
+`0x3f000000` there (`0x10023ec2`–`0x10023ecc`). All **20** call sites of
+`0x10023f30` in `Behavior.dll` push 0.5 as the third word, so every request
+rewrites `+0x30` with what it already holds. Over the fire control's own code
+(`0x10023e80`–`0x10025c60`) a sweep of every memory operand finds two readers
+of `+0x28` (`0x100240a6`, `0x10025430`) and two of `+0x2c` (`0x100240b5`,
+`0x1002543f`) — the mode and the id the takt picks by — and **none of
+`+0x30`**; and no instruction in the module touches `MBehaviour+0x38c`, the
+same field reached through the behaviour's base. That is the control for the
+negative: the same sweep, over the same object, does find the neighbours.
+
+**Neither lock can ever be set** (*read*). `+0x5c` has one writer,
+`Behavior.dll:0x10023fd0`, which sets it to 1 and puts an id at `+0x64` — and
+**nothing calls it**. There is no direct call anywhere in `Behavior.dll`, and
+no vtable slot either: the constructor installs `0x1005956c` at the object's
+`+0` (`0x10023f1b`), a 20-slot table the fire control inherits whole and
+overrides nothing in. The only place the value `0x10023fd0` occurs as four
+bytes in any section of any shipped module is `World3D.dll:0x1000c167`, which
+is `push offset "CICLS_SIMPLE"` — the modules share an image base, so a string
+address collides with a code one. `+0x60` is
+set to 1 and cleared to 0 only inside `0x10025a00` (`0x10025b8b`,
+`0x10025bda`), and `0x10025a00`'s one caller is the takt at `0x1002422a`,
+which reaches it **only when `+0x5c` or `+0x60` is already set**
+(`0x10023f36`'s mirror at `0x10024216`). `0x10025c40`, a two-line predicate
+that answers whether either is set, has no caller either. So the guarded
+branch at `0x10023f38`/`0x10023f3f` never takes: **0 of the 20 requests are
+ever refused**, and a task always gets the fire mode it asks for. The control
+is the same call scan over the same class, which finds the constructor's
+caller (`0x10003723`), the takt's (`0x100050fc`), the request's twenty and
+`0x10025a00`'s one. The twenty cover every task in the table above, so there is
+no order in any shipped mission whose fire-control request could be turned
+away, and no count to take over the 458 assemblies: the number is 0.
 
 So **the search task's start asks for mode 2** like every task that moves.
 The fire control, run from the behaviour's takt with the unit's position
@@ -1465,8 +1499,13 @@ distance × 0.7 (`0x10059968`). Inside, the score is the default's formula:
     (2 − (a + 1) ÷ (b + 1)) × (c × b + 10) ÷ (d + 10)
 
 where *d* is that distance and *a*, *b*, *c* are the clan areal map's record
-of the contact at `+0x20`, `+0x18` and `+0x1c` (slot 9, `ArealMap.dll:0x10001ab0`,
-not named). The default score (`0x10001010`), which most tasks keep, measures
+of the contact at `+0x20`, `+0x18` and `+0x1c` (slot 9, `ArealMap.dll:0x10001ab0`):
+the life the contact has **left**, the life it would have **whole**, and its
+guns' rate, all cached by the refresh at `0x10006fdf`
+([15-behaviour.md](15-behaviour.md#what-a-strength-is--read-and-measured)). So
+`2 − (a + 1) ÷ (b + 1)` is 1 against an untouched target and rises towards 2 as
+it is shot apart, and `c × b + 10` is how much gun a whole one brings: a patrol
+takes up the wounded and the dangerous first. The default score (`0x10001010`), which most tasks keep, measures
 *d* from the unit itself and cuts off at 500. **So a patrolling unit takes up
 an engagement only against what comes inside its patrol ground**: a place
 patrol of radius 60 ignores a hostile 61 m from its place, however close to the
@@ -1803,8 +1842,11 @@ captures by logic id 34 times.
   - the task's `+0x54`, which skips the weapon test;
   - what `0x10023b60` picks as a Refit's dock, and from which clan's
     buildings.
-- What a fire-control request's third value, 0.5, does, and what sets `+0x5c`
-  and `+0x60` to lock a unit's fire mode.
+- ~~What a fire-control request's third value, 0.5, does, and what sets `+0x5c`
+  and `+0x60` to lock a unit's fire mode.~~ Nothing, and nothing: 0.5 is the
+  constructor's own `+0x30`, which every request rewrites and no reader ever
+  reads, and neither lock has a reachable writer, so all 20 requests stand
+  ([The fire control](#the-fire-control--read)).
 - ~~Who sends `MBehaviour` messages `0x19` and `0x1a`, the explosions that start a
   retaliation.~~ Every hit's first step sends `0x19` with the firer's id, and so
   does a round passing through a shield; `0x1a` is never sent
@@ -1839,8 +1881,12 @@ captures by logic id 34 times.
   and independence floats do.~~ [The patrol, tick by tick](#the-patrol-tick-by-tick--read).
 - ~~Which units run their behaviour.~~ Every object of a non-neutral clan
   ([Which objects run a behaviour](#which-objects-run-a-behaviour--read)).
-- The clan areal map's contact record (slot 9, 40-byte records): what its
-  `+0x18`, `+0x1c` and `+0x20`, which every engagement score weighs, are.
+- ~~The clan areal map's contact record (slot 9, 40-byte records): what its
+  `+0x18`, `+0x1c` and `+0x20`, which every engagement score weighs, are.~~ The
+  life a contact would have whole, its guns' rate, and the life it has left —
+  `ILifeSystem` properties 54 and 38 with device query 6 between them, cached
+  by `ArealMap.dll:0x10006e40`
+  ([15-behaviour.md](15-behaviour.md#what-a-strength-is--read-and-measured)).
 - How high a flyer on patrol flies, which decides whether a script patrol's
   circle about a place at z 0 ever holds its attack
   ([24-motion.md](24-motion.md#not-established)).

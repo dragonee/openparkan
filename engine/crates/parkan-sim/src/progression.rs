@@ -117,6 +117,28 @@ impl Areals {
     }
 }
 
+/// What the strength formula adds to a unit's guns before it multiplies by its hit points
+/// (`ai.dll:0x1000fc70`): an unarmed machine is still worth this much of itself.
+pub const UNARMED_GUNS: f32 = 0.8;
+
+/// A unit's strength (`ai.dll:0x1000fc70`): `(guns + 0.8) × hit_points × 1e-5`, where
+/// `hit_points` is what the control system sums over the object's nodes and `guns` the total
+/// the behaviour recomputes over the unit's gun table.
+///
+/// The areal map's cached form and the live one take *different* hit points: what the clan
+/// map caches for a contact is `ILifeSystem` property `0x26`, the life its nodes have **left**
+/// plus the shield it has now, while the one-object form asks property `0x36`, the life they
+/// could have plus the full shield (`Control.dll:0x1000e6c0`, `0x100138b0`). So a place is
+/// held against you by what its defenders have left, and your own group is worth what it
+/// would be at full.
+pub fn strength(guns: f32, hit_points: f32) -> f32 {
+    (guns + UNARMED_GUNS) * hit_points * 1e-5
+}
+
+/// The strength an object counts for until a caller prices it with
+/// [`Progress::set_strength`]: one object, which is what this map used to count.
+pub const UNPRICED: f32 = 1.0;
+
 /// A unit with a logical id: its clan, its `Type` word, and its position reports.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Unit {
@@ -124,6 +146,8 @@ pub struct Unit {
     pub clan: i64,
     pub type_word: u32,
     pub alive: bool,
+    /// What it is worth to [`Progress::strength_near`].
+    pub strength: f32,
     /// Where it last reported, and when its takt next runs, ms.
     reported: [f32; 2],
     next_takt_ms: f64,
@@ -138,6 +162,8 @@ pub struct Building {
     pub type_word: u32,
     pub alive: bool,
     pub at: [f32; 2],
+    /// What it is worth to [`Progress::strength_near`].
+    pub strength: f32,
 }
 
 /// A clan's SuperAI takt, slot 3 (`ai.dll:0x10001780`): when it next runs, and the seconds
@@ -252,7 +278,27 @@ impl Progress {
     pub fn join(&mut self, id: i32, clan: i64, type_word: u32, at: Vec3, now_ms: f64) {
         let _ = now_ms;
         self.areals.report(id, at);
-        self.units.push(Unit { id, clan, type_word, alive: true, reported: [at.x, at.y], next_takt_ms: 0.0 });
+        self.units.push(Unit {
+            id,
+            clan,
+            type_word,
+            alive: true,
+            strength: UNPRICED,
+            reported: [at.x, at.y],
+            next_takt_ms: 0.0,
+        });
+    }
+
+    /// Price an object for [`Progress::strength_near`], which is what the game's areal map
+    /// caches for every contact it refreshes (`ArealMap.dll:0x10006fe2`). Until a caller
+    /// does, an object counts [`UNPRICED`].
+    pub fn set_strength(&mut self, id: i32, strength: f32) {
+        for u in self.units.iter_mut().filter(|u| u.id == id) {
+            u.strength = strength;
+        }
+        for b in self.buildings.iter_mut().filter(|b| b.id == id) {
+            b.strength = strength;
+        }
     }
 
     /// Run every unit's object takt that is due by `now_ms`, with `position` giving where
@@ -310,7 +356,14 @@ impl Progress {
     /// A building with a logical id, owned by clan `clan`, of `type_word`, standing at `at`. A
     /// building is on its clan's SuperAI list too (`ai.dll:0x10001880`, docs/34, "Mission 03").
     pub fn place_building(&mut self, id: i32, clan: i64, type_word: u32, at: Vec3) {
-        self.buildings.push(Building { id, clan, type_word, alive: true, at: [at.x, at.y] });
+        self.buildings.push(Building {
+            id,
+            clan,
+            type_word,
+            alive: true,
+            at: [at.x, at.y],
+            strength: UNPRICED,
+        });
     }
 
     /// Function 34 (`ai.dll:0x10009c30`): how many entries of clan `clan`'s own list, units
@@ -335,16 +388,25 @@ impl Progress {
     /// objects the areal map holds inside that circle, and asked for no clan in particular it
     /// counts the enemy's alone — how strongly a place is held against the clan asking.
     ///
-    /// STAND-IN: docs/15-behaviour.md#what-is-not-read-here -- an object's own strength
-    /// (`0x1000fc70`: `(q + 0.8) × p × 1e-5` over `IControl` property `0x36` and interface
-    /// `0x204`'s `+4`) is not followed to what those two are, so every object counts 1 and this
-    /// is how many stand there. Only the order between candidates is used below, and a count
-    /// leaves the least defended one least.
+    /// STAND-IN: docs/15-behaviour.md#what-a-strength-is-read-and-measured -- the formula is
+    /// [`strength`], and the hit points behind it are the ones this engine's [`crate::damage::Life`]
+    /// already sums; the gun total is `MBehaviour`'s own, which is not modelled here. Nothing
+    /// prices an object yet, so every one counts [`UNPRICED`] and this is how many stand there.
+    /// Only the order between candidates is used below, and a count leaves the least defended
+    /// one least.
     pub fn strength_near(&self, hostile: impl Fn(i64) -> bool, x: f32, y: f32, radius: f32) -> f32 {
-        self.objects()
-            .filter(|&(_, clan, _, at)| hostile(clan) && (at[0] - x).hypot(at[1] - y) < radius)
-            .count()
-            .min(u32::MAX as usize) as f32
+        let near = |at: [f32; 2]| (at[0] - x).hypot(at[1] - y) < radius;
+        let units = self
+            .units
+            .iter()
+            .filter(|u| u.alive && hostile(u.clan) && near(u.reported))
+            .map(|u| u.strength);
+        let buildings = self
+            .buildings
+            .iter()
+            .filter(|b| b.alive && hostile(b.clan) && near(b.at))
+            .map(|b| b.strength);
+        units.chain(buildings).sum()
     }
 
     /// Function 71 (`ai.dll:0x1000f12e`): of the enemy objects whose type word is exactly
@@ -712,6 +774,36 @@ mod tests {
         );
         p.destroyed(0x8000_0001_u32 as i32);
         assert_eq!(p.enemy_of_type(hostile, bunker, 100.0), None);
+    }
+
+    #[test]
+    fn a_strength_is_the_guns_plus_a_fifth_over_the_hit_points() {
+        // `ai.dll:0x1000fc70`. Mission 01's hero sums 7362 hit points over its `.ndp` tables,
+        // so it is worth 0.0589 of itself before a gun is counted.
+        assert!((strength(0.0, 7362.0) - 0.058_896).abs() < 1e-6);
+        // The 0.8 is a fifth of the way to a gun total of 4: an unarmed machine is not nothing.
+        assert!((strength(4.0, 7362.0) / strength(0.0, 7362.0) - 6.0).abs() < 1e-5);
+        assert_eq!(strength(0.0, 0.0), 0.0, "a wreck with no life left holds nothing");
+    }
+
+    #[test]
+    fn a_priced_object_holds_its_strength_and_an_unpriced_one_holds_itself() {
+        let mut p = Progress::new(&[], &[], []);
+        p.place_building(0x8000_0001_u32 as i32, 0, 0x8001_0000, Vec3::ZERO);
+        p.join(6, 0, 0x0100_8000, Vec3::new(10.0, 0.0, 0.0), 0.0);
+        let hostile = |clan: i64| clan == 0;
+        assert_eq!(p.strength_near(hostile, 0.0, 0.0, 100.0), 2.0, "two objects, neither priced");
+        // A large bunker sums 66010 hit points and the hero 7362; unarmed, that is 0.528 and
+        // 0.0589 ([23-economy.md] has neither, these are the `.ndp` sums docs/15 measures).
+        p.set_strength(0x8000_0001_u32 as i32, strength(0.0, 66010.0));
+        p.set_strength(6, strength(0.0, 7362.0));
+        let held = p.strength_near(hostile, 0.0, 0.0, 100.0);
+        assert!((held - 0.586_976).abs() < 1e-5, "{held}");
+        // Out of the circle it holds nothing, and a destroyed object holds nothing either.
+        assert_eq!(p.strength_near(hostile, 400.0, 0.0, 100.0), 0.0);
+        p.destroyed(0x8000_0001_u32 as i32);
+        let left = p.strength_near(hostile, 0.0, 0.0, 100.0);
+        assert!((left - strength(0.0, 7362.0)).abs() < 1e-6, "{left}");
     }
 
     #[test]

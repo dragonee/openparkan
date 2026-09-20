@@ -15,7 +15,12 @@ to its handler, and the functions are named as far as their code says —
 problems raised and solved, units picked and ordered, targets found. The two
 helpers the target functions lean on are read as well, and one of them was being
 read wrong: what a script gets back from them is a **strength held over a place**,
-not a distance ([What the functions do](#what-the-functions-do)). The expression
+not a distance ([What the functions do](#what-the-functions-do)) — and a
+strength is now read to its two floats, **guns over hit points** ([What a
+strength is](#what-a-strength-is--read-and-measured)). So is the planner that
+runs the handlers: what the two numbers a problem is raised with do, and which
+of `_Start` and `_Continue` runs when ([The
+planner](#the-planner-when-a-_start-runs-and-when-a-_continue--read-and-measured)). The expression
 language a statement's formula is written in is read arm for arm as well, and the
 corpus uses **three** of its thirteen operators ([The `.fml`
 operators](#the-fml-operators--read-and-measured)). What a handler asks
@@ -465,10 +470,12 @@ keeps every object standing within *f* of a point — the enemy's alone unless a
 clan is named, in which case that clan's — and sums `(q + 0.8) × p × 1e-5` over
 each (`0x1000fc70`, over the two floats an areal-map entry caches at `+0x20` and
 `+0x24`; the same formula gives one unit's strength at `0x100065e0`, over
-`IControl` property `0x36` and interface `0x204`'s `+4`). So what these
-functions write into their "out" operand is **how strongly a place is held
-against the clan asking** — which is what a script hands `TAKE_BY_HITS` to size
-the group it sends: `dTemp3 = fn44(fT, ERROR, TARGET_BY_LOGIC_ID, dX)`, then
+`IControl` property `0x36` and interface `0x204`'s `+4`). What those floats are
+is read [below](#what-a-strength-is--read-and-measured): **guns over hit
+points**. So what these functions write into their "out" operand is **how
+strongly a place is held against the clan asking** — which is what a script
+hands `TAKE_BY_HITS` to size the group it sends:
+`dTemp3 = fn44(fT, ERROR, TARGET_BY_LOGIC_ID, dX)`, then
 `fn25(TAKE_BY_HITS, dTemp3, …)`.
 
 Six of them **pick the least**: 35, 36, 37, 40, 64 and 71 gather their
@@ -627,6 +634,215 @@ the three that never call 69 — `c1m3e`, `c1m4e`, `scream` — keep the spread 
 **Neither function's result is ever read**: 0 of the 14 calls of 57 and 0 of
 the 7 of 69 name a destination, so what 69 leaves in the result slot goes
 nowhere.
+
+## What a strength is — *read*, and *measured*
+
+The formula is `0x1000fc70`, three instructions long:
+
+```
+strength = (guns + 0.8) × hit points × 1e-5
+```
+
+Both floats are the object's own, and this page left them unnamed for a reason
+worth writing down. The control system's
+property interface (`Control.dll:0x1000dcc0`, 180 ids, 37 implemented) answers
+neither 38 nor 54 — both fall to the default at `0x1000e002`, which returns 0
+and leaves the caller's out-pointer untouched. That looked like a shipped bug
+and it is not: **`LoadControlSystem` makes a derived class for every agent kind
+but 9**, 0x670 bytes rather than 0x668 (`0x10032290`, constructor `0x10031490`,
+vtables `0x1003d298`…), and *its* `ILifeSystem` slot 5 is a second dispatcher —
+`0x1000e6c0`, ids 38 to 179, which handles the two and hands the rest down to
+the base's (`0x1000e875`). Find the derived class before reading a property
+table: the base's silence says nothing about what the object answers.
+
+**Property 54 is what the object's life could be, 38 what it has** (*read*).
+Both go through one helper, `Control.dll:0x100138b0`, which takes a flag:
+
+| property | the hit points | the shield |
+|---:|---|---|
+| 54 (`0x36`) | `+0x58c`, the **maximum** summed over the nodes | device query 15, every deflector full |
+| 38 (`0x26`) | `+0x590`, the life those nodes **have left** | device query 14, the shield as it stands |
+
+`+0x590` is where the control system accumulates each node's life as it builds
+the object (`0x1000fa42`), and `+0x58c` is a copy of it taken while everything
+is whole (`0x1000fa7c`); both are rescaled together when a scale changes
+(`0x10009f5d`), which is how [26-damage.md](26-damage.md) reads a node's life.
+The helper also divides by `[+0x5b4]`'s `+4` when that pointer is set — it is
+cleared in the constructor (`0x10007172`), never assigned anywhere in
+`Control.dll`, and only the destructor frees it, so **the divide never
+happens** and the branch that answers `FLT_MAX` for a zero divisor is dead.
+
+**The other float is the unit's guns**, `IGameObject` variable `0x204`'s `+4`
+(*read*). The variable getter is `MBehaviour`'s own switch
+(`Behavior.dll:0x1000a490`, the one [23-economy.md](23-economy.md#how-ore-reaches-a-consumer--read-after-two-corrections)
+reads the ore ids off); id `0x204` (`0x1000a7b1`) hands back `&[MBehaviour +
+0x674]` and, before it does, **recomputes the second word of that pair**: it
+refreshes the unit's weapon table from its machine (`0x1001c1a0`, asking every
+gun for its rounds left, `0x204` id `0x700`, and its rate figure, id 6) and
+then sums `a ÷ b × rounds` over it into `+0x678` (`0x1001ccb0`, skipping a gun
+whose *b* is not above 0). Which two authored figures *a* and *b* are — the
+gun record's `+0x0c` and `+0x28`, which that refresh does not fill — is **not
+read**. So a strength is fresh on every ask, and an unarmed machine still
+counts: the 0.8 is what it is worth without a gun.
+
+**The cached form and the live one do not measure the same thing** (*read*).
+The clan areal map's contact record is 40 bytes and
+`ArealMap.dll:0x10006e40` fills it from four interfaces at once: the logic id,
+Type and clan at `+0`/`+4`/`+8` (`IGameObject` slots 12, 14 and 17), the
+position at `+0xc`, and then **`+0x18` property 54, `+0x1c` device query 6,
+`+0x20` property 38, `+0x24` variable `0x204`'s `+4`**. `0x10006130` sums
+`(+0x24 + 0.8) × +0x20 × 1e-5` — property **38** — while `0x100065e0`, which
+fetches one object by logical id, asks property **54**. So *how strongly a
+place is held against you* is measured on what its defenders have **left**,
+and *what your own group is worth* on what it would have at **full**. That
+also names the three numbers [31-packages.md](31-packages.md#what-it-scores-slot-13-0x1002d390-and-lets-through-slot-12-0x1002d250)
+weighs in every engagement score: its *a*, *b* and *c* are the life left, the
+life at full and the guns' rate, so `2 − (a + 1) ÷ (b + 1)` is 1 on a whole
+target and rises towards 2 as it is shot apart.
+
+**The design store scores a design the same way** (*read*). Its per-design fill
+(`ai.dll:0x10010c30`) builds a real object from the scheme
+(`ArealMap.dll:CreateObjectFromScheme`) and reads five figures off it into the
+0x124-byte record: `+0x108` the Type word, `+0x10c` property `0x201` (the size
+class), **`+0x110` property 54**, **`+0x114` variable `0x204`'s `+4`**, `+0x118`
+property 145 (the live top speed). Those are the first two of the six floats
+`SELECT_*` chooses between ([Function 69](#function-69-sets-how-sloppy-the-ais-design-pick-is--read-and-measured)),
+so `SELECT_BEST_COMBAT` and `SELECT_FASTEST` rank by hit points and by speed.
+The fill also computes the strength itself and drops it — the three calls
+around it (`0x10010daa`, `0x10010db4`, `0x10010dcd`) are stubs that `ret`, a
+trace that was compiled out.
+
+### What a `TAKE_BY_HITS` amount is worth — *measured*
+
+The scale is only useful with a number beside it. Summing every component's
+`.ndp` durabilities over the **458** shipped assemblies gives 0 to 1,084,514
+hit points, median 8,774; five carry no damage table at all (`b_ruin`,
+`e_ruin`, `m_ruin`, `s_ruin`, `mas_l_n1`). All **19** hero assemblies sum
+**7,362** and the largest bunker 66,010, so unarmed and whole the hero is worth
+**0.0589** and that bunker **0.528**. So armour alone barely moves the number:
+a `TAKE_BY_HITS` amount of 25 is 424 hero hulls' worth of it, which no group
+the AI can raise will ever reach. **A two-digit amount is a demand for guns.**
+
+Where the amount comes from, over all **74** `TAKE_BY_HITS` calls — every one
+of them passing `dTemp3` (*measured*):
+
+| the amount was last written by | calls |
+|---|---:|
+| `fn29(d2)`, the running problem's third parameter | 30 |
+| a formula: `dBuildingProtectHits − dT2`/`− dTemp`, `dPlaceProtectHits − …`, and one 0 | 27 |
+| `fn44`, the strength standing about a place | 13 |
+| `fn38`, a clan's battle units' summed strength | 4 |
+
+So **17 of the 74 are a strength the engine has just measured**, and most of
+the 30 out of the problem are one at second hand: six codes pass `dTemp3` as
+their third parameter (`PBM_BUILDING_CAPTURE`, `PBM_BASE_DEFENCE`,
+`PBM_BUILDING_PROTECT`, `PBM_PLACE_PROTECT`, `PBM_ATTACK_UNIT`,
+`PBM_BUILDING_ATTACK`), and of those 37 raises **12 hand it straight from
+`fn44`** and 5 more scale what `fn44` left (`dTemp3*1.5`, `dTemp3*2.5`,
+`dTemp3 + 0.5*dTemp3`), while 16 carry whatever an earlier handler left in the
+variable.
+
+Only the 27 formulas are authored numbers, and they are small. `varset.var`
+declares both `*Hits` variables 2,000,000; every script overwrites them, with
+0, 10, 15, 16, 25, 51, 55, 100, 150, 250, 500 or 9,999,999, twice with
+`20 + 55·fDifficulty` and once with `100 − 40·fDifficulty`.
+
+## The planner: when a `_Start` runs, and when a `_Continue` — *read*, and *measured*
+
+A problem is a 0x64-byte record in a list at the SuperAI's `+0xa0`, and the
+clan's takt (slot 3, `ai.dll:0x10001780`, every 7000 + rand % 1000 ms:
+[34-progression.md](34-progression.md#when-the-mission-handler-runs--read))
+walks it four times, in this order:
+
+1. **The drain** (`0x10005910` → `0x10004ee0` per problem). Every problem with
+   a code loses its **`+0x2c`** from its **`+0x24`**, and at 0 or below it is
+   retired: `0x10005010` releases its units and zeroes its code, its three
+   parameters and its state, which frees the slot. A test ahead of the
+   subtraction, taken only while the drain is above 0, retires it the same way
+   on its `+0x20` count instead (`0x10004efa`–`0x10005040`); what that count
+   holds is not followed.
+2. **The `_Continue` pass** (`0x10001e50`). Every problem whose state is
+   `ST_SOLVING`, in list order: it writes the problem's **index** into
+   `dCurrentProblem` (`0x10001ea0`) and runs handler
+   `[SuperAI + code × 4 + 0x244]`.
+3. **`Problems<n>`**, the handler at `+0x89c` that function 33 re-points.
+4. **The `_Start` pass** (`0x10001bf0`). It takes the **largest weight** among
+   the problems that are neither `ST_SOLVING` nor `ST_SOLVED`, collects every
+   problem at exactly that weight into `0x10054ac8`, and for each writes its
+   index into `dCurrentProblem` (`0x10001da4`) and runs handler
+   `[SuperAI + code × 4 + 0xb4]`. If a handler leaves its problem neither
+   solved nor solving, a flag is set and **the whole pass runs again**
+   (`0x10001e3d`), so one takt drains the list from the heaviest down.
+
+**Nothing else writes `dCurrentProblem` or `dCurrentSender`** (*read*). The
+SuperAI keeps pointers to the two variables at `+0x868` and `+0x86c`
+([Which slot reads and which writes](#which-slot-reads-and-which-writes));
+`0x10013770` is the value setter and `0x10013570` the getter. Sweeping every
+memory operand at those two displacements — **ebp included, because this build
+uses it as an object pointer** — returns the constructor's two stores of the
+pointers themselves (`0x10001545`, `0x10001560`) and **20 loads**, of which
+exactly **three reach the setter**: `dCurrentProblem` at `0x10001da4` (the
+`_Start` pass) and `0x10001ea0` (the `_Continue` pass), and `dCurrentSender`
+once, at `0x10005d7c`, from the argument of the event dispatcher `0x10005d70`.
+The other 17 go to the getter — that is how each function handler finds the
+running problem. So the three handlers that switch on `dCurrentSender`
+([The jumps](#the-jumps--read-and-measured)) are reading whoever raised the
+**event**, not whoever raised the problem. A first sweep for this page missed
+`0x10001da4` by skipping `ebp`-based operands, and would have published one
+writer where there are two.
+
+**A raise names its own handlers** (*read*). `fn2` (`0x10009610`) reads its
+seven operands and hands them to `0x100059f0` together with **the name of the
+variable its first operand is**, `0x1000f6d0` — so `fn2(PBM_BASE_DEFENCE, …)`
+looks for `PBM_BASE_DEFENCE_Start` and `PBM_BASE_DEFENCE_Continue` by name in
+the script (`0x10011f40`, the suffixes are two strings at `0x1003d770` and
+`0x1003d778`) and caches their indices in the two 100-entry tables. **If either
+name is missing the raise is abandoned** (`0x10005aa1`, `0x10005aff`): no
+record is made and nothing is queued. Then, before the record is pushed, the
+list is searched for one with the same code, `p1` and `p2` (`0x10004c50`); a
+match **refreshes the standing problem's `+0x24` by `+0x28`** (`0x10005070`)
+instead of raising a second.
+
+The record, as the constructor lays it out (`0x10004e50`):
+
+| field | fn2's operand | what |
+|---|---|---|
+| `+0x00` | 0 | the `PBM_*` code |
+| `+0x14` | 1 | the weight, the priority the pass ranks by |
+| `+0x24`, `+0x28` | **2** | the life counter, and the value a re-raise reloads it by |
+| `+0x2c` | **3** | what each takt takes off the counter |
+| `+0x04`, `+0x08`, `+0x0c` | 4, 5, 6 | `p1`, `p2`, `p3`, which function 29 reads back |
+| `+0x10` | — | −1 |
+| `+0x18` | — | the state, `ST_NONE` |
+
+So the two numbers a problem is raised with are **a life and a drain**, counted
+in clan takts of 7–8 s. *Measured* over the **176** raises in the corpus, every
+one of which passes two plain numbers:
+
+| a / b | raises | how long the problem stands |
+|---|---:|---|
+| 25 / 24 | 72 | two takts |
+| 5 / 2 | 37 | three takts |
+| 1 / 0 | 28 | for ever |
+| 15 / 1, 20 / 1, 25 / 1, 30 / 1, 3 / 1 | 26 | *a* takts, 21 s to 4 min |
+| 35 / 34, 15 / 14, 14 / 13, 51 / 50 | 13 | two takts |
+
+The commonest shape is *a* = *b* + 1, which leaves the problem exactly **two
+takts** unless the script raises it again — and a raise of the same code, `p1`
+and `p2` adds *a* back. So `PBM_ROBOT_NEEDED`, raised 70 times as 25/24, is a
+standing request the script must keep repeating, while the 28 raises of 1/0 —
+every `PBM_BUILDING_INF_CAPTURE`, `PBM_BUILDING_PROTECT` and
+`PBM_PLACE_PROTECT` — never expire and only a handler's `fn8(ST_SOLVED)` ends
+them.
+
+**21 of the 176 raises are dead** (*measured*), because the script raises a
+code whose handler pair it never defines: 17 of `PBM_ROBOT_NEEDED` in `c1m2e`,
+`c2m4e`, `c3m4e` and `c4m2e1`, one of `PBM_BASE_DEFENCE` in `c2m1e`, and three
+of `PBM_BUILDING_NEEDED` in `c3m1e`, `c3m2e` and `c3m2e2`. The name lookup
+fails and the record is dropped, so four of the campaign's enemy clans ask for
+warbots they will never plan for. The control is the other 155, whose pairs all
+resolve, and the ten `_Start` handlers that sit in a script which never raises
+their code — the mirror image, and harmless.
 
 ## Reading a script
 
@@ -998,19 +1214,30 @@ capturer — which is why the table stops one call deep.
   (`0x100065e0`), a distance (`0x10006130`)~~ are now read, and the second was
   not a distance at all: both are the strength formula at `0x1000fc70`, and
   `0x10006130` sums it over a radius ([What the functions
-  do](#what-the-functions-do)). What is still not followed is what the two
-  floats that formula multiplies are — `IControl` property `0x36` and interface
-  `0x204`'s `+4` — and so what a strength is worth in the numbers the scripts
-  compare it against. The problem's action record (`+0x34`) and the object at
+  do](#what-the-functions-do)). ~~What the two floats that formula multiplies
+  are — `IControl` property `0x36` and interface `0x204`'s `+4` — and so what a
+  strength is worth in the numbers the scripts compare it against~~ is now read
+  and measured: **guns over hit points**, where 54 is the life an object could
+  have and 38 the life it has, the guns are the behaviour's own recomputed
+  total, and a whole hero is worth 0.0589 ([What a strength
+  is](#what-a-strength-is--read-and-measured)). What is still not read is which
+  two authored gun figures the total divides (`Behavior.dll:0x1001ccb0`'s
+  `+0x0c` and `+0x28`). The problem's action record (`+0x34`) and the object at
   `+0x40c` behind functions 40, 41, 43, 53 and 65 are not read either. The table
   says what each handler does with them. ~~The areal-map list function 32 tests~~ is now read:
   a route's list of the units last reported inside it
   ([34-progression.md](34-progression.md)).
-- **The two numbers a problem is raised with** — `fn2`'s third and fourth
+- ~~**The two numbers a problem is raised with** — `fn2`'s third and fourth
   arguments, kept at `+0x24` and `+0x2c` (`25` and `24` above) — and what the
   engine does with a problem once raised: which problem handler runs when, and
-  who writes `dCurrentProblem` and `dCurrentSender`. When `Init`, `Mission` and
-  `Problems<n>` run is read in [34-progression.md](34-progression.md).
+  who writes `dCurrentProblem` and `dCurrentSender`.~~ All read. The two are a
+  **life counter and a drain**, in clan takts of 7–8 s; `_Continue` runs for a
+  problem in `ST_SOLVING` and `_Start` for the heaviest that is not, repeated
+  until none is left to start; `dCurrentProblem` is written by those two passes
+  alone (`0x10001da4`, `0x10001ea0`) and `dCurrentSender` by the event
+  dispatcher (`0x10005d7c`) ([The planner](#the-planner-when-a-_start-runs-and-when-a-_continue--read-and-measured)).
+  When `Init`, `Mission` and `Problems<n>` run is read in
+  [34-progression.md](34-progression.md).
 - ~~**Channel 2 of the message callback** (function 57), and the `+0x41c` count
   function 69 stores.~~ Both are now read. Channel 2 runs `mission.cfg`'s
   `script`*a* as a debug-console command, and the 14 calls name only lines

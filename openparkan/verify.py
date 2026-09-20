@@ -16211,6 +16211,140 @@ def check_behaviour_flow(check, game: Path, scripts, table) -> None:
     check_behaviour_operators(check, game, scripts, table)
     check_behaviour_mission_scripts(check, game, scripts, table)
     check_behaviour_builds(check, game, scripts, table)
+    check_behaviour_raises(check, game, scripts, table)
+    check_behaviour_strength(check, game, scripts, table)
+
+
+def _has_formulas(source) -> bool:
+    """Whether a ``.fml`` sits beside the script at ``source``."""
+    return bool(source) and source.with_suffix(behaviour.FORMULAS).exists()
+
+
+def _last_writers(handler, table, formulas):
+    """For each node of ``handler``, what last wrote each variable before it.
+
+    A call with a destination writes it; an assignment writes a formula's text,
+    a copy of another variable, or a literal.  Yields ``(node, writers)``.
+    """
+    B = behaviour
+    last: dict[int, str] = {}
+    for node in handler.nodes:
+        yield node, last
+        if node.calls:
+            if node.destination != B.NULL:
+                last[node.destination] = f"fn{node.function}"
+        elif node.assigns:
+            if node.source != B.NULL:
+                text = formulas[node.source] if node.source < len(formulas) else "?"
+                last[node.destination] = f"formula {text}"
+            elif node.reference != B.NULL:
+                last[node.destination] = f"copy {B.name_at(table, node.reference)}"
+            else:
+                last[node.destination] = f"literal {node.literal}"
+
+
+def check_behaviour_raises(check, game: Path, scripts, table) -> None:
+    """A problem's two raise numbers, and the raises no handler answers.
+
+    ``fn2``'s third and fourth operands are the problem's life counter and what
+    each clan takt takes off it (``ai.dll:0x10004e96``, ``0x10004f1a``).  The
+    raise also resolves ``<code>_Start`` and ``<code>_Continue`` by name and
+    abandons the problem when either is missing (``0x10005aa1``, ``0x10005aff``).
+    """
+    B = behaviour
+    pairs, lives, dead = Counter(), Counter(), Counter()
+    raises = 0
+    for s in scripts:
+        formulas = B.formulas(s.source) if _has_formulas(s.source) else []
+        handlers = {h.name for h in s.handlers}
+        for h in s.handlers:
+            for n, last in _last_writers(h, table, formulas):
+                if not n.calls or n.function != 2 or len(n.operands) < 7:
+                    continue
+                raises += 1
+                code = B.name_at(table, n.operands[0])
+                if f"{code}_Start" not in handlers or f"{code}_Continue" not in handlers:
+                    dead[f"{s.source.stem}:{code}"] += 1
+                a = last.get(n.operands[2], "?").removeprefix("formula ")
+                b = last.get(n.operands[3], "?").removeprefix("formula ")
+                pairs[(a, b)] += 1
+                if a.isdigit() and b.isdigit():
+                    a, b = int(a), int(b)
+                    lives["never" if b <= 0 else f"{-(-a // b)} takts"] += 1
+    named = sum(v for (a, b), v in pairs.items() if a.isdigit() and b.isdigit())
+    check("behaviour: a raise carries a life counter and what a takt takes off it",
+          raises == 176 and named == raises and lives["2 takts"] == 85
+          and lives["never"] == 28 and sum(dead.values()) == 21
+          and len(dead) < len(scripts),
+          f"all {raises} fn2 raises pass two plain numbers as operands 2 and 3, the "
+          f"problem's counter and its drain: " + ", ".join(
+              f"{a}/{b} x{n}" for (a, b), n in pairs.most_common(6))
+          + f"; at a clan takt each ({lives.most_common()}), where a drain of 0 never "
+          f"expires and a drain one below the counter leaves the problem two takts "
+          f"unless the script raises it again ({sum(dead.values())} raises name a code "
+          f"whose _Start or _Continue the script never defines, so the engine abandons "
+          f"them: {', '.join(sorted(dead))})")
+
+
+def check_behaviour_strength(check, game: Path, scripts, table) -> None:
+    """What a ``TAKE_BY_HITS`` amount is compared against, and the scale behind it.
+
+    A strength is ``(guns + 0.8) x hit points x 1e-5`` (``ai.dll:0x1000fc70``),
+    and the hit points are the sum of an object's ``.ndp`` durabilities, which
+    the control system accumulates at ``Control.dll:0x1000fa42``.
+    """
+    B = behaviour
+    sources = Counter()
+    for s in scripts:
+        formulas = B.formulas(s.source) if _has_formulas(s.source) else []
+        for h in s.handlers:
+            for n, last in _last_writers(h, table, formulas):
+                if not n.calls or n.function != 25 or len(n.operands) < 2:
+                    continue
+                if B.name_at(table, n.operands[0]) != "TAKE_BY_HITS":
+                    continue
+                sources[last.get(n.operands[1], "not written in this handler")] += 1
+    total = sum(sources.values())
+    measured = sources["fn44"] + sources["fn38"]
+    from_problem = sources["fn29"]
+
+    asm = assembly.Assembly(game)
+    cache: dict[tuple[str, str], float] = {}
+
+    def life(member: str) -> float:
+        record = asm.library.get(member)
+        ref = record.damage if record else None
+        if ref is None:
+            return 0.0
+        key = (ref.library, ref.member)
+        if key not in cache:
+            rows = objects.parse_damage(asm.archive(ref.library).read_name(ref.member),
+                                        ref.member)
+            cache[key] = sum(r.durability for r in rows)
+        return cache[key]
+
+    totals: dict[str, float] = {}
+    for dat in sorted((game / "UNITS").rglob("*.dat")):
+        unit = objects.load_unit(dat)
+        totals[dat.relative_to(game / "UNITS").as_posix()] = sum(life(c.ref.member)
+                                                                 for c in unit.components)
+    heroes = {v for k, v in totals.items() if k.startswith("UNITS/HERO/")}
+    bunker = totals.get("BUILDS/BUNKER/lbunk03.dat", 0.0)
+    empty = sorted(k for k, v in totals.items() if v == 0)
+    floor = 0.8e-5
+    check("behaviour: a TAKE_BY_HITS amount is the same strength the scorers write",
+          total == 74 and measured == 17 and from_problem == 30 and len(totals) == 458
+          and heroes == {7362} and bunker == 66010 and len(empty) == 5,
+          f"{total} TAKE_BY_HITS calls, every one through dTemp3: {measured} hold a "
+          f"strength a scorer just wrote (fn44 {sources['fn44']}, fn38 "
+          f"{sources['fn38']}), {from_problem} the running problem's third parameter "
+          f"(fn29), the other {total - measured - from_problem} a formula over "
+          f"dBuildingProtectHits or dPlaceProtectHits; over the {len(totals)} assemblies "
+          f"the .ndp tables sum {min(totals.values()):g}-{max(totals.values()):g} hit "
+          f"points (median {statistics.median(totals.values()):g}; {len(empty)} carry no "
+          f"table at all: {', '.join(empty)}), so unarmed and whole every one of the "
+          f"{sum(1 for k in totals if k.startswith('UNITS/HERO/'))} hero assemblies is "
+          f"worth {7362 * floor:.4g} and a large bunker {bunker * floor:.4g}")
 
 
 #: The message callback's two channels: function 30 opens channel 0, the mission's
