@@ -90,9 +90,11 @@ four 128 x 32 strips, eight 64 x 64 tiles, eight 30 x 30 discs and five
 16 x 16 icons, in one table; `RAIN_DROP` is cell 21, a 16 x 16 icon at
 (16, 224), and no square grid puts anything but a fragment there.
 
-**All 61 textures a material indexes carry a table, and all 478 cells asked
-for fall inside their own** — which is what makes the reading safe, since a
-wrong stride would run off the end almost immediately.
+**Every texture a material indexes carries a table, and every cell asked for
+falls inside its own** — 2513 of 2513 cells over 62 textures, counting every
+entry of every material and not just the first, with cell numbers up to 63.
+That is what makes the reading safe: a wrong stride would run off the end
+almost immediately.
 
 ### How a cell is drawn — *read*
 
@@ -299,8 +301,7 @@ skins of machines and buildings — 19 `S*`, 14 `RL_*`, 13 `PG*` and `PG_*`, 7
 `GEN_*`, 5 `MTP_*`, 4 `DD*`, 4 `BIRD_*`, 3 `RU*`, 3 `PLT_*`, 2 `MN_*`, 2
 `KORA*`, 2 `STONE0*`, then `APKORA`, `SKIN02`, `COMP_2`, `HNG_01`, `RB_04`,
 `RBW_3`, `RLW_4`, `P26` and `AIM_02` — which is why 78 of the 81 are worn by a
-lit material. The
-members on either side are a different kind of thing: 60 to 65 are
+lit material. The members on either side are a different kind of thing: 60 to 65 are
 `BLUEPG0*`, `LAUSE*`, `LAULEG1` and `SUN5`, and 155 onwards `B_FOUND`, the four
 `NEBULA_*` and the `SUN*` sprites.
 
@@ -309,7 +310,7 @@ members on either side are a different kind of thing: 60 to 65 are
 `BIRD_U.0`, `BIRD_W.0` — are `ARGB8888`, mip-mapped, `+0x18` = 0 and
 box-filtered like the other 81; they span the same 64–256 sizes and the same
 name families, and `PG03`, `PG04`, `PG06` and `PG07` are marked while `PG05` is
-not, `MTP_01`, `MTP_03`, `MTP_04` and `MTP_05` while `MTP_06` is not. A ninth
+not, `MTP_01`, `MTP_03`, `MTP_04` and `MTP_05` while `MTP_06` is not. One more
 axis, the `Page` table, is on 7 of the 81 and 0 of the 8, which is what eight
 draws from a 7-in-89 rate would give anyway. So the bit is **bookkeeping inside
 one batch**, not a property the batch shares and the eight lack.
