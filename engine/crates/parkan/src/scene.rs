@@ -50,6 +50,11 @@ pub struct World {
     pub body_textures: [Option<usize>; 2],
     /// Each body's cell in that texture, `(u0, v0, du, dv)`.
     pub body_cells: [[f32; 4]; 2],
+    /// The nebula's and the clouds' textures, `sky.wea` slots 0 and 2, resolved with the
+    /// bodies'. Both materials take the whole texture on all 29 shipped missions.
+    pub sky_layers: parkan_render::dome::Layers,
+    /// The two lens-flare slots, 5 and 6: `SUN.0` cells 1 and 3 on all 29.
+    pub flare_looks: [parkan_render::flare::Look; 2],
 }
 
 pub fn world(game: &Path, loaded: &Loaded) -> Result<World> {
@@ -83,7 +88,28 @@ pub fn world(game: &Path, loaded: &Loaded) -> Result<World> {
     });
     let body_textures = looks.each_ref().map(|l| l.as_ref().and_then(|l| l.still.texture));
     let body_cells = looks.each_ref().map(|l| l.as_ref().map_or([0.0, 0.0, 1.0, 1.0], |l| l.still.cell));
-    Ok(World { store, terrain, objects, atmosphere, body_textures, body_cells })
+    // The rest of the sky's own slots, resolved the same way and at the same moment. The
+    // stars, slot 1, are deliberately not among them: the game builds them and draws them
+    // nowhere (`docs/10-sky.md`, "The stars are built and never drawn").
+    let mut role = |role: &str| {
+        atmosphere
+            .as_ref()
+            .and_then(|a| parkan_sim::sky::role_texture(a, role))
+            .map(str::to_owned)
+            .and_then(|name| store.look(&name).ok())
+    };
+    let sky_layers = parkan_render::dome::Layers {
+        nebula: role("nebula").and_then(|l| l.still.texture),
+        clouds: role("clouds").and_then(|l| l.still.texture),
+        cloud_tint: [1.0; 4],
+    };
+    let flare_looks = ["flare", "flare2"].map(|r| {
+        role(r).map_or_else(Default::default, |l| parkan_render::flare::Look {
+            texture: l.still.texture,
+            cell: l.still.cell,
+        })
+    });
+    Ok(World { store, terrain, objects, atmosphere, body_textures, body_cells, sky_layers, flare_looks })
 }
 
 /// The bodies to draw this frame: each one up, along its own arc, with its slot's texture.
@@ -120,7 +146,7 @@ pub fn lighting(
     seconds: f64,
     eye: Vec3,
     forward: Vec3,
-) -> Option<(parkan_render::frame::Lighting, Vec<[f32; 3]>)> {
+) -> Option<(parkan_render::frame::Lighting, Vec<[f32; 4]>)> {
     use parkan_render::frame::{Light, linear};
     use parkan_sim::sky as atm;
     let a = world.atmosphere.as_ref()?;
@@ -152,7 +178,47 @@ pub fn lighting(
         eye,
         clock_ms: seconds * 1000.0,
     };
-    Some((lighting, sky.dome_colours(fog).into_iter().map(linear).collect()))
+    let colours = sky
+        .dome_colours(fog)
+        .into_iter()
+        .map(|[r, g, b, a]| {
+            let [r, g, b] = linear([r, g, b]);
+            [r, g, b, a]
+        })
+        .collect();
+    Some((lighting, colours))
+}
+
+/// The sky's textured layers this frame: the mission's own nebula and clouds, the clouds
+/// tinted by slot 18 (`docs/10-sky.md`, "The three layers and their texture coordinates").
+/// The stars are not among them -- the game does not draw those.
+pub fn sky_layers(world: &World, seconds: f64) -> parkan_render::dome::Layers {
+    use parkan_render::frame::linear;
+    let mut layers = world.sky_layers;
+    layers.cloud_tint = world
+        .atmosphere
+        .as_ref()
+        .and_then(|a| parkan_sim::sky::at(a, parkan_sim::sky::position(a, seconds)))
+        .map_or([1.0; 4], |s| {
+            let [r, g, b, a] = s.cloud_colour;
+            let [r, g, b] = linear([r, g, b]);
+            [r, g, b, a]
+        });
+    layers
+}
+
+/// This frame's lens flare, or `None` where no body is up.
+///
+/// The second of its two gates is here, on how high the body stands (`docs/10-sky.md`,
+/// "The lens flare"); the first is on the view, so the renderer takes it from the camera
+/// the frame is actually drawn with.
+pub fn flare(world: &World, seconds: f64) -> Option<parkan_render::flare::Flare> {
+    use parkan_sim::sky as atm;
+    let a = world.atmosphere.as_ref()?;
+    let &(body, progress) = atm::bodies_aloft(a, seconds).first()?;
+    let toward = body.direction(progress);
+    let height_gate = atm::flare_height_gate(toward.z);
+    Some(parkan_render::flare::Flare { toward, height_gate, looks: world.flare_looks })
 }
 
 /// The mission's play, with the hero's view held steady against its gait unless `--sway`,

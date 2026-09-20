@@ -1542,6 +1542,7 @@ dependencies = [
  "anyhow",
  "bytemuck",
  "glam 0.29.3",
+ "parkan-sim",
  "parkan-world",
  "wgpu",
 ]

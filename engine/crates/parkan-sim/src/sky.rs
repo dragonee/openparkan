@@ -14,8 +14,8 @@ use std::f32::consts::{PI, TAU};
 
 use glam::Vec3;
 use parkan_formats::sky::{
-    APEX_SLOT, Atmosphere, FOG_END_SLOT, FOG_SCALE, FOG_START_SLOT, HORIZON_SLOTS, Keyframe, RING2_SLOTS,
-    RING3_SLOTS, SCENE_COLOUR_SLOT, SUN_LIGHT_SLOT,
+    APEX_SLOT, Atmosphere, CLOUD_SLOT, FOG_END_SLOT, FOG_SCALE, FOG_START_SLOT, HORIZON_SLOTS, Keyframe,
+    RING2_SLOTS, RING3_SLOTS, SCENE_COLOUR_SLOT, SUN_LIGHT_SLOT,
 };
 
 /// The dome's parameter block (`0x1006f1ba`): height, cap angle, rings, and 2 to the
@@ -24,6 +24,29 @@ pub const DOME_HEIGHT: f32 = 10_000.0;
 pub const DOME_ANGLE: f32 = PI / 4.0;
 pub const DOME_RINGS: usize = 5;
 pub const DOME_SEGMENTS: usize = 16;
+
+/// The sphere the cap is cut from: *W* / (2 sin²(*A*/2)) (`0x100788c9`), which at a
+/// quarter-turn cap is *W*(2 + √2) = 34142.1.
+pub const DOME_RADIUS: f32 = DOME_HEIGHT * (2.0 + std::f32::consts::SQRT_2);
+
+/// The clouds are the same cap with its origin this far below the camera (`0x1007a08e`).
+pub const CLOUD_DROP: f32 = 5000.0;
+
+/// The cap carries **three** texture-coordinate sets, one a layer, and each is the same
+/// top-down planar projection of the vertex -- `(x / R, y / R)` -- times its own constant
+/// (`0x10078f2f`, `0x10078fa9`, `0x10079023`). The layer each belongs to is read from the
+/// vertex stream the draw names (`docs/10-sky.md`, "The three layers and their texture
+/// coordinates").
+pub const NEBULA_UV_SCALE: f32 = 1.0;
+pub const CLOUD_UV_SCALE: f32 = 3.0;
+/// The stars' -- **built and never drawn**. `Terrain.dll` loads their material into the
+/// sky's fourth material block and lays out this third set of texture coordinates for
+/// them, and then draws them nowhere: the block (`+0x284`) is named at its one setup site
+/// and at no draw, where the nebula's (`+0x384`) and the clouds' (`+0x304`) are each named
+/// at theirs, and `AtmStarsOn` is one of the four settings the module never reads
+/// (`docs/10-sky.md`, "The render settings"). So this engine does not draw them either,
+/// and the scale is kept for what it says about the layout.
+pub const STARS_UV_SCALE: f32 = 15.0;
 
 /// Where the sun and the moon stand **at the top of their arc**: `CSun`'s constant
 /// azimuth and tilt as a direction, `(sin A sin B, −cos A sin B, cos B)`
@@ -65,6 +88,45 @@ pub const FLARE_HEIGHT_ZERO: f32 = 0.5;
 pub const FLARE_HEIGHT_FULL: f32 = SUN_DIRECTION.z;
 /// How far the gates lift the main light: from its colour `c` to `5c`.
 pub const FLARE_LIGHT_BOOST: f32 = 5.0;
+
+/// A ghost's half-size is `FLARE_SCALE × (viewport width / 2) × size`, which makes the
+/// largest of the twelve an eighth of the screen across.
+pub const FLARE_SCALE: f32 = 0.25;
+
+/// The flare is skipped whole once the first gate falls below this.
+pub const FLARE_CUT: f32 = 0.1;
+
+/// One of the twelve sprites `CSun::RenderFlare` strings along the line from the body's
+/// place on screen through the centre of it (`docs/10-sky.md`, "The lens flare"). The four
+/// fields are four parallel tables in `Terrain.dll`'s data.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Ghost {
+    /// Where on that line it sits: 1 is the body, 0 the middle of the screen.
+    pub at: f32,
+    /// Its size, against [`FLARE_SCALE`].
+    pub size: f32,
+    /// Its `D3DCOLOR` constant, ARGB. The engine scales **only the alpha** by the flare's
+    /// intensity and leaves the three colour bytes alone (`0x1007ea14`'s helper).
+    pub colour: [u8; 4],
+    /// Which of the two `sky.wea` flare slots, 5 and 6, it draws with.
+    pub texture: usize,
+}
+
+/// The twelve, in the tables' order.
+pub const FLARE_ELEMENTS: [Ghost; 12] = [
+    Ghost { at: 1.2, size: 0.2, colour: [0xFF, 0xB0, 0x90, 0xA3], texture: 0 },
+    Ghost { at: 0.7, size: 0.3, colour: [0xFF, 0x5A, 0x58, 0xBB], texture: 0 },
+    Ghost { at: 0.5, size: 0.2, colour: [0x96, 0x30, 0xBE, 0x52], texture: 1 },
+    Ghost { at: 0.2, size: 0.1, colour: [0x96, 0xC9, 0x34, 0x32], texture: 1 },
+    Ghost { at: 0.0, size: 0.1, colour: [0xFF, 0x30, 0xBE, 0x52], texture: 0 },
+    Ghost { at: -0.2, size: 0.3, colour: [0x96, 0x96, 0x96, 0x64], texture: 1 },
+    Ghost { at: -0.3, size: 0.3, colour: [0xFF, 0xB0, 0x90, 0xA3], texture: 0 },
+    Ghost { at: -0.5, size: 0.7, colour: [0xFF, 0x7C, 0x6B, 0xC9], texture: 0 },
+    Ghost { at: -0.6, size: 0.4, colour: [0x96, 0x30, 0x64, 0x52], texture: 1 },
+    Ghost { at: -0.8, size: 1.0, colour: [0xFF, 0x0B, 0x17, 0xB9], texture: 0 },
+    Ghost { at: -1.0, size: 0.3, colour: [0xFF, 0xB6, 0x26, 0xB1], texture: 0 },
+    Ghost { at: -1.1, size: 0.2, colour: [0xFF, 0x7C, 0xC5, 0xC9], texture: 0 },
+];
 
 type Rgb = [f32; 3];
 
@@ -337,6 +399,17 @@ pub struct Sky {
     pub ring3: [Rgb; 4],
     pub ring2: [Rgb; 4],
     pub apex: Rgb,
+    /// The same four groups' **alpha**, in the same order, and the apex's. The dome is
+    /// drawn over the nebula, so this is what lets the nebula through: *measured* over all
+    /// 656 shipped keyframes, the apex is alpha 0 on 355 of them and the horizon 255 on
+    /// 2594 of its 2624, so the gradient is clear overhead and solid at the rim. The
+    /// control is in the same read: slot 20, the scene colour, is alpha 255 on all 656.
+    pub horizon_alpha: [f32; 4],
+    pub ring3_alpha: [f32; 4],
+    pub ring2_alpha: [f32; 4],
+    pub apex_alpha: f32,
+    /// The clouds' own colour and alpha, slot 18, which tints their layer.
+    pub cloud_colour: [f32; 4],
     pub fog_start: f32,
     pub fog_end: f32,
     pub scene_colour: Rgb,
@@ -389,6 +462,7 @@ pub fn at(atmosphere: &Atmosphere, now: Position) -> Option<Sky> {
     let t = if span_end > span_start { ((clock - span_start) / (span_end - span_start)) as f32 } else { 0.0 };
     let t = t.clamp(0.0, 1.0);
     let group = |slots: [usize; 4]| slots.map(|s| colour(k0, k1, s, t));
+    let alpha = |slots: [usize; 4]| slots.map(|s| channels(k0, k1, s, t)[3]);
     let number = |slot: usize| k0.number(slot) + (k1.number(slot) - k0.number(slot)) * t;
     let light = k0.intensity[LIGHT_FLOAT] + (k1.intensity[LIGHT_FLOAT] - k0.intensity[LIGHT_FLOAT]) * t;
     Some(Sky {
@@ -396,6 +470,11 @@ pub fn at(atmosphere: &Atmosphere, now: Position) -> Option<Sky> {
         ring3: group(RING3_SLOTS),
         ring2: group(RING2_SLOTS),
         apex: colour(k0, k1, APEX_SLOT, t),
+        horizon_alpha: alpha(HORIZON_SLOTS),
+        ring3_alpha: alpha(RING3_SLOTS),
+        ring2_alpha: alpha(RING2_SLOTS),
+        apex_alpha: channels(k0, k1, APEX_SLOT, t)[3],
+        cloud_colour: channels(k0, k1, CLOUD_SLOT, t),
         fog_start: FOG_SCALE * number(FOG_START_SLOT),
         fog_end: FOG_SCALE * number(FOG_END_SLOT),
         scene_colour: colour(k0, k1, SCENE_COLOUR_SLOT, t),
@@ -457,27 +536,40 @@ impl Sky {
     }
 
     /// The dome's vertex colours in [`dome`]'s order: the apex and ring 1 the apex, rings
-    /// 2–4 their compass groups, the rim `rim` (`0x1007ac60`).
-    pub fn dome_colours(&self, rim: Rgb) -> Vec<Rgb> {
+    /// 2–4 their compass groups, the rim `rim` (`0x1007ac60`). Each carries its keyframe's
+    /// own alpha, which is what the nebula under it shows through; the rim takes the fog's,
+    /// which has none of its own, so it is drawn solid.
+    pub fn dome_colours(&self, rim: Rgb) -> Vec<[f32; 4]> {
         let quarter = DOME_SEGMENTS / 4;
-        let around = |group: [Rgb; 4], j: usize| {
+        let around = |group: [Rgb; 4], alpha: [f32; 4], j: usize| {
             let (q, m) = (j / quarter, j % quarter);
-            lerp(group[q], group[(q + 1) % 4], m as f32 / quarter as f32)
+            let f = m as f32 / quarter as f32;
+            let [r, g, b] = lerp(group[q], group[(q + 1) % 4], f);
+            [r, g, b, alpha[q] + (alpha[(q + 1) % 4] - alpha[q]) * f]
         };
-        let mut out = vec![self.apex];
+        let apex = [self.apex[0], self.apex[1], self.apex[2], self.apex_alpha];
+        let mut out = vec![apex];
         for ring in 1..=DOME_RINGS {
             for j in 0..DOME_SEGMENTS {
                 out.push(match ring {
-                    1 => self.apex,
-                    2 => around(self.ring2, j),
-                    3 => around(self.ring3, j),
-                    4 => around(self.horizon, j),
-                    _ => rim,
+                    1 => apex,
+                    2 => around(self.ring2, self.ring2_alpha, j),
+                    3 => around(self.ring3, self.ring3_alpha, j),
+                    4 => around(self.horizon, self.horizon_alpha, j),
+                    _ => [rim[0], rim[1], rim[2], 1.0],
                 });
             }
         }
         out
     }
+}
+
+/// One vertex's texture coordinates for a sky layer: the vertex projected straight down
+/// on to the horizontal plane, in radii, times the layer's own scale
+/// (`0x10078eea`–`0x10079093`). At the rim that reaches sin(π/4) = 0.707 of the scale, so
+/// the nebula's set never leaves one tile and the clouds' crosses three.
+pub fn layer_uv(vertex: Vec3, scale: f32) -> [f32; 2] {
+    [vertex.x / DOME_RADIUS * scale, vertex.y / DOME_RADIUS * scale]
 }
 
 /// The dome around the camera (`0x100787f0`): the apex at the dome's height, then
@@ -832,6 +924,70 @@ mod tests {
         assert_eq!(sky.fog_colour(0.0), [1.0, 0.0, 0.0], "north");
         assert_eq!(sky.fog_colour(PI / 2.0), [0.0, 1.0, 0.0], "east");
         assert_eq!(sky.fog_colour(PI / 4.0), [0.5, 0.5, 0.0]);
+    }
+
+    #[test]
+    fn the_cap_is_cut_from_a_34142_sphere_and_its_rim_lies_at_eye_height() {
+        assert!((DOME_RADIUS - 34_142.1).abs() < 0.5, "{DOME_RADIUS}");
+        let dome = dome();
+        assert_eq!(dome.len(), DOME_RINGS * DOME_SEGMENTS + 1);
+        assert!((dome[0].z - DOME_HEIGHT).abs() < 1e-3, "the apex is at the dome's height");
+        let rim = *dome.last().expect("a rim vertex");
+        assert!(rim.z.abs() < 1e-2, "the rim is at eye height: {rim}");
+        assert!((rim.length() - 24_142.1).abs() < 1.0, "24142 out: {}", rim.length());
+    }
+
+    #[test]
+    fn a_layer_is_the_cap_seen_from_above_and_each_layer_has_its_own_scale() {
+        let dome = dome();
+        // Straight down on to the horizontal plane, in radii: only x and y reach it.
+        for v in &dome {
+            let [u, w] = layer_uv(*v, 1.0);
+            assert!((u - v.x / DOME_RADIUS).abs() < 1e-6 && (w - v.y / DOME_RADIUS).abs() < 1e-6);
+        }
+        assert_eq!(layer_uv(dome[0], CLOUD_UV_SCALE), [0.0, 0.0], "the apex is the middle of every set");
+        // The three scales are 1, 3 and 15, so the clouds tile three times over the cap
+        // and the stars fifteen -- the set nothing draws.
+        assert_eq!([NEBULA_UV_SCALE, CLOUD_UV_SCALE, STARS_UV_SCALE], [1.0, 3.0, 15.0]);
+    }
+
+    #[test]
+    fn the_domes_alpha_is_the_keyframes_own_and_the_rim_is_drawn_solid() {
+        let mut k = sky_keyframe(6, 100, 0.5);
+        k.slots[APEX_SLOT] = [0, 0, 0, 0];
+        k.slots[RING2_SLOTS[0]] = [0, 0, 0, 64];
+        let sky = at(&day(vec![k]), at_seconds(0, 360.0)).unwrap();
+        assert_eq!(sky.apex_alpha, 0.0, "clear overhead, so the nebula shows through");
+        let colours = sky.dome_colours([1.0, 0.0, 0.0]);
+        assert_eq!(colours.len(), DOME_RINGS * DOME_SEGMENTS + 1);
+        assert_eq!(colours[0][3], 0.0, "the apex");
+        assert_eq!(colours[1][3], 0.0, "ring 1 takes the apex's");
+        assert!((colours[1 + DOME_SEGMENTS][3] - 64.0 / 255.0).abs() < 1e-6, "ring 2 its own");
+        assert_eq!(colours.last().expect("the rim")[3], 1.0, "the rim, from the fog, is solid");
+    }
+
+    #[test]
+    fn the_flare_chain_is_twelve_sprites_from_past_the_body_to_the_far_side() {
+        assert_eq!(FLARE_ELEMENTS.len(), 12);
+        let places: Vec<f32> = FLARE_ELEMENTS.iter().map(|g| g.at).collect();
+        assert!(places.windows(2).all(|w| w[0] > w[1]), "they run in order: {places:?}");
+        assert!(places[0] > 1.0, "the first is past the body");
+        assert!(*places.last().expect("a tail") < -1.0, "the last is out the far side");
+        // Both flare slots are used, and the largest ghost is an eighth of the screen.
+        assert!(
+            FLARE_ELEMENTS.iter().any(|g| g.texture == 0) && FLARE_ELEMENTS.iter().any(|g| g.texture == 1)
+        );
+        let largest = FLARE_ELEMENTS.iter().map(|g| g.size).fold(0.0_f32, f32::max);
+        assert!((FLARE_SCALE * largest - 0.25).abs() < 1e-6, "{largest}");
+    }
+
+    #[test]
+    fn the_second_gate_is_full_only_at_the_top_of_the_suns_arc_and_shut_for_a_low_body() {
+        // The sun reaches cos 30 exactly at the top of its arc, which is the gate's top
+        // edge; the moon's 50-degree tilt never gets there.
+        assert!((flare_height_gate(SUN_DIRECTION.z) - 1.0).abs() < 1e-6);
+        assert!((flare_height_gate(MOON_DIRECTION.z) - 0.39).abs() < 0.01, "the moon flares at 0.39");
+        assert_eq!(flare_height_gate(0.4), 0.0, "a body below 60 degrees off the vertical has none");
     }
 
     #[test]

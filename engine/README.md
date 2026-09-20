@@ -122,12 +122,27 @@ behind.
 **M5.** The sky is the mission's `sky.ske`, interpolated on its clock, which
 starts at the file's closing time and plays its sections in turn:
 
-- the dome around the camera takes its apex, rings and horizon colours;
+- the **nebula** goes on the dome first, the sheet its `sky.wea` slot 0 names,
+  on texture coordinates that are the cap seen from straight above;
+- the dome around the camera takes its apex, rings and horizon colours **and
+  their alpha**, which is what lets the nebula through: clear overhead at
+  night, solid by day, solid at the rim throughout;
+- the **clouds**, slot 2, go last of the layers, on the same cap dropped 5000
+  below the camera and tiled three times, tinted by slot 18 — so they pass in
+  front of a body;
+- the **stars**, slot 1, are not drawn, because the game does not draw them
+  either: it loads the material, lays out their texture coordinates, and never
+  names either again;
 - linear range fog runs from the eye to 700 × slot 6, in the horizon colour
   of the heading, additive materials fogging to black;
 - the sun and the moon are up from their start keyframe to their stop, and
   while one is up the sun object's two lights shine: slot 19, lifted by the
   flare gates, and slot 21;
+- the **lens flare** is twelve sprites strung from the body's place on screen
+  through the centre of it, added over the finished frame, on the tables'
+  places, sizes and colours with only their alpha scaled by the gates — the
+  first on the 15° cone about the camera the frame is drawn with, the second on
+  how high the body stands;
 - the lit colour, the scene colour and the material's ambient colour (its
   self-light) and diffuse under both lights, is formed in the files' display
   space, held to 1, and decoded; the texture's alpha is scaled by the ambient
@@ -1105,7 +1120,7 @@ a row here. A row leaves this table when research closes it.
 | milestone | what is unknown | stand-in | see |
 |---|---|---|---|
 | M1 | How the 34142-radius dome escapes the far plane and a fog ending by 700, and what lies below its rim | draw the dome first at the camera, depth-tested without writing depth under a projection with no far plane, unfogged but for its rim; clear the frame to the fog colour | [10](../docs/10-sky.md#the-dome) |
-| M1 | The sky's textures: the nebula, stars, clouds and the lens flare | not drawn; the sun and moon sprites are | [10](../docs/10-sky.md#the-dome-the-fog-and-the-scene-colour--read-and-measured) |
+| M1 | What the sky's fourth draw puts on the screen: a four-vertex quad over the viewport, on a fixed matrix with the depth test off, whose material takes no `sky.wea` slot | not drawn; the frame is cleared to the fog colour instead | [10](../docs/10-sky.md#not-resolved) |
 | M1 | The unit of a body sprite's two extents, which are a factor on a base the game takes from camera slot 27 | a body at extent 1 is drawn 8° across, so the shipped 0.4–3.3 span 3.2° to 26° | [10](../docs/10-sky.md#the-sun-and-the-moon-are-drawn) |
 | M1 | The files' colours in a renderer that decodes textures to linear | sky, fog and dome colours and texture tints decoded from sRGB to linear; the lit colour (scene colour, material ambient and diffuse, both lights) formed from the files' values, held to 1, then decoded, so blends match the game's display-space ones | [10](../docs/10-sky.md#the-dome-the-fog-and-the-scene-colour--read-and-measured) |
 | M3 | What the draw layers 10 and 9 a fifth slot is filed under do (`Terrain.dll:0x1004553b`), and `CShade` slot 15 | the fifth slots draw with the scene, depth-tested, lit and fogged like any model | [07](../docs/07-objects.md#the-fifth-slot-is-what-the-units-own-view-draws) |

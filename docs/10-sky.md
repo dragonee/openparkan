@@ -444,9 +444,21 @@ starts just past the sun and runs out the far side. A ghost's half-size is
 eighth of the screen across. The colours are `D3DCOLOR` constants; the engine
 scales **only their alpha** by the flare's intensity and leaves the RGB alone,
 which is visible in the helper that does it — it shifts the top byte out,
-multiplies, and ORs the other three back unchanged. The texture column picks
-between the two flare slots of `sky.wea`; which of the pair the engine calls 0
-is not established.
+multiplies, and ORs the other three back unchanged.
+
+**The texture column is `sky.wea`'s slot 5 and slot 6, in that order** (*read*).
+`RenderFlare` branches on the column into `CSun`'s material block `+0x11c` when
+it is 0 and `+0x19c` otherwise (`0x1007d753`), and the constructor fills those
+two from the slot list by index: `push 5` into `+0x11c` (`0x1007cb05`) and
+`push 6` into `+0x19c` (`0x1007cc0a`) — the same 0x80 block stride the sky's
+own materials use. So the eight ghosts on texture 0 draw `ENV_FLARE_00` and the
+four on 1 draw `ENV_FLARE_01`, which the names had already suggested.
+
+Both are cells of `SUN.0`, the same 256-pixel sheet the sun and the moon come
+from: cell 1 is a soft disc whose alpha peaks at **25 of 255** and cell 3 a
+brighter one peaking at 146 (*measured*). Added over a daylit sky the chain is
+faint on purpose — rendering a frame with and without it moves 88579 of the
+2359296 bytes of a 1024×576 capture, over 240 rows, by at most 19.
 
 Intensity has two gates, and both are now exact. The first: the flare is off
 once the sun is more than **15°** off the view axis, ramps linearly to full
@@ -746,6 +758,120 @@ established**.
 **The clouds** use the same cap with its origin 5000 below the camera
 (`0x1007a08e`), and carry their own fog, from 5000 to 11380.7 (`0x1007a5d4`).
 
+### The three layers and their texture coordinates — *read*
+
+The cap builder (`0x100787f0`) lays out, per vertex, one position array
+(`+0x34`, 12 bytes) and one colour array (`+0x38`, 4) — and then **three**
+eight-byte arrays, `+0x40`, `+0x44` and `+0x48`. They are texture coordinates,
+and all three are the same thing: the vertex **projected straight down on to
+the horizontal plane, in radii**, times one constant each
+(`0x10078f2f`, `0x10078fa9`, `0x10079023`):
+
+```
+u = x / R * K     v = y / R * K
+```
+
+| array | *K* | drawn by |
+|---|---:|---|
+| `+0x48` | 1 | the nebula |
+| `+0x44` | 3 | the clouds |
+| `+0x40` | 15 | nothing |
+
+The rim is at *R* sin(π/4), so a set reaches 0.707 *K* at the horizon: the
+nebula never leaves one tile of its sheet and the clouds cross three.
+
+**Which layer takes which** falls out of the vertex-stream blocks the draws
+name. The builder fills four of them, each a run of `{pointer, stride}` pairs
+(`0x100792fc` onwards):
+
+| block | position | colour | texture coordinates |
+|---|---|---|---|
+| `+0xd4` | `+0x34` | `+0x38`, per vertex | none |
+| `+0x74` | `+0x34` | a constant white | `+0x40`, *K* 15 |
+| `+0x134` | `+0x34` | `+0x3c`, per vertex | `+0x44`, *K* 3 |
+| `+0x194` | `+0x34` | a constant white | `+0x48`, *K* 1 |
+
+and the sky's four draws, in the order it queues them:
+
+| draw | material | from | matrix | vertices |
+|---|---|---|---|---|
+| `0x1007a37a` | `+0x484` | — | fixed | a four-vertex quad, `+0x1f4` |
+| `0x1007a408` | `+0x384` | **slot 0**, the nebula | at the camera | `+0x194`, *K* 1 |
+| `0x1007a49e` | `+0x404` | — | at the camera | `+0xd4`, no texture |
+| `0x1007ab51` | `+0x304` | **slot 2**, the clouds | 5000 below | `+0x134`, *K* 3 |
+
+The material blocks are filled from `sky.wea` by index, each a copy into its
+own 0x80-byte block: index 1 to `+0x284` (`0x1007828c`), index 2 to `+0x304`
+(`0x1007838e`), index 0 to `+0x384` (`0x10078496`). `+0x404` and `+0x484` take
+no slot; their texture handles come from the render device (`0x100785a2`,
+`0x100785f5`), so those two draws are untextured — the vertex-colour dome and
+a flat quad over the viewport.
+
+So **the nebula is drawn first and the coloured dome over it**, which is what
+makes the dome's alpha matter.
+
+### The dome's alpha shows the nebula through — *read*, and *measured*
+
+The colour slots are BGRA, and their alpha is not padding. *Measured* over all
+656 shipped keyframes: the apex is **alpha 0 on 355** of them and the four
+horizon colours are **255 on 2594 of their 2624**. The control is in the same
+read — slot 20, the scene colour, is 255 on all 656.
+
+Read against a mission's clock it is a day. `CAMPAIGN.00/Mission.01`:
+
+| clock | apex | ring 2 | ring 3 | horizon |
+|---|---:|---:|---:|---:|
+| 00:00 | 0 | 0 | 120 | 255 |
+| 01:30 | 45 | 0 | 140 | 255 |
+| 03:40 – 11:00 | 255 | 255 | 255 | 255 |
+| 13:15 | 45 | 70 | 230 | 255 |
+| 15:00 | 0 | 0 | 120 | 255 |
+
+— clear overhead at night, solid by day, and solid at the rim throughout.
+That is a nebula that comes out after dark and is washed out at noon, which is
+what the four `ENV_NEBULA_*` sheets are for; and the four are **256-pixel
+`RGB565` images with no alpha at all** (*measured*), so the layer under the
+dome is a backdrop, not a wash. `CAMPAIGN.01/Mission.01` keeps its apex at 0
+on every one of its five keyframes, so its nebula is up the whole mission.
+
+### The stars are built and never drawn — *read*, and *measured*
+
+Slot 1 is `ENV_STARS` on all 29 missions, its material is copied into the
+sky's `+0x284`, and the cap carries a third set of texture coordinates at
+*K* 15 in the block at `+0x74`. Nothing draws either of them. `0x284` as a
+32-bit immediate appears in `Terrain.dll`'s code at exactly one site inside
+the sky, the setup at `0x1007828c`; the controls are the other two slots'
+blocks, which the same search finds at both their setup **and** their draw
+(`+0x384` at `0x10078496` and `0x1007a3e5`, `+0x304` at `0x1007838e` and
+`0x1007ab2c`). `AtmStarsOn` agrees: it is one of the four settings
+[nothing reads](#nobody-reads-forceswfog--read-and-measured), while
+`AtmCloudsOn` gates the cloud draw (`0x1007a4cd`), `AtmSkyDetail` the segment
+count (`0x1007ac8f`) and `LensFlareOn` the flare (`0x1007d523`).
+
+`STAR0.0` is drawn and shipped — 256 pixels square, `ARGB8888`, alpha 0 on
+65441 of its 65536 pixels, a sparse star field. It just never reaches the
+screen.
+
+### What each sky material blends with — *measured*
+
+Every `sky.wea` slot of all 29 missions, through `Material.lib`:
+
+| slot | material | texture | cell | blend |
+|---:|---|---|---|---|
+| 0 | `ENV_NEBULA_*` | `NEBULA_0..3.0` | whole | 4, `SRCALPHA`/`INVSRCALPHA` |
+| 1 | `ENV_STARS` | `STAR0.0` | whole | 4 |
+| 2 | `ENV_CLOUDS*` | `S_03/05/06.0`, `TOK51.0` | whole | 4 |
+| 3 | `ENV_SUN*` | `SUN*.0` | 0, 3, 4 or whole | 4 |
+| 4 | `ENV_MOON*`, `ENV_SUN*` | `SUN.0`, `SUN3.0`, `SUN4.0` | 2, 3, 4, 5 | 4 |
+| 5 | `ENV_FLARE_00` | `SUN.0` | **1** | **2, `SRCALPHA`/`ONE`** |
+| 6 | `ENV_FLARE_01` | `SUN.0` | **3** | **2** |
+| 7 | `SNOWFLAKE`, `DUST_ADD` | `EFFECT6.0`, `DUST.0` | 20, 0 | 4, 2 |
+| 8 | `RAIN_DROP` | `EFFECT6.0` | 21 | 4 |
+
+So the sky blends on alpha everywhere but the flare, which is added. `ENV_STARS`
+is the one material in the game with **bit 0** of the flags byte set, and what
+that bit does is still not read — it does not change the mode.
+
 ### Fog
 
 **Fog is on for the whole scene.** `CShade`'s constructor sets `FOGENABLE`
@@ -953,9 +1079,12 @@ entries; the scan that finds nothing at index 0 finds both.
   apex (slot 15) to its horizon at heading zero (slot 2), so one draw gives
   "this sky at this hour". The game's dome carries four compass horizons and
   two rings between; the viewer keeps one of each.
-- The **stars** over it, additive, fading in as the day's light drops.
+- The **stars** over it, additive, fading in as the day's light drops. This one
+  is the viewer's own invention: the game
+  [never draws them](#the-stars-are-built-and-never-drawn--read-and-measured),
+  and their material is not additive either.
 - The **clouds** over that, tiled four times and tinted by their own colour,
-  slot 18.
+  slot 18. The game tiles them **three** times, and over a cap dropped 5000.
 - The **sun** and **moon** as billboards, each at its own fixed place, and
   only while the keyframes' opcodes have it up.
 - **Rain** while a rain spell runs: the drops are its own `RAIN_DROP` sprite,
@@ -1014,7 +1143,19 @@ which is what the game does.
   colour filter and its flag bit 0. The two extents themselves are read and the
   bodies are now drawn
   ([The sun and the moon are drawn](#the-sun-and-the-moon-are-drawn)); what is
-  left is the base the factor scales, for which the engine picks 3° at extent 1.
+  left is the base the factor scales, for which the engine picks 8° at extent 1.
+- ~~Which of the flare's pair the engine calls texture 0~~ — slot 5; the column
+  branches into the material blocks the constructor fills from slots 5 and 6
+  ([The lens flare](#the-lens-flare)).
+- **What the sky's fourth draw puts on the screen.** Its material block `+0x484`
+  takes no `sky.wea` slot and its texture handle comes from the device, so it is
+  untextured; it is four vertices and six indices built from the viewport
+  rectangle (`0x1007a1ea` onwards), on a fixed matrix with the depth test off —
+  a flat quad over the whole frame, drawn before everything. What colour it
+  carries, and so whether it is the answer to what lies below the dome's rim, is
+  not read.
+- **What flag bit 0 of a material's blend byte does.** It is set on `ENV_STARS`
+  and on nothing else in the game, and it does not change the blend mode.
 - ~~Which field carries the opcode~~ — the word ahead of slot 0; the three
   dead candidates were one keyframe out.
 - ~~What selects between a file's two day cycles~~ — nothing: they play in
@@ -1026,5 +1167,6 @@ which is what the game does.
   the times' last eight bytes, and marks the editor session that saved the
   file: it is there exactly on the 12 files whose last `int32` is 1.
 - ~~Slots 0 and 16; property 15; the sun's seven values~~ — unused, unused,
-  the clouds' colour, and two lights' colours and the sprite's size.
+  the clouds' colour (which tints their layer, now drawn), and two lights'
+  colours and the sprite's size.
 - What header bit `0x4000000` does on 81 textures.

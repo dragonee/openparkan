@@ -34,6 +34,8 @@ pub const HORIZON_SLOTS: [usize; 4] = [2, 3, 1, 4];
 pub const RING3_SLOTS: [usize; 4] = [7, 10, 8, 9];
 pub const RING2_SLOTS: [usize; 4] = [11, 14, 12, 13];
 pub const APEX_SLOT: usize = 15;
+/// The clouds' own colour, which tints their layer of the sky.
+pub const CLOUD_SLOT: usize = 18;
 pub const FOG_START_SLOT: usize = 5;
 pub const FOG_END_SLOT: usize = 6;
 pub const FOG_SCALE: f32 = 700.0;

@@ -2853,6 +2853,47 @@ def check_sky(check, game: Path) -> None:
           f"{', '.join(n for group in flare_names for n in group)} have an "
           f"alpha channel, which is what an additive sprite needs")
 
+    # How each slot blends, which is what the sky's layers are drawn with.  The
+    # flare is the one that is added; everything else blends on its own alpha.
+    modes: list[set[int | None]] = [set() for _ in sky.SLOT_ROLES]
+    for path in files:
+        try:
+            atmosphere = sky.load(path)
+        except sky.SkyFormatError:
+            continue
+        for index, role in enumerate(sky.SLOT_ROLES):
+            material = lib.get(atmosphere.texture(role) or "")
+            if material is not None:
+                modes[index].add(material.blend_mode)
+    blended = [i for i, m in enumerate(modes) if m == {4}]
+    added = [i for i, m in enumerate(modes) if m == {2}]
+    check("sky.wea: every layer blends on alpha and only the flare is added",
+          blended == [0, 1, 2, 3, 4, 8] and added == [5, 6],
+          f"slots {blended} carry blend mode 4 (SRCALPHA/INVSRCALPHA) on every "
+          f"mission and slots {added} mode 2 (SRCALPHA/ONE); slot 7 is split, "
+          f"{sorted(m for m in modes[7] if m is not None)}")
+
+    # The dome's colours are BGRA and their alpha is a day: clear overhead at
+    # night, so the nebula drawn under the dome shows, and solid at the rim.
+    clear_apex = apexes = horizons = solid_horizons = scene_solid = 0
+    for path in files:
+        try:
+            atmosphere = sky.load(path)
+        except sky.SkyFormatError:
+            continue
+        for frame in atmosphere.keyframes:
+            apexes += 1
+            clear_apex += frame.colour(sky.APEX_SLOT)[3] == 0
+            scene_solid += frame.colour(sky.SCENE_COLOUR_SLOT)[3] == 255
+            for slot in sky.HORIZON_SLOTS:
+                horizons += 1
+                solid_horizons += frame.colour(slot)[3] == 255
+    check("sky.ske: the dome's alpha is clear overhead and solid at the rim",
+          clear_apex and solid_horizons == horizons - 30 and scene_solid == apexes,
+          f"the apex is wholly clear on {clear_apex}/{apexes} keyframes and the "
+          f"horizon solid on {solid_horizons}/{horizons}; the control is slot "
+          f"{sky.SCENE_COLOUR_SLOT}, opaque on {scene_solid}/{apexes}")
+
     # A starting event takes what it needs from its keyframe's effect list:
     # GetEvents stops with "Rain background sound not specified" or "Lightning
     # effect not specified" when the first entry is empty.  Snow needs nothing.

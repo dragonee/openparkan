@@ -72,6 +72,85 @@ pub fn corners(eye: Vec3, sprite: &Sprite) -> [Vec3; 4] {
     [centre - a + u, centre + a + u, centre + a - u, centre - a - u]
 }
 
+/// The layout every sky draw binds its texture and sampler through: a material names one
+/// texture, and the sky's samplers repeat, which is what lets a cloud sheet tile.
+pub fn skin_layout(device: &wgpu::Device, label: &str) -> wgpu::BindGroupLayout {
+    device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        label: Some(label),
+        entries: &[
+            wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Texture {
+                    sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                    view_dimension: wgpu::TextureViewDimension::D2,
+                    multisampled: false,
+                },
+                count: None,
+            },
+            wgpu::BindGroupLayoutEntry {
+                binding: 1,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                count: None,
+            },
+        ],
+    })
+}
+
+/// One texture bound through [`skin_layout`].
+pub fn skin_group(
+    device: &wgpu::Device,
+    layout: &wgpu::BindGroupLayout,
+    bank: &GpuTextures,
+    view: &wgpu::TextureView,
+    label: &str,
+) -> wgpu::BindGroup {
+    device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some(label),
+        layout,
+        entries: &[
+            wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(view) },
+            wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(&bank.sampler) },
+        ],
+    })
+}
+
+/// Blend mode 4, `SRCALPHA`/`INVSRCALPHA` (docs/07-objects.md, "How a material draws"):
+/// what every shipped sky material but the two flare slots carries -- the nebula, the
+/// clouds, and every sun and moon -- so a sky layer is blended on its texture's alpha and
+/// not added. *Measured* over the 29 missions' `sky.wea` slots 0, 2, 3 and 4.
+pub fn material_blend() -> wgpu::BlendState {
+    wgpu::BlendState {
+        color: wgpu::BlendComponent {
+            src_factor: wgpu::BlendFactor::SrcAlpha,
+            dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+            operation: wgpu::BlendOperation::Add,
+        },
+        alpha: wgpu::BlendComponent {
+            src_factor: wgpu::BlendFactor::One,
+            dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+            operation: wgpu::BlendOperation::Add,
+        },
+    }
+}
+
+/// Blend mode 2, `SRCALPHA`/`ONE`: additive, which both flare slots carry on all 29.
+pub fn additive_blend() -> wgpu::BlendState {
+    wgpu::BlendState {
+        color: wgpu::BlendComponent {
+            src_factor: wgpu::BlendFactor::SrcAlpha,
+            dst_factor: wgpu::BlendFactor::One,
+            operation: wgpu::BlendOperation::Add,
+        },
+        alpha: wgpu::BlendComponent {
+            src_factor: wgpu::BlendFactor::One,
+            dst_factor: wgpu::BlendFactor::One,
+            operation: wgpu::BlendOperation::Add,
+        },
+    }
+}
+
 pub struct BodyRenderer {
     pipeline: wgpu::RenderPipeline,
     camera: wgpu::Buffer,
@@ -103,42 +182,10 @@ impl BodyRenderer {
                 count: None,
             }],
         });
-        let skin_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("sky body skin"),
-            entries: &[
-                wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                    count: None,
-                },
-            ],
-        });
-        let skin_group = |view: &wgpu::TextureView, label: &str| {
-            device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some(label),
-                layout: &skin_layout,
-                entries: &[
-                    wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(view) },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: wgpu::BindingResource::Sampler(&bank.sampler),
-                    },
-                ],
-            })
-        };
-        let skins = bank.views.iter().map(|v| skin_group(v, "sky body skin")).collect();
-        let white = skin_group(&bank.white, "sky body white");
+        let skin_layout = skin_layout(device, "sky body skin");
+        let skin = |view, label| skin_group(device, &skin_layout, bank, view, label);
+        let skins = bank.views.iter().map(|v| skin(v, "sky body skin")).collect();
+        let white = skin(&bank.white, "sky body white");
         let camera = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("sky body camera"),
             size: 64,
@@ -156,20 +203,8 @@ impl BodyRenderer {
             immediate_size: 0,
         });
         // The blend is the material's own, not a choice: every shipped sun and moon
-        // material carries blend mode 4, `SRCALPHA`/`INVSRCALPHA`
-        // (docs/07-objects.md, "How a material draws").
-        let blend = wgpu::BlendState {
-            color: wgpu::BlendComponent {
-                src_factor: wgpu::BlendFactor::SrcAlpha,
-                dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
-                operation: wgpu::BlendOperation::Add,
-            },
-            alpha: wgpu::BlendComponent {
-                src_factor: wgpu::BlendFactor::One,
-                dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
-                operation: wgpu::BlendOperation::Add,
-            },
-        };
+        // material carries blend mode 4.
+        let blend = material_blend();
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("sky body"),
             layout: Some(&pipeline_layout),

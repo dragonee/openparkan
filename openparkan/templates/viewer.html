@@ -239,7 +239,11 @@ if (typeof THREE === "undefined" || typeof pako === "undefined") {
   //   * a dome carrying the nebula, tinted by the keyframe's zenith and
   //     horizon colours -- MeshBasicMaterial multiplies map by vertex colour,
   //     so one draw gives "the nebula under this hour's light";
-  //   * the stars over it, additive, fading in as the day's light drops;
+  //   * the stars over it, additive, fading in as the day's light drops -- the
+  //     one layer here that the game does not draw at all: it loads the
+  //     material and lays out their texture coordinates and never names either
+  //     again, and AtmStarsOn is read nowhere (docs/10-sky.md).  The viewer
+  //     keeps them, because the sheet is shipped and worth seeing;
   //   * the clouds over that, tiled and tinted by the horizon;
   //   * the sun and the moon as billboards.
   // sky.wea's nine slots are fixed roles, and the material behind each names

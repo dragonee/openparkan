@@ -644,7 +644,9 @@ fn screenshot(loaded: &scene::Loaded, game: &Path, args: &Args, out: &Path) -> R
     if let Some((lighting, colours)) = scene::lighting(&world, seconds, eye, forward) {
         renderer.set_lighting(lighting);
         renderer.set_dome_colours(colours);
+        renderer.set_sky_layers(scene::sky_layers(&world, seconds));
         renderer.set_body_sprites(&gpu.device, scene::body_sprites(&world, seconds));
+        renderer.set_flare(&gpu.device, scene::flare(&world, seconds));
     }
     if let Some(p) = play.as_mut() {
         scene::sync(&mut renderer, &gpu.device, &gpu.queue, p, &world.objects, view_proj, eye);
@@ -1456,7 +1458,9 @@ impl App {
         if let Some((lighting, colours)) = scene::lighting(&self.world, seconds, eye, forward) {
             r.renderer.set_lighting(lighting);
             r.renderer.set_dome_colours(colours);
+            r.renderer.set_sky_layers(scene::sky_layers(&self.world, seconds));
             r.renderer.set_body_sprites(&r.gpu.device, scene::body_sprites(&self.world, seconds));
+            r.renderer.set_flare(&r.gpu.device, scene::flare(&self.world, seconds));
         }
         let lighting = scene::lighting(&self.world, seconds, eye, forward).map(|l| l.0);
         let view_proj = match self.play.as_mut() {

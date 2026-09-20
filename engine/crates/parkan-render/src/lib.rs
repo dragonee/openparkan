@@ -12,6 +12,7 @@ use wgpu::util::DeviceExt;
 
 pub mod body;
 pub mod dome;
+pub mod flare;
 pub mod frame;
 pub mod hud;
 pub mod models;
@@ -123,10 +124,13 @@ pub struct Renderer {
     previews: Option<ModelRenderer>,
     preview_bank: Option<GpuTextures>,
     lighting: frame::Lighting,
-    dome: Option<(dome::DomeRenderer, Vec<[f32; 3]>)>,
+    dome: Option<(dome::DomeRenderer, Vec<[f32; 4]>)>,
     /// The sun's and the moon's sprites, drawn over the dome.
     bodies: Option<body::BodyRenderer>,
     body_sprites: Vec<body::Sprite>,
+    /// The lens flare, a 2D overlay over the whole scene.
+    flare: Option<flare::FlareRenderer>,
+    this_frames_flare: Option<flare::Flare>,
     hud: Option<hud::HudRenderer>,
     text: Option<text::TextRenderer>,
     /// Text in other fonts, drawn after `text` in slot order.
@@ -222,6 +226,8 @@ impl Renderer {
             dome: None,
             bodies: None,
             body_sprites: Vec::new(),
+            flare: None,
+            this_frames_flare: None,
             hud: None,
             text: None,
             more_text: Vec::new(),
@@ -301,16 +307,40 @@ impl Renderer {
         self.lighting = lighting;
     }
 
-    /// The sky dome's shape, drawn from now on.
+    /// The sky dome's shape, drawn from now on. `set_world` must have run: the dome's
+    /// nebula and clouds draw with textures from its bank.
     pub fn set_dome(&mut self, device: &wgpu::Device, positions: &[glam::Vec3], indices: &[u32]) {
-        self.dome = Some((dome::DomeRenderer::new(device, self.format, positions, indices), Vec::new()));
+        if let Some(bank) = &self.bank {
+            let dome = dome::DomeRenderer::new(device, self.format, positions, indices, bank);
+            self.dome = Some((dome, Vec::new()));
+        }
     }
 
-    /// The dome's vertex colours for this frame.
-    pub fn set_dome_colours(&mut self, colours: Vec<[f32; 3]>) {
+    /// The dome's vertex colours for this frame, each with its keyframe's own alpha.
+    pub fn set_dome_colours(&mut self, colours: Vec<[f32; 4]>) {
         if let Some((_, c)) = self.dome.as_mut() {
             *c = colours;
         }
+    }
+
+    /// Which textures the sky's nebula and clouds draw with, and the clouds' tint.
+    pub fn set_sky_layers(&mut self, layers: dome::Layers) {
+        if let Some((dome, _)) = self.dome.as_mut() {
+            dome.set_layers(layers);
+        }
+    }
+
+    /// This frame's lens flare, or `None` where no body is up or its gate has shut.
+    pub fn set_flare(&mut self, device: &wgpu::Device, f: Option<flare::Flare>) {
+        if f.is_some()
+            && self.flare.is_none()
+            && let Some(bank) = &self.bank
+        {
+            // The display format: the flare is a 2D overlay, which the game's device
+            // blends in the surface's own space as the effects are.
+            self.flare = Some(flare::FlareRenderer::new(device, self.display, bank));
+        }
+        self.this_frames_flare = f;
     }
 
     /// This frame's HUD rectangles.
@@ -512,6 +542,10 @@ impl Renderer {
         if let Some(bodies) = self.bodies.as_mut() {
             bodies.prepare(queue, view_proj, self.lighting.eye, &self.body_sprites);
         }
+        let this_frames_flare = self.this_frames_flare;
+        if let Some(f) = self.flare.as_mut() {
+            f.prepare(queue, view_proj, this_frames_flare.as_ref(), width as f32 / height.max(1) as f32);
+        }
         if let Some(terrain) = &self.terrain {
             terrain.prepare(queue, view_proj, &self.lighting);
         }
@@ -627,6 +661,11 @@ impl Renderer {
             if let Some(bodies) = &self.bodies {
                 bodies.draw(&mut pass);
             }
+            // The clouds are the last of the sky's layers, so they pass in front of a
+            // body: the cap they ride is 5000 below the camera and that much nearer.
+            if let Some((dome, _)) = &self.dome {
+                dome.draw_clouds(&mut pass);
+            }
             if let Some(terrain) = &self.terrain {
                 terrain.draw(&mut pass);
             }
@@ -648,6 +687,11 @@ impl Renderer {
         if let Some(sprites) = &self.sprites {
             let mut pass = pass_over(&mut encoder, display, depth, "effects", wgpu::LoadOp::Load);
             sprites.draw(&mut pass);
+        }
+        // The flare over the whole scene, in the lens rather than the world.
+        if let Some(f) = &self.flare {
+            let mut pass = pass_over(&mut encoder, display, depth, "flare", wgpu::LoadOp::Load);
+            f.draw(&mut pass);
         }
         self.draw_views(&mut encoder, target, depth, (width, height), true);
         if let Some(ui) = &self.ui {
