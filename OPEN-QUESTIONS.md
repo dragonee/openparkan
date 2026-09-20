@@ -137,6 +137,47 @@ a spot-check, not the research, asked the second question — and the first in w
 answer to the coordinator's objection was *"you are right, and it does not save the
 claim"*.
 
+A fifth round of twelve was worked on **2026-09-20**, the same four areas of three.
+**Ten closed, two narrowed**, and two further queue lines went with them, both **stale** —
+the map and radar display and the four writers of `+0xa2` were answered in the docs and
+never ticked here, and both were caught by the coordinator's own check rather than spent
+on an agent. Three carry negatives with their controls: the effect view test's interval
+float `0x10026a7c` has **two references in its module and both are reads**, against a
+generator state three instructions away that the same sweep finds written twice; a
+particle's **place jitter is `(0,0,0)` on all 923** effects, against the time jitter in the
+same header non-zero on 56 of its 58; and **no shipped object answers world class 2** under
+three separate sweeps, though a class computed at runtime would still escape them. The
+engine changed in seven places, the largest being that **every celestial body was drawn at
+43 % of its size** — camera slot 27 is pixels per radian, so a body's half-width is
+`extent × 0.1625` radians and not the guessed 8° at extent 1 — and that **clan attitudes are
+modelled for the first time**.
+
+**This round corrects two premises of the fourth round, and they run in opposite
+directions.** The sky's pass descriptor at `0x100a3828` was published as *read by nothing*;
+it is read, from a live duplicate at `0x100a1d68` that `CShade` hands both prim buffers, and
+the copy that round found is the dead one. That negative failed for a reason worth keeping:
+**its control was the wrong kind of object** — `0x100a3800` is the quad's vertex format, not
+a camera descriptor — and a control that is not the same kind of thing as its subject proves
+nothing about it. Running the other way, the face record's `+0x34`, whose claim the fourth
+round published, defended, and then **withdrew** on the ground that nothing writes it, is
+**reinstated**: the landscape's constructor writes it, in the most-derived object's
+coordinates rather than the interface's, which is why the sweep for it came back empty. Both
+entries are rewritten where they stand, and the coordinate-space trap is now a bullet in
+[09-method](docs/09-method.md)'s *Searches that do not discriminate*.
+
+**Which way this round's corrections ran is worth recording**, because it breaks a run of
+three. The last three rounds each turned on a coordinator spot-check asking the second
+question; this time the **agents' own research** overturned both premises, and the
+coordinator's checks confirmed rather than broke them — the pass tables re-read off a
+continuous decode of `0x10040b10`, the `+0x34` writer off one decode from the constructor's
+entry to its first `ret`, the attitude constant off `ai.dll:0x10001fe0`, and the generator's
+cycle of **1 065 353 089** recomputed from its recurrence rather than taken. Two smaller
+corrections came out of the round: [29-weapons](docs/29-weapons.md) had a round passing a
+lake by its excluded world flags `0x208` when it is the excluded **class** `0x24` that
+carries the water (the flags fall on 0 of the 275882 faces, the class on 3630), fixed here;
+and this page's own "the 33 missions place 864 objects" mis-attributes a count — the install
+has **33 maps but 29 missions**, and it is the 29 that place them.
+
 One methodological note, since it has now cost two agents a wrong address: **a
 disassembly started at a guessed boundary decodes garbage**, and garbage that looks
 like plausible instructions. Both slips this round came from listings that did not
@@ -173,19 +214,32 @@ bookkeeping errors.
   its 900-second day, its moon for 300. The lens flare's second gate reads better for it too — the
   negated height peaks at `cos B`, so the sun *reaches* the top of its ramp at zenith instead of
   sitting there always ([10-sky](docs/10-sky.md)).
-- [ ] [M1] Which pass descriptor the sky's draw is given, and what lies below the dome's rim.
-  *Narrowed 2026-09-19*: two mechanisms are now read. A "render layer" is the **item pool** a draw item
-  is allocated from (`0x10028508`), and a view runs the pass list's group *k* then flushes pool *k*
-  (`0x10081c90`–`0x10081ce8`), so layer 1 draws after layer 0; and **each pass carries its own near
-  plane, far plane and viewport z range**, overriding the device camera for the length of the pass
-  (`0x1003d760`, restored at `0x1003d920`) from a 24-byte `{type, near, far, minZ, maxZ, flag}`
-  descriptor. `Terrain.dll` even holds one shaped for the job — **near 700, far 50000, z range 1.0 to
-  1.0**, at `0x100a3828`, first of ten filled by the static initialiser at `0x1007c450` — **but nothing
-  reads it**: a raw byte search over every section finds no reference to it or to the array at
-  `0x100a7410`, where the same search does find `0x100a3800` (pushed by the dome's own draw at
-  `0x1007a339`) and the pass list's vtable `0x1009ae18`. Next handles: who calls `SetPasses`, and what
-  the item-pool flush does to the fog. What lies below the rim was not reached
+- [x] ~~[M1] Which pass descriptor the sky's draw is given~~ — closed 2026-09-20, and it **overturns a
+  premise this page published on 2026-09-19**. That round found the descriptor **near 700, far 50000, z
+  range 1.0 to 1.0** at `0x100a3828` and reported that *nothing reads it*. It is read: the live copy is
+  the 14-entry array at **`0x100a1d68`**, and the run at `0x100a3828` is a **dead duplicate**, written
+  field by field by absolute address (`0x1007c450`), which is why no reference to its base exists.
+  Nothing calls `SetPasses` by name because it is **slot 0 of `CPrimBuffer`** (vtable `0x1009ae18`,
+  installed `0x10032a25`): `CShade`'s render setup (`0x10041370`) makes two prim buffers and calls it on
+  each with `(4, 0x100a6060, 14, 0x100a1d68)` (`0x1004217a`, `0x100421e0`). Both tables are zero on disk
+  and filled at load from the floats at `0x1009b0ec`–`0x1009b120`. **Re-read by the coordinator** off a
+  continuous decode of `0x10040b10`: entry 0 takes near from `[0x1009b104]` = 700, far from
+  `[0x1009b108]` = 50000 and both z from `[0x1009b11c]`/`[0x1009b120]` = 1.0, and the sky files **group
+  1, layer 0** on all four draws. The second named handle is a clean negative: the item-pool reset
+  (`0x100332b0`–`0x100336ea`) holds **no `call` at all** and only zeroes item `+4` and the pool counts,
+  so it does nothing to the fog — control, its sibling `CPrimBuffer::Draw` (`0x10032c60`) has six calls
+  in its first 130 instructions. **Why the negative failed is the lesson**: its control, `0x100a3800`,
+  is not a camera descriptor at all but the **quad's vertex format**, bound for the draw item's `+0x194`
+  (`0x100286ab`). A control has to be the same kind of thing as its subject
   ([10-sky](docs/10-sky.md#the-dome)).
+- [ ] What lies below the dome's rim, and which views carry mode 1. *Narrowed 2026-09-20* out of the
+  line above: the sky's fourth draw is **read** — four pre-transformed screen vertices from the viewport
+  rectangle (`0x1007a1a6`), flags `0xc`, depth test and write both off, and a material block (sky
+  `+0x484`) whose only written fields in the whole module are the ambient alpha at `+0x20`, two zero
+  texture fields and a format id, so the only colour it can carry is the **scene colour**. It is
+  **skipped whenever the view's mode (slot 24, `0x10083010`) is 1** (`0x1007a325`), and which views
+  carry which mode is not read; that the world's view is mode 1 is *inferred*, not established. What
+  lies below the rim was again not reached ([10-sky](docs/10-sky.md#the-dome)).
 - [x] ~~[M1] Whether `ForceSWFog` does anything outside `Terrain.dll`~~ — closed 2026-09-18: **no
   module reads it**, and it is entry 0 of `Terrain.dll`'s 36-setting page. A setting is read as
   `[index * 4 + 0x100a6cac]`, an address the loader relocates, so the readers are countable rather than
@@ -221,8 +275,43 @@ bookkeeping errors.
   `ALPHAREF` is 1 and `ALPHAFUNC` is `GREATEREQUAL`, written by two agreeing writers, and the six
   blend-mode records are 30 `{state, value}` pairs over five states, among which neither `ALPHAREF`
   nor `ZWRITEENABLE` appears ([07-objects](docs/07-objects.md)).
-- [ ] [M3] What draw layers 10 and 9, which a fifth slot is filed under, do (`Terrain.dll:0x1004553b`); and `CShade` slot 15.
-- [ ] The sun sprite's extent unit, camera slot 27, and shader slot 5's colour filter and flag bit 0.
+- [x] ~~[M3] What draw layers 10 and 9, which a fifth slot is filed under, do
+  (`Terrain.dll:0x1004553b`); and `CShade` slot 15.~~ — closed 2026-09-20: **a layer is the index of the
+  pass inside its group**, so a layer is a frustum and a depth range, not a sort key. The mesh draw picks
+  both together (`0x1004552a`–`0x100455bc`): an ordinary opaque surface gets group 0 layer 0 (near 0.5,
+  far 700, z 0.1–0.99), a see-through one group 1 layer 5 (the same frustum), and **a fifth slot group 1
+  layers 9 and 10 — near 0.05, far 10, viewport z 0.0 to 0.1**. So the depth buffer is cut in three: the
+  first-person geometry owns the front tenth, the world 0.1–0.99 and the sky 1.0, and a cockpit closer
+  than the world's own near plane is neither clipped by it nor ever occluded. *Re-read by the
+  coordinator* at `0x100a1e40` and `0x100a1e58`. **`CShade` slot 15 is `0x100437a0`** (vtable
+  `0x1009b17c`, installed `0x10041f94` — and `0x1009b13c` one table over is the *item manager's*, the
+  trap that has cost this file two slot numbers): it writes one byte to `CShade+0xca8`, which the mesh
+  draw reads at `0x100455fe` and uses to set the item's flag bit 0 **only when it is zero**, so
+  AniMesh's "slot 15 with 1" clears that bit on the fifth-slot draws. What bit 0 then does is **not
+  established** — the renderer masks it off at `0x1003056a` and no test was found, against the control
+  that bits 3, 4 and `0x400` all turn up at once. The engine still draws the fifth slots as ordinary
+  scene instances; the row moves to the README's *Read since the stand-in was written*
+  ([07-objects](docs/07-objects.md)).
+- [x] ~~The sun sprite's extent unit, camera slot 27~~ — closed 2026-09-20, **and the engine was wrong
+  by a factor of 2.3**. `CCamera` slot 27 (`0x100851c0`, vtable `0x1009c620`) is the viewport's **width
+  in pixels over the view's field of view in radians**: *re-read by the coordinator*, it fetches the view
+  at `+0x19c`, asks slot 15 for the viewport rectangle, takes `right − left`, `fild`s it and `fdivr`s by
+  slot 17's answer (the float at view `+0x234`, which `Ngi32` halves into a cotangent projection at
+  `0x10007055`; the game sets 1.7 rad at `0x1001ffd7`). Pixels per radian — and since the sprite's
+  corners are screen pixels at z 0.999, the width and the field of view cancel, leaving a body's
+  half-width at **`extent × 0.1625` radians**. Extent 1 is **18.62° across** and the shipped 0.4–3.3 span
+  **7.45° to 61.4°**, against the engine's guessed 8°, so every body was being drawn at 43 % of its size.
+  Fixed and pinned by two tests, one re-deriving the constant from the pixel rule at three screen and
+  field-of-view pairs; a new `verify` check measures across ≥ up on **656 of 656** keyframes
+  ([10-sky](docs/10-sky.md#the-sun-and-the-moon-are-drawn)).
+- [ ] What the colour filter's slot 5 computes. *Narrowed 2026-09-20*: it is **not the shader**, as this
+  page said. The object reaches the bodies from `CAtmosphere`'s `+0x16c` (`0x1006fde6`) and the item
+  renderer from the shader component's **interface 4** (`0x10032a75`); its slot 7 returns a block whose
+  `+8` bit 0 is the flag, tested at `0x10079786`, `0x1007d923` and `0x1002fe79`, and its slot 5 maps one
+  `D3DCOLOR`. The `0xff00ff00` mask names it — the camera's **infrared** (`CMD_CAMERA_INFRARED`,
+  `CIS_INFRARED_ON/OFF/INV`, `NightVisionOn`), which is also what the outer view's flag `0x20` turned out
+  to be. What slot 5 computes is still unread: the object's vtable is installed outside `Terrain.dll` and
+  its class was not found ([10-sky](docs/10-sky.md)).
 - [ ] Texture header bit `0x4000000`: which batch of exports it marks, and whether the exporter is
   identifiable. (~~and load flag `0x200000`'s effect~~ — closed 2026-09-18: it is the texture stage.
   `Ngi32.dll`'s surface description fills `DDSURFACEDESC2 +0x78`, `dwTextureStage`, from bit 21 of the
@@ -336,10 +425,59 @@ bookkeeping errors.
   The page's **`+0x14a4` is 50, 250 or 1000 by preset** and **has no reader** — control: the same sweep
   over the page's fields finds both the writes and the reads of `+0x1084` and `+0x1294` beside it
   ([11-effects](docs/11-effects.md)).
-- [ ] [M4] The effect manager's random generator and jitter, the owner values of time modes 5–15, and a phase's animated frames.
+- [x] ~~[M4] The effect manager's random generator and jitter, the owner values of time modes 5–15, and
+  a phase's animated frames.~~ — closed 2026-09-20, all four parts, **and the engine was wrong on three
+  of them**. **The generator** is `Effect.dll:0x10002220`, a pair of 16-bit shift registers — `lo =
+  (lo << 1) ^ hi`, then `hi = (hi >> 1) ^ lo`, returning the new `hi` — the engine's house generator,
+  already read inlined in `Control.dll` and the patroller and reached as a routine for the first time.
+  **Verified independently by the coordinator**: as a GF(2) map it has **rank 31**, so one transient
+  step, and its cycle is exactly **1 065 353 089 = 127 × (2²³ − 1) = 127 × 47 × 178 481**, with none of
+  the three prime quotients closing it. Thirteen copies of the state sit in `.data`, **seven ever read,
+  six seeded and never drawn from**, and nothing gives a manager or an instance a state of its own, so
+  the streams are shared process-wide. **Flag 1** adds a uniform in ±half of the header's `+0xc` to *t*
+  and clamps, on **58** effects; **137 more carry a spread the flag never reads**. Flag 8 is the same
+  shape on the *place* on 57 effects, and that triple is `(0,0,0)` on **all 923** — a negative whose
+  control is flag 1's spread in the same header, non-zero on 56 of its 58. **Time modes**: 5–8 are
+  velocity over the per-axis top speed, 9–12 the spin, **13** is 1 − the attach point's value, **14** is
+  1 − the owner's **life fraction**, 15 the larger of 5 and 9. *Measured* over the 923: mode 5 on **46**,
+  15 on **31**, 14 on **8** (the five `tree_flame*` among them) and **modes 6–13 on none** — so a burning
+  tree's fire runs forward as it burns down, which the stand-in's "all read speed" got wrong. **A phase
+  is not a second clock**: its fractional part is **where its material's own animation track stands**,
+  multiplied by the track's whole length by `GetMaterialPhase` (`World3D.dll:0x10003680`), a fraction
+  outside 0..1 becoming 0.5. *Measured*: **2062 of 3577** material references name a material with more
+  than one key, and the phase moves on **all 2013** type 3/4/9 blocks, **832 of them clocked in
+  seconds**. That frames advance at all was already right — that half of the row was stale
+  ([11-effects](docs/11-effects.md)).
 - [ ] [M4] When a stream emits its first particle, and where burst and stream particles go.
-- [ ] [M4] How often an effect tests its point's view, and what that ray meets.
-- [ ] [M4] What a building answers for a strike's material, and a node's wear base.
+- [x] ~~[M4] How often an effect tests its point's view, and what that ray meets.~~ — closed
+  2026-09-20, **and the engine was wrong about the ray**. *How often*: the draw keeps a deadline at
+  `+0x30` and after each test sets the next to `now + I + uniform(±I × 0.25 / 2)`, with `I` from
+  `0x10026a7c` — **a zero `.data` float that nothing writes**. *Re-checked by the coordinator*: it has
+  exactly **two** references in the module, `fld` at `0x10007fa4` and `fadd` at `0x1000800b`, both
+  reads, against the control of the generator state `0x10024110` three instructions away, which the same
+  sweep finds with **six** references including two plain writes. So the interval and its jitter are
+  both 0, the deadline is set to *now*, and "every frame" was right and is now exact. *What it meets*:
+  the ray goes into **`IWorld` slot 7**, the **sight ray's** entry, not the slot-6 mesh test a round's
+  ground query uses, with the record `[0x40a, 0, 0, 0, 0, 8, 0, 0]` against a round's `[0x41e, …,
+  0x208, …, 0x24]`. It **excludes no face class at all**, so the water sheet a round passes through
+  (3630 of 275882 faces) **stops an effect's view test**, and its one excluded world flag, 8, is the
+  landscape flags word's `0x20`, on **0 of the 275882**. The engine had cast a round's query; fixed, and
+  pinned by a test that the same ray is stopped by water where a round's is not
+  ([11-effects](docs/11-effects.md)).
+- [x] ~~[M4] What a building answers for a strike's material, and a node's wear base.~~ — closed
+  2026-09-20: **a building answers exactly as a unit does, and the engine was half wrong.** A
+  `CBuilding`'s own `QueryInterface` (`Terrain.dll:0x10057d50` → `0x10057c20`) answers only five ids —
+  0, 6, `0x11`, `0x17`, `0x18` — through a byte table at `0x10057d2b`; everything else, **`0xd` among
+  them**, falls to the default arm, which forwards to the agent it aggregates at `+0x2c` (`0x10057cf6`),
+  whose own table serves it. *Measured* over `fortif.rlb`: its **34** building models carry **1034**
+  wear materials — class 5 on **898**, unset on **92**, 8 on **25**, 6 on **18**, 10 on **1** — so a hit
+  on a building plays slot 6 `mt` on 898 of its skins and slot 0 only on the 92 unset. The engine's
+  `struck_class` turned a building away and played slot 0; that early return is gone, and an install
+  test drops 48 rays through Mission 01's two bridge halves and asserts class 5 (it fails with the early
+  return restored). **The wear base was already right**: the material id is `[mesh+0x10] | batch
+  material byte`, and `+0x10` is written from an argument shifted 16 up (`0x1000a726`), which the
+  manager splits back as `id >> 16` and `id & 0xffff`, so the base has a zero low word by construction
+  and **the batch's material byte alone indexes the wear** ([11-effects](docs/11-effects.md)).
 - [ ] How Direct3D Sound places a sound between the speakers. (~~[M5] How a sound falls off between
   its near and far distances~~ — this half was **stale**: the game takes the Direct3D Sound path
   rather than its own mixer, so the law is DirectSound's — whole within the near distance, then
@@ -571,7 +709,19 @@ bookkeeping errors.
   set by **nothing**, not by a shot — all three writers of `+0x4c` sit behind a `value 1 > 0` gate,
   so the five such components keep the 0 their constructor leaves
   ([29-weapons](docs/29-weapons.md)).
-- [ ] [M3] How the camera builds its frame when its up is parallel to the look.
+- [x] ~~[M3] How the camera builds its frame when its up is parallel to the look.~~ — closed
+  2026-09-20, **and it is not a fallback but a built frame**. The branch at `Control.dll:0x10023769`
+  calls `0x10003ef0`, which takes the look's **horizontal perpendicular**, `(−look y, look x, 0)`, for
+  its side — normalised where the look's z is non-zero and left alone where it is — and `look × side`
+  for its up, with the bottom row (0, 0, 0, 1). Two axis cases take a stored triple instead, the world x
+  axis where the look's x is exactly zero and the world y axis where its y is, **dropping the sign the
+  perpendicular would carry**, so half the looks on each axis get a frame rolled 180°. The test is read
+  too: `g_FastProc` slot `+0x98` normalises the side in place and returns its old length, compared
+  against **0.0** — an exactly zero cross, not a near-parallel pair. The stand-in's measured half holds
+  and is now in `verify`: posing every camera's control points over every frame its own and its
+  turret's channels play, the look's closest approach to its up over the **63** camera components is
+  **9.99°** (`e_tur_lt_01`), 54 no nearer than 10° and the two animals' cameras square at 90°. The
+  engine took an arbitrary orthonormal pair; fixed and pinned ([30-turrets](docs/30-turrets.md)).
 - [ ] [M5] How the HUD draws the aim point, the guns and the player's target; what plays `TARGET_READY` and `TARGET_ZOOM`; and the unit record's `+0x94` and `+0x98`.
 - [x] ~~`e_gun_bl_03` and `e_gun_tl_02` carry a follower and no gun: are they never fitted, or does it
   pair with a later gun?~~ — closed 2026-09-18: never fitted. Both are on 0 of the 458 assemblies and are
@@ -596,36 +746,68 @@ bookkeeping errors.
   `(id >> 24) & 0xf` and hands class 3 to the level's building list and class 4 to its unit list, so a
   winged SSM is held for **buildings** (*derived*) — which is what a 45–60 m blast at 700 m is for. The
   damage bar is `> 10,000` and 3 of the 62 `e_gun_*` with a round clear it, the next gun down doing
-  3,000. Negative with control: the nibble is in **no shipped file** — of the 864 objects the 33
-  missions place it is 0 on the 463 owned and `0xf` on the 401 scenery, never 3
+  3,000. Negative with control: the nibble is in **no shipped file** — of the 864 objects the
+  **29** missions place it is 0 on the 463 owned and `0xf` on the 401 scenery, never 3. (*Corrected
+  2026-09-20*: this line said "the 33 missions". The install has **33 maps but 29 missions** —
+  `gamedir.maps()` returns 33 and `gamedir.missions()` 29 — and it is the 29 that place objects. The
+  864 and its split are unaffected; only the attribution was wrong.)
   ([29-weapons](docs/29-weapons.md)).
 - [x] ~~An AI turret's state word while it fights (`0x200` or `0x400`).~~ — this line was **stale**:
   it is `0x400`, set on every aiming pass, so the turret's unguided guns keep the target and the range
   gate ([29-weapons](docs/29-weapons.md#how-the-ai-fires--read)). Whether the relink runs between that
   set and the gun's shot is still not followed.
-- [ ] What the landscape face record's `+0x34` points at — the vector the outer camera adds 0.75 of to
-  the point its line meets — and which objects answer world **class 2**, the one class that line drops.
-  *Partly answered 2026-09-19*: the query (`iron3d.dll:0x10038649`) is a round's eight dwords but for
-  **one class bit**, so the camera passes exactly what a round passes, the water surface on **3630 of
-  275882** faces among them, and slides through the leaf batches a round flies past. `IWorld` slot 6 is
-  `CWorld::GetWorldFace`, which names itself in its own panic string at `0x100a1398`, and returns
-  `this+0x10` whose `+8` is the slot-5 record's `+4`. The vector is traced through four steps to the
-  face record's **`+0x34` and no further**: it was published as the face's normal and **withdrawn
-  before it landed** (see the summary above), because **nothing writes `+0x34`** and the face's own
-  normal is built elsewhere in the same block, into `this+0x7b0c` from three `int16` at the face
-  source's `+0x14`. A weak negative on class 2: a sweep of every module's vtables for a slot-11 stub
-  returning a constant ≤ 16 finds 1, 3 and 11 and nothing returning 2, but a class computed at runtime
-  would escape it. Also unread: what the outer view's flag `0x20`, copied from the main view, is
+- [x] ~~What the landscape face record's `+0x34` points at — the vector the outer camera adds 0.75 of
+  to the point its line meets~~ — closed 2026-09-20, and it **reinstates a claim this page recorded as
+  withdrawn on 2026-09-19**. That round published the normal reading, was sent back by a spot-check,
+  repaired both broken links and then withdrew the claim anyway on the ground that **nothing writes
+  `+0x34`**. That withdrawal was wrong. The landscape's constructor (`Terrain.dll:0x100166a0`) writes
+  `this_outer + 0x7c48` into `this_outer + 0x170` (`0x10018dd0`–`0x10018ddb`) and installs the interface
+  vtable `0x1009a3c4` at `this_outer + 0x13c` (`0x10016e9b`) — so `+0x170` **is** the interface's
+  `+0x34` and `+0x7c48` **is** its `+0x7b0c`, the very buffer the flag-2 block fills from the face
+  record's three `int16` at `+0x14`, scaled by 1/32767. **Re-read by the coordinator** on one continuous
+  decode from the constructor's entry to its first `ret` at `0x100190f9`, which contains both sites; a
+  second install of the same vtable at `+0x138` (`0x10019463`) lies *past* that `ret`, in another class,
+  and does not govern this object. **The sweep missed it because a multi-interface object's constructor
+  writes the pair in the most-derived object's coordinates, not the interface's** — a bullet is now in
+  [09-method](docs/09-method.md)'s *Searches that do not discriminate*. So the camera stands at the
+  point met **plus 0.75 × the struck face's own normal**, 0.75 m out along the surface; the engine had
+  brought it back along its own line, and is fixed and pinned. Read for the landscape; the same field on
+  a mesh object was not traced. **The outer view's flag `0x20` closes with it**: it is the camera's
+  **infrared**, read off the game's view (slot 20) and or-ed into the outer view (slot 13) at
+  `0x1003895c`–`0x10038990`, set and flipped by `CIS_INFRARED_ON/_OFF/_INV`
   ([30-turrets](docs/30-turrets.md)).
-- [ ] What writes the design row's node field, inside the fits' loop over a part's nodes, and what the
-  row's `+0x00` and `+0x24` mean. (~~The Large transport's second slot and the Large builder's module
-  socket~~ — closed 2026-09-18: a socket's kind is its **stream-10 label**, not its node name, and the
-  gun page is the label's last two letters after `e_gun_`. The Large transport has one socket, a cannon
-  one; the Large builder's module is `Base_LU_02` and its cannon `Base_LU_01`, reversing the rule the
-  small and medium builders gave. `objects.dlb`'s hanger rows agree on 48 of 55 turrets; its free text
-  does not and was the source of "two battle slots". The slot records themselves are the destination
-  panel's 64-row lists, a row keeping a mesh node and a research item index
-  ([30-turrets](docs/30-turrets.md), [37-designer](docs/37-designer.md)).)
+- [ ] Which objects answer world class 2, the one class the outer camera's line drops. *Narrowed
+  2026-09-20* with three controls, all negative. A class is slot 11 of the object interface and the
+  query's first word is anded with `[class*4 + 0x1009a5f0]`, sixteen dwords whose entry *k* is `1 << k`,
+  so the camera's `0x41a` does drop class 2 from a round's `0x41e`. **Class 1 is the landscape**, named
+  by `CLightning::Init`'s own panic. (a) Every `call [reg+0x2c]` in all 21 modules followed within 8
+  instructions by a comparison with a constant < 16 gives **68 sites** naming 1, 3, 4, 5, 6, 7, 9, 10
+  and 11 — **never 2**. (b) Of the **71** `return N < 16` stubs in the install, the **7** that sit at a
+  vtable's slot 11 answer 1 (three times), 3, 5, 7 and 11; four stubs do return 2, none at a slot 11.
+  (c) The game-message switch on the id-class nibble gives 1, 3, 4, 7 and 11 a case and drops 2 to the
+  default — weaker, since it drops 10 too. A class computed at runtime would still escape all three
+  ([30-turrets](docs/30-turrets.md)).
+- [x] ~~What writes the design row's node field, inside the fits' loop over a part's nodes~~ — closed
+  2026-09-20; `+0x00` and `+0x24` are **narrowed**. The fits' loop is
+  `iron3d.dll:0x10052809`–`0x1005290c`: the catalogue is asked how many nodes the part has, the counter
+  runs **1 up to that count**, each node's socket label is fetched and a node that answers none is
+  passed over — and the counter itself is written into the prototype record at the offset the list
+  insert copies to the row's `+0x04`. So **the field is the node's own index, not an ordinal, and node 0
+  never opens a row**. *Measured* over the 33 `.dat` files the designer writes: all **138** external
+  attachments are node ≥ 1, all 138 name a node carrying a stream-10 label, all 138 rise in node order
+  under their host, and **only 60 of the 138** would also fit an ordinal over the host's sockets — which
+  is what separates the two readings. `+0x24` **names the part the row holds** and `+0x00` **the part
+  whose socket the row is**, both filled from a three-dword request the project answers (query 6 with
+  `0x80000020`); what that handle counts was not read. The unit writer's test is confirmed exactly: a
+  row is emitted only where `+0x20` ≠ −1 **and `+0x00` == 0**. Left open with it: the turret add appends
+  socket rows to the **fourth** row array while the writer reads the **third**, so which tab each array
+  is stays unread. (~~The Large transport's second slot and the Large builder's module socket~~ — closed
+  2026-09-18: a socket's kind is its **stream-10 label**, not its node name, and the gun page is the
+  label's last two letters after `e_gun_`. The Large transport has one socket, a cannon one; the Large
+  builder's module is `Base_LU_02` and its cannon `Base_LU_01`, reversing the rule the small and medium
+  builders gave. `objects.dlb`'s hanger rows agree on 48 of 55 turrets; its free text does not and was
+  the source of "two battle slots".) ([37-designer](docs/37-designer.md),
+  [38-designs](docs/38-designs.md))
 - [x] ~~What stops the player building the six free turrets, and which state bits the design screen
   tests~~ — closed 2026-09-18: the screen tests `RESEARCHED` and `IN_TREE` and **not** `AVAILABLE`, which
   it parses and never reads. Five of the six are out of the tree in all **17** trees a player clan loads —
@@ -690,7 +872,24 @@ bookkeeping errors.
   on **0, 0 and 0 of 275882** — the control being the same scan on the same two fields, which does
   find the 3630. So a shot into a lake splashes on the bed, while the sight ray, which excludes
   nothing, stops on the surface ([26-damage](docs/26-damage.md)).
-- [ ] [M4] What a dead unit leaves (wreck, damage stages), and what `iron3d.dll` does with owner word `0xfffe` (37 compares).
+- [x] ~~[M4] What a dead unit leaves (wreck, damage stages), and what `iron3d.dll` does with owner word
+  `0xfffe` (37 compares).~~ — closed 2026-09-20, **the wreck half stale and the `0xfffe` half read**.
+  The wreck was already in [26-damage](docs/26-damage.md): a unit is deleted the controller's `+92` ms
+  after death, a building becomes a shell, and stages are `N − ceil(N·life/max)` drawn from the mesh's
+  slot index. What was left was that doc's own *guess* that a radar passes over wrecks, and the owner
+  word is what settles it: it lives at the control system's `+0x550`, reaches the game through
+  `ILifeSystem` slot 11 and `IGameObject` slot 17, and has two reserved values — the constructor writes
+  `0xffff` (`0x100070c7`) and **death writes `0xfffe`** from two inlined copies (`0x10011098`,
+  `0x10003354`). It is **one-way**: the setter (`0x1000f1f0`) refuses to write when the word already
+  reads `0xfffe` and refuses to write `0xfffe` itself. The **37 compares are one idiom, not 37
+  decisions** — 30 through slot 11, 3 through slot 17, 3 from the record's cached `+0x24`, 1 from a
+  target-list contact — guarding lists and pickers (13), the HUD (6), the target list (9), the view and
+  the player's own unit (6), two component tests and a rebind. **7 of the 37 stand within a dozen
+  instructions of an `imul …, 0x68`**, the clan-record stride, which is what the value means: `0xfffe`
+  is *not a clan index*. Control, *measured*: **0 of the 864** placed objects of the shipped missions
+  carries `0xfffe` or `0xffff` in a clan word, against ClanIDs 0×124, 1×220, 2×69, 3×37, 4×11, 5×2 — a
+  mission cannot author it. The engine was already right
+  ([27-ownership](docs/27-ownership.md), [26-damage](docs/26-damage.md)).
 - [x] ~~The `.exp` record's two 1.0 floats, for which no reader was found~~ — closed 2026-09-18 as a
   **negative with its control**: the thread the doc named ends, and nothing reads them. The record is
   792 bytes on all 144, exactly `0x18 + 12 × 64`, so nothing is unparsed. Its bytes reach one pointer,
@@ -700,10 +899,54 @@ bookkeeping errors.
   same enumeration finds four of the six scalars and all twelve names at named addresses: it is not
   blind to two adjacent floats between the radius and the placement word. What they are *for* is left
   as a guess the layout supports and the code does not settle ([26-damage](docs/26-damage.md)).
-- [ ] What the player's map and radar display show (`iron3d.dll:0x1003fb90` and `0x10073550`).
-- [ ] What moves a SuperAI's attitude from one relation band to another.
-- [ ] The game view's states 1, 3, 4, 5 and 6, and what pods open on a generator, mine, storage or Outpost; also what `0x10033e40` refuses on a tower.
-- [ ] The other four writers of a unit record's `+0xa2`.
+- [x] ~~What the player's map and radar display show (`iron3d.dll:0x1003fb90` and `0x10073550`).~~ —
+  this line was **stale**, found by the coordinator's own check rather than spent on an agent.
+  [35-hud](docs/35-hud.md) reads out both: the radar's seven-step draw order at `0x1003fb90`, its view
+  wedge as the camera's 1.3 rad field drawn always pointing up, the disc turning by the `atan2` of the
+  camera matrix's first column, a contact drawn at `β − θ + π/2`, and the satellite map's load at
+  `0x10073550` — minimap, `exit_icon`, `map_compass_icon` and string 5074 — with its `MAP_ALPHA` of 128
+  and its ] and [ keys. What remains is only the **clan contact list** the maps mark by, which is its
+  own line below and its own M13 stand-in row.
+- [x] ~~What moves a SuperAI's attitude from one relation band to another.~~ — closed 2026-09-20 as a
+  **positive and a controlled negative together**, and the engine gained a model it never had. The
+  record is 16 bytes × 64 at the SuperAI's `+0x43c` — attitude, a decrease, an increase, the word. **The
+  earlier search failed because the compiler folds the base into the index**: the write is `add eax,
+  0x44; shl eax, 4`, so neither `0x440` nor `0x444` is a displacement anywhere. Sweeping all sixteen
+  modules for the eight object- and interface-relative displacements *and* enumerating all 80 `shl reg,
+  4` sites in `ai.dll` leaves exactly one non-zero writer: **`ai.dll:0x10001fe0`, slot 13 of vtable
+  `0x100341b8`**, which adds a fixed **0.004** (`0x10034284`) to the *decrease*; its caller
+  (`Behavior.dll:0x1000658c`) pushes an amount of its own, 1.0, that the slot never reads (`ret 0xc`).
+  **Re-read by the coordinator**, instruction by instruction, including the bounds check against 64 and
+  the constant. **The increase field is written only to 0** — control: the same sweep does find the
+  writers of all three neighbouring fields. So **a relation can only ever fall**: 13 hits lose an ally,
+  42 inside one takt make a neutral clan hostile, and a hostile one can never rise. Implemented in a new
+  `relations` module with 8 unit tests and an install test
+  ([25-sensors](docs/25-sensors.md), [31-packages](docs/31-packages.md)).
+- [x] ~~The game view's states 1, 3, 4, 5 and 6, and what pods open on a generator, mine, storage or
+  Outpost; also what `0x10033e40` refuses on a tower.~~ — closed 2026-09-20; the middle clause was
+  already struck in [27-ownership](docs/27-ownership.md) (no screen: those two calls select the building
+  and make it current). The switch is the **mode stack's**, an 8 × 8 handler table at `0x10104b18`
+  indexed *front × 8 + new*, **40 of whose 64 cells are filled** — there is no way into a building's
+  screen from mode 1, and none from mode 5 to 6. Modes 0–4 and 7 were already in docs/39 and docs/40;
+  **mode 5** (`0x10064430`) turns the outer camera off, clears the selection, **hands the hero back**,
+  makes the building current and sets the level's view-state word to **1, the cockpit**, so the page
+  draws over the ordinary view; **mode 6** (`0x10063fd0`) clears the driven unit, sets the word to
+  **6** — of the module's 39 calls of `0x100a4f90` only the four handlers into mode 6 pass 6 — a state
+  the per-frame camera update has no case for, and sends the tower's object `IGameObject` slot 13 with
+  **(6, 7, 1)**, byte for byte the message the takeover sends a bot. **So entering a tower drives its
+  guns exactly as boarding drives a bot's.** **`0x10033e40`** refuses on: owner word `0xfffe`; no
+  `IControl`; no class-1 item; or that item's node life ≤ 0 — confirming docs/41's reading, and it is
+  the third copy of a predicate the boarding and builder-beam tests also use. *Measured*: **0 of the
+  30** `fortif.rlb` building controllers carries a class-1 item, so it is always a fitted part; **24 of
+  the 68** building assemblies carry one — the 15 bunkers and the **9 towers** — and on all 24 it is a
+  turret with life (3,500 on the 6 medium, 6,000 on the 3 large). **All 9 shipped towers can be entered
+  until their turret is shot off** ([27-ownership](docs/27-ownership.md)).
+- [x] ~~The other four writers of a unit record's `+0xa2`.~~ — this line was **stale**, found by the
+  coordinator's own check rather than spent on an agent: it is read in
+  [39-boarding](docs/39-boarding.md#the-other-writers-of-0xa2--read) as a six-row table — the record's
+  constructor and its binding to an object (0), the briefing's start (0) and end (1), and the help
+  screen opening (0) and closing (1) — and was already struck where it stands in
+  [27-ownership](docs/27-ownership.md).
 
 ## AI, scripts, packages and economy
 
