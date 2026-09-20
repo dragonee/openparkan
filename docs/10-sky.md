@@ -376,7 +376,11 @@ across runs 0.4 to 3.3 and up 0.4 to 3.0, and **across is at or above up on all
 656**, so a body is never drawn taller than it is wide. Nothing that small is a
 world size, and the base they scale is camera slot 27, which is
 [not read](#not-resolved). The engine picks its own: a body at extent 1 is drawn
-**3° across**, which puts the shipped range at 1.2° to 9.9°.
+**8° across**, which puts the shipped range at 3.2° to 26°. The first figure tried
+here was 3°, and the picture threw it out at once — a body came out a dot of a few
+pixels, throwing away artwork drawn 128 pixels square, and the sheets hold
+**planets** as well as suns, which a sky hangs large. It remains a choice, not a
+reading.
 
 ## What the numbers are
 

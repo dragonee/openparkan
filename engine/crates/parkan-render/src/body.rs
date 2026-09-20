@@ -28,9 +28,15 @@ pub const BODY_DISTANCE: f32 = 10_000.0;
 
 /// STAND-IN: docs/10-sky.md#not-resolved -- the unit of the sprite's two extents is not
 /// read. They are a factor on a base this engine has to choose, the game's own being
-/// camera slot 27; a body at extent 1 is drawn 3° across, which is a disc the eye reads
-/// as the sun without swamping the sky.
-pub const BODY_BASE_HALF_ANGLE: f32 = 0.026_179_94; // 1.5° in radians
+/// camera slot 27.
+///
+/// A body at extent 1 is drawn **8° across**, which puts the shipped 0.4 to 3.3 at 3.2°
+/// to 26°. The first choice here was 3°, and it was wrong for a reason the picture showed
+/// at once: a body came out a dot of a few pixels, throwing away artwork drawn at 128
+/// pixels square, and the sheets hold **planets** as well as suns (`SUN3.0` is a star and
+/// three planets), which a sci-fi sky hangs large. The figure is still a choice, not a
+/// reading.
+pub const BODY_BASE_HALF_ANGLE: f32 = 0.069_813_17; // 4° in radians
 
 /// One body to draw this frame.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -271,12 +277,12 @@ mod tests {
     }
 
     #[test]
-    fn a_body_at_extent_one_is_three_degrees_across() {
+    fn a_body_at_extent_one_is_eight_degrees_across() {
         // The stand-in's own figure, pinned so a change to it is deliberate.
         let quad = corners(Vec3::ZERO, &sprite(Vec3::Y, [1.0, 1.0]));
         let half = (quad[1] - quad[0]).length() / 2.0;
         let degrees = 2.0 * (half / BODY_DISTANCE).atan().to_degrees();
-        assert!((degrees - 3.0).abs() < 0.01, "{degrees}");
+        assert!((degrees - 8.0).abs() < 0.01, "{degrees}");
     }
 
     #[test]

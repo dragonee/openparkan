@@ -1456,6 +1456,7 @@ impl App {
         if let Some((lighting, colours)) = scene::lighting(&self.world, seconds, eye, forward) {
             r.renderer.set_lighting(lighting);
             r.renderer.set_dome_colours(colours);
+            r.renderer.set_body_sprites(&r.gpu.device, scene::body_sprites(&self.world, seconds));
         }
         let lighting = scene::lighting(&self.world, seconds, eye, forward).map(|l| l.0);
         let view_proj = match self.play.as_mut() {
