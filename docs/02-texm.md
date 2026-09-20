@@ -14,7 +14,8 @@ offset  size  field
 0x10       4  uint32 flags — 32 on mip-mapped textures, 0 otherwise
 0x14       4  uint32 the exporter's flags, of which the loader reads bits 24
               and 25 — 0 on 312 of Textures.lib's 393 and 0x4000000 on 81
-0x18       4  uint32, varies; not needed to decode
+0x18       4  uint32 a colour the exporter recorded, read by nothing — a
+              palette index on the palettised textures, 0 on 346 of 393
 0x1C       4  uint32 pixel format
 0x20     ...  pixel data, mip 0 first, each level half the previous
 ```
@@ -44,15 +45,19 @@ produces sane colours.
 ## Mip chains
 
 The declared level count runs the usual halving pyramid, clamping at 1 pixel.
-For 328 of 393 textures the total
+The total
 `sum(max(w>>i,1) * max(h>>i,1) for i in range(mips)) * bytes_per_pixel`
-(plus 1024 for a palette) equals the payload size exactly. The remaining 65
-have a slightly short tail — the smallest levels are truncated or padded
-differently.
+(plus 1024 for a palette) equals the payload size exactly on 328 of the 393,
+and **on the other 65 the leftover is the `Page` chunk** and nothing else, to
+the byte. So every declared level is present in all 393 — and in all 518 `Texm`
+members of the install, counting `lightmap.lib` and the three `ui/*.lib`
+([below](#the-page-chunk--a-textures-own-sub-images)). An earlier reading
+called those 65 a truncated tail; they are not truncated at all.
 
-Because of that, `openparkan.texm.decode` reads **mip level 0 only**. Level 0
-sits at a known offset regardless of how the tail is stored, so decoding is
-robust for all 393 textures.
+`openparkan.texm.decode` still reads **mip level 0 only**, because that is
+what a renderer imports, but the deeper levels are there and are worth reading
+for what they say about the tool that wrote them
+([below](#the-mip-chain-is-one-tools-box-filter--measured)).
 
 ## The `Page` chunk — a texture's own sub-images
 
@@ -112,9 +117,13 @@ uv run openparkan textures ui/minimap.lib --out /tmp/minimaps
 
 ## Verified by
 
-`uv run openparkan verify`: the declared format predicts the payload size for
-328/393 textures, all 393 decode to RGBA at the declared dimensions, and
-478/478 material cells fall inside the `Page` table of the texture they name.
+`uv run openparkan verify`: the header accounts for every byte of every
+payload — 328 of the 393 end on the last mip level and the other 65 carry a
+`Page` table after it — all 393 decode to RGBA at the declared dimensions,
+2513/2513 material cells fall inside the `Page` table of the texture they name,
+all 81 marked textures' mip chains are the box filter
+([below](#the-mip-chain-is-one-tools-box-filter--measured)) while 89 unmarked
+ones are not, and `+0x18` is non-zero only on members below 60.
 
 ## Transparency
 
@@ -279,6 +288,118 @@ throughout. (The control on the sweep is that per-archive pass itself: reporting
 So `+0x14` is **an exporter flags word of which the loader reads only bits 24
 and 25** — the alpha-surface tests above. Whatever the tool meant by bits 23 and
 26, the engine never asks.
+
+### Which batch the bit marks — *measured*
+
+The run is members **66 to 154**, and it is a coherent thing: **all 89 are
+`ARGB8888`, all 89 are mip-mapped** (`+0x10` = 32, chains of 4 to 7 levels),
+all 89 have `+0x18` = 0, and all 89 have the same mip generator
+([below](#the-mip-chain-is-one-tools-box-filter--measured)). The names are the
+skins of machines and buildings — 19 `S*`, 14 `RL_*`, 13 `PG*` and `PG_*`, 7
+`GEN_*`, 5 `MTP_*`, 4 `DD*`, 4 `BIRD_*`, 3 `RU*`, 3 `PLT_*`, 2 `MN_*`, 2
+`KORA*`, 2 `STONE0*`, then `APKORA`, `SKIN02`, `COMP_2`, `HNG_01`, `RB_04`,
+`RBW_3`, `RLW_4`, `P26` and `AIM_02` — which is why 78 of the 81 are worn by a
+lit material. The
+members on either side are a different kind of thing: 60 to 65 are
+`BLUEPG0*`, `LAUSE*`, `LAULEG1` and `SUN5`, and 155 onwards `B_FOUND`, the four
+`NEBULA_*` and the `SUN*` sprites.
+
+**Nothing but the bit tells the 89 apart.** The eight unmarked inside the run —
+`PG05.0`, `STONE00.0`, `STONE01.0`, `MTP_06.0`, `BIRD_B.0`, `BIRD_T.0`,
+`BIRD_U.0`, `BIRD_W.0` — are `ARGB8888`, mip-mapped, `+0x18` = 0 and
+box-filtered like the other 81; they span the same 64–256 sizes and the same
+name families, and `PG03`, `PG04`, `PG06` and `PG07` are marked while `PG05` is
+not, `MTP_01`, `MTP_03`, `MTP_04` and `MTP_05` while `MTP_06` is not. A ninth
+axis, the `Page` table, is on 7 of the 81 and 0 of the 8, which is what eight
+draws from a 7-in-89 rate would give anyway. So the bit is **bookkeeping inside
+one batch**, not a property the batch shares and the eight lack.
+
+### The mip chain is one tool's box filter — *measured*
+
+Every mip level *k* of a shipped texture is the **truncated mean of the
+matching 2<sup>*k*</sup> × 2<sup>*k*</sup> block of level 0** — in the
+components the file stores, alpha included, `sum >> 2k` with no rounding. Not
+the mean of the level above it: that rounds differently, and comparing level 2
+against level 1 fails on textures the direct test passes.
+
+- **81 of the 81** marked textures pass, every level, no exceptions.
+- The **control** is that the same test *fails*: 89 of the 256 unmarked
+  mip-mapped non-palettised textures do not pass it at level 1, and they are a
+  block of their own — `L02.0`..`L24.0` (42 `RGB565` members, 177–218) and
+  `L00M.0`..`L24M.0` (42 `XRGB8888` members, 219–260), plus `SLD_GL`, `S_05`,
+  `SUN3`, `SUN1` and `NE_SHIELD`. The `M` maps are far off (mean error 3.3 to
+  18.5 per component), the 565 ones barely (0.09 to 0.50, which is what
+  quantising a higher-precision average to 5 and 6 bits costs).
+- But it passes on **167** unmarked textures too, so it names the *tool*, not
+  the batch. `lightmap.lib` and the three `ui/*.lib` carry no mip chains at all
+  — all 125 of their members declare one level.
+
+So `Textures.lib` is at least three blocks laid down in turn, each with its own
+signature: members **0–59**, the only ones with `+0x18` ≠ 0 and mostly without
+mip chains; members **66–154**, the `0x4000000` batch; and members
+**177–260**, the `L*` lightmap-style set whose mips another tool made.
+
+### `+0x18` is a colour, and it belongs to the first block — *measured*
+
+`+0x18` is non-zero on **47 of `Textures.lib`'s 393**, and every one of them is
+a member below 60 — so it and the `0x4000000` run never appear on one texture.
+It is also non-zero on all 15 of `ui/ui.lib` and on 2 of `ui/ui_back.lib`
+(`Crdt_uu`, `Crdt_dd`), and on none of `lightmap.lib` or `ui/minimap.lib`.
+
+What it holds is **a colour**, which the 15 palettised textures settle: there
+it is a palette index, and the entry it names is one of the nearest in the
+whole 256-entry palette to the image's own mean colour. `WATER0.0`..`WATER9.0`
+all say 115, whose colour is (181, 181, 189) against a mean of (181.5, 180.6,
+183.2); `TREE01.0` says 57, (76, 100, 40) against (74.9, 93.2, 39.3). By
+distance to the mean the named entry ranks **1st on ten of the fifteen and
+inside the nearest twenty on all fifteen** — a uniformly chosen index would be
+that close 7.8% of the time, so fifteen of them by chance is 10<sup>−17</sup>.
+
+On the 49 `4444` textures that carry it the value is 12 or 13 bits and its top
+two nibbles track the mean's red and green, but the low nibble does not track
+blue — `LAVA0*.0` say `0x0c3c` against a mean of (12.1, 3.1, 1.1) in nibbles,
+and `ui_tex9.tex` says `0x0ccc` against (12, 12, 12). **The packing on the
+16-bit formats is not established.** Whatever it is, no module reads `+0x18`
+either: the sweep that found the loader's tests of `+0x14` bits 24 and 25 finds
+no read of the header's `+0x18`.
+
+### The exporter is not identifiable from the install — *read*, a negative
+
+**The only code in the shipped game that writes a `Texm` header is the
+engine's own**, and it is not the exporter. A byte sweep of all 22 `.dll` and
+`.exe` files in the install for the literal `Texm` returns exactly one hit,
+`Ngi32.dll` file offset `0x7e80`, which is the immediate of
+`mov dword ptr [esp], 0x6d786554` at `0x10007e7c`, inside the function that
+starts at `0x10007e50`. That function builds a 32-byte header on the stack for
+a texture it is about to create from nothing: width and height both from its
+argument masked with `0xfe0`, **mip count 1**, `+0x10` = 0, **`+0x14` = 0**,
+**`+0x18` = 0**, and a pixel format chosen from its caller's flags — `565` for
+bit 27, `4444` for bit 29, `88` for bit 23 and `556` for bit 24, each gated on
+a global being non-zero — and hands it to the texture constructor at
+`0x10010310` after `0x1002a8b0` allocates `0x88` bytes.
+
+That is the control the negative needs: **the search can find a writer of this
+header**, and the one writer it finds sets both exporter fields to zero and one
+mip level. So the tool that wrote `0x4000000`, `0x800000` and `+0x18` was never
+shipped, and nothing in the install names it: the same sweep over the same 22
+binaries finds no `.tga`, `.bmp`, `.pcx`, `.psd`, `3ds`, `3D Studio`,
+`Photoshop` or `exporter` anywhere — the only `Convert` strings are the three
+modules' scan-code converters and a Windows ACM import. What the shipped data
+does identify is a **tool behaviour**:
+the box filter above, shared by 248 of `Textures.lib`'s 341 mip-mapped members
+and absent from the `L*` block. That is as far as the archaeology goes.
+
+## Not established
+
+- **What `+0x14` bit 26 and bit 23 meant to the tool that set them.** Their
+  effect is a settled negative — nothing reads them — and their extent is
+  measured, but the 81 and the 8 unmarked members inside the same run are alike
+  on every axis the archive carries.
+- **How `+0x18` packs a colour on the 16-bit formats.** The palettised reading
+  is measured; the `4444` one is not.
+- **`Ngi32.dll:0x10007e50`'s pixel formats `88` and `556`.** They are read off
+  the immediates at `0x10007ef1` and `0x10007f0c`; no shipped texture declares
+  either, so nothing checks the reading.
 
 ### Load flag `0x200000` is the texture stage — *read*, and *measured*
 

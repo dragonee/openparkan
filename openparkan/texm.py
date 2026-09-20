@@ -8,7 +8,11 @@ Layout (see ``docs/02-texm.md``)::
     0x0C  uint32   mip level count
     0x10  uint32   flags       (32 on every mip-mapped texture, 0 otherwise)
     0x14  uint32   flags       (0x4000000 on 81 ARGB8888 textures, 0 elsewhere)
-    0x18  uint32   unknown     (varies; not needed to decode)
+    0x18  uint32   a colour the exporter left behind and nothing reads: a
+                   palette index near the image's own mean on the palettised
+                   textures.  Non-zero on 47 of Textures.lib's 393, all of
+                   them members below 60 -- an earlier batch than the one
+                   +0x14 bit 26 marks
     0x1C  uint32   pixel format, spelled as a decimal channel-width literal:
                    8888, 888, 565, 4444, or 0 for 8-bit palettised
     0x20  ...      pixel data, mip 0 first, each level half the previous
@@ -34,6 +38,8 @@ from __future__ import annotations
 
 import struct
 from dataclasses import dataclass, field
+from itertools import chain
+from operator import add
 
 HEADER = struct.Struct("<4sIIIIIII")
 HEADER_SIZE = HEADER.size  # 32
@@ -59,9 +65,11 @@ FMT_ARGB8888 = 8888
 #: shipped texture sets either.
 ALPHA_SURFACE = 0x01000000
 FADE_PALETTE = 0x02000000
-#: On 81 ARGB8888 textures, 78 of them skins of lit materials.  No module
-#: tests it: a sweep of the six render modules for the constant finds the
-#: loader's two alpha bits and nothing for this one.
+#: On 81 ARGB8888 textures, 78 of them skins of lit materials, and they are
+#: members 66 to 154 of 393 -- one batch of exports.  No module tests it: a
+#: sweep of the six render modules for the constant finds the loader's two
+#: alpha bits and nothing for this one.  Nothing else tells the batch's 81
+#: marked members from its 8 unmarked ones either, the mip chains included.
 HEADER_BIT_26 = 0x04000000
 
 #: The caller's load flag that sends even a 4444 or 8888 texture to an opaque
@@ -148,6 +156,65 @@ def parse_pages(data: bytes) -> list[tuple[int, int, int, int]]:
         )
         out.append((x, y, width, height))
     return out
+
+
+def _level_components(fmt: int, level: bytes, pixels: int) -> list[list[int]]:
+    """One list per stored channel, in the widths the file stores them in.
+
+    Comparing mip levels has to happen in the file's own components -- a 4444
+    level rounded to 8 bits would agree with anything.
+    """
+    if fmt in (FMT_XRGB8888, FMT_ARGB8888):
+        return [list(level[c::4][:pixels]) for c in range(4)]
+    words = struct.unpack_from(f"<{pixels}H", level, 0)
+    if fmt == FMT_ARGB4444:
+        return [[(w >> s) & 0xF for w in words] for s in (12, 8, 4, 0)]
+    return [[(w >> 11) & 0x1F for w in words],
+            [(w >> 5) & 0x3F for w in words],
+            [w & 0x1F for w in words]]
+
+
+def mip_box_depth(data: bytes) -> tuple[int, int]:
+    """``(levels that are an exact box filter of level 0, levels below 0)``.
+
+    The exporter that made most of the library built every mip level by
+    **truncating the mean of the matching 2**k x 2**k block of level 0**, in
+    the stored components and including alpha -- not by halving the level above
+    it, which rounds differently.  The two disagree by a unit or so, so the
+    test is a signature of the tool rather than of the picture: it either holds
+    for the whole chain or fails at level 1.
+
+    Palettised levels are not averages of anything, so they return ``(0, ...)``.
+    """
+    w, h, mips, _flags, fmt = parse_header(data)
+    bpp = _BYTES_PER_PIXEL.get(fmt)
+    below = max(mips - 1, 0)
+    if bpp is None or fmt in (FMT_PALETTE8, FMT_INDEX8) or mips < 2:
+        return 0, below
+    body = data[HEADER_SIZE:]
+    sums = _level_components(fmt, body, w * h)
+    off, cw, ch, depth = bpp * w * h, w, h, 0
+    for level in range(1, mips):
+        nw, nh = cw >> 1, ch >> 1
+        if nw * 2 != cw or nh * 2 != ch or off + bpp * nw * nh > len(body):
+            break
+        want = _level_components(fmt, body[off:], nw * nh)
+        rows = range(0, ch, 2)
+        folded = []
+        for plane in sums:
+            wide = list(map(add, plane[0::2], plane[1::2]))
+            top = chain.from_iterable(wide[r * nw : (r + 1) * nw] for r in rows)
+            bottom = chain.from_iterable(wide[(r + 1) * nw : (r + 2) * nw] for r in rows)
+            folded.append(list(map(add, top, bottom)))
+        shift = 2 * level
+        if any(
+            [s >> shift for s in plane] != got
+            for plane, got in zip(folded, want)
+        ):
+            break
+        sums, depth = folded, level
+        off, cw, ch = off + bpp * nw * nh, nw, nh
+    return depth, below
 
 
 def uploads_with_alpha(fmt: int, flags14: int = 0, load_flags: int = 0) -> bool:

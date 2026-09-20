@@ -189,6 +189,50 @@ def check_texm(check, game: Path) -> None:
             [rows[i][1] for i in range(min(marked), max(marked) + 1) if not rows[i][2]]
             if marked else [],
         )
+    # What the run does share is a mip generator, and it is not unique to it.
+    box = Counter()
+    run_axes: set[tuple] = set()
+    run_paged: Counter = Counter()
+    x18_at = []
+    for i, e in enumerate(ar):
+        blob = ar.read(e)
+        depth, below = texm.mip_box_depth(blob)
+        marked = bool(struct.unpack_from("<I", blob, 0x14)[0] & 0x4000000)
+        fmt = struct.unpack_from("<I", blob, 0x1C)[0]
+        kind = ("nomip" if below == 0 else "pal" if fmt == texm.FMT_PALETTE8
+                else "full" if depth == below else "no")
+        box[(kind, marked)] += 1
+        if struct.unpack_from("<I", blob, 0x18)[0]:
+            x18_at.append(i)
+        if 66 <= i <= 154:
+            w, h, mips, flags, fmt = texm.parse_header(blob)
+            run_axes.add((fmt, flags, depth == below,
+                          struct.unpack_from("<I", blob, 0x18)[0] != 0))
+            if texm.parse_pages(blob):
+                run_paged[marked] += 1
+    check("Texm: nothing but the bit tells the run's members apart",
+          run_axes == {(texm.FMT_ARGB8888, 32, True, False)}
+          and run_paged[False] == 0 and run_paged[True] == 7,
+          f"all 89 members of the run, the 81 marked and the 8 not, are ARGB8888 with "
+          f"the mip flag set, a complete box-filtered chain and +0x18 zero -- "
+          f"{len(run_axes)} distinct combination of those four axes across the run; the "
+          f"fifth axis, a Page table, is on {run_paged[True]} of the 81 and {run_paged[False]} "
+          f"of the 8, which at that rate is what 8 draws would give anyway")
+    check("Texm: header +0x18 belongs to an earlier batch",
+          len(x18_at) == 47 and max(x18_at) == 59,
+          f"{len(x18_at)} of {len(ar)} carry a non-zero +0x18, and all of them are "
+          f"members 0 to {max(x18_at)} -- the block before the 0x4000000 run, which "
+          f"starts at 66, so the two exporter fields never appear on one texture")
+    check("Texm: the marked batch's mip chains are one tool's box filter",
+          box[("full", True)] == 81 and box[("no", True)] == 0
+          and box[("full", False)] == 167 and box[("no", False)] == 89,
+          f"every level of all {box[('full', True)]} marked textures is the truncated "
+          f"mean of the matching 2**k x 2**k block of level 0, in the stored components "
+          f"and including alpha; the control is that the same test fails on "
+          f"{box[('no', False)]} of the {box[('full', False)] + box[('no', False)]} "
+          f"unmarked mip-mapped ones it applies to, so it discriminates -- but it passes "
+          f"on {box[('full', False)]} of them too, so it does not pick the batch out")
+
     textures, lightmaps = runs["Textures.lib"], runs["lightmap.lib"]
     check("Texm: header +0x14 marks one batch of exports, not a kind of texture",
           all(r[1] for r in runs.values())
