@@ -334,9 +334,10 @@ addresses the docs say are installed in one — `Terrain.dll:0x1007ed40` at
 
 ### `0x1008a690` is the designer's part category — *read*, and *measured*
 
-The same five bytes, read in a different order, give a **category 0–7**, and
-the number is a dispatch index and nothing else. The chain (`0x1008a690`,
-which is a leaf, 15 compares and a `ret`) asks, in order: kind 9 sub-kind 32
+The same record `0x1008a500` fills, read on different fields, gives a
+**category 0–7**, and the number is a dispatch index and nothing else. The
+function is a leaf — a chain of compares and returns, no calls — and it asks,
+in order: kind 9 sub-kind 32
 → **0**; kind 9 sub-kind 33 → **1**; kind 8 by its *second* sub-kind — 81
 `BLD` → **5**, 80 `TUR` → **1**, 84 `UPG` → **1**, 82 `DEF` → **1**, 83 `RDR`
 → **2**; kind 12 → **2**; kind 11 sub-kind 69 `BRN` → **6**; kind 10 → **4**;
