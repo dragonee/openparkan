@@ -307,7 +307,10 @@ the label "`name (code)`", the class and the child count. The classes are
 5 clip.
 
 **Children are written slots first, in slot order, then sockets in node
-order** (*measured*). All 33 of the install's `bld_unit_*`, `view_unit_*`
+order** (*measured*). That order is the designer's own: a part's sockets become
+rows in the order its fits' loop counts the nodes, and the row keeps the node's
+index, which is what the writer emits as the attachment
+([37-designer.md](37-designer.md#a-rows-record--read-and-measured)). All 33 of the install's `bld_unit_*`, `view_unit_*`
 and `temp_unit.dat` re-write byte for byte from their trees in that order:
 
 - the chassis's engine 0, battery 1, shield 2, detection shield 3, repair 4

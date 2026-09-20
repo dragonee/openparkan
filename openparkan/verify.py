@@ -14019,6 +14019,36 @@ def check_designs(check, game: Path) -> None:
           f"then sockets, ascending; labels 'name (code)'); {pairs} of {len(built)} bld/view "
           f"pairs identical; temp_unit.dat is {temp_is}")
 
+    # A design row's node field is the node's own index: the fits' loop counts 1 up to
+    # the part's node count and skips the nodes with no socket label (iron3d.dll:
+    # 0x1005281a-0x1005290c, written at 0x10052878).  So every attachment the designer
+    # writes names a labelled node, never node 0, and they rise in node order.
+    designer = designs.Designer(shop, designs.Catalogue(research.read(tree_path), full=True))
+    fitted = from_one = named = rising = ordinals = 0
+    for path in written:
+        unit = objects.load_unit(path)
+        parents = unit.parents()
+        last: dict[int, int] = {}
+        for i, component in enumerate(unit.components):
+            host = parents[i]
+            if host < 0 or not component.is_external:
+                continue
+            fitted += 1
+            node = component.attach_node
+            found = designer.labels(unit.components[host].ref.member)
+            from_one += node >= 1
+            named += 0 <= node < len(found) and bool(found[node])
+            rising += node > last.get(host, -1)
+            ordinals += node == last.get(host, 0) + 1
+            last[host] = node
+    check("designs: a design's attachment is the host node's own index, and it is labelled",
+          fitted and from_one == named == rising == fitted and ordinals < fitted,
+          f"over the {len(written)} .dat files the designer writes, {fitted} external "
+          f"attachments: {from_one} are node 1 or above, {named} name a node carrying a "
+          f"stream-10 socket label, {rising} rise in node order under their host -- and "
+          f"only {ordinals} would match an ordinal over the host's sockets, so the field "
+          f"is the node index the fits' loop counts with, not the socket's place in the list")
+
 
 def check_units(check, game: Path) -> None:
     """units: every assembly described whole, and its pieces fitting together."""

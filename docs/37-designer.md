@@ -207,7 +207,7 @@ the panel's takt (`0x1004bb90` for the source) makes a model view of the part
 (`0x1009df90`) on (*X*₀ + 12, 244) sized 160 × 151, carrying the old model's
 angle on (`0x1004bcca`).
 
-### A row's record — *read*, in part
+### A row's record — *read*, and *measured*
 
 The rows a destination tab lists are kept in the designer's own memory as
 **arrays of 64 records, `0x330` bytes each**, and there are four of them, at
@@ -229,8 +229,49 @@ returns the out-record's `+0x1c`, which `MisLoad.dll:0x10002aa0` fills from
 `TRFB[item.part_index]` — so **`+0x20` is a research item index the writer
 turns into a part id**.
 
-What writes `+0x04`, inside the fits' node loop from `0x100527aa`, and what
-`+0x00` and `+0x24` mean, were not read.
+**`+0x04` is the node's own index in the host part's mesh**, and the fits' loop
+writes it (*read*, *measured*). Adding a part opens a row for each of its sockets
+(`0x10052809`–`0x1005290c` in the turret add; the weapon add and the rest repeat it):
+
+- the catalogue interface at the designer's `+0xbc94` is asked how many nodes the
+  part has (slot 15, `0x10052809`), and the loop counter `ebx` runs **1 up to that
+  count** (`0x1005281a`, `0x10052906`–`0x1005290c`);
+- for each it asks slot 6 for that node's socket label (`0x10052832`) and **passes
+  over a node that answers none** (`0x10052839`), so a node with no stream-10 label
+  opens no row and node 0, the part's own root, never does;
+- what it keeps is the counter itself: `0x10052878` writes `ebx` into the record it
+  is building, at the offset the list insert (`0x10049410`) copies to the row's
+  `+0x04` — `+0xd4` of the 0x330-byte record, which is `+0x04` in this page's
+  numbering. The label goes to `+0x08`, and the row is appended by `0x10049410`,
+  which copies eight fields from a prototype record on the caller's stack.
+
+So the row's node field is the **node's index**, not an ordinal over the sockets.
+*Measured* over the 33 `.dat` files the designer itself writes (`bld_unit_*`,
+`view_unit_*`, `temp_unit`): all **138** external attachments are node 1 or above,
+all 138 name a node that carries a stream-10 label, and all 138 rise in node order
+under their host — and only **60 of the 138** would also fit an ordinal over the
+host's sockets, the values being real node indices, 1 and 4 to 12, where the
+ordinals would be 1 to 6. Over all 458 shipped assemblies, 1414 of 1414 land on a
+`Base_*` node ([07-objects.md](07-objects.md#how-parts-attach)).
+
+**`+0x00` and `+0x24` are the same handle seen from the two ends** (*read*, in
+part). The part add fills a three-dword request — the selected row's `+0x00`, its
+`+0x04`, and −1 — and hands it to the project (`+0xbc90`'s `+0x74`, slot 13, query
+6 with `0x80000020`, `0x100526c3`–`0x100526f7`), which fills the third word in
+place. That word is then:
+
+- written into the row the part went into, at **`+0x24`** (`0x10052736` for a
+  turret, `0x10052ea8` and `0x100530cb` for the other kinds), beside the research
+  item that goes to `+0x20`;
+- handed to the catalogue as the part whose nodes to count (`0x100527f8`), and
+  written into **`+0x00`** of every socket row the loop then opens
+  (`0x1005284b`–`0x10052855`).
+
+So `+0x24` names the part the row now holds and `+0x00` the part whose socket the
+row is; what the handle itself is — the project's own index for a fitted part — was
+not read. It is what the unit writer tests: it emits a row only where `+0x20` is not
+−1 **and `+0x00` is zero** (`0x100546e2`–`0x100546f9`), and then writes `+0x04` as
+the component's attachment (`0x1005476e`) and `+0x08` as its label (`0x10054785`).
 
 ### Moving a part — *read*, and *seen*
 
@@ -466,6 +507,16 @@ from top to bottom in about a second.
 - The tooltip's box and timing (`0x1009bbc0`, [35-hud.md](35-hud.md#who-draws-it-and-what-it-hides--read)).
 - The destination panel's draw and takt (`0x1004ccb0`, `0x1004cd00`) beyond their
   sharing the source's routines.
-- **Which tab each of the four `0x330`-byte row arrays holds**, what writes a
-  row's attach node at `+0x04`, and what its `+0x00` and `+0x24` mean
-  ([A row's record](#a-rows-record--read-in-part)).
+- ~~What writes a row's attach node at `+0x04`~~ — **read**, and **measured**:
+  the fits' loop over the part's nodes writes its own counter, which runs 1 up to
+  the part's node count and skips the nodes with no socket label, so the field is
+  the node's own index; all 138 attachments in the 33 `.dat` files the designer
+  writes are node 1 or above and every one carries a stream-10 label
+  ([A row's record](#a-rows-record--read-and-measured)).
+  **`+0x00` and `+0x24`** are narrowed, not closed: both take the handle the
+  project answers for a fitted part (`+0xbc90`'s slot 13, query 6), `+0x24` for the
+  part in the row and `+0x00` for the part whose socket the row is, and the unit
+  writer emits a row only where `+0x00` is zero. What the handle itself counts was
+  not read. **Which tab each of the four `0x330`-byte row arrays holds** is open
+  too: the turret add appends its socket rows to the fourth (`+0x33e0c`) and the
+  unit writer reads the third (`+0x26f68`).
