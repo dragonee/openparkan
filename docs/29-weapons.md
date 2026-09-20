@@ -405,7 +405,10 @@ that would find no gun
   is `[0xfff, 0, 0, ?, 0, 0, 0, 0]` (`0x1002a68e` → `0x1001bca0`, then
   `0x1002a6c1`–`0x1002a6cd` zeroing the last four): no required or excluded
   world flags and no required or excluded class. A round's excludes world
-  flags `0x208`, of which `0x200` is the landscape's water surface
+  flags `0x208` *and* class `0x24`, and it is the **class** that carries the
+  water: against the landscape `0x24` becomes the surface word's `0x02` and
+  `0x01`, of which `0x02` is the water sheet on 3630 of 275882 faces, while
+  `0x208` becomes the flags word's `0x20` and `0x80`, on none
   ([26-damage.md](26-damage.md#the-query-record-and-what-a-round-excludes--read-and-measured)).
   **So the sight stops on a lake's surface where the round it aims flies
   through to the bed.**
