@@ -465,7 +465,8 @@ slots are 54 guns, 28 turrets, 11 chassis, 5 parts and 5 buildings.
   1 (`0x10014e9a`), which that draw files under layers 10 and 9 where an
   ordinary surface gets 0, or 5 when see-through (`Terrain.dll:0x1004553b`),
   and in place of `CShade::SetClipStateForJoint` the mesh calls `CShade` slot
-  15 with 1 (`0x10014f85`).
+  15 with 1 (`0x10014f85`). What those layers are, and what slot 15 does, is
+  [below](#a-layer-is-a-pass-and-the-cockpits-two-are-a-frustum-of-their-own--read).
 - The per-part draw behind the mesh's interface `0x20` slot 6
   (`AniMesh.dll:0x100101d0`) takes the level as an argument and applies the
   same two modes at level 4 (mode 0 for an agent of kind 3).
@@ -480,6 +481,45 @@ This also corrects why level 0 falls back to the fifth slot in this library:
 the only nodes it happens to are cockpits, which a survey does not draw.
 `ObjectMesh.select` and the viewer skip them; `Subobject.cockpit_slot` names
 the slot.
+
+### A layer is a pass, and the cockpit's two are a frustum of their own — *read*
+
+A draw item is filed by a **group** and a **layer**, and the layer is the index
+of the pass it joins inside that group's pass list
+([10-sky.md](10-sky.md#the-dome)). The mesh draw picks both together
+(`0x1004552a`–`0x100455bc`): mode bit 0 gives group 1, layer 9; mode bit 1
+group 1, layer 10; and otherwise the see-through test gives group 1, layer 5 or
+group 0, layer 0. Every pass overrides the camera's near plane, far plane and
+viewport z range for its own length, so what the four choices mean is:
+
+| what | group | layer | near | far | viewport z |
+|---|---:|---:|---:|---:|---|
+| an ordinary opaque surface | 0 | 0 | 0.5 | 700 | 0.1 – 0.99 |
+| a see-through one | 1 | 5 | 0.5 | 700 | 0.1 – 0.99 |
+| a fifth slot, ordinary node | 1 | 9 | **0.05** | **10** | **0.0 – 0.1** |
+| a fifth slot, the cockpit | 1 | 10 | **0.05** | **10** | **0.0 – 0.1** |
+
+So the fifth slots are **not** drawn with the scene. They get a near frustum of
+their own — 0.05 to 10 units, against the world's 0.5 to 700 — mapped to the
+front tenth of the depth buffer, while the world owns 0.1 to 0.99 and the sky
+is pinned at 1.0. A cockpit shell closer to the eye than the world's own 0.5
+near plane is neither clipped by it nor ever occluded by anything in the
+world, and the two first-person layers depth-test against each other alone.
+Group 1 runs after group 0, so they are drawn over the finished scene.
+
+**`CShade` slot 15 is a one-byte setter** (`0x100437a0`, `ret 8`; the vtable
+`0x1009b17c` is installed at `0x10041f94`): it writes its argument into
+`CShade+0xca8`. The mesh draw reads that byte at `0x100455fe` and, **when it is
+zero**, sets bit 0 of the draw item's flag word (`0x10045608`). So
+`AniMesh`'s "slot 15 with 1" is exactly *clear bit 0 on this draw*, and it
+stands in for `CShade::SetClipStateForJoint` (slot 14, `0x10043680`), which the
+ordinary path calls to hand the joint's clip planes to the material manager.
+What bit 0 then does is **not established**: the item renderer masks it off
+again before passing the flags to the device (`and edx, 0xfffffffe`,
+`0x1003056a`), an item copied for another draw has it cleared with bit `0x400`
+(`0x1002c6ce`), and no test of it was found — against the control that the
+neighbouring bits do turn up at once, bit 3 at `0x10030043`, bit 4 at
+`0x1002fe3d` and bit `0x400` at `0x1003ecb9`.
 
 ### Every level is a simplification in place
 

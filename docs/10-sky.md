@@ -374,13 +374,35 @@ on its texture's alpha and not added.
 **The extents are a factor, not a length.** *Measured* over all 656 keyframes:
 across runs 0.4 to 3.3 and up 0.4 to 3.0, and **across is at or above up on all
 656**, so a body is never drawn taller than it is wide. Nothing that small is a
-world size, and the base they scale is camera slot 27, which is
-[not read](#not-resolved). The engine picks its own: a body at extent 1 is drawn
-**8° across**, which puts the shipped range at 3.2° to 26°. The first figure tried
-here was 3°, and the picture threw it out at once — a body came out a dot of a few
-pixels, throwing away artwork drawn 128 pixels square, and the sheets hold
-**planets** as well as suns, which a sky hangs large. It remains a choice, not a
-reading.
+world size.
+
+**The base they scale is an angle, and it is 0.325 radians** — *read*. The takt
+takes camera slot 27 and multiplies it by 0.325 and then by 0.5
+(`0x1007dfdf`); the products are the sprite's two half-extents, and the four
+corners it writes at `CSun+0x21c`..`+0x278` are **screen pixels** at *z* =
+0.999, the same pre-transformed quad the sky's first draw uses. **Camera slot
+27 is pixels per radian**: `CCamera`'s slot 27 (`0x100851c0`, vtable
+`0x1009c620` installed at `0x10083a2b`) asks its view for the viewport
+rectangle (slot 15, `0x100820c0`, the four ints at view `+0x10`), takes
+`right − left`, and divides it by the view's field of view (slot 17,
+`0x10082120`, the float at view `+0x234`, which the view's projection puts at
+`+0xc` of the 100-byte camera block, `0x10081a92`). That field really is an
+angle in radians: `Ngi32` halves it and takes its sine and cosine
+(`0x10007055`, `ngiGetSinCos`), writing `cos(fov/2)` into the projection's
+`m[0]`, `(width/height)·cos(fov/2)` into `m[5]` and `sin(fov/2)` into `m[11]` —
+a cotangent projection with a full horizontal field of view of `fov`. The game
+sets it to **1.7 rad**, 97°, at `0x1001ffd7` (view slot 10, `0x10081f60`; the
+constructor's default is 1.0).
+
+The screen width and the field of view therefore cancel: a body's **half-width
+is `extent × 0.1625 radians`**, whatever the resolution and whatever the view
+is set to. A body at extent 1 is **18.6° across**, and the shipped 0.4 to 3.3
+span **7.4° to 61°** — the engine's earlier guess of 8° at extent 1 was less
+than half of it. The sheets hold **planets** as well as suns, which a sky hangs
+large, and the read figure hangs them larger still. The game lays the angle out
+linearly in pixels (it is a pixels-per-radian scale, not a tangent), so a body
+near the edge of a 97° view is drawn a little smaller than a true projection
+would draw it.
 
 ## What the numbers are
 
@@ -632,11 +654,38 @@ the flare gates as [above](#the-lens-flare), and the second's to slot 21
 
 The sun's on-screen half-extents are `float 1 × 0.1625 × camera slot 27`
 across and `float 2 ×` the same up (`0x1007dfdf`), which the takt tests
-against the screen's edges. When the shader's flag bit 0 is set, the sun
-passes slot 17 through the shader's slot 5 first, and the sky does the same
-to its fog colour (`0x1007d93d`, `0x10079b05`); the sky also sets its colour
-mask to `0xff00ff00` in that mode, which reads as a green night-vision filter
-(*guess*).
+against the screen's edges; slot 27 is pixels per radian, so the two are
+`extent × 0.1625` **radians**
+([above](#the-sun-and-the-moon-are-drawn)).
+
+### The colour filter is the camera's infrared, not the shader — *narrowed*
+
+This page used to call it "the shader's slot 5". It is not the shader. `CSun`
+keeps the object at `+0x1c` and the sky at `+0x18`, both handed down by
+`CAtmosphere` from its own `+0x16c` (`0x1006fde6`, into the five-way body
+factory `0x10069dd0` and on to each constructor at `0x1007c817`); the only
+writer of `+0x16c` is the setter at `0x10084950`, slot 8 of the same
+`CCamera`/`CAtmosphere` wrapper vtable `0x1009c620`. The item renderer holds
+the same kind of object in the global `0x100a5e44`, which
+`CPrimBuffer::CPrimBuffer` fills by asking the shader component
+(`LoadComponent` of `CID_SHADER`) for interface **4** (`0x10032a75`).
+
+Two of its slots are used, and all three callers use them the same way:
+
+- **slot 7** (`+0x1c`) returns a small state block; **bit 0 of that block's
+  `+8`** is the flag. The sky tests it at `0x10079786`, the sun's takt at
+  `0x1007d923`, the item renderer at `0x1002fe79`.
+- **slot 5** (`+0x14`) is a `__fastcall` that takes one `D3DCOLOR` in `edx` and
+  returns one. With the flag set the sun passes slot 17's colour through it
+  (`0x1007d95f`) and the sky its fog colour (`0x10079b05`).
+
+The sky also sets its colour mask to `0xff00ff00` in that mode (`0x100797a8`,
+against `0xffffffff` otherwise) — green only. That names the filter: it is the
+camera's **infrared**, `CMD_CAMERA_INFRARED` (35) with `CIS_INFRARED_ON`,
+`_OFF` and `_INV` in `World3D.dll` and `NightVisionOn` in `iron3d.dll`, whose
+HUD lamp is already read ([35-hud.md](35-hud.md)). **What slot 5 computes is
+still not read**: the object's vtable is installed outside `Terrain.dll` and
+its class was not found.
 
 ### Where the two lights point — *read*
 
@@ -698,26 +747,58 @@ The vertices:
 (`0x1007a17d`), so its rim lies at eye height.
 
 **How it is queued.** The sky's layers go through the shader's slot 16
-(`0x10028500`) into render layer 1, with the static render record at
-`0x100a7138`, whose flags are 0 — so they take the scene's fog, not their
-own. Bits 0 and 1 of one argument become the draw item's `ZENABLE` and
-`ZWRITEENABLE` bytes (`+0x12c`, `+0x12d`, each set when its bit is clear,
-`0x10028664`), which the item renderer sets as render states 7 and 14
-(`0x100302fb`, `0x10030318`):
+(`0x10028500`, `CShade`'s vtable `0x1009b17c`, installed at `0x10041f94`) into
+group 1, with the static render record at `0x100a7138` — its own class's
+vtable and flags 0, both written at `0x1007c07d` — so they take the scene's
+fog, not their own. The record only reaches the item at
+all when the item's own flag word carries `0x10` (`0x100285a2`), which of the
+sky's draws only the clouds do, and the clouds hand over a record of their own
+with flags `0x40` and fog 5000 to 11380.7 (`0x1007a5c3`–`0x1007a607`). Bits 0
+and 1 of another argument become the draw item's `ZENABLE` and `ZWRITEENABLE`
+bytes (`+0x12c`, `+0x12d`, each set when its bit is clear, `0x10028664`), which
+the item renderer sets as render states 7 and 14 (`0x100302fb`, `0x10030318`):
 
-| draw | material block | matrix | `ZENABLE` | `ZWRITEENABLE` |
-|---|---|---|---:|---:|
-| `0x1007a37a` | `+0x484` | `0x100a7168` | 0 | 0 |
-| `0x1007a408`, `0x1007a49e` | `+0x384`, `+0x404` | at the camera | 1 | 0 |
+| draw | material block | matrix | flags | `ZENABLE` | `ZWRITEENABLE` |
+|---|---|---|---:|---:|---:|
+| `0x1007a37a` | `+0x484` | `0x100a7168` | `0xc` | 0 | 0 |
+| `0x1007a408`, `0x1007a49e` | `+0x384`, `+0x404` | at the camera | `4` | 1 | 0 |
+| `0x1007ab51` | `+0x304` | dropped 5000 | `0x14` | 1 | 0 |
 
-So the layers drawn at the camera are depth-tested and write no depth.
+So the layers drawn at the camera are depth-tested and write no depth. Flag bit
+3 of that word is the **pre-transformed** vertex path, FVF `0x1c4`
+(`0x10030043` → `0x1002f2c0`), and only the first draw sets it.
 
-**What a render layer is** (*read*). The last argument but one of that call —
-the 1 the sky passes — is the **item pool** the draw item is allocated from
-(`0x10028508`, `0x1002850c`), and a view draws in two rounds
-(`0x10081c90`–`0x10081ce8`): it runs the pass list's group 0, flushes pool 0,
-runs group 1, then flushes pool 1. The pass list (`0x10032c60`) keeps one array
-of passes per group. So layer 1 is drawn **after** everything in layer 0.
+**What a render layer is, and which pass the sky gets** — *read*. The two last
+arguments of that call are a **group** and a **layer**, and the sky passes
+group 1, layer 0 on all four of its draws, the clouds included (`0x1007a32d`,
+`0x1007a3a4`, `0x1007a43a`, `0x1007aaeb`). Group 1's layer 0 is
+a pass that **overrides the camera to near 700, far 50000 and viewport z 1.0 to
+1.0** for its own length. That is how a 34142-radius dome gets drawn at all,
+and the rest of this section is how that was read.
+
+The item's group and layer go to `CPrimBuffer::AddItem` (slot 2,
+`0x10032f10`), which appends it to `passes[group][layer]` — the array at the
+buffer's `+0x14` when the group is 0 and at `+0x1c` otherwise — after asking
+the item's own slots 2 and 3 whether it is to be drawn at all. The item itself
+comes from the draw-item manager's `Alloc(kind, group)` (slot 0, `0x10032f90`,
+vtable `0x1009b13c` installed at `0x100422f2`, the manager in the global
+`0x100a6000`): five item kinds, each with a pool per group, so the **pool is
+the group**. The sky takes kind 0 (`0x10028508`), the mesh draw kind 1
+(`0x100455bc`).
+
+A view then draws in two rounds (`0x10081c70`): it runs the pass list's group 0
+(`0x10081ca6`), resets pool 0 (`0x10081cab`), runs group 1 (`0x10081cd5`) and
+resets pool 1 (`0x10081ce8`). So group 1 is drawn **after** everything in group
+0, and within a group the passes run in order and each pass draws its own
+items in the order they were filed.
+
+**The reset touches no render state at all** — *read*, with a control. Slot 1
+of the manager (`0x100332b0`, `ret 4`) runs from `0x100332b0` to `0x100336ea`
+and contains **no `call` instruction**: it walks the two chunked arrays of the
+named pool, zeroes each item's `+4` and then the pool's count. It cannot touch
+the fog, or anything else. The control is the same scan over its sibling,
+`CPrimBuffer::Draw` (`0x10032c60`), which has six calls in its first 130
+instructions.
 
 **A pass carries its own near plane, far plane and depth range** (*read*). At
 its start (`0x1003d760`) a pass asks the render device for the current camera
@@ -730,22 +811,59 @@ far and both z bounds from its own six-word descriptor (`slot 5`,
 25, `Ngi32.dll:0x10007170`). At its end (`0x1003d920`) it restores all four and
 sets the camera again. A descriptor is `{type 0..5, near, far, min z, max z,
 flag}`, 24 bytes, and the type picks which of six pass classes the factory
-makes (`0x10031760`); the list is built from two such arrays (`0x10032ae0`).
+makes (`0x10031760`; the jump table is at `0x10031ae6`, and type 4 falls to its
+default and makes nothing).
 
-That is a mechanism that would answer the question, and `Terrain.dll` even
-holds a descriptor shaped for it: one static initialiser (`0x1007c450`) fills a
-run of ten descriptors at `0x100a3828`, of which the **first** is near **700**,
-far **50000**, z range **1.0 to 1.0** — a pass that begins exactly where the
-ordinary far plane ends and reaches past the dome's 34142, with its depth range
-pinned to the very back of the buffer — while the other nine are near 0.5 (or
-0.2, or 0.05), far 700 (or 10), z range 0.1 to 0.99. **But nothing reads
-them**: a raw byte search of every section of `Terrain.dll` finds no reference
-to `0x100a3828`, nor to the four-descriptor array at `0x100a7410` that the same
-initialiser fills. The control is the same search: it does find `0x100a3800`,
-the blob the dome's own draw pushes (`0x1007a339`), and the pass list's vtable
-`0x1009ae18` at its two constructors. So the tables are written at load and
-never used, and which descriptor the sky's pass actually gets is **not
-established**.
+**Who calls `SetPasses`** — *read*. Nothing calls `0x10032ae0` directly; it is
+slot 0 of `CPrimBuffer`'s vtable `0x1009ae18`, installed by
+`CPrimBuffer::CPrimBuffer` at `0x10032a25`. `CShade`'s render setup
+(`0x10041370`) makes **two** prim buffers, keeps them in the globals
+`0x100a60c0` and `0x100a60c4`, and gives each the same two descriptor arrays
+(`0x1004217a`, `0x100421e0`):
+
+```
+SetPasses(this, 4, 0x100a6060, 14, 0x100a1d68)
+```
+
+— **four** passes in group 0 and **fourteen** in group 1. Both arrays live in
+`.data` and are filled at load, group 0's by `0x10040a00` and group 1's by
+`0x10040b10`, from the float constants at `0x1009b0ec`..`0x1009b120`. Group 0
+is four copies of one pass — type 0, near 0.5, far 700, z 0.1 to 0.99, the flag
+byte 1 on the first and 0 on the rest. Group 1 is the interesting one:
+
+| layer | type | near | far | z range | filed by |
+|---:|---:|---:|---:|---|---|
+| 0 | 2 | **700** | **50000** | **1.0 – 1.0** | the sky, all five draws |
+| 1–4 | 2 | 0.5 | 700 | 0.1 – 0.99 | |
+| 5 | 1 | 0.5 | 700 | 0.1 – 0.99 | a see-through surface (`0x100455b2`) |
+| 6 | 3 | 0.5 | 700 | 0.1 – 0.99 | |
+| 7 | 3 | 0.2 | 700 | 0.1 – 0.99 | |
+| 8 | 2 | 0.5 | 700 | 0.1 – 0.99 | |
+| 9 | 0 | **0.05** | **10** | **0.0 – 0.1** | a fifth slot, ordinary node |
+| 10 | 2 | **0.05** | **10** | **0.0 – 0.1** | a fifth slot, the cockpit |
+| 11 | 0 | 0.5 | 700 | 0.1 – 0.99 | |
+| 12 | 5 | 0.5 | 700 | 0.1 – 0.99 | |
+| 13 | 2 | 0.5 | 700 | 0.1 – 0.99 | |
+
+So the depth buffer is cut into three: the first-person passes own 0.0 to 0.1,
+the world owns 0.1 to 0.99, and the sky is pinned at 1.0. The sky's pass begins
+exactly where the ordinary far plane ends and reaches past the dome's 34142,
+and because its whole output lands at 1.0 it fills only the pixels the scene
+left — group 1 runs after group 0. The fifth slots are in
+[07-objects.md](07-objects.md#the-fifth-slot-is-what-the-units-own-view-draws).
+
+**The descriptor an earlier round found unread is a duplicate.** The static
+initialiser at `0x1007c450` fills the same fourteen descriptors at
+`0x100a3828`, in the same order and with the same values, and four more at
+`0x100a7410`; nothing reads either, and they stay written and unused. The live
+arrays are `0x100a6060` and `0x100a1d68`, and a raw search for their addresses
+finds only the two `push`es apiece, because the initialisers write each field
+by its own absolute address (`0x100a1d6c`, `0x100a1d70`, …) and never name the
+array's base. The control that round used pointed at the wrong kind of object
+too: `0x100a3800`, "the blob the dome's own draw pushes", is not a camera
+descriptor at all — it is the quad's **vertex format**, which the queue stores
+at the draw item's `+0x194` between the vertex count at `+0x190` and the index
+count at `+0x198` (`0x100286ab`–`0x100286c9`).
 
 **Its colours** (`0x1007ac60`):
 
@@ -757,6 +875,34 @@ established**.
 
 **The clouds** use the same cap with its origin 5000 below the camera
 (`0x1007a08e`), and carry their own fog, from 5000 to 11380.7 (`0x1007a5d4`).
+
+### The sky's first draw is a screen-wide quad, and it is usually skipped — *read*
+
+The draw at `0x1007a37a` is built from the viewport rectangle the view hands
+back (`0x1007a1a6`): four corners at *z* = 1.0 written into the sky's own
+`+0x254`, `+0x260`, `+0x26c` and `+0x278`, six indices, the vertex format at
+`0x100a3800`, item flags `0xc` — pre-transformed vertices, the depth test and
+the depth write both off. It is filed into group 1 layer 0 like the rest of the
+sky and, being filed first, is drawn first within that pass.
+
+**It carries no colour of its own.** Its material block is the sky's `+0x484`,
+and the only fields anything ever writes in it are `+0x20` (1.0, the ambient
+alpha, `0x10078614`), `+0x48` and `+0x4c` (both 0, so no texture), `+0x58` (0)
+and `+0x5c` (a format id from `CShade`'s five-entry table at `+0xbfc`,
+`0x10046a98`). Its diffuse at `+4` and its ambient colour at `+0x14` are never
+written anywhere in `Terrain.dll` — a scan of every `[reg + 0x484..0x504]`
+operand and every `add`/`lea` by a constant in that span over the whole module
+returns the six sites above and the one `add ecx, 0x484` that pushes the block.
+So what it would put on the screen is the **scene colour** alone, which is
+what every material's emissive gets added
+([below](#the-scene-colour-is-added-to-every-material)).
+
+**But the draw is gated** (`0x1007a325`): the sky asks the view (interface
+`0x12`) for its mode — slot 24, `0x10083010`, the field `+0x280` that slot 23
+sets and the view's constructor leaves 0 — and **skips the quad when the mode
+is 1**. Which views carry which mode is not read. The inference is that the
+mode that draws the world is 1: group 1 runs *after* group 0, so a screen-wide
+quad with the depth test off would paint over the finished scene.
 
 ### The three layers and their texture coordinates — *read*
 
@@ -1118,17 +1264,19 @@ which is what the game does.
   Whether a body started before the clock's start keeps its full lifetime from
   its own keyframe or from creation still turns on what stamps `this+0x28`
   (`0x1007d168`), which is not traced.
-- **How the 34142-radius dome escapes the far plane and a fog ending by 700.**
-  *Narrowed.* A render layer is an item pool, and a view runs the pass list's
-  group *k* and then flushes pool *k*, so layer 1 draws after layer 0
-  (`0x10081c90`). Each pass overrides the camera's near plane, far plane and
-  viewport z range from its own descriptor for the length of the pass
-  (`0x1003d760`, restored at `0x1003d920`), which is a mechanism that would do
-  it — and one shipped descriptor is near 700, far 50000, z range 1 to 1
-  (`0x100a3828`, filled at `0x1007c450`). But nothing in the module references
-  that table ([The dome](#the-dome)). Next handle: who calls the pass list's
-  `SetPasses` (`0x10032ae0`, slot 0 of the vtable at `0x1009ae18`) and with
-  which descriptors, and what the item-pool flush does to the fog.
+- ~~How the 34142-radius dome escapes the far plane and a fog ending by 700~~ —
+  it is drawn in a pass of its own. `CShade`'s render setup gives both prim
+  buffers `SetPasses(4, 0x100a6060, 14, 0x100a1d68)` (`0x1004217a`,
+  `0x100421e0`), the sky files every draw under group 1, layer 0, and that
+  pass overrides the camera to **near 700, far 50000, viewport z 1.0 to 1.0**
+  for its own length. The descriptor an earlier round found "unread" at
+  `0x100a3828` is a dead duplicate of the live array, and `0x100a3800`, the
+  control it used, is the quad's vertex format and not a camera descriptor at
+  all ([The dome](#the-dome)). The item-pool reset does nothing to the fog:
+  slot 1 of the manager (`0x100332b0`, `0x100332b0`–`0x100336ea`) holds **no
+  `call` instruction** and only zeroes counts; the control is the six calls in
+  the first 130 instructions of its sibling `CPrimBuffer::Draw`
+  (`0x10032c60`).
 - ~~Whether `ForceSWFog` does anything outside `Terrain.dll`~~ — nothing
   reads it anywhere: 0 of `Terrain.dll`'s 41 reads of the settings page name
   entry 0, and of the four other modules that can reach the page only
@@ -1139,21 +1287,37 @@ which is what the game does.
   the same call, is what `Ngi32.dll` turns into the Direct3D view: its first
   column is the view's depth axis (`0x10009450`), its last the eye
   ([Fog](#fog)).
-- The sun sprite's **extent unit**, camera slot 27, and the shader's slot 5
-  colour filter and its flag bit 0. The two extents themselves are read and the
-  bodies are now drawn
-  ([The sun and the moon are drawn](#the-sun-and-the-moon-are-drawn)); what is
-  left is the base the factor scales, for which the engine picks 8° at extent 1.
+- ~~The sun sprite's **extent unit** and camera slot 27~~ — slot 27
+  (`CCamera`, `0x100851c0`) is the viewport's width in pixels divided by the
+  view's field of view in radians, the sprite's corners are screen pixels, and
+  the two cancel: a body's half-width is `extent × 0.1625` radians, so extent 1
+  is **18.6° across** and the shipped 0.4 to 3.3 span 7.4° to 61°
+  ([The sun and the moon are drawn](#the-sun-and-the-moon-are-drawn)).
+- The **colour filter's slot 5**, and its flag bit 0. *Narrowed.* It is not the
+  shader: it is an object `CAtmosphere` hands its bodies from `+0x16c` and the
+  item renderer gets from the shader component's interface 4, and it is the
+  camera's infrared. Its slot 7 returns a block whose `+8` bit 0 is the flag,
+  and slot 5 maps one `D3DCOLOR`; what slot 5 computes is not read, because the
+  object's vtable is installed outside `Terrain.dll`
+  ([The colour filter is the camera's infrared, not the
+  shader](#the-colour-filter-is-the-cameras-infrared-not-the-shader--narrowed)).
 - ~~Which of the flare's pair the engine calls texture 0~~ — slot 5; the column
   branches into the material blocks the constructor fills from slots 5 and 6
   ([The lens flare](#the-lens-flare)).
-- **What the sky's fourth draw puts on the screen.** Its material block `+0x484`
-  takes no `sky.wea` slot and its texture handle comes from the device, so it is
-  untextured; it is four vertices and six indices built from the viewport
-  rectangle (`0x1007a1ea` onwards), on a fixed matrix with the depth test off —
-  a flat quad over the whole frame, drawn before everything. What colour it
-  carries, and so whether it is the answer to what lies below the dome's rim, is
-  not read.
+- ~~What the sky's fourth draw puts on the screen~~ — the **scene colour**, and
+  usually nothing at all. Its material block `+0x484` has no texture and no
+  colour of its own: over the whole module the only fields written in it are
+  the ambient alpha at `+0x20`, the two texture fields at `+0x48` and `+0x4c`
+  (both 0) and a format id at `+0x5c`, so the only colour it can carry is the
+  scene colour every emissive gets. And the draw is skipped whenever the view's
+  mode (slot 24, `0x10083010`) is 1 (`0x1007a325`). Which views carry which
+  mode is **not read**; the inference is that the world's view is 1, because
+  group 1 runs after group 0 and a screen-wide quad with the depth test off
+  would paint over the finished scene
+  ([The sky's first draw is a screen-wide quad](#the-skys-first-draw-is-a-screen-wide-quad-and-it-is-usually-skipped--read)).
+- **What lies below the dome's rim.** The rim is at eye height and the terrain
+  covers what is under it, but what the frame is cleared to before either is
+  drawn is still not read.
 - **What flag bit 0 of a material's blend byte does.** It is set on `ENV_STARS`
   and on nothing else in the game, and it does not change the blend mode.
 - ~~Which field carries the opcode~~ — the word ahead of slot 0; the three

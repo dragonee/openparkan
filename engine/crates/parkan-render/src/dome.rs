@@ -153,9 +153,15 @@ impl DomeRenderer {
                 })],
             },
             primitive: wgpu::PrimitiveState { cull_mode: None, ..Default::default() },
-            // STAND-IN: docs/10-sky.md#the-dome -- how the engine keeps a 34 km dome past
-            // its far plane and out of a fog that ends by 700 is not read: it is drawn
-            // first, under a projection with no far plane, unfogged but for its rim.
+            // The game draws the sky in a pass of its own -- group 1's layer 0, which
+            // overrides the camera to near 700, far 50000 and viewport z 1.0 to 1.0
+            // (docs/10-sky.md, "The dome") -- so its output lands at the very back of the
+            // depth buffer and fills only what the scene left. Drawing it first under a
+            // projection with no far plane, depth-tested and writing no depth, comes to
+            // the same image.
+            //
+            // STAND-IN: docs/10-sky.md#the-dome -- whether the dome and its layers take
+            // the scene's fog is still not read; they are drawn unfogged but for the rim.
             depth_stencil: Some(depth_state()),
             multisample: Default::default(),
             fragment: Some(wgpu::FragmentState {

@@ -16771,6 +16771,29 @@ def check_atmosphere_events(check, game: Path) -> None:
           f"snow or lightning spell (its stop included); it is 0 on all {dry} "
           f"keyframes outside one")
 
+    # The first two floats are the body sprite's half-extents, in units of
+    # 0.1625 radians: the takt multiplies camera slot 27 by 0.325 and then by
+    # 0.5 (0x1007dfdf), and slot 27 is the viewport's width in pixels over the
+    # view's field of view in radians (CCamera, 0x100851c0), so the screen and
+    # the field of view cancel.  See docs/10, "The sun and the moon are drawn".
+    HALF_RADIAN_PER_EXTENT = 0.1625
+    across_up = [(f.intensity[0], f.intensity[1])
+                 for _path, atmosphere in atmospheres
+                 for index in range(atmosphere.section_count)
+                 for f in atmosphere.section_keyframes(index)]
+    wider = sum(1 for a, u in across_up if a >= u)
+    lo = min(min(a, u) for a, u in across_up)
+    hi = max(max(a, u) for a, u in across_up)
+    def degrees(extent: float) -> float:
+        return math.degrees(2 * extent * HALF_RADIAN_PER_EXTENT)
+
+    check("sky.ske: the two extents span 0.4 to 3.3, which is 7.4 to 61 degrees",
+          across_up and wider == len(across_up)
+          and abs(lo - 0.4) < 1e-6 and abs(hi - 3.3) < 1e-6,
+          f"across is at or above up on {wider}/{len(across_up)} keyframes, and the two "
+          f"run {lo:g} to {hi:g} -- {degrees(lo):.1f} to {degrees(hi):.1f} degrees across "
+          f"at 0.325 radians per unit of extent")
+
     # The file closes on the clock's start time (0x1006fab0), and every
     # mission opens with the sun up.
     in_section_0 = sunlit = 0

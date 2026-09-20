@@ -26,17 +26,18 @@ struct GpuVertex {
 /// lands between the dome and the scene.
 pub const BODY_DISTANCE: f32 = 10_000.0;
 
-/// STAND-IN: docs/10-sky.md#not-resolved -- the unit of the sprite's two extents is not
-/// read. They are a factor on a base this engine has to choose, the game's own being
-/// camera slot 27.
+/// The base the two extents scale, **read** (docs/10-sky.md, "The sun and the moon are
+/// drawn"). The game's half-width in pixels is `extent × 0.1625 × camera slot 27`
+/// (`Terrain.dll:0x1007dfdf`), and slot 27 (`CCamera`, `0x100851c0`) is the viewport's
+/// width in pixels divided by the view's field of view in radians — pixels per radian. The
+/// width and the field of view cancel: a body's **half-width is `extent × 0.1625
+/// radians`**, whatever the screen and whatever the view is set to.
 ///
-/// A body at extent 1 is drawn **8° across**, which puts the shipped 0.4 to 3.3 at 3.2°
-/// to 26°. The first choice here was 3°, and it was wrong for a reason the picture showed
-/// at once: a body came out a dot of a few pixels, throwing away artwork drawn at 128
-/// pixels square, and the sheets hold **planets** as well as suns (`SUN3.0` is a star and
-/// three planets), which a sci-fi sky hangs large. The figure is still a choice, not a
-/// reading.
-pub const BODY_BASE_HALF_ANGLE: f32 = 0.069_813_17; // 4° in radians
+/// So a body at extent 1 is drawn 0.325 rad = **18.6° across**, and the shipped 0.4 to 3.3
+/// span 7.4° to 61°. This replaces a guessed 8°; the sheets hold **planets** as well as
+/// suns (`SUN3.0` is a star and three planets), which a sci-fi sky hangs large, and the
+/// read figure hangs them larger still.
+pub const BODY_BASE_HALF_ANGLE: f32 = 0.1625;
 
 /// One body to draw this frame.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -301,23 +302,46 @@ mod tests {
 
     #[test]
     fn the_extents_scale_the_quad_across_and_up_independently() {
+        // The game lays the extent out linearly in pixels, which is linearly in angle,
+        // so it is the half-angle that doubles and not the quad's world width.
         let eye = Vec3::ZERO;
         let toward = Vec3::new(0.0, 1.0, 0.0);
         let one = corners(eye, &sprite(toward, [1.0, 1.0]));
         let wide = corners(eye, &sprite(toward, [2.0, 1.0]));
-        let across = |q: [Vec3; 4]| (q[1] - q[0]).length();
-        let up = |q: [Vec3; 4]| (q[0] - q[3]).length();
+        let across = |q: [Vec3; 4]| ((q[1] - q[0]).length() / 2.0 / BODY_DISTANCE).atan();
+        let up = |q: [Vec3; 4]| ((q[0] - q[3]).length() / 2.0 / BODY_DISTANCE).atan();
         assert!((across(wide) / across(one) - 2.0).abs() < 0.01, "twice across");
         assert!((up(wide) / up(one) - 1.0).abs() < 0.01, "the same up");
     }
 
     #[test]
-    fn a_body_at_extent_one_is_eight_degrees_across() {
-        // The stand-in's own figure, pinned so a change to it is deliberate.
-        let quad = corners(Vec3::ZERO, &sprite(Vec3::Y, [1.0, 1.0]));
-        let half = (quad[1] - quad[0]).length() / 2.0;
-        let degrees = 2.0 * (half / BODY_DISTANCE).atan().to_degrees();
-        assert!((degrees - 8.0).abs() < 0.01, "{degrees}");
+    fn a_bodys_half_width_is_the_extent_times_0_1625_radians() {
+        // The game's half-width in pixels is `extent × 0.1625 × (viewport width ÷ field of
+        // view in radians)`, so the pixels and the field of view cancel and the half-angle
+        // is `extent × 0.1625` rad. Extent 1 is 18.6° across, the shipped 0.4 and 3.3 are
+        // 7.4° and 61°.
+        let across = |e: f32| {
+            let quad = corners(Vec3::ZERO, &sprite(Vec3::Y, [e, e]));
+            let half = (quad[1] - quad[0]).length() / 2.0;
+            2.0 * (half / BODY_DISTANCE).atan().to_degrees()
+        };
+        assert!((across(1.0) - 18.62).abs() < 0.01, "{}", across(1.0));
+        assert!((across(0.4) - 7.45).abs() < 0.01, "{}", across(0.4));
+        assert!((across(3.3) - 61.4).abs() < 0.1, "{}", across(3.3));
+    }
+
+    #[test]
+    fn the_half_angle_is_the_games_pixel_rule_with_the_screen_divided_out() {
+        // `Terrain.dll:0x1007dfdf` multiplies camera slot 27 by 0.325 and then by 0.5;
+        // slot 27 (`0x100851c0`) is (right − left) ÷ the view's field of view. Work the
+        // half-width out in pixels for a screen and a field of view, then turn it back
+        // into an angle: the engine's constant comes out whatever the two are.
+        for (width, fov) in [(1024.0_f32, 1.7_f32), (800.0, 1.0), (1920.0, 2.2)] {
+            let slot_27 = width / fov;
+            let half_pixels = 1.0 * 0.325 * 0.5 * slot_27;
+            let half_radians = half_pixels / (width / fov);
+            assert!((half_radians - BODY_BASE_HALF_ANGLE).abs() < 1e-6, "{half_radians}");
+        }
     }
 
     #[test]

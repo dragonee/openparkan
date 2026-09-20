@@ -699,9 +699,12 @@ pub struct OwnView {
 /// placement, its level 0, leaves `objects`. The chassis and the turret are the meshes
 /// the hero poses; Mission 01's hero has no other part.
 ///
-/// STAND-IN: docs/07-objects.md#the-fifth-slot-is-what-the-units-own-view-draws -- what the
-/// draw layers 10 and 9 a fifth slot is filed under do is not read; it draws with the
-/// scene, depth-tested, lit and fogged like any model.
+/// STAND-IN: docs/07-objects.md#a-layer-is-a-pass-and-the-cockpits-two-are-a-frustum-of-their-own--read
+/// -- the fifth slots draw here with the scene, depth-tested, lit and fogged like any
+/// model. The game gives layers 9 and 10 a frustum of their own -- near 0.05, far 10,
+/// viewport z 0.0 to 0.1, against the world's 0.5, 700 and 0.1 to 0.99 -- and draws them
+/// after the scene, so a cockpit close to the eye is never clipped by the world's near
+/// plane and never occluded by anything in the world.
 pub fn own_view(objects: &mut Objects, store: &mut TextureStore, play: &Play) -> Result<OwnView> {
     // Every whole model drawn node by node leaves first: removing one shifts the instances
     // after it, so no node's instance may be counted before the last removal.
