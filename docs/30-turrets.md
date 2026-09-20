@@ -906,7 +906,18 @@ exception:
 `0xf0f1` magic at `0x10054f5f`, and the class word after it is decided at
 `0x10054505`–`0x10054551`:
 
-- **An animal.** A chassis whose name starts with `a` is `0x20000000`.
+- **An animal.** The test is `cmp byte ptr [ecx], 0x61` on the design state's
+  `+0x370`, answering `0x20000000` when the string begins with **lower-case
+  `a`**. *Corrected 2026-09-20*: this line read that string as the chassis's
+  name, and it is not. Measured over all **29** trees, the **27** chassis part
+  ids are identical in every one and **all 27 are upper case** — `A_L_01`..
+  `A_L_05` are the five animal ones — so **0 of the 783** examined begin with
+  lower-case `a`, and this test would never fire on a chassis id. What `+0x370`
+  holds is *not established*; the designer's kind prefix, spelled `r_`, `fr_`
+  and `a_`, is the likely candidate but no store into the field was found
+  ([38-designs.md](38-designs.md#not-established)). It makes no
+  difference to a robot design, where the base part is a chassis and the `Type`
+  comes from the turret either way.
 - **Otherwise the base part.** `0x1008a500` fills a record for the design's
   base part (design `+0x39c`) through the research tree's reader. It takes
   slot 12 (`+0x23`), slot 11 (`+0x24`), slot 18 (`+0x25`), slot 14 (`+0x22`,

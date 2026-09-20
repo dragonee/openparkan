@@ -938,6 +938,20 @@ bookkeeping errors.
   turret passes both bits in six of the 17 and is stopped one level further out: its page never opens,
   because `r_h` is not a chassis-page prefix at any factory grade. Zero cost is not the gate
   ([30-turrets](docs/30-turrets.md), [38-designs](docs/38-designs.md)).
+- [ ] What the design state's `+0x370` is — the string all three readers of a design's `Type` test
+  before anything else, answering `0x20000000`, an animal, when it begins with lower-case `a`
+  (`iron3d.dll:0x1004f318`, `0x100514fb`, `0x100544f9`, each `cmp byte ptr [ecx], 0x61`; the boundary
+  confirmed by five start offsets converging on it). *Raised 2026-09-20* out of the formats agent's
+  part-category work, **and it corrects a claim in [30-turrets](docs/30-turrets.md)**, which read that
+  string as the chassis's name ("a chassis whose name starts with `a`"). It is not: *measured over all
+  **29** trees, which carry an identical set of **27** chassis part ids, **all 27 upper case** —
+  `A_L_01`..`A_L_05` being the five animal ones — so **0 of the 783** examined begin with lower-case
+  `a`*, and the test could never fire on a chassis id. The likely candidate is the designer's own kind
+  prefix, spelled `r_`, `fr_` and `a_` and handed to the layout at `0x1004dff0`, but **no store into
+  `+0x370` was found in `iron3d.dll`**, so that is *inferred*, not read — and that missing store is the
+  next place to look. It makes no difference to a robot design, where the base part is a chassis and the
+  `Type` comes from the turret either way ([38-designs](docs/38-designs.md#not-established),
+  [30-turrets](docs/30-turrets.md)).
 - [ ] Where the unit constructor's page item names (`+0xc4`) come from.
 
 ## Damage, sensors and ownership
