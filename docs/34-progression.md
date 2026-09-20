@@ -576,7 +576,8 @@ Three things follow from it.
 3. **Report the hero's route from the bot** while it rides one.
 4. **Let the medusas graze and defend** as above, from `Anml`'s two zones.
 5. **Ask for message 100** the first time the player takes over a flyer, in a
-   training mission (game mode 4 is a *guess*, [21-briefing.md](21-briefing.md#not-established)).
+   training mission (game mode 4 is a mission of campaign 0, *read*:
+   [21-briefing.md](21-briefing.md#the-launch-mode-and-what-mode-4-is--read-and-measured)).
 6. **Win** when objectives 0, 1 and 2 are all complete, whatever objective 3 is.
 
 ## Mission 03, *The Field Base*, end to end — *derived*

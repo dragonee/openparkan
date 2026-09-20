@@ -150,10 +150,12 @@ of Mission 01, 1.5 × that screen, whose first frame of the briefing is at
 
 ### When it runs — *read*
 
-**Starting** (`iron3d.dll:0x100a29f3`–`0x100a2aa5`). Unless a saved game is
-being loaded (the game's `+0xe5`), the mission set-up creates the briefing
-object (`0x10030dd0`, one global at `0x1010a148`) and starts it
-(`0x10031130`):
+**Starting** (`iron3d.dll:0x100a29f3`–`0x100a2aa5`). Unless the attract-mode
+demo is running — the game's `+0xe5`, which is **launch mode 3**
+([below](#the-launch-mode-and-what-mode-4-is--read-and-measured)); an earlier
+reading of this document took that byte for a save being loaded — the mission
+set-up creates the briefing object (`0x10030dd0`, one global at `0x1010a148`)
+and starts it (`0x10031130`):
 
 1. It looks up `mission.cfg`'s `briefing` object and its `filename`, and loads
    the waypoints ([above](#how-the-player-runs-it--read)). **A mission without
@@ -237,6 +239,55 @@ after the model's end (*measured*).
 - **Music.** No `THEME` plays until the end. In the recording the sound is
   near silent, some 40 dB under the voices, from 94.5 s to 99.5 s, and music
   starts at 99.65 s (*measured*).
+
+### The launch mode, and what mode 4 is — *read*, and *measured*
+
+The byte that gates the briefing is one of five **launch modes**, and the set
+is worth writing out here: one of them stops a briefing playing, and one of
+them is the long-open question of what game mode 4 is.
+
+The mode is the **first word of the shell's parameter block** — the block the
+shell hands the game, `[game + 4]`, the same one whose `+0x154` says whether a
+saved game is being loaded and whose `+4` holds the mission directory. The
+mission set-up loads it at `0x1005c73a` and turns it into three bytes on the
+game at `0x1005c748`–`0x1005c766` — `cmp [eax], 2` → `+0xe4`, `cmp [eax], 3` →
+`+0xe5`, `cmp [eax], 4` → `+0xe6`. Every address in this section was reached by
+a continuous decode from its own function's entry.
+
+Every writer of that word is in the shell, and between them they name the
+modes:
+
+| mode | written at | what it is |
+|---:|---|---|
+| 0 | `0x10008fad` | no game: the shell's page transition (`0x10008e90`) clears the word when its argument is 0 or 2 |
+| 1 | `0x10028f42`; `0x1000387c` | a **single mission** (`missions/single.`), and a campaign mission from any campaign but the first |
+| 2 | `0x10007334` | **multiplayer** — the function at `0x100071b0` that asks for `LOGIN` and `PASSWORD` |
+| 3 | `0x10006d77`, `0x10007183` | the **attract-mode demo**, from a menu item and from the idle timer whose interval is `demo_run_interval` (`0x10006523`) |
+| 4 | `0x1000387c` | a mission of **campaign 0** |
+
+**Mode 4 is the training campaign** (*read*). The campaign screen's command
+handler (`0x10003740`) fetches the block and computes the word from the chosen
+campaign's index in five instructions at `0x1000386e`–`0x1000387c`:
+`mov ecx, esi` · `neg ecx` · `sbb ecx, ecx` · `and ecx, 0xfffffffd` ·
+`add ecx, 4`, which is **4 when the index is 0 and 1 otherwise**. Campaign 0 is
+`MISSIONS/CAMPAIGN/CAMPAIGN.00`, *TARA. THE HOME BASE* — *Line of Fire*, *The
+Constructor*, *The Field Base* and *Teleport*, the four training missions. So
+the reading this document called a guess is now read out of the shell, and it
+is exactly the training campaign rather than campaigns in general.
+
+*Measured*, from the other side: the two messages the game asks for itself in
+mode 4 — id 22 as a build command (`0x10058015`) and id 100 when the unit the
+player takes over is a flyer (`0x100638a9`) — are each defined in exactly
+**one of the install's 16 `messages.cfg` files**, `CAMPAIGN.00/Mission.03` and
+`CAMPAIGN.00/Mission.02`. Both live in the one campaign the shell gives mode 4.
+
+**Mode 3 forces the mission** (*read*). With `+0xe5` set, `0x1005ddc8`–
+`0x1005ddf8` overwrites the parameter block's mission directory at `+4` with
+`missions\autodemo.00\`, which is a real directory in the install. That is what
+makes `+0xe5` the demo rather than a save being loaded: a save is what
+`+0x154` = 0 means, and the two sites that set mode 3 both set `+0x154` to 1.
+It is also the byte the briefing tests, so **the demo plays its mission with no
+briefing**.
 
 ### The screen — *read*, and *measured*
 
@@ -559,17 +610,30 @@ both in the training campaign — 22 in `CAMPAIGN.00/Mission.03`, 100 in
 - ~~Who asks for a message by `message_index`~~ — the clan script, through
   the SuperAI's game callback with `MESSAGE_INFO`, and the game itself for 22
   and 100.
-- **What game mode 4 is.** `iron3d.dll:0x1005c748` compares the settings
-  object's first word with 2, 3 and 4 into three flags; mode 4 is the one that
-  asks for messages 22 and 100, which only training missions carry, so the
-  training campaign is the likely reading — a **guess**. Message 100 is asked
-  when the unit the player takes over is a flyer (`0x10075f70`), and a
-  recording of Mission 02 played from the campaign shows it as the hero boards
-  its warbot ([34-progression.md](34-progression.md#seen-in-a-recording)).
+- ~~**What game mode 4 is.**~~ — **closed**: a mission of **campaign 0**, the
+  training campaign. The word is the shell's parameter block's first, and the
+  campaign screen computes it from the chosen campaign's index — 4 for index 0,
+  1 for any other — in five instructions at `0x1000386e`–`0x1000387c`
+  ([The launch mode](#the-launch-mode-and-what-mode-4-is--read-and-measured)).
+  The guess this line used to record was right, and the same reading names the
+  other four modes: 0 the shell idle, 1 a single mission, 2 multiplayer, 3 the
+  attract-mode demo. The one thing the enumeration does not settle is whether
+  any writer sets the word from outside the shell; none was found in
+  `iron3d.dll`. Message 100 is still asked when the unit the player takes
+  over is a flyer (`0x10075f70`), and a recording of Mission 02 played from the
+  campaign shows it as the hero boards its warbot
+  ([34-progression.md](34-progression.md#seen-in-a-recording)).
 - ~~How a briefing is skipped~~ — Esc sets the player's finished byte and
   the next frame ends it as if the path had run out
-  ([How the briefing is shown](#when-it-runs--read)). **What `WaitForClick`
-  was for** stays open; nothing that indexes the waypoints reads it.
+  ([How the briefing is shown](#when-it-runs--read)). ~~**What `WaitForClick`
+  was for**~~ — **the same answer as `NoisePercent`'s**: this build loads it
+  and never reads it, so what a value was meant to do cannot be learned from
+  this binary. The control is that the loader's own use of the name is
+  findable: `WaitForClick` occurs in exactly one of the install's 22 binaries,
+  `iron3d.dll` at `0x101037a8`, and its only references are four inside the
+  waypoint loader `0x1002d140` — `0x1002d7c9` and `0x1002e37e`–`0x1002e38f` —
+  which parse it exactly as `WaitForTime` at `0x101037b8` is parsed from the
+  same function, and `WaitForTime`'s slot *is* read by the dwell.
 - ~~The spline's own curve~~ — **a cubic Hermite over `EdgeTime`**, the
   look-at's with zero end tangents
   ([Every frame of the path](#every-frame-of-the-path-exactly--read)).

@@ -418,3 +418,15 @@ free bot spares it is [36-factory.md](36-factory.md)'s.
   not met.
 - **Other modes.** The constructor has two more: buildings, `fr_`, and
   animals, `a_` (`0x10051413`). Only the factory's robot mode has a caller.
+- **What the design state's `+0x370` is.** All three readers of the design's
+  `Type` begin with `cmp byte ptr [ecx], 0x61` on it and answer `0x20000000`,
+  an animal, when it matches (`0x1004f318`, `0x100514fb`, `0x100544f9`).
+  [30-turrets.md](30-turrets.md) reads that string as the chassis's name
+  ("a chassis whose name starts with `a`"), but the test is against **lower-case
+  `a`** and all 27 chassis part ids are upper case — `A_L_01`..`A_L_05` are the
+  five animal ones (*measured*, over all 29 trees). So it is some other string,
+  most likely the designer's kind prefix, which is spelled `r_`, `fr_` and `a_`
+  and is handed to the layout at `0x1004dff0`; no store into `+0x370` was found
+  in `iron3d.dll`, so that is *inferred*, not read. It makes no difference to a
+  robot design, where the base part is a chassis and the `Type` comes from the
+  turret either way.

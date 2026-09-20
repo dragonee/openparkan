@@ -101,8 +101,9 @@ asked** (*derived*). *Measured:* 86 of the turreted robot assemblies in
    (`0x10074ff0` with 1) and switches its camera view on (`0x10075180`);
 6. makes the bot the driven unit (`+0xaec`, `0x100a5660`) and clears `+0xaf0`;
 7. sets the view state word to 1, and the `CState`'s `+0x28` to the bot;
-8. in game mode 4 (the training campaign, a *guess* in
-   [21-briefing.md](21-briefing.md#not-established)), if the bot flies
+8. in game mode 4 (a mission of campaign 0, the training campaign — *read*,
+   [21-briefing.md](21-briefing.md#the-launch-mode-and-what-mode-4-is--read-and-measured)),
+   if the bot flies
    (`0x10075f70`, `ChassisType` 1), plays message 100 (`0x100638a9`);
 9. ends in `World3D.dll`'s `stdClearKeyboard` (`0x100638b2`), which removes
    every pending key and mouse message (`0x100`–`0x108`, `0x200`–`0x209`) and

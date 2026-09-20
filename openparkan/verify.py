@@ -17819,6 +17819,51 @@ def check_briefing(check, game: Path) -> None:
           f"{len(paths)} briefings against {len(campaign)} campaign missions "
           f"and {len(gamedir.missions(game))} missions in all")
 
+    # The two messages the game asks for itself run in launch mode 4, which the
+    # shell gives a mission of campaign 0 alone (docs/21#the-launch-mode).
+    defines: dict[int, list[str]] = {22: [], 100: []}
+    catalogues = sorted((game / "MISSIONS").rglob("messages.cfg"))
+    for path in catalogues:
+        text = path.read_bytes().decode("latin-1")
+        ids = {int(v) for v in re.findall(r"message_index\s*=\s*(\d+)", text)}
+        for wanted in defines:
+            if wanted in ids:
+                defines[wanted].append(path.parent.relative_to(game).as_posix())
+    module = game / "iron3d.dll"
+    if module.exists():
+        at = _image_at(module.read_bytes())
+        check("briefing: the launch mode is 4 for campaign 0 and 1 for any other",
+              # mov ecx, esi / neg ecx / sbb ecx, ecx / and ecx, 0xfffffffd /
+              # add ecx, 4 / push 0x17 / mov [eax], ecx
+              at(0x1000386E, 16) == bytes.fromhex("8bcef7d91bc983e1fd83c1046a178908")
+              # cmp [eax], 2 -> +0xe4; 3 -> +0xe5; 4 -> +0xe6
+              and at(0x1005C748, 36) == bytes.fromhex(
+                  "8338020f94c1888ee40000008338030f94c28896e50000008338040f94c08886e6000000")
+              # the briefing's own gate: mov al, [game + 0xe5] / test al, al / jne
+              and at(0x100A29DF, 20) == bytes.fromhex("8b15f8b510108a82e500000084c00f85f0000000")
+              # cmp byte [esi + 0xe5], bl / je -- the arm that forces autodemo.00
+              and at(0x1005DDC8, 8) == bytes.fromhex("389ee5000000742a")
+              # the single-mission path: push 0x17 / mov [eax], 1
+              and at(0x10028F40, 8) == bytes.fromhex("6a17c70001000000")
+              # multiplayer: mov [esi], 2
+              and at(0x10007334, 6) == bytes.fromhex("c70602000000"),
+              "the campaign screen turns the chosen campaign's index into the shell parameter "
+              "block's first word with neg/sbb/and 0xfffffffd/add 4 (0x1000386e), so index 0 "
+              "gives 4 and any other 1; the mission set-up splits that word into the game's "
+              "+0xe4, +0xe5 and +0xe6 for 2, 3 and 4 (0x1005c748); +0xe5 is what skips the "
+              "briefing (0x100a29df) and what forces the mission directory to autodemo.00 "
+              "(0x1005ddc8), so it is the demo and not a save being loaded")
+
+    training = (game / "MISSIONS" / "CAMPAIGN" / "CAMPAIGN.00")
+    check("briefing: the messages the game asks for itself are campaign 0's",
+          catalogues and all(len(v) == 1 for v in defines.values())
+          and all(v[0].startswith("MISSIONS/CAMPAIGN/CAMPAIGN.00/")
+                  for v in defines.values()),
+          f"of the {len(catalogues)} messages.cfg in the install, id 22 is defined in "
+          f"{defines[22]} and id 100 in {defines[100]} -- both in campaign 0, "
+          f"{(training / 'descr').read_text('latin-1').splitlines()[0].strip()!r}, the "
+          f"only campaign the shell starts in launch mode 4 (iron3d.dll:0x1000387c)")
+
     stops: list[tuple[Path, briefing.Waypoint]] = []
     complete = 0
     for path in paths:
