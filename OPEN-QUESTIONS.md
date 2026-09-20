@@ -178,6 +178,62 @@ carries the water (the flags fall on 0 of the 275882 faces, the class on 3630), 
 and this page's own "the 33 missions place 864 objects" mis-attributes a count — the install
 has **33 maps but 29 missions**, and it is the 29 that place them.
 
+A sixth round of twelve was worked on **2026-09-20**, four areas of three: the font, the AI
+and clan brain, files and formats, and motion and controls. **Eleven closed and one is partly
+answered**, and two further queue lines went with them, both **stale** and both caught by the
+coordinator's check rather than spent on an agent — the retaliation messages, read out in
+[31-packages](docs/31-packages.md), and `TRF1`'s directory flag, already narrowed in
+[16-research](docs/16-research.md) to a near-settled negative. The whole of **milestone M5's
+text** closed: four stand-in rows became one, and the engine's text was wrong in three separate
+ways at once — it mapped every character through CP866 and drew `?` for the rest, it moved the pen
+by the advance alone so glyphs overlapped by a pixel, and it keyed the atlas on black with alpha
+blending instead of alpha-testing it and modulating.
+
+Five results are **negatives carrying their controls**, and two of them are doubles. Nothing reads
+the fire control's 0.5 and **neither fire-mode lock can ever be set** — `0x10023fd0` has no caller
+anywhere, and the three hits a byte sweep does return are **image-base collisions**, every module
+being based at `0x10000000`, one of them a string that genuinely lives at that address in another
+DLL. Nothing reads class 3's value 0, the camera's values 3–5 or the section-5 record's int 8,
+each against a control that finds the neighbouring ids' readers in the same sweep. The texture
+**exporter is not identifiable**: the one writer of a `Texm` header the install contains is the
+engine's own, which zeroes the two fields in question. And **nothing in the install opens
+`gamefont.rlb` or `sprites.lib`**, against the control that every one of the other twenty
+archives' names occurs somewhere — they are the software renderer's 2D half.
+
+**The engine changed in four places**, the largest being the font. A hall-way vertex now gates a
+unit by its size class, which measured out at 165 vertices open to any size, 7 to the building's
+own and **884 to size class 2 or less, all 21 control pods among them**; an object's strength is
+now priced by the read formula `(guns + 0.8) × hit points × 1e-5` rather than counted; and the
+walker's path search filters shut and flyer-only links. Notably the hall-way fix **changes nothing
+about the shipped game** — the engine feeds only bridges' hall ways into the search and all 37 of
+their vertices are open to any size — which is itself the result that the stand-in was right *for
+what the engine models*.
+
+**Three premises are corrected.** [21-briefing](docs/21-briefing.md) had the byte the briefing
+tests before running as *a saved game being loaded*; it is **mode 3, the attract-mode demo**, which
+plays its mission with no briefing — and game mode 4, a long-standing *guess*, is read as **a
+mission of campaign 0, the training campaign**, from five branchless instructions. An earlier
+round's **recording measurement of the pen advance was miscalibrated**, having assumed a 640 × 480
+frame where the recording is 1024 × 768; refitting at the right size puts every run within 0.56 px
+with `advance + 1`, where the advance alone is out by up to 4 px. And [02-texm](docs/02-texm.md)
+said *"no texture sets either bit"* when the measurement behind it had been taken over
+`Textures.lib` alone: **all eleven font atlases set the alpha-surface bit**, and that colour key is
+exactly how a glyph's background is cut out. The scope was the error, not the count — a failure
+mode worth naming beside the "control of the wrong kind" the round before.
+
+Two smaller corrections: the toolkit claimed a hall-way link's eight tail words are `0xFFFFFFFF`
+throughout the shipped data, and **62 of the 1096 links** carry one that is not; and the 65
+textures whose payload exceeds their mip pyramid are **not truncated tails**, the leftover being
+the `Page` chunk to the byte. **Which way this round's corrections ran**: all four agents found
+their own, and the coordinator's spot-checks confirmed rather than broke them — the strength
+constants, the 1251→866 table round-tripped through Python's own codecs, the font metrics over
+every archived font, the mip box filter over all 81 marked textures, the hall-way counts, and the
+mode-4 arithmetic all re-derived independently. One agent reported an error of its own unprompted:
+its first sweep missed a `dCurrentProblem` setter by skipping `ebp` operands, and the doc records
+that rather than quietly fixing it. Finally, **the merged tree failed `ruff` where all four
+branches had passed on their own** — two lint errors that exist only in combination — which is
+what verifying the merge is for.
+
 One methodological note, since it has now cost two agents a wrong address: **a
 disassembly started at a guessed boundary decodes garbage**, and garbage that looks
 like plausible instructions. Both slips this round came from listings that did not
@@ -312,15 +368,26 @@ bookkeeping errors.
   `CIS_INFRARED_ON/OFF/INV`, `NightVisionOn`), which is also what the outer view's flag `0x20` turned out
   to be. What slot 5 computes is still unread: the object's vtable is installed outside `Terrain.dll` and
   its class was not found ([10-sky](docs/10-sky.md)).
-- [ ] Texture header bit `0x4000000`: which batch of exports it marks, and whether the exporter is
-  identifiable. (~~and load flag `0x200000`'s effect~~ — closed 2026-09-18: it is the texture stage.
-  `Ngi32.dll`'s surface description fills `DDSURFACEDESC2 +0x78`, `dwTextureStage`, from bit 21 of the
-  load flags, shifted rather than masked, which is why an immediate scan never found it; `ENV_STARS` is
-  the one material that sets it, so exactly one surface in the game is made for stage 1
-  ([02-texm](docs/02-texm.md)). The header bit is **not a property of the picture**: format, mips, alpha
-  and wearer all fail to separate the 81, and the directory being in offset order they are members 66 to
-  154 of 393 — one run of insertions, eight unmarked inside it and none outside. `+0x14` is the
-  exporter's flags word and the loader reads only bits 24 and 25.)
+- [x] ~~Texture header bit `0x4000000`: which batch of exports it marks~~ — **partly answered**
+  2026-09-20: the batch is characterised, the exporter is a negative with its control. The run is
+  members **66–154 of 393** and it is coherent — **all 89 are ARGB8888, all 89 mip-mapped** (`+0x10` =
+  32, chains of 4–7), all 89 carry `+0x18` = 0, and their names are machine and building skins (19
+  `S*`, 14 `RL_*`, 13 `PG*`, 7 `GEN_*`…), which is why 78 of the 81 are worn by a lit material.
+  **Nothing but the bit tells the run's 89 apart**: the eight unmarked ones match on format, mip flag,
+  filter, `+0x18` and size, and interleave by name (`PG03/04/06/07` marked, `PG05` not). A new axis
+  *does* discriminate a tool: every mip level *k* is the **truncated mean of the matching 2^k × 2^k
+  block of level 0**, `sum >> 2k`, in the stored components — **81 of 81** marked pass (*re-measured
+  by the coordinator*), and the control is the same test failing on a coherent block of unmarked ones,
+  the `L*M.0` and `L*.0` families. It passes on 166 unmarked too, so it names the **tool, not the
+  batch**. The **exporter is not identifiable**, a negative with its control: a byte sweep of all 22
+  binaries for the literal `Texm` returns **one** hit, `Ngi32.dll:0x10007e7c`, which *builds* a header
+  for a texture made from nothing and zeroes both `+0x14` and `+0x18` — so the search can find a writer
+  of this header, and the one it finds is the engine's own; no `.tga`, `.bmp`, `.pcx`, `.psd`, `3ds` or
+  `Photoshop` string occurs in any of the 22. Two corrections fall out: the 65 textures whose payload
+  exceeds the pyramid are **not truncated tails** (the leftover is the `Page` chunk to the byte, and
+  all 518 `Texm` members account for every payload byte), and `+0x18` is a **colour**, non-zero on 47
+  of 393, on the palettised ones an index whose entry is near the image's own mean
+  ([02-texm](docs/02-texm.md)).
 - [ ] Who sets an object's material track (`ILifeSystem` slot 16), and who calls IAnimation slot 27.
 - [ ] Whether any caller besides the round's hit test and the collision pass hands a face query a
   triangle mask carrying 2 or 16 — the round builds its filter inline, so enumerating the filter
@@ -650,13 +717,69 @@ bookkeeping errors.
   table — the plain mouse X and mouse Y rows. Every other plain row's list is empty, so Shift+W walks.
   The engine's stand-in agreed with the rule on all 116 shipped rows; it now applies the rule
   ([14-controls](docs/14-controls.md)).
-- [ ] What behaviour flag `0x800` changes besides clearing the walker.
+- [x] ~~What behaviour flag `0x800` changes besides clearing the walker.~~ — closed 2026-09-20:
+  **it is the unit's leave to be ordered at all**, not a walker detail. Every access to `MBehaviour
+  +0xa04` anywhere in the fifteen modules is in `Behavior.dll` — 51, all at that one displacement — and
+  bit `0x800` sits at five of them in three routines: the unit takt (slot 56, `0x10005110`) sets it at
+  `0x100051e9` and clears it at `0x100052b0`, and the two readers are **`MBehaviour::AddOrder`** (slot
+  3, `0x10004a90`), which with the flag clear returns 0 and never reaches `MakeNewOrder`, and the
+  **self-given task factory** (`0x10034579`), which then builds no attack and no reload task. Both
+  escape on the Type word carrying `0x80000000`, a building. Control: the same sweep finds the readers
+  of bits `0x1`, `0x2`, `0x4`, `0x10`, `0x20`, `0x40` and `0x1000`. *Measured*: **94 of the 531**
+  controllers can ever carry it; three of the 24 `bases.rlb` chassis cannot — `r_h_01`, `r_h_03` (the
+  shooting-range targets) and `r_b_06` (the **Small Tower**) — and the missions place **33** of them,
+  all Type `0x01008000`, a warrior, so **a Small Tower can never take an order or a task of its own**.
+  Its shooting is the fire control's, not this path, which fits what this file already holds about a
+  tower's reach. The engine models no behaviour flags, so nothing was wrong
+  ([24-motion](docs/24-motion.md)).
 - [ ] [M14] The walker's local path and its obstacle contours: how it goes round a tree's or a stone's hole, whether it widens it by the unit's size, how a walker in one walks out, and what it does with a goal in one; the sub-areals' shapes and whether the search measures one from its centre; whether every scenery object reaches the areal map, and the box of a mesh of several parts; how it drops the points a unit has passed (`MWalker::ClearMoverReachedPoint`); how a unit's place comes onto a building's map object and which vertex the search starts from; who calls `MHallWay` slot 11; a hall-way vertex's size gate (the unit's `+0x960`, the record's `+0x28`); the link flags `0x10000` and `0x20000`; how a walker goes to the point it finds off a non-walkable areal, and what it does when its search fails; and how a walk to a door gets past the building's own walls, which cut no areal (the engine: a door more than 20 over the ground under it is passed over, and a straight line into a wall goes round the building's ground contour) ([24-motion](docs/24-motion.md#not-established)).
-- [ ] The remaining `.ctl` values:
-  - [ ] class 3's value 0, the camera's values 3–5, and the hero's arms' values 1 and 4
-  - [ ] the section-5 record's int 8
-  - [ ] control message 7's arguments (byte 15, `+0x618`)
-  - [ ] `IDeviceManager` ids 5 and 6
+- [x] ~~The remaining `.ctl` values~~ — closed 2026-09-20, **all four**, and three of them are
+  negatives with controls.
+  - **Class 3's value 0, the camera's 3–5 and the arms' 1 and 4 are read by nothing.** A value leaves a
+    component only through vtable slot 4 (`0x10021d00`, `[this + 4*(id & 0xff) + 0x54]`); the camera
+    class's constructor and all sixteen slots of its vtable touch that range only through the getter,
+    and it asks *itself* for ids 0, 1 and 2 alone. Across fourteen modules ids 3/4/5 are pushed at 18
+    sites — all radar, detect, shield, gun or the two `IDeviceManager` summaries, **none a camera** —
+    against **100, 196 and 28** pushes for ids 0, 1 and 2, which is the control. *Measured*: all **61**
+    cameras carry (0.1, 1000, 1.3, 1, 150, 1); class 3 is 72 records with value 0 at 0.5 on eight.
+  - **The section-5 record's int 8 is read by nothing**: the interpreter `0x10002800` strides the
+    records by 100 and reads `[esi]`, ints 1–2, `+0xc`, `+0x10`..`+0x1c`, `+0x24` and `+0x44`, while
+    all three `[esi + 0x20]` follow an `add esi, 0x24` and address the member name. *Measured*: **2923
+    of 2925 are zero**, the two others action-3 records naming `eng_rb_07_snd` and `eng_rb_08_snd`.
+  - **Control message 7 says who simulates the object.** `0x10007bdc` sets `+0x618 = (arg == 2)`;
+    argument 2 comes from `CreateMirror`, `AddNewMirror` and the queued `ChangeOwner`, and 0 and 1 from
+    `LoadObject`, the owner-change handler and `iron3d.dll:0x10074ff0`. While the byte is set the
+    ground contact does not lift, node damage is put back, and the camera makes no view unless the
+    owner is a building. **Still open: what separates argument 0 from 1** — `Control.dll` treats them
+    alike.
+  - **`IDeviceManager` ids 5 and 6 are the unit's damage a second**: the sum over class-2 components of
+    `+0x174 × 1000 ÷ max(1, value 3)`. `+0x174` has two writers — the constructor zeroes it, and the
+    round-creating routine stores the new round's property `0x35`, the nodes' hit points plus their
+    explosions' damage — so **a gun that has not fired answers 0**, and a salvo counts one round.
+
+    The engine had none of these wrong ([13-control](docs/13-control.md),
+    [14-controls](docs/14-controls.md)).
+- [x] ~~[M14] How a walker drops the points a unit has passed, who calls `MHallWay` slot 11, the
+  hall-way vertex size gate and the two link flags~~ — closed 2026-09-20 as a **named slice** of the
+  large walker line below, **and the engine was wrong**. `MWalker::ClearMoverReachedPoint`
+  (`0x1003cfd0`, self-named) releases the hall-way place the walker held, takes *n* records off the
+  **front** of the trajectory, adopts the last of them as the walker's own place, and hands back every
+  vertex any of the *n* had booked. **`MHallWay` slot 11** (`0x1000b390`) has exactly two callers,
+  `OnAddStatic` and `OnRemoveStatic`, each over every scene object of kind 3 — so a building's exits
+  are relinked at load and whenever a tree or a stone moves. **The size gate** (`0x10042d08`, in
+  `MWorldGraph::AddNeighbourToFront`): the unit's `+0x960` is its **size class** (T 1, S 2, M 3, L 4),
+  measured against the vertex's flag word. *Re-measured by the coordinator* over the 29 shipped hall
+  ways and their **1056** vertices: **165** carry `0x10000000` (any size), **7** carry `0x20000000`
+  (the building's own — all seven on the three factories) and **884** carry neither (size class ≤ 2).
+  **All 21 control pods are in the 884**, the same bound the capture order applies, enforced a second
+  time by the path graph. **The link flags**: over **1096** links, **1078 carry neither, 18 carry
+  `0x10000` and none carries `0x20000`**. A by-catch corrects the toolkit: its claim that a link's
+  eight tail words are "`0xFFFFFFFF` throughout the shipped data" is **wrong** — *re-measured*, **62 of
+  the 1096** links carry a tail word that is not, and `openparkan/mesh.py` is fixed. The engine's "every
+  vertex passes" stand-in is gone and the search now gates by size; nothing about the shipped game
+  moves, since the engine feeds only bridges' hall ways into the search and all 37 of their vertices
+  carry `0x10000000` — which is itself the result that the stand-in was right *for what the engine
+  models* ([24-motion](docs/24-motion.md)).
 
 ## Turrets, weapons and camera
 
@@ -953,8 +1076,43 @@ bookkeeping errors.
 [15-behaviour](docs/15-behaviour.md#what-is-not-read-here), [31-packages](docs/31-packages.md#not-established),
 [23-economy](docs/23-economy.md#not-established), [32-builder](docs/32-builder.md#not-established)
 
-- [ ] What the two floats an object's strength is made of are (`IControl` property `0x36` and interface `0x204`'s `+4`), and so what a `TAKE_BY_HITS` amount is worth; the problem's action record, and SuperAI `+0x40c`. The strength formula and the helper that sums it over a radius — once read as a distance — are now read.
-- [ ] A problem's two raise numbers, which handler runs when, and who writes `dCurrentProblem` and `dCurrentSender`.
+- [x] ~~What the two floats an object's strength is made of are (`IControl` property `0x36` and
+  interface `0x204`'s `+4`), and so what a `TAKE_BY_HITS` amount is worth~~ — closed 2026-09-20, **and
+  the engine was wrong**. The formula at `ai.dll:0x1000fc70` is **`(guns + 0.8) × hit points × 1e-5`**,
+  a five-instruction leaf — *re-read by the coordinator*, with the 0.8 at `0x10034600` and the 1e-5 at
+  `0x100345f8`. This page could not name the two floats because **the property table it looked in is
+  the wrong one**: the control system's base interface answers neither 38 nor 54, both falling to a stub
+  that returns 0 — but `LoadControlSystem` runs a **derived** constructor for every agent kind but 9,
+  whose `ILifeSystem` slot 5 is a **second dispatcher** (`0x1000e6c0`) covering ids 38–179. So
+  **property 54 is the life an object's nodes *could* have plus the full shield**, and **property 38 the
+  life they have *left* plus the shield now**. The second float, variable `0x204`'s `+4`, **is the
+  unit's guns**; *which* two authored gun figures it divides is the one piece left open. A bonus falls
+  out: the cached and live forms measure different things — a place is held against you by what its
+  defenders have **left**, while your own group is worth what it would be **at full** — which also names
+  [31-packages](docs/31-packages.md)'s unresolved patrol-score `a`, `b` and `c`. *Measured*: the 458
+  assemblies sum 0–1,084,514 `.ndp` hit points (median 8,774); all 19 hero assemblies sum 7,362 and the
+  largest bunker 66,010, so unarmed they are worth **0.0589** and **0.528** — an amount of 25 is 424
+  hero hulls of armour, so **a two-digit `TAKE_BY_HITS` is a demand for guns**, not for armour. Of the
+  74 such calls, 30 come from a problem's third parameter and 27 from a formula over the two protect
+  variables. The engine counted objects; it now sums a priced strength, though nothing prices one yet,
+  so the stand-in narrows to the gun total ([15-behaviour](docs/15-behaviour.md)). **Not taken**: the
+  problem's action record and SuperAI `+0x40c`, the budget having gone to the two floats.
+- [x] ~~A problem's two raise numbers, which handler runs when, and who writes `dCurrentProblem` and
+  `dCurrentSender`.~~ — closed 2026-09-20. One clan takt (`ai.dll:0x10001780`, 7000 + rand % 1000 ms)
+  walks the problem list **four times**: the drain, the `_Continue` pass (every `ST_SOLVING` problem),
+  `Problems<n>`, then the `_Start` pass — which takes the **largest weight** among problems neither
+  solving nor solved and is **repeated** while any handler leaves its problem unstarted, so one takt
+  drains the list from the heaviest down. The two raise numbers are **a life counter and what each takt
+  takes off it**, with the value a re-raise reloads by between them; at 0 or below the problem retires.
+  A raise resolves `<code>_Start` and `<code>_Continue` **by name** and is abandoned when either is
+  missing. `dCurrentProblem` has **two** setter sites and `dCurrentSender` one, out of 20 loads of the
+  two pointers. *Measured* over **176 raises**: 72 carry 25/24 (two takts), 37 carry 5/2 (three), 28
+  carry 1/0 (never expire), 26 carry a drain of 1 — and **21 raises across eight scripts are dead**
+  because the script never defines the handler pair, so **four enemy clans ask for warbots they will
+  never plan for**. Worth recording how the agent found its own error: its first sweep missed one
+  setter by skipping `ebp` operands, exactly the trap this file's method notes warn about, and the doc
+  records that rather than quietly fixing it. The engine raises no AI problem at all, as its stand-in
+  already said ([15-behaviour](docs/15-behaviour.md)).
 - [x] ~~Channel 2 of the message callback (function 57), and the count function 69 stores~~ — closed
   2026-09-18. **Channel 2 runs a line of the mission's own `object script` block** in `mission.cfg`:
   the callback takes the channel first, function 57 passes 2, and that arm formats its one value into
@@ -988,8 +1146,25 @@ bookkeeping errors.
   and `N`/`S`/`B` are a clamped ramp, the positive part and a strictly-positive test. Fixed. The doc's
   table address was the dead copy; the live one is `0x10047c70` with its count at `0x10047c68`
   ([15-behaviour](docs/15-behaviour.md)).
-- [ ] A fire-control request's 0.5, and what sets `+0x5c` and `+0x60` to lock a unit's fire mode.
-- [ ] Who sends `MBehaviour` messages `0x19` and `0x1a` (the retaliations).
+- [x] ~~A fire-control request's 0.5, and what sets `+0x5c` and `+0x60` to lock a unit's fire mode.~~
+  — closed 2026-09-20 as a **double negative with controls**. The **0.5** is the fire control's own
+  `+0x30`, set by the constructor and rewritten with the same value by all **20** request sites, and
+  **nothing reads it**; control, the same sweep over the class's code finds two readers of `+0x28` and
+  two of `+0x2c`. **Neither lock can ever be set.** `+0x5c`'s only writer, `0x10023fd0`, **has no caller
+  anywhere and sits in no vtable** — *re-checked by the coordinator*: sweeping all 22 modules for that
+  address finds three hits and every one is an **image-base collision**, since every module is based at
+  `0x10000000` — a `push offset "CICLS_SIMPLE"` in `World3D.dll` (the string really is at that address
+  there) and two `je`/`jle` targets inside `iron3d.dll`. `+0x60` is set and cleared only inside
+  `0x10025a00`, whose one caller is reached only when one of the two is **already** set, and the "is it
+  locked" predicate has no caller either. Control: the same call scan finds `0x10025a00`'s one caller.
+  So **0 of the 20 requests are ever refused**, and since the twenty cover every task in the mode table
+  there is **no order in any shipped mission that could be turned away**. The engine has no fire-mode
+  lock to get wrong ([31-packages](docs/31-packages.md)).
+- [x] ~~Who sends `MBehaviour` messages `0x19` and `0x1a` (the retaliations).~~ — this line was
+  **stale**, caught by the coordinator's own check rather than spent on an agent: it is already read and
+  struck where it stands in [31-packages](docs/31-packages.md) — every hit's first step sends `0x19`
+  with the firer's id, and so does a round passing through a shield, while **`0x1a` is never sent**, on
+  a search of every binary.
 - [x] ~~Whether a clan's AI re-orders a build refused for want of a mind~~ — closed 2026-09-18: **it
   drops it, at every level**, and the page's derived claim was backwards. `op5` is `!=`, not `==`, so
   all 9 `ORDER_BUILDING_CONSTRUCT` sites — one per script, every one in `PBM_ROBOT_NEEDED_Start` — mark
@@ -1093,7 +1268,51 @@ bookkeeping errors.
 
 [17-saves](docs/17-saves.md#not-established), [16-research](docs/16-research.md#what-is-not-read-here),
 [19-descriptions](docs/19-descriptions.md#what-is-not-read-here), [18-vocabulary](docs/18-vocabulary.md),
-[21-briefing](docs/21-briefing.md#not-established), [06](docs/06-open-questions.md), [22-settings](docs/22-settings.md)
+[21-briefing](docs/21-briefing.md#not-established), [06](docs/06-open-questions.md), [22-settings](docs/22-settings.md),
+[12-rsli](docs/12-rsli.md#not-resolved)
+
+- [x] ~~[M5] How the game turns a string's characters into the font's glyph indices~~ — closed
+  2026-09-20, **and the engine was wrong**. **The game does not map characters at all**: `Ngi32.dll`'s
+  text-out (`0x10010e40`) loads each string byte zero-extended and indexes the 256 records at
+  `font+0x38` by it, and the width routine does the same. **Nothing is ever replaced by `?`**, which the
+  stand-in had guessed. The one transformation is a 256-entry `int16` table at **`0x10036e50`**, applied
+  only while the font's flag at `+0x104c` is 1, and it is **Windows-1251 → CP866** — *re-read and
+  round-tripped by the coordinator through Python's own codecs: **0 disagreements** across 0xC0–0xFF
+  plus Ё/ё, and **190 of 256** entries are the identity.* The constructor sets the flag and
+  `services.dll` clears it on every font it makes. *Measured*: the nine `ui/font.lib` fonts draw **79**
+  glyphs above 0x7f while `sys.lib`'s and `gamefont.rlb`'s draw **64** and **56**; and of **24740**
+  strings in 112 shipped text resources **none** carries a byte above 0x7f, this being the English
+  release ([12-rsli](docs/12-rsli.md)).
+- [x] ~~[M5] How tall a glyph is drawn, how far apart lines are, and how far the pen moves after a
+  glyph~~ — closed 2026-09-20 for the glyph and the pen, **narrowed for the spacing**, and **the engine
+  was wrong on the pen**. The header's four words are the metrics, copied into the font object *out of
+  order*: the fixed-pitch cell, the glyph **height**, that height in texture coordinates, and **what the
+  pen adds after every glyph's advance**. *Re-measured by the coordinator over every font the archives
+  hold*: the pen extra is **1 on all of them**, and the texture-coordinate height × the atlas height is
+  **exactly height + 1** on all of them (8, 10, 12, 13, 16, 20, and 18 on `gamefont.rlb`'s) — which is
+  also the atlas's row pitch, so the font is drawn **one texel to the pixel**. The pen therefore moves
+  **advance + 1**, and the engine had been moving it by the advance alone, overlapping glyphs by a
+  pixel. **A premise of an earlier round is corrected**: the recording measurement that justified the
+  old row was **miscalibrated** — it assumed `mf_640` at 640 × 480 where the recording is **1024 ×
+  768**; refitting against `gf_1024` places all twelve runs of "TSW-1 Warrior" to within **0.56 px**
+  with `advance + 1`, while the advance alone is out by up to 4 px. **Line spacing is not the font's**:
+  the routine draws one line at the y its caller names, and that is the one row left standing
+  ([12-rsli](docs/12-rsli.md)).
+- [x] ~~[M5] How the game draws its font: its 8-bit blend table and the text's colour~~ — closed
+  2026-09-20, **and the engine was wrong**. Text draws through **phase 8**, whose state record sets
+  stage 0 colour to **`MODULATE(TEXTURE, DIFFUSE)`**, stage 0 alpha to the texture's, point filtering
+  and no mip, and the alpha test on at `GREATEREQUAL` against reference 1 — **so the run's colour
+  multiplies the atlas, it does not replace it**, and the key is the atlas's own alpha. All eleven fonts
+  set `0x1000000` in their `Texm` header's `+0x14`, the alpha-surface bit, where **palette index 0 is
+  cleared to alpha 0** and 1–255 made opaque; an atlas uses 2 to 5 indices, 0 always its corner, so 7 of
+  the 11 draw a white body and a shadow a quarter as bright. Nothing converts out of display space.
+  **And the `Ipol` blend table is dead**: it is the 8-bit renderer's, and **79 of `Ngi32`'s 145 exports
+  are stubs** folded onto fourteen addresses — `vrtTextOut` is a bare `ret 0x18` — against the control
+  that `rsOpenLib`, `rsLoadFast`, `rsLoad` and `rsGetInfo` are real and the Direct3D texture loader
+  calls them. A negative worth its own line came with it: **nothing in the install opens `gamefont.rlb`,
+  and nothing opens `sprites.lib`** — the byte strings occur in no file, against the control that every
+  one of the other twenty archives' names does occur somewhere. The game's on-screen text is
+  `ui/font.lib`'s nine ([12-rsli](docs/12-rsli.md)).
 
 - [ ] Saves:
   - [ ] most chunks' contents (the control chunk past `+32`, the wizard, behaviour, building and tree chunks)
@@ -1101,7 +1320,24 @@ bookkeeping errors.
   - [ ] the 24-byte records and the `1, id, id` triple
   - [ ] the AI state's layout
   - [ ] whether a mind list's ids are logical ids
-- [ ] What `iron3d.dll:0x1008a690` does with a part's derived number, and what else reads a part's `Type`.
+- [x] ~~What `iron3d.dll:0x1008a690` does with a part's derived number, and what else reads a part's
+  `Type`.~~ — closed 2026-09-20: it is a **leaf of compares** turning the record into a **part category
+  0–7, or −1**, and the number is a **jump-table index and nothing else**. Kind 9 sub 32 → 0, sub 33 →
+  1; kind 8 by its *second* sub-kind (`BLD`→5, `TUR`/`UPG`/`DEF`→1, `RDR`→2); kind 12 → 2; kind 11
+  `BRN` → 6, `ARM` → 7; kind 10 → 4; the tail at `0x1008a761`–`0x1008a770` gives 3 for any other device
+  and −1 for the rest — so **a building is filed by its branch**, a bunker's turret fitting as a turret
+  and a tower's radar as a gun. The only two askers are fitting (`0x100519e0`, bound `cmp eax, 6`) and
+  unfitting (`0x10053a50`, `cmp eax, 7`), and two consequences fall out: category 0 and −1 both fall
+  past the fit bound, so **clicking a chassis once a project exists does nothing**, and on the unfit
+  side 0 and 5 both reach `0x10053b00`, which **throws the whole project away**. **Who reads the
+  derived `Type`**: six call sites in three functions, *all three the designer's* — the unit box title,
+  the takt's Accept, the unit writer — and **nothing else reaches it**, a negative whose control is that
+  the same raw scan does find `Terrain.dll:0x1007ed40` and `0x10080550` in the vtables the docs say
+  they sit in. *Measured*: all **29** trees carry the same 395 parts and the same split — 27 chassis,
+  74 turrets, 67 guns, 104 devices, 58 clips, 34 buildings, 6 brains, 24 armours — with exactly **one**
+  uncategorised (`R_H_01`, the hero target) and **293 of the 395** deriving `Type` 0. The engine was
+  already right for the range it covers ([16-research](docs/16-research.md),
+  [38-designs](docs/38-designs.md)).
 - [ ] What the words behind `objects.dlb`'s `A` and `N` are, and why twelve clip-less guns carry `A4`
   and `A5`. (~~what the `A` and `N` size letters stand for, and the 37 exceptions~~ — partly answered
   2026-09-18: the **referents** are pinned. `N` is the five `ANM` animals, which the research tree marks
@@ -1117,7 +1353,25 @@ bookkeeping errors.
   letter and the second letter is the weapon family: bullet, laser, missile, plasma rifle, rocket, animal,
   flamer, taser, each settled by what fires it, by the trail effect its controller plays and by its
   flight ([18-vocabulary](docs/18-vocabulary.md)).
-- [ ] Briefings: what game mode 4 is, how a briefing is skipped (`WaitForClick`), and the spline's curve.
+- [x] ~~Briefings: what game mode 4 is, how a briefing is skipped (`WaitForClick`), and the spline's
+  curve.~~ — closed 2026-09-20, **and it overturns a premise of [21-briefing](docs/21-briefing.md)**.
+  The queue had conflated two things: the 8 × 8 table at `0x10104b18` is the interface's *view* mode
+  stack, while **game mode is the first word of the shell's parameter block**, split into
+  `+0xe4`/`+0xe5`/`+0xe6` at `0x1005c748`–`0x1005c766`. Its five modes are 0 no game, 1 a single
+  mission, 2 multiplayer, 3 the attract-mode demo, and **4 a mission of campaign 0** — computed from
+  the chosen campaign's index in five branchless instructions at `0x1000386e`–`0x1000387c` (`neg` ·
+  `sbb` · `and 0xfffffffd` · `add 4`), giving **4 for index 0 and 1 otherwise**; *re-read by the
+  coordinator* off a continuous decode from the handler's entry. Campaign 0 is `CAMPAIGN.00`, *Tara.
+  The Home Base* — **the training campaign**. *Measured* from the other side: the two messages the game
+  asks for itself in mode 4 (22, 100) are each defined in exactly one of the install's 16
+  `messages.cfg`, both in `CAMPAIGN.00`. **The premise corrected**: the byte the briefing tests before
+  running at all (`0x100a29e5`) is **mode 3, the demo — not a saved game being loaded**, which the doc
+  said; with it set the set-up overwrites the mission directory with `missions\autodemo.00\`, so the
+  demo plays with no briefing. **`WaitForClick`** closes as a negative with its control: the name
+  occurs in exactly one of the 22 binaries and its only four references are inside the waypoint loader,
+  which parses it *identically* to `WaitForTime` from the same function — and `WaitForTime`'s slot **is**
+  read by the dwell, so this build loads the value and never reads it. The spline was already closed
+  and is confirmed: a **cubic Hermite** over `EdgeTime` ([21-briefing](docs/21-briefing.md)).
 - [ ] What the word after `data.tma`'s map path was for — it marks the free-play maps, but `Single.02`
   disagrees with every reading. (~~what reads a building's start flag back, and the word after the map
   path~~ — closed 2026-09-18, both negatively and with controls. **Nothing reads either.** `IMission`
@@ -1126,7 +1380,11 @@ bookkeeping errors.
   `CBuilding +0xb8`, the building's object state, 1 by construction and 2 when the flag is set — is only
   ever tested against zero, which a placed building never is. So the flag changes nothing
   ([04-missions](docs/04-missions.md)).)
-- [ ] What `TRF1`'s directory flag does beyond the debug warning.
+- [x] ~~What `TRF1`'s directory flag does beyond the debug warning.~~ — this line was **stale**,
+  caught by the coordinator's own check rather than spent on an agent: it is already **narrowed** where
+  it stands in [16-research](docs/16-research.md) to marking a tree as carrying debugging information,
+  whose one reader found is the warning `FULL_RESEARCH_TREE` silences, and **no shipped archive sets
+  it** — near enough a settled negative that an agent's time went to the briefings instead.
 - [ ] What the landscape, camera and atmosphere component constructors read.
 
 ## Mission 02, *The Constructor*
