@@ -266,8 +266,12 @@ pub struct Play {
     /// The driven unit's auto-driver level, 0–2, which `CMD_JAMES_AUTO_DRIVER` steps (docs/31).
     pub auto_driver: u8,
     pub clans: Vec<Clan>,
-    /// Each clan's relation word towards each clan, as the loader files them.
+    /// Each clan's relation word towards each clan, as the loader files them and the clan
+    /// brains' takt leaves them: `attitudes` owns them and this is refreshed from it.
     pub relations: Vec<Vec<u32>>,
+    /// The attitude behind each of those words, and the takt that re-reads one from the other
+    /// (docs/25, "Clan relations").
+    pub attitudes: parkan_sim::relations::Relations,
     /// Each shielded target's next effect instance, of three, and where each flash stands off
     /// its bubble's centre, which it follows.
     pub shield_flashes: HashMap<usize, usize>,
@@ -916,6 +920,7 @@ impl Play {
             auto_driver: 0,
             clans: mission.clans.clone(),
             relations: mission::relation_words(&mission.clans),
+            attitudes: parkan_sim::relations::Relations::new(&mission::relation_words(&mission.clans)),
             shield_flashes: HashMap::new(),
             player_clan,
             hero_id,
@@ -1577,6 +1582,7 @@ impl Play {
         self.pose_hero();
         let now = self.hero.time_ms;
         if !self.paused {
+            self.takt_relations(now);
             self.tick_buildings(now);
             self.tick_places(now);
             self.tick_economy(now, (dt_ms / 1000.0) as f32);
@@ -2949,11 +2955,12 @@ impl Play {
     }
 
     /// A hit on target `t` from the round's `owner` (message `0x19`): a robot's behaviour asks
-    /// for an attack on the unit that fired. A building does nothing (`0x100064b0`), nor a unit
-    /// the player drives.
+    /// for an attack on the unit that fired, and, unless the victim is a hero, its clan's
+    /// SuperAI takes 0.004 off its attitude toward the firer's clan (`0x1000658c`, docs/25,
+    /// "Clan relations"). A building does nothing (`0x100064b0`), nor a unit the player drives.
     ///
     /// STAND-IN: docs/31-packages.md#a-hit-pulls-a-unit-in--read -- the call for help to the
-    /// clan's warriors within 400 and the clan attitude a hit lowers are not modelled.
+    /// clan's warriors within 400 is not modelled.
     fn hurt(&mut self, t: usize, owner: Option<usize>) {
         let firer = match owner {
             None => self.hero_id,
@@ -2967,6 +2974,38 @@ impl Play {
         }
         if let Some((_, robot)) = self.robots.iter_mut().find(|(rt, _)| *rt == t) {
             robot.behaviour.hurt(firer);
+            self.resent(t, owner);
+        }
+    }
+
+    /// The attitude a hit costs: the victim's clan toward the firer's. The slot 67 handler
+    /// skips a building and a hero (`Type` `0x1020000`, `Behavior.dll:0x1000656c`), and it is
+    /// the firer's object's owner word that names the clan (`0x10006587`), so a round whose
+    /// firer is gone takes nothing.
+    fn resent(&mut self, victim: usize, owner: Option<usize>) {
+        let them = match owner {
+            None => Some(self.player_clan),
+            Some(o) => self.units.get(o).and_then(|u| u.clan),
+        };
+        let Some(us) = self.units.get(victim).filter(|u| u.type_word != parkan_formats::research::TYPE_HERO)
+        else {
+            return;
+        };
+        let (Some(us), Some(them)) = (us.clan, them) else { return };
+        if let (Ok(us), Ok(them)) = (usize::try_from(us), usize::try_from(them)) {
+            self.attitudes.hurt(us, them);
+        }
+    }
+
+    /// Every clan brain whose 7-8 s takt is due (`ai.dll:0x100017f0` -> `0x10005f30`): it
+    /// applies what the hits added and reads each relation word off its attitude again.
+    fn takt_relations(&mut self, now_ms: f64) {
+        if !self.attitudes.takt(now_ms) {
+            return;
+        }
+        self.relations = self.attitudes.words();
+        if let Some(p) = self.progression.as_mut() {
+            p.relations = self.relations.clone();
         }
     }
 

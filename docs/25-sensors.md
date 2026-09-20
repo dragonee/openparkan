@@ -352,15 +352,15 @@ holds. Nothing maps a 0/1 file onto a 0/2 runtime.
 3. **The SuperAI keeps the word and an attitude** (`ai.dll:0x10005e80`): the
    word itself, which slot 8 returns (`0x10005f10`) and which the behaviour's
    hostile and friendly tests read, and a float attitude of 1/6, 1/2 or 5/6
-   for a word of 0, 1 or 2. Setting clan *i*'s word towards *j* also writes it
-   into *j*'s SuperAI towards *i*.
+   for a word of 0, 1 or 2 — exactly 0.16665, 0.49995 and 0.8333. Setting clan
+   *i*'s word towards *j* also writes it into *j*'s SuperAI towards *i*.
 4. **Each clan-brain takt re-reads the word from the attitude**
    (`0x10005f30`): below 1/3 it is 0, above 2/3 it is 2, otherwise 1. The
    attitude then moves 0.0033 a takt, never across the band's edge: a hostile
    one up to 0.2833, a neutral one back to 0.49995, an allied one down to
-   0.7166. So a relation stays where the mission put it. What would
-   move an attitude across a band — the two change fields the takt adds and
-   subtracts — was not found written (a search for their offsets).
+   0.7166. So a relation stays where the mission put it unless something
+   writes one of the takt's two change fields — and **only being shot does**
+   ([below](#what-moves-an-attitude-being-shot-and-nothing-else--read)).
 
 *Measured*, over the 101 clans of the 29 shipped missions: towards other clans
 the words are 0 on 135, 1 on 137 and 2 on 28, and every clan that names itself
@@ -385,6 +385,87 @@ neutral to each other, as are `Trgt` and `Enm`.
 What follows for sensors: a clan's units put only the machines of clans at 0
 in their hostile lists and only those at 2 in their friendly ones — a neutral
 clan's machine is in neither, and an allied clan's is friendly.
+
+### What moves an attitude: being shot, and nothing else — *read*
+
+**The record.** A SuperAI keeps **64** relation records of 16 bytes, the array
+at the object's `+0x43c` (the relation interface is the object's `+0x7c`
+sub-object, vtable `ai.dll:0x100341b8`, installed at `0x1000102c` and
+`0x100016d7`; the takt reaches the array as `interface + 0x3c0`). The record is
+
+| offset | what |
+|---|---|
+| `+0` | the attitude, 0 to 1 |
+| `+4` | a **decrease** the next takt subtracts, then clears (`0x10005f46`) |
+| `+8` | an **increase** the next takt adds, then clears (`0x10005f60`) |
+| `+0xc` | the relation word every other system reads |
+
+The constructor fills all 64 with attitude 0.16665, word 1 and both change
+fields 0 (`0x10005884`–`0x100058a7`); `iron3d.dll` then sets each word through
+slot 7, which sets the attitude with it.
+
+**Why the earlier search failed.** The compiler folds the array's base into the
+index — `add eax, 0x44; shl eax, 4` for `object + 16·clan + 0x440` — so the
+offsets `0x440` and `0x444` appear in no instruction at all. Asking for them
+directly finds nothing, which is what the previous round reported.
+
+**The one writer.** Sweeping every module for the four displacements
+(`0x43c`, `0x440`, `0x444`, `0x448`) and the four interface-relative ones
+(`0x3c0`…`0x3cc`), **and** enumerating all 80 `shl reg, 4` sites in `ai.dll` so
+that a folded index cannot hide, leaves exactly one non-zero write to a change
+field in the whole install:
+
+- **`ai.dll:0x10001fe0`**, slot **13** of that vtable (`0x100341b8 + 0x34`),
+  adds the fixed **0.004** at `0x10034284` to the **decrease** toward a clan
+  numbered below 64. `ai.dll` never calls it directly — it is reached through
+  the vtable — and the one call traced to it is `Behavior.dll:0x1000658c`, the
+  hit handler ([31-packages.md](31-packages.md#a-hit-pulls-a-unit-in--read)),
+  once per hit a non-hero, non-building unit takes outside a network game. The
+  caller pushes an amount of its own, `1.0` (`0x1000657f`), and **the slot
+  ignores it** (`ret 0xc` with the third argument never read), which is why
+  there is no variable rate to find.
+
+**The increase field is never written non-zero** — a controlled negative. The
+same two sweeps that turn up that writer also turn up every writer of the three
+neighbouring fields of the same record: the attitude (`0x10005efc`,
+`0x100060c1`, and the takt's own stores through `edx`), the word (`0x10005ec7`,
+`0x10005edf`, `0x100060ac`) and the decrease (`0x10001fe0`). The increase is
+written only to 0, by the constructor's fill and by the takt after it applies
+it. So **a relation can only ever fall**.
+
+**What the takt does**, in order, for every clan but its own
+(`0x10005f30`, run from the clan brain's takt `0x100017f0` → `0x10005910` →
+`0x100059da`, whose deadline is now + **7000 ms plus a random 0–999**,
+`0x100017f0`):
+
+1. subtract the decrease and clear it; add the increase and clear it;
+2. hold the attitude to 0 and 1;
+3. read the word: below 0.3333 hostile, below 0.6666 neutral, else allied;
+4. drift by 0.0033052 toward the band's rest point and stop there — 0.2833
+   hostile, 0.49995 neutral, 0.7166 allied. **A hostile band only rises, an
+   allied band only falls**, so an attitude knocked below 0.7166 stays where
+   the hit left it, while a neutral one recovers toward 0.49995 from either
+   side;
+5. if the word changed, write the new word *and this clan's attitude* into the
+   other clan's record about this one (`0x100060ac`, `0x100060c1`) — so a
+   relation always breaks both ways.
+
+**What that costs in rounds** (*derived* from the figures above).
+
+- **An ally is cheap to lose.** A fresh alliance starts at 0.8333 and drifts
+  down to its rest of 0.7166 in some 35 takts — four minutes — and there it
+  stops, five hundredths above the 2/3 edge, with no way back up. So **13
+  hits** on its units, however far apart, make it neutral.
+- **A neutral clan is expensive.** It rests at 0.49995, a sixth above the 1/3
+  edge, and recovers 0.0033 a takt against the 0.004 a hit takes, so a trickle
+  of one hit a takt nets 0.0007 and would need some 240 takts — half an hour —
+  to turn it. What turns it in practice is a burst: **42 hits inside one 7–8 s
+  takt**.
+- **A hostile clan can never become anything else.** Nothing adds, and its
+  drift stops at 0.2833, five hundredths short of the edge.
+
+**The engine models this** (`engine/crates/parkan-sim/src/relations.rs`), with
+the takt wired into the play's tick and `Behavior.dll`'s hit into it.
 
 ## The player's target — *read*, and *measured*
 
@@ -661,6 +742,14 @@ first two take the rule's colour.
   [29-weapons.md](29-weapons.md#guided-rounds-differ-in-how-hard-they-steer--read-and-measured):
   a missile's seeker, `cos(value 0)` its cone. It does not use the detection
   test above.
-- What would move a SuperAI's attitude from one relation band to another:
+- ~~What would move a SuperAI's attitude from one relation band to another:
   nothing was found writing the two change fields its takt applies
-  (`ai.dll:0x10005f46`, `0x10005f60`).
+  (`ai.dll:0x10005f46`, `0x10005f60`).~~ Answered: **being shot, and nothing
+  else**. The decrease field has one writer in the whole install,
+  `ai.dll:0x10001fe0` (the SuperAI's vtable slot 13, `0x100341b8 + 0x34`),
+  which adds a fixed 0.004 for every hit a unit takes and ignores the amount
+  `Behavior.dll:0x1000658c` passes it; the increase field is written only to 0.
+  The earlier search missed it because the compiler folds the array's base into
+  the index (`add eax, 0x44; shl eax, 4`), so neither offset is an operand
+  anywhere ([What moves an attitude](#what-moves-an-attitude-being-shot-and-nothing-else--read)).
+  *Not established*: the random source of the takt's 0–999 ms jitter.

@@ -24,6 +24,7 @@ pub mod orders;
 pub mod path;
 pub mod power;
 pub mod progression;
+pub mod relations;
 pub mod research;
 pub mod script;
 pub mod shield;

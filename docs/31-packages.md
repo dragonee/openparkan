@@ -1157,10 +1157,14 @@ nothing for a building, for property `0x208` set (`+0xa64`), or in a network gam
 1. It asks for a **reason-1 attack on the firer's logic id** (`0x10018060` →
    `0x100179c0`).
 2. Unless the victim is a hero (`0x1020000`), it adds **0.004** to its clan
-   SuperAI's decrease toward the firer's clan (`ai.dll:0x10001fe0`). The clan's takt,
+   SuperAI's decrease toward the firer's clan (`ai.dll:0x10001fe0`, the SuperAI's
+   vtable slot 13; the `1.0` this call pushes at `0x1000657f` is the slot's
+   third argument and it is never read). The clan's takt,
    every 7–8 s (`0x100017f0`), takes that off the attitude and reads the word from it
-   again ([25-sensors.md](25-sensors.md#clan-relations-the-files-words-straight-through--read-and-measured)),
-   so enough hits turn a neutral or allied clan hostile, both ways.
+   again ([25-sensors.md](25-sensors.md#what-moves-an-attitude-being-shot-and-nothing-else--read)),
+   so enough hits turn a neutral or allied clan hostile, both ways: **13** on an
+   ally, **42** inside one takt on a neutral. **This is the only thing in the
+   game that moves a relation**, and it only moves it down.
 3. It **calls for help** (`0x1000c260`): message `0x12d` to every warrior
    (`0x1008000` and no other bit) in its clan's areal snapshot within **400**, in
    three dimensions. Each asks for a reason-5 attack (`0x10018030`) on the nearest
@@ -1806,7 +1810,10 @@ captures by logic id 34 times.
   does a round passing through a shield; `0x1a` is never sent
   ([A hit pulls a unit in](#a-hit-pulls-a-unit-in--read)).
 - Whether fire mode 1's target fetch (`0x100241d8`, from the system map) consults
-  the radar when it aims or fires; who writes the clan attitude's increase field;
+  the radar when it aims or fires;
+  ~~who writes the clan attitude's increase field~~ — **nobody**, in any of the
+  sixteen modules, with the decrease field's own writer as the control
+  ([25-sensors.md](25-sensors.md#what-moves-an-attitude-being-shot-and-nothing-else--read));
   what `IGameObject` slot 21, the test that the firer still exists, answers; how
   high a flying medusa holds against its attack's three-dimensional circle.
 - What a unit record's `+0x30` is. The wingman menu lets only 1 or 2 capture, the

@@ -385,3 +385,50 @@ fn c03_m02s_raider_takes_up_the_attack_on_the_bunker_and_closes_on_it() {
     let clock = p.others.iter().find(|o| o.clan == 2).expect("Enm2").takt.clock();
     assert!((28..=42).contains(&clock), "the enemy clan's clock reads {clock} after 30 s");
 }
+
+/// Mission 01's three clans hold the words its file gives them, and the clan brains' takt
+/// keeps them there: each attitude drifts 0.0033 a takt toward its band's rest point and stops
+/// (docs/25, "Clan relations"), so `Plr`'s hostility toward `Enm` climbs from 0.16665 to 0.2833
+/// and never reaches the 1/3 edge. Only a hit moves a word, and only downwards: 42 hits inside
+/// one 7-8 s takt take the player's clan's neutral word for `Trgt` to hostile, both ways.
+#[test]
+#[ignore = "needs the game install"]
+fn mission_01s_relations_drift_within_their_bands_and_only_a_hit_moves_one() {
+    use parkan_sim::relations::{LOW_EDGE, REST, SET};
+    use parkan_world::play::{RELATION_HOSTILE, RELATION_NEUTRAL};
+
+    let mut play = campaign_play(gamedir::MISSION_01);
+    let names: Vec<&str> = play.clans.iter().map(|c| c.name.as_str()).collect();
+    assert_eq!(names, vec!["Plr", "Trgt", "Enm", "Ntrl"], "{names:?}");
+    assert_eq!((play.relations[0][1], play.relations[1][0]), (RELATION_NEUTRAL, RELATION_NEUTRAL));
+    assert_eq!((play.relations[0][2], play.relations[2][0]), (RELATION_HOSTILE, RELATION_HOSTILE));
+    assert_eq!(play.attitudes.attitude(0, 2), Some(SET[RELATION_HOSTILE as usize]));
+
+    // Twenty seconds is two or three takts of 7 to 8 s: the hostile attitude rises by 0.0033
+    // each and the words stand, the drift never crossing a band's edge.
+    let before = play.attitudes.attitude(0, 2).unwrap();
+    for _ in 0..(20 * 60) {
+        play.tick(1000.0 / 60.0, [0.0; 2]);
+    }
+    let after = play.attitudes.attitude(0, 2).unwrap();
+    eprintln!("Plr toward Enm rose from {before} to {after} in 20 s");
+    assert!(after > before && after < LOW_EDGE, "it rises toward {} but stops short", REST[0]);
+    assert!((after - before - 3.0 * parkan_sim::relations::DRIFT).abs() < 2.0 * parkan_sim::relations::DRIFT);
+    assert_eq!(play.relations[0][2], RELATION_HOSTILE);
+    assert_eq!(play.relations[0][1], RELATION_NEUTRAL, "no drift crosses an edge");
+
+    // 42 hits, each the 0.004 `Behavior.dll:0x1000658c` adds for one round, inside a takt.
+    for _ in 0..42 {
+        play.attitudes.hurt(0, 1);
+    }
+    for _ in 0..(9 * 60) {
+        play.tick(1000.0 / 60.0, [0.0; 2]);
+    }
+    assert_eq!(play.relations[0][1], RELATION_HOSTILE, "the player's clan turns on Trgt");
+    assert_eq!(play.relations[1][0], RELATION_HOSTILE, "and Trgt hears of it");
+    assert_eq!(
+        play.progression.as_ref().unwrap().relations[0][1],
+        RELATION_HOSTILE,
+        "the scripts read the same word"
+    );
+}
