@@ -1094,7 +1094,11 @@ the areal map as the clan's *migration areals* (slot 35, `0x100220e0`).
   clan (slot 47, `ArealMap.dll:0x10022230`). It answers the same one until the
   clan's timer runs out, then picks `rand() % count` — the same one again,
   possibly — and restarts the timer. The timer's words are 937 and 1875, ×64
-  ms (`0x1002ab37`, `0x1002ab3d`): **60 s, plus up to 120 s**.
+  ms (`0x1002ab37`, `0x1002ab3d`): **60 s, plus up to 120 s**. The current one
+  starts at −1, so the first question picks at once (`0x10022264`); a clan with
+  no zones answers −1 and logs *"Migration Place Error: Clan … has no
+  MigrationAreals"* (`0x10022294`). Only a question moves the clan on: the
+  answer changes when an animal asks after the timer has run out.
 - **The start** (`Behavior.dll:0x1002c9d0`) asks for the clan's pasture into
   `+0x60`, starts its own timer at 60 + up to 120 s (`+0x58`), walks to a
   point, and starts a second timer at 5 + up to 10 s (`+0x64`). Both use the
@@ -1104,12 +1108,17 @@ the areal map as the clan's *migration areals* (slot 35, `0x100220e0`).
   0.2 (`0x10059770`, `0x100597e8`), and the centre's own height. **Both
   offsets are positive**, so the point always lies in the square to the +x, +y
   side of the centre, 0.2 to 1 inner radius along each axis. It tries up to 50
-  points until the walker takes one.
+  points until the walker takes one (`0x10001960`, `0x1002cc92`), at the unit's
+  speed × `Go_SpeedPercent` — the patrol block's `+0x34`, bound by that name at
+  `0x10016598`. With no pasture it walks nowhere (`0x1002cbbc`).
 - **Each tick** (`0x1002ca60`) asks the fire control for mode 0, no target of
-  its own. When the long timer has run out it asks for the pasture again and
-  walks to a new point. Otherwise, when the walker is idle and the short timer
-  has run out, it walks to a new point; while the walker is busy it restarts
-  the short timer.
+  its own. When the long timer has run out it asks for the pasture again,
+  starts the long timer again, walks to a new point and starts the short timer.
+  Otherwise, when the walker is idle and the short timer has run out, it walks
+  to a new point; while the walker is busy it restarts the short timer, so an
+  animal stands 5 to 15 s at each point it reaches.
+- **Every distance it measures is across the ground**: the score's and the
+  priority's go through `0x10020f70`, which takes x and y alone.
 - **What it lets through.** A migrating animal is the one animal that engages
   at all (`0x10017a1e`, [above](#between-orders--read)), and the task decides
   what:
@@ -1119,8 +1128,9 @@ the areal map as the clan's *migration areals* (slot 35, `0x100220e0`).
     takes only a contact scoring above 0 (`0x10017f75`).
   - **The priority** (slot 12, `0x1002c640`), by reason
     (`0x1002c8f8`): for an engagement, reasons 0, 2 and 5, it is 1 when the
-    animal itself is within the outer radius of the centre and the contact
-    within it too, and 0 otherwise. For **retaliation**, reason 1, it is always
+    animal itself is strictly inside the outer radius of the centre and the
+    contact within it (`0x1002c706`–`0x1002c722`), and 0 otherwise. For
+    **retaliation**, reason 1, it is always
     1. Reasons 3 and 4 get the default. The task also hands the attack it lets
     through a time and a circle about the pasture's centre, which `0x100179c0`
     merges into the new task ([A hit pulls a unit in](#a-hit-pulls-a-unit-in--read)
@@ -1131,9 +1141,16 @@ the areal map as the clan's *migration areals* (slot 35, `0x100220e0`).
   (*read*, [below](#a-hit-pulls-a-unit-in--read)). The attack is then the
   animal's version of [the attack](#the-attack-tick-by-tick--read).
 
+**With no pasture** (*read*) the task walks nowhere, nothing scores
+(`0x1002c91a`), and its priority is the base's for every reason
+(`0x1002c653` → `0x1002c8df` → `0x100018a0`): a hit is answered as a stopped unit
+answers it, 1,000 about where it stands, and an engagement is scored by nothing.
+An animal whose firer stands exactly on the outer circle is answered the same
+way, the one case the table below leaves to the base.
+
 *Measured:* only nature clans carry zones — 12 of the 15, each with animals
 of its own. One more places animals with no zone at all, where slot 47 has no
-pasture to give (what the task does then is not read). Mission 02's two
+pasture to give, so its animals graze on the spot. Mission 02's two
 pastures are in [34-progression.md](34-progression.md#mission-02-the-constructor-end-to-end--derived).
 
 ### A hit pulls a unit in — *read*

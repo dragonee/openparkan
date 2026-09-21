@@ -106,6 +106,23 @@ pub const MIGRATE_AWAY: (f64, Option<f32>) = (10.0, None);
 pub const MIGRATE_FIRER_OUTSIDE: (f64, Option<f32>) = (20.0, Some(20.0));
 pub const MIGRATE_FIRER_ON_PASTURE: (f64, Option<f32>) = (25.0, Some(80.0));
 pub const MIGRATE_FIRER_INSIDE: (f64, Option<f32>) = (35.0, Some(100.0));
+/// A migrating animal's answer to an engagement (`0x1002c6c9`), when it stands inside the outer
+/// radius and the contact within it: the attack's time, s, and its circle past the outer
+/// radius, for a contact inside the inner radius and for one on the rest of the pasture.
+pub const MIGRATE_ENGAGE_INSIDE: (f64, f32) = (20.0, 80.0);
+pub const MIGRATE_ENGAGE_ON_PASTURE: (f64, f32) = (10.0, 20.0);
+/// The migrate task's own timers, (fixed, random) ms (`0x1002c9d0`): the long one, after which
+/// it asks for its clan's pasture again, and the short one an idle animal waits at its point.
+pub const MIGRATE_LONG_MS: (f64, f64) = (60_000.0, 120_000.0);
+pub const MIGRATE_SHORT_MS: (f64, f64) = (5_000.0, 10_000.0);
+/// A point's two offsets from the pasture's centre, each a random share of the inner radius
+/// held to at least this (`0x100597e8`), both positive; and how many points it tries before
+/// the walker takes one (`0x1002cc92`).
+pub const MIGRATE_POINT_FLOOR: f32 = 0.2;
+pub const MIGRATE_TRIES: usize = 50;
+/// A clan's pasture timer (`ArealMap.dll:0x10022230`, the words 937 and 1875 at
+/// `Behavior.dll:0x1002ab37`, `0x1002ab3d`, × 64 ms): (fixed, random) ms.
+pub const PASTURE_TIMER_MS: (f64, f64) = (59_968.0, 120_000.0);
 /// An animal's attack fires on its target from within this, and on the nearest hostile
 /// contact beyond (`0x10027580`).
 pub const ANIMAL_FIXED_FIRE: f32 = 200.0;
@@ -332,10 +349,11 @@ pub struct Senses<'a> {
     /// A building: it runs its fire control and no unit takt, so it takes up no engagement
     /// and its tasks do not move it (docs/31, "Which objects run a behaviour").
     pub building: bool,
-    /// An animal: it takes up no engagement unless it migrates (`0x10017a1e`).
+    /// An animal: it takes up no engagement unless it migrates (`0x10017a1e`), and its default
+    /// order is migrate.
     pub animal: bool,
-    /// An animal's pasture: its centre and its inner and outer radii.
-    pub pasture: Option<Pasture>,
+    /// Where a migrating animal asks for its clan's pasture.
+    pub pastures: Pastures<'a>,
 }
 
 /// A nature clan's zone an animal grazes in (docs/31, "Migrate: an animal's pasture").
@@ -344,6 +362,59 @@ pub struct Pasture {
     pub centre: Vec3,
     pub inner: f32,
     pub outer: f32,
+}
+
+/// The pasture the unit's clan grazes, as the system areal map answers a migrating animal
+/// that asks for it (slot 47, `ArealMap.dll:0x10022230`). Asking may pick a new one, so the
+/// task asks only when the game's does: as it starts and when its long timer runs out.
+#[derive(Clone, Copy)]
+pub struct Pastures<'a>(pub &'a dyn Fn() -> Option<Pasture>);
+
+fn no_pasture() -> Option<Pasture> {
+    None
+}
+
+impl Pastures<'_> {
+    /// A clan with no zones, as every clan but a nature clan's is (docs/31).
+    pub const NONE: Pastures<'static> = Pastures(&no_pasture);
+
+    pub fn ask(&self) -> Option<Pasture> {
+        (self.0)()
+    }
+}
+
+impl std::fmt::Debug for Pastures<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Pastures")
+    }
+}
+
+/// A clan's current pasture, as the system areal map keeps it (slot 47,
+/// `ArealMap.dll:0x10022230`): it answers the same zone until the clan's timer runs out, then
+/// picks one of the clan's zones at random — possibly the same again — and starts the timer
+/// again; the first question picks at once. With no zones it answers none ("*** Migration Place
+/// Error: Clan … has no MigrationAreals").
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct ClanPasture {
+    pub current: Option<usize>,
+    pub until_ms: f64,
+}
+
+impl ClanPasture {
+    /// The zone, of `count`, the clan grazes when asked at `now_ms`; `random` gives 0..1.
+    ///
+    /// STAND-IN: docs/31-packages.md#migrate-an-animals-pasture--read-and-measured -- the areal
+    /// map's `rand()` is not the play's: the pick and the timer's share take the random handed in.
+    pub fn ask(&mut self, count: usize, now_ms: f64, mut random: impl FnMut() -> f32) -> Option<usize> {
+        if count == 0 {
+            return None;
+        }
+        if self.current.is_none() || now_ms >= self.until_ms {
+            self.until_ms = now_ms + PASTURE_TIMER_MS.0 + PASTURE_TIMER_MS.1 * f64::from(random());
+            self.current = Some(((random() * count as f32) as usize).min(count - 1));
+        }
+        self.current
+    }
 }
 
 impl Senses<'_> {
@@ -451,6 +522,17 @@ pub enum Task {
     /// Shutdown (order 19, vtable `0x10059eec`): its takt clears the walker and asks the fire
     /// control for nothing, and its priority is 0 for every reason (`0x10031b10`).
     Shutdown,
+    /// Migrate (order 15, vtable `0x10059aac`), an animal's default order: it grazes its clan's
+    /// pasture (`+0x60`), walking to a point on it and on to another once it has stood 5 to 15
+    /// s, and asks for the pasture again when its long timer (`+0x58`) runs out. `short_ms` is
+    /// the short timer (`+0x64`); `started` whether slot 6 has run, which it does again when an
+    /// attack over it ends.
+    Migrate {
+        pasture: Option<Pasture>,
+        long_ms: f64,
+        short_ms: f64,
+        started: bool,
+    },
     /// Patrol (order 4, vtable `0x10059d38`): a loop of points about what it guards, walked
     /// in turn and drawn afresh on its timer. `next_loop_ms` is `None` until the task
     /// starts, or starts again once an attack over it is dropped.
@@ -539,6 +621,9 @@ impl Task {
     fn engage_priority(&self) -> f32 {
         match self {
             Task::Stop => 1.0,
+            // Migrate answers by where the animal and the contact stand (`0x1002c640`), which
+            // its engagement weighs.
+            Task::Migrate { .. } => 1.0,
             Task::Search { search: Search::Enemies, .. } => 1.0,
             Task::Attack { .. } => 1.0,
             // The patrol lets every reason but a refit through (`0x1002d250`).
@@ -570,6 +655,11 @@ impl Task {
     /// A search not yet started.
     pub fn search(search: Search) -> Task {
         Task::Search { search, next_ms: 0.0, building: None, landing: false, started: false }
+    }
+
+    /// Migrate not yet started: an animal's default order (docs/31, "Between orders").
+    pub fn migrate() -> Task {
+        Task::Migrate { pasture: None, long_ms: 0.0, short_ms: 0.0, started: false }
     }
 
     /// The task an order builds (the dispatcher's `INSERT_ORDER_REPLACE`).
@@ -778,6 +868,10 @@ impl Behaviour {
         // unnamed fields): the nearest hostile unit within 500 is the best, and for a patrol
         // the one nearest its centre inside its radius. An attack already running is not
         // given another.
+        // An animal's empty stack holds its default order, migrate (docs/31, "Between orders").
+        if senses.animal && self.tasks.first() == Some(&Task::Stop) {
+            self.tasks[0] = Task::migrate();
+        }
         if let Some(firer) = self.hurt_by.take() {
             self.retaliate(firer, senses);
         }
@@ -790,14 +884,12 @@ impl Behaviour {
             match self.run(senses) {
                 Some(takt) => {
                     // The stack's takt tests the task's limit after its takt (`0x10034a53`):
-                    // an attack past it ends, and the patrol beneath starts again.
+                    // an attack past it ends, and the task beneath starts again.
                     if let Task::Attack { limit: Some(limit), .. } = self.task()
                         && limit.passed(senses.position, senses)
                     {
                         self.tasks.pop();
-                        if let Some(Task::Patrol { next_loop_ms, .. }) = self.tasks.last_mut() {
-                            *next_loop_ms = None;
-                        }
+                        self.restart_beneath();
                     }
                     // The fire control does nothing for an animal whose walker is idle
                     // (`0x10024069`).
@@ -807,7 +899,7 @@ impl Behaviour {
                 None => {
                     self.tasks.pop();
                     if self.tasks.is_empty() {
-                        self.tasks.push(Task::Stop);
+                        self.tasks.push(if senses.animal { Task::migrate() } else { Task::Stop });
                     }
                 }
             }
@@ -815,12 +907,23 @@ impl Behaviour {
         Takt { walk: Walk::Clear, target: self.fire_target(senses), fire_freely: false }
     }
 
+    /// Slot 9 ended the attack on top (`0x10001660`) and the task beneath starts again: a
+    /// patrol draws a fresh loop, and migrate asks for its pasture and walks to a new point.
+    fn restart_beneath(&mut self) {
+        match self.tasks.last_mut() {
+            Some(Task::Patrol { next_loop_ms, .. }) => *next_loop_ms = None,
+            Some(Task::Migrate { started, .. }) => *started = false,
+            _ => {}
+        }
+    }
+
     /// The engagement (`0x10017e70`), inserted as a reason-0 task: whether one was taken up.
+    /// An animal takes one up only while it migrates (`0x10017a1e`).
     fn engage(&mut self, senses: &Senses) -> bool {
         let task = self.task();
         if !senses.neutral
             && !senses.building
-            && !senses.animal
+            && (!senses.animal || matches!(task, Task::Migrate { .. }))
             && senses.has_weapon
             && task.engage_priority() >= ENGAGE_BAR
             && !matches!(task, Task::Attack { .. })
@@ -901,7 +1004,7 @@ impl Behaviour {
     /// asked. The attack goes on top, its limit the task's answer merged with the task's own.
     fn retaliate(&mut self, firer: i32, senses: &Senses) {
         let task = self.task();
-        if senses.building || senses.neutral || (senses.animal && task != Task::Stop) {
+        if senses.building || senses.neutral || (senses.animal && !matches!(task, Task::Migrate { .. })) {
             return;
         }
         let Some((priority, limit)) = self.retaliation(task, firer, senses) else { return };
@@ -930,39 +1033,40 @@ impl Behaviour {
     /// limit), `None` for 0.
     fn retaliation(&self, task: Task, firer: i32, senses: &Senses) -> Option<(f32, Option<Limit>)> {
         let at = senses.position;
+        // The base priority (`0x100018a0`): 1 wherever the firer is, 1000 about where the unit
+        // stands.
+        let base =
+            Some((1.0, Some(Limit { centre: Limited::Place(at), radius: STOP_LIMIT, until_ms: None })));
         match task {
-            // A migrating animal answers 1 wherever the firer is; its pasture limits the attack.
-            //
-            // STAND-IN: docs/31-packages.md#migrate-an-animals-pasture--read-and-measured -- an
-            // animal's migrate is not modelled: a standing animal answers as a migrating one, about
-            // its clan's zone nearest it, and with none as one beyond its pasture.
-            Task::Stop if senses.animal => {
+            // A migrating animal answers 1 wherever the firer is; its pasture limits the attack,
+            // by where it and the firer stand across the ground (`0x1002c799`). With no pasture,
+            // or a firer on the outer circle itself, it answers as the base does (`0x1002c8df`).
+            Task::Migrate { pasture: Some(p), .. } => {
                 let firer_at = senses.find(firer)?.position;
-                let (time, circle, centre) = match senses.pasture {
-                    Some(p) if at.truncate().distance(p.centre.truncate()) <= p.outer => {
-                        let d = firer_at.truncate().distance(p.centre.truncate());
-                        let (time, circle) = if d > p.outer {
-                            MIGRATE_FIRER_OUTSIDE
-                        } else if d > p.inner {
-                            MIGRATE_FIRER_ON_PASTURE
-                        } else {
-                            MIGRATE_FIRER_INSIDE
-                        };
-                        (time, circle.map(|c| p.outer + c), p.centre)
-                    }
-                    _ => (MIGRATE_AWAY.0, MIGRATE_AWAY.1, at),
+                let me = at.truncate().distance(p.centre.truncate());
+                let d = firer_at.truncate().distance(p.centre.truncate());
+                let (time, circle) = if me >= p.outer {
+                    MIGRATE_AWAY
+                } else if d > p.outer {
+                    MIGRATE_FIRER_OUTSIDE
+                } else if d < p.inner {
+                    MIGRATE_FIRER_INSIDE
+                } else if d < p.outer {
+                    MIGRATE_FIRER_ON_PASTURE
+                } else {
+                    return base;
                 };
                 let limit = Limit {
-                    centre: Limited::Place(centre),
-                    radius: circle.unwrap_or(0.0),
+                    centre: Limited::Place(p.centre),
+                    radius: circle.map_or(0.0, |c| p.outer + c),
                     until_ms: Some(time * 1000.0),
                 };
                 Some((1.0, Some(limit)))
             }
-            // The base priority, and the tasks that embed it: 1000 about where the unit stands.
-            Task::Stop | Task::Search { search: Search::Enemies, .. } => {
-                Some((1.0, Some(Limit { centre: Limited::Place(at), radius: STOP_LIMIT, until_ms: None })))
-            }
+            // The base priority, and the tasks that embed it.
+            Task::Stop
+            | Task::Migrate { pasture: None, .. }
+            | Task::Search { search: Search::Enemies, .. } => base,
             // A patrol answers 1 wherever the firer is, limited about what it guards.
             Task::Patrol { guarded, radius, .. } => {
                 let limit = match guarded {
@@ -1057,6 +1161,32 @@ impl Behaviour {
                     .min_by(|a, b| d(a).total_cmp(&d(b)))?;
                 Some((enemy.id, Some(limit)))
             }
+            // Migrate scores a contact within the inner radius of its pasture's centre by
+            // 1 / (d + 10), d across the ground (`0x1002c910`), so the one nearest the centre is
+            // best; it lets it through while the animal stands inside the outer radius, for 20 s
+            // within outer + 80, or 10 s within outer + 20 for one on the inner circle itself
+            // (`0x1002c6c9`). With no pasture nothing scores.
+            Task::Migrate { pasture, .. } => {
+                let p = pasture?;
+                let d = |s: &Seen| s.position.truncate().distance(p.centre.truncate());
+                let enemy = senses
+                    .seen
+                    .iter()
+                    .filter(hostile)
+                    .filter(|s| d(s) <= p.inner)
+                    .min_by(|a, b| d(a).total_cmp(&d(b)))?;
+                if senses.position.truncate().distance(p.centre.truncate()) >= p.outer {
+                    return None;
+                }
+                let (time, circle) =
+                    if d(enemy) < p.inner { MIGRATE_ENGAGE_INSIDE } else { MIGRATE_ENGAGE_ON_PASTURE };
+                let limit = Limit {
+                    centre: Limited::Place(p.centre),
+                    radius: p.outer + circle,
+                    until_ms: Some(time * 1000.0),
+                };
+                Some((enemy.id, Some(limit)))
+            }
             // The base priority's limit: 1000 about where the unit stands (`0x100018a0`).
             Task::Stop => {
                 let enemy = senses.nearest(engageable, ENGAGE_RANGE)?;
@@ -1139,11 +1269,28 @@ impl Behaviour {
             Some(Takt { walk, target: me.fire_target(senses), fire_freely: false })
         };
         match self.task() {
-            // STAND-IN: docs/31-packages.md#migrate-an-animals-pasture--read-and-measured -- an
-            // animal's default order, migrate, is not modelled: it stands, asking the fire
-            // control for nothing, as a grazing animal does.
-            Task::Stop if senses.animal => at_rest(FireMode::None, Walk::Keep, self),
             Task::Stop => at_rest(FireMode::Nearest, Walk::Keep, self),
+            // Migrate (its start `0x1002c9d0`, each tick `0x1002ca60`): the fire control asked
+            // for nothing. As it starts and whenever its long timer runs out it asks for its
+            // clan's pasture, walks to a new point of it and starts both timers again. Otherwise
+            // the short timer starts again while the walker is busy, and once the walker is idle
+            // and the short timer has run out the animal walks to a new point.
+            Task::Migrate { pasture, long_ms, short_ms, started } => {
+                let (mut pasture, mut long_ms, mut short_ms) = (pasture, long_ms, short_ms);
+                let mut walk = Walk::Keep;
+                if !started || now >= long_ms {
+                    pasture = senses.pastures.ask();
+                    long_ms = self.timer(now, MIGRATE_LONG_MS);
+                    walk = self.graze(pasture, senses).map_or(Walk::Keep, |p| Walk::To(p, GO_SPEED));
+                    short_ms = self.timer(now, MIGRATE_SHORT_MS);
+                } else if !senses.walker_idle {
+                    short_ms = self.timer(now, MIGRATE_SHORT_MS);
+                } else if now >= short_ms {
+                    walk = self.graze(pasture, senses).map_or(Walk::Keep, |p| Walk::To(p, GO_SPEED));
+                }
+                *self.tasks.last_mut()? = Task::Migrate { pasture, long_ms, short_ms, started: true };
+                at_rest(FireMode::None, walk, self)
+            }
             Task::StayGround => at_rest(FireMode::Nearest, Walk::Clear, self),
             Task::Shutdown => at_rest(FireMode::None, Walk::Clear, self),
             Task::Patrol { guarded, radius, speed, index, next_loop_ms } => {
@@ -1407,6 +1554,27 @@ impl Behaviour {
         }
     }
 
+    /// A point of `pasture` to graze at (`0x1002cba0`): its centre plus a random share of the
+    /// inner radius along x and along y, each held to at least [`MIGRATE_POINT_FLOOR`], so it
+    /// lies in the square off the centre's +x, +y side, at the centre's own height. The first
+    /// of [`MIGRATE_TRIES`] the walker takes; none with no pasture.
+    ///
+    /// STAND-IN: docs/31-packages.md#migrate-an-animals-pasture--read-and-measured -- what makes
+    /// the walker take a point (`0x10001960`) is not read: the areal under it, as a flyer's by
+    /// none.
+    fn graze(&mut self, pasture: Option<Pasture>, senses: &Senses) -> Option<Vec3> {
+        let p = pasture?;
+        for _ in 0..MIGRATE_TRIES {
+            let u = self.random().max(MIGRATE_POINT_FLOOR);
+            let v = self.random().max(MIGRATE_POINT_FLOOR);
+            let point = p.centre + Vec3::new(u * p.inner, v * p.inner, 0.0);
+            if senses.flyer || senses.usable.at(point) {
+                return Some(point);
+            }
+        }
+        None
+    }
+
     /// The first of up to 150 random points at least 100 inside the map that lies on a usable
     /// areal (`0x10030ed2`).
     ///
@@ -1666,7 +1834,7 @@ mod tests {
             neutral: false,
             building: false,
             animal: false,
-            pasture: None,
+            pastures: Pastures::NONE,
         }
     }
 
@@ -1755,9 +1923,16 @@ mod tests {
         let t = bunker.takt(&Senses { building: true, ..senses(&[hall], 0.0, Vec3::ZERO, true) });
         assert_eq!(t.target, None, "the radar lists no buildings");
 
+        // An animal of a clan with no pasture migrates on the spot: nothing scores, and it
+        // asks its fire control for nothing.
         let mut medusa = Behaviour::new(3);
         let t = medusa.takt(&Senses { animal: true, ..senses(&[enemy], 0.0, Vec3::ZERO, true) });
-        assert_eq!((medusa.task(), t.target), (Task::Stop, None));
+        assert!(
+            matches!(medusa.task(), Task::Migrate { pasture: None, started: true, .. }),
+            "{:?}",
+            medusa.task()
+        );
+        assert_eq!((t.walk, t.target), (Walk::Keep, None));
     }
 
     #[test]
@@ -1765,16 +1940,17 @@ mod tests {
         // Mission 02's western pasture: outer 50, inner 20. The hero fires from 150 m off it, far
         // past the radar's reach of the test's world, which retaliation does not ask.
         let pasture = Pasture { centre: Vec3::new(0.0, 0.0, 0.0), inner: 20.0, outer: 50.0 };
+        let ask = || Some(pasture);
         let hero = Seen { sensed: false, ..unit(11, 200.0, 0.0) };
         let medusa = |at: Vec3, idle: bool| Senses {
             animal: true,
             flyer: true,
-            pasture: Some(pasture),
+            pastures: Pastures(&ask),
             ..senses(std::slice::from_ref(&hero), 1000.0, at, idle)
         };
         let mut b = Behaviour::new(5);
         b.takt(&medusa(Vec3::new(8.0, 0.0, 11.0), true));
-        assert_eq!(b.task(), Task::Stop, "grazing, it takes up nothing");
+        assert!(matches!(b.task(), Task::Migrate { started: true, .. }), "grazing, it takes up nothing");
         b.hurt(11);
         let t = b.takt(&medusa(Vec3::new(8.0, 0.0, 11.0), false));
         let Task::Attack { target: Some(11), limit: Some(limit), ordered: false, .. } = b.task() else {
@@ -1788,19 +1964,148 @@ mod tests {
         b.hurt(12);
         b.takt(&Senses { seen: &[hero, other], now_ms: 9000.0, ..medusa(Vec3::new(20.0, 0.0, 11.0), false) });
         assert!(matches!(b.task(), Task::Attack { target: Some(11), .. }), "{:?}", b.task());
-        // Past 70 m of the pasture's centre the attack is dropped, and the medusa grazes again.
+        // Past 70 m of the pasture's centre the attack is dropped, and migrate starts again: it
+        // asks for its pasture and walks back onto it.
         b.takt(&Senses { now_ms: 9500.0, ..medusa(Vec3::new(75.0, 0.0, 11.0), false) });
-        assert_eq!(b.task(), Task::Stop);
+        assert!(matches!(b.task(), Task::Migrate { started: false, .. }), "{:?}", b.task());
+        let t = b.takt(&Senses { now_ms: 9600.0, ..medusa(Vec3::new(75.0, 0.0, 11.0), false) });
+        assert!(matches!(t.walk, Walk::To(p, GO_SPEED) if p.x <= 20.0 && p.y <= 20.0), "{t:?}");
 
         // Hit from inside the inner circle: 35 s, outer + 100.
         let near = Seen { sensed: false, ..unit(11, 10.0, 0.0) };
-        let mut b = Behaviour::new(5);
+        let grazing = || {
+            let mut b = Behaviour::new(5);
+            b.takt(&Senses { now_ms: 0.0, ..medusa(Vec3::new(8.0, 0.0, 11.0), true) });
+            b
+        };
+        let mut b = grazing();
         b.hurt(11);
         b.takt(&Senses { seen: std::slice::from_ref(&near), ..medusa(Vec3::new(8.0, 0.0, 11.0), false) });
         assert!(matches!(
             b.task(),
             Task::Attack { limit: Some(Limit { radius: 150.0, until_ms: Some(36_000.0), .. }), .. }
         ));
+
+        // Standing off its pasture, it goes for the firer for 10 s, held by no circle.
+        let mut b = grazing();
+        b.hurt(11);
+        b.takt(&Senses { seen: std::slice::from_ref(&near), ..medusa(Vec3::new(60.0, 0.0, 11.0), false) });
+        assert!(matches!(
+            b.task(),
+            Task::Attack { limit: Some(Limit { radius: 0.0, until_ms: Some(11_000.0), .. }), .. }
+        ));
+
+        // With no pasture it answers a hit as a stopped unit does: 1000 about where it stands.
+        let mut b = Behaviour::new(5);
+        b.hurt(11);
+        b.takt(&Senses {
+            pastures: Pastures::NONE,
+            seen: std::slice::from_ref(&near),
+            ..medusa(Vec3::new(8.0, 0.0, 11.0), false)
+        });
+        assert!(matches!(
+            b.task(),
+            Task::Attack { limit: Some(Limit { radius: 1000.0, until_ms: None, .. }), .. }
+        ));
+    }
+
+    /// Migrate (docs/31, "Migrate: an animal's pasture"): Mission 02's western pasture, centre
+    /// (915.1, 990.0) at 198.8, inner 20 and outer 50.
+    #[test]
+    fn a_grazing_medusa_walks_its_pasture_point_to_point_and_asks_for_it_again_on_its_long_timer() {
+        let pasture = Pasture { centre: Vec3::new(915.1, 990.0, 198.8), inner: 20.0, outer: 50.0 };
+        let asked = std::cell::Cell::new(0);
+        let ask = || {
+            asked.set(asked.get() + 1);
+            Some(pasture)
+        };
+        let medusa = |now: f64, idle: bool| Senses {
+            animal: true,
+            flyer: true,
+            pastures: Pastures(&ask),
+            ..senses(&[], now, Vec3::new(924.3, 987.4, 215.0), idle)
+        };
+        let on_pasture = |walk: Walk| match walk {
+            Walk::To(p, share) => {
+                let (dx, dy) = (p.x - pasture.centre.x, p.y - pasture.centre.y);
+                share == GO_SPEED
+                    && (4.0..=20.0).contains(&dx)
+                    && (4.0..=20.0).contains(&dy)
+                    && p.z == pasture.centre.z
+            }
+            _ => false,
+        };
+        let mut b = Behaviour::new(9);
+        // Its start: the pasture asked, a point in the square off the centre's +x, +y side at
+        // 0.2 to 1 inner radius, at the centre's height, and no target.
+        let t = b.takt(&medusa(0.0, true));
+        assert!(on_pasture(t.walk), "{t:?}");
+        assert_eq!((t.target, asked.get()), (None, 1));
+        let Task::Migrate { long_ms, .. } = b.task() else { panic!("{:?}", b.task()) };
+        assert!((60_000.0..=180_000.0).contains(&long_ms), "{long_ms}");
+        // On its way, the short timer keeps starting again; arrived, it stands 5 to 15 s.
+        assert_eq!(b.takt(&medusa(1000.0, false)).walk, Walk::Keep);
+        let Task::Migrate { short_ms, .. } = b.task() else { panic!() };
+        assert!((6000.0..=16_000.0).contains(&short_ms), "{short_ms}");
+        assert_eq!(b.takt(&medusa(2000.0, true)).walk, Walk::Keep, "standing");
+        let t = b.takt(&medusa(16_500.0, true));
+        assert!(on_pasture(t.walk), "{t:?}");
+        assert_eq!(asked.get(), 1, "the pasture is asked for only at the start and on the long timer");
+        // Past its long timer it asks again, whatever the walker is doing.
+        let t = b.takt(&medusa(180_500.0, false));
+        assert!(on_pasture(t.walk), "{t:?}");
+        assert_eq!(asked.get(), 2);
+    }
+
+    #[test]
+    fn a_migrating_medusa_takes_up_a_contact_inside_its_inner_circle_while_it_stands_inside_the_outer() {
+        let pasture = Pasture { centre: Vec3::ZERO, inner: 20.0, outer: 50.0 };
+        let ask = || Some(pasture);
+        let at = |x: f32| Vec3::new(x, 0.0, 15.0);
+        let medusa = |seen: &[Seen], now: f64, x: f32| {
+            let mut b = Behaviour::new(4);
+            b.takt(&Senses {
+                animal: true,
+                flyer: true,
+                pastures: Pastures(&ask),
+                ..senses(&[], 0.0, at(x), false)
+            });
+            b.takt(&Senses {
+                animal: true,
+                flyer: true,
+                pastures: Pastures(&ask),
+                ..senses(seen, now, at(x), false)
+            });
+            b.task()
+        };
+        let hero = |x: f32| Seen { hostile: true, ..unit(1, x, 0.0) };
+        // Inside the inner circle while the medusa grazes the pasture: 20 s within outer + 80.
+        assert!(matches!(
+            medusa(&[hero(-10.0)], 3000.0, 30.0),
+            Task::Attack {
+                target: Some(1),
+                limit: Some(Limit { radius: 130.0, until_ms: Some(23_000.0), .. }),
+                ..
+            }
+        ));
+        // On the rest of the pasture, or with the medusa off it, nothing is taken up.
+        assert!(matches!(medusa(&[hero(-25.0)], 3000.0, 30.0), Task::Migrate { .. }));
+        assert!(matches!(medusa(&[hero(-10.0)], 3000.0, 55.0), Task::Migrate { .. }));
+        // Of two inside, the one nearer the centre scores more.
+        let near = Seen { hostile: true, ..unit(2, 5.0, 0.0) };
+        assert!(matches!(medusa(&[hero(-15.0), near], 3000.0, 30.0), Task::Attack { target: Some(2), .. }));
+    }
+
+    #[test]
+    fn a_clan_grazes_one_pasture_until_its_timer_runs_out_and_then_picks_again() {
+        let mut clan = ClanPasture::default();
+        assert_eq!(clan.ask(0, 0.0, || 0.5), None, "a clan with no zones has no pasture");
+        // The first question picks at once; the timer is 59.968 s and up to 120 more.
+        assert_eq!(clan.ask(2, 1000.0, || 0.5), Some(1));
+        assert_eq!(clan.until_ms, 1000.0 + 59_968.0 + 60_000.0);
+        assert_eq!(clan.ask(2, 100_000.0, || 0.25), Some(1), "the same until the timer runs out");
+        assert_eq!(clan.ask(2, 121_000.0, || 0.25), Some(0), "then a pick at random");
+        assert_eq!(clan.until_ms, 121_000.0 + 59_968.0 + 30_000.0);
     }
 
     #[test]

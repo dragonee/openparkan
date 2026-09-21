@@ -143,7 +143,11 @@ fn c01_m02s_medusa_shot_by_the_hero_turns_on_it() {
     for _ in 0..60 {
         play.tick(1000.0 / 60.0, [0.0; 2]);
     }
-    assert_eq!(play.robots[r].1.behaviour.task(), Task::Stop, "grazing, it lets the hero be");
+    assert!(
+        matches!(play.robots[r].1.behaviour.task(), Task::Migrate { .. }),
+        "grazing, it lets the hero be: {:?}",
+        play.robots[r].1.behaviour.task()
+    );
 
     // A laser of the hero's at the medusa's sphere.
     let kinds = &play.battle.combat.kinds;

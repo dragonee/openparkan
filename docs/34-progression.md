@@ -519,6 +519,22 @@ eastern's (*read*, [31-packages.md](31-packages.md#a-hit-pulls-a-unit-in--read))
 The briefing's `T02_T03` says as much: they attack only those who trespass on
 their territory.
 
+**How fast a medusa can be asked to fly** (*measured*, then *derived*).
+`a_a_l3.ctl` is a mode-2 controller of 216 states, every one driven by
+velocity, and 24 of them anchors
+([24-motion.md](24-motion.md#section-1-is-the-animation-state-graph--read-and-measured)).
+Twelve anchors hover, with a velocity box of ±0.1 m/s. The twelve that move
+take a forward speed of 0.1 to 7 m/s or 5 to 10 m/s with a sideways and an
+upward part of −0.1 to 5.5, or the same boxes mirrored backwards, down and to
+the left. Its top speed forward is 13 m/s. The planner only moves to an anchor
+whose boxes hold the machine's velocity (`Control.dll:0x100051c0`), so a medusa
+asked for more than 10 m/s forward matches no moving anchor and keeps hovering.
+Asked for its full speed — `Speed_MaximumFactor` 1 — it would not fly; the
+`diff_slow` profile's 0.7 asks for 9.1 m/s, inside the 5-to-10 box
+([24-motion.md](24-motion.md#how-the-ai-asks-for-speed--read)). Which
+difficulty profile an animal's behaviour holds (`+0x8d4`) is not read; the
+recording shows the medusas flying.
+
 **Destroying both** empties `Anml`'s count, which completes the bonus
 objective with `T02_I04`. How a dead unit leaves the count is not read; the
 recording below shows it happen.
@@ -1575,9 +1591,15 @@ sits 11.8 dB under its file: music and sounds come out alike, as the equal
   the other eight writes of an immediate store 1 or 4, and all 39 calls of the
   setter (`0x100a4f90`) pass 1, 2, 3, 4 or 6 (*measured*). Whether those
   screens set the pause byte was not read.
-- Mission 02's medusas: what the attack does with the figures and the circle
-  the migrate task gives it, and how a flyer's migration point, which takes
-  the pasture centre's height, meets its flying height.
+- Mission 02's medusas: ~~what the attack does with the figures and the circle
+  the migrate task gives it~~ — answered: the gate merges them into the attack's
+  limit, whose start stamps its time; slot 9 ends the attack past that time or
+  outside the circle, in three dimensions, and migrate beneath it starts again
+  ([31-packages.md](31-packages.md#a-hit-pulls-a-unit-in--read)). Still open:
+  how a flyer's migration point, which takes the pasture centre's height, meets
+  its flying height; and which difficulty profile a medusa holds, whose
+  `Speed_MaximumFactor` decides whether it is asked for less than the 10 m/s its
+  moving states allow ([The medusas](#the-medusas--read-and-measured)).
 - What the behaviour does with the message 6 it sends itself for each tactical
   areal it is in.
 - ~~The ambient variations' schedule.~~ Answered: one every 10 + `rand()` % 10

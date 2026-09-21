@@ -356,6 +356,47 @@ pub struct Play {
     pub mindless: Vec<usize>,
     /// The walker's search's random source (docs/24, "The global path").
     pub walk_seed: u32,
+    /// Each clan's current pasture, which its migrating animals ask for (docs/31, "Migrate:
+    /// an animal's pasture").
+    pub grazing: std::cell::RefCell<Grazing>,
+}
+
+/// Each clan's current pasture, as the system areal map keeps it for the clan's migrating
+/// animals (slot 47, `ArealMap.dll:0x10022230`), and the random source its pick draws on.
+#[derive(Clone, Debug)]
+pub struct Grazing {
+    pub clans: Vec<parkan_sim::behaviour::ClanPasture>,
+    seed: u32,
+}
+
+impl Default for Grazing {
+    fn default() -> Self {
+        Self { clans: Vec::new(), seed: 0x2545_f491 }
+    }
+}
+
+impl Grazing {
+    /// The pasture clan `clan`, whose zones are `zones`, grazes when one of its animals asks at
+    /// `now_ms`.
+    pub fn ask(
+        &mut self,
+        clan: usize,
+        zones: &[parkan_sim::behaviour::Pasture],
+        now_ms: f64,
+    ) -> Option<parkan_sim::behaviour::Pasture> {
+        if self.clans.len() <= clan {
+            self.clans.resize(clan + 1, Default::default());
+        }
+        let seed = &mut self.seed;
+        let random = || {
+            *seed ^= *seed << 13;
+            *seed ^= *seed >> 17;
+            *seed ^= *seed << 5;
+            (*seed >> 8) as f32 / (1u32 << 24) as f32
+        };
+        let i = self.clans[clan].ask(zones.len(), now_ms, random)?;
+        zones.get(i).copied()
+    }
 }
 
 /// A round about to leave a barrel.
@@ -966,6 +1007,7 @@ impl Play {
             places: Vec::new(),
             mindless: Vec::new(),
             walk_seed: 0x2545_f491,
+            grazing: std::cell::RefCell::default(),
         };
         play.research = crate::research::Research::load(game, mission, &battle_objects, &play.units);
         play.load_places(mission);
@@ -3046,17 +3088,21 @@ impl Play {
         }
     }
 
-    /// The pasture animal `t` grazes: its clan's zone nearest it, across the ground.
-    fn pasture(&self, t: usize) -> Option<parkan_sim::behaviour::Pasture> {
-        let at = self.battle.combat.targets.get(t)?.position;
-        let clan = self.clan(self.units.get(t)?.clan?)?;
-        let d = |z: &mission::Zone| Vec3::from_array(z.position).truncate().distance(at.truncate());
-        let zone = clan.zones.iter().min_by(|a, b| d(a).total_cmp(&d(b)))?;
-        Some(parkan_sim::behaviour::Pasture {
-            centre: Vec3::from_array(zone.position),
-            inner: zone.inner,
-            outer: zone.outer,
-        })
+    /// The clan of animal `t` and its zones, the pastures the areal map hands the clan's
+    /// migrating animals (`IMission` slot 8 → areal map slot 35, docs/31).
+    fn zones(&self, t: usize) -> (Option<usize>, Vec<parkan_sim::behaviour::Pasture>) {
+        let Some(c) = self.units.get(t).and_then(|u| u.clan) else { return (None, Vec::new()) };
+        let zones = self.clan(c).map_or_else(Vec::new, |clan| {
+            clan.zones
+                .iter()
+                .map(|z| parkan_sim::behaviour::Pasture {
+                    centre: Vec3::from_array(z.position),
+                    inner: z.inner,
+                    outer: z.outer,
+                })
+                .collect()
+        });
+        (usize::try_from(c).ok(), zones)
     }
 
     /// A hit met target `t`'s shield (`0x1002c83e`, played at `0x10025ca0`): the generator's
@@ -3333,7 +3379,7 @@ impl Play {
                     neutral: false,
                     building: true,
                     animal: false,
-                    pasture: None,
+                    pastures: parkan_sim::behaviour::Pastures::NONE,
                 };
                 let takt = robot.behaviour.takt(&senses);
                 aim_and_fire(robot, t, &takt, seen, battle, ground, false, *building_fire_floor);
@@ -3429,7 +3475,7 @@ impl Play {
         let sensed = self.radar_ids(r, false, world);
         let others = self.seen_by(t, seen, &sensed);
         let animal = self.units[t].type_word & CLASS_ANIMAL != 0;
-        let pasture = if animal { self.pasture(t) } else { None };
+        let (clan, zones) = if animal { self.zones(t) } else { (None, Vec::new()) };
         let bounds = self.ground.bounds();
         let capturing = matches!(
             self.robots[r].1.behaviour.task(),
@@ -3443,8 +3489,10 @@ impl Play {
         let docks = if refitting || condition.needs_service(false) { self.docks_for(t) } else { Vec::new() };
         let graph = &self.graph;
         let usable = |x: f32, y: f32| graph.as_ref().is_none_or(|g| g.usable(x, y));
+        let grazing = &self.grazing;
         let (_, robot) = &mut self.robots[r];
         let now = robot.time_ms;
+        let ask = || clan.and_then(|c| grazing.borrow_mut().ask(c, &zones, now));
         let at = robot.walker.body.position;
         let senses = Senses {
             now_ms: now,
@@ -3462,7 +3510,7 @@ impl Play {
             neutral: false,
             building: false,
             animal,
-            pasture,
+            pastures: parkan_sim::behaviour::Pastures(&ask),
         };
         let takt = robot.behaviour.takt(&senses);
         let (flyer, top, low) = (

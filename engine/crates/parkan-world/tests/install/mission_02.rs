@@ -179,3 +179,48 @@ fn mission_02s_hero_walks_in_by_the_factorys_west_door_down_to_its_pod_and_captu
     assert!((at.z - 140.7).abs() < 1.0, "on the pod room's floor: {at}");
     assert!(matches!(play.mode(), Mode::Factory(0)), "the pod captured the factory and opened its screen");
 }
+
+/// Mission 02's medusas graze (docs/31, "Migrate: an animal's pasture"; docs/34, "The
+/// medusas"): with no order an animal migrates, asking for its clan's current pasture — one of
+/// `Anml`'s two zones, the same for both — and is sent to a point off its centre's +x, +y side.
+///
+/// How far they get is the motion's, not the task's: the Wizard writes the medusa's live top
+/// speed, 13 m/s forward, and no moving anchor state of `a_a_l3.ctl` has a forward box past
+/// 10, so the machine holds its hover (docs/34, "The medusas").
+#[test]
+#[ignore = "needs the game install"]
+fn mission_02s_medusas_migrate_over_their_clans_one_pasture() {
+    use parkan_sim::behaviour::Task;
+    use parkan_world::play::CLASS_ANIMAL;
+
+    let (mut play, m) = mission_02_play();
+    let zones = &m.clans.iter().find(|c| c.name == "Anml").expect("the animals' clan").zones;
+    assert_eq!(zones.len(), 2);
+    let medusas: Vec<usize> = (0..play.robots.len())
+        .filter(|&r| play.units[play.robots[r].0].type_word & CLASS_ANIMAL != 0)
+        .collect();
+    assert_eq!(medusas.len(), 2);
+    for _ in 0..30 {
+        play.tick(1000.0 / 60.0, [0.0; 2]);
+    }
+    let pastures: Vec<_> = medusas
+        .iter()
+        .map(|&r| match play.robots[r].1.behaviour.task() {
+            Task::Migrate { pasture: Some(p), started: true, .. } => p,
+            other => panic!("medusa {r} is not grazing: {other:?}"),
+        })
+        .collect();
+    assert_eq!(pastures[0], pastures[1], "a clan grazes one pasture at a time");
+    let p = pastures[0];
+    assert!(
+        zones.iter().any(|z| glam::Vec3::from_array(z.position) == p.centre
+            && z.inner == p.inner
+            && z.outer == p.outer),
+        "{p:?} is one of Anml's zones"
+    );
+    for &r in &medusas {
+        let robot = &play.robots[r].1;
+        assert!(!robot.wizard.idle(robot.time_ms), "medusa {r} has been sent to a point");
+        assert_eq!(play.robots[r].1.fire_target, None, "a grazing medusa aims at nothing");
+    }
+}
