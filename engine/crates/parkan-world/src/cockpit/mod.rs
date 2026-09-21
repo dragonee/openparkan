@@ -210,25 +210,19 @@ impl Cockpit {
         // (`0x1008d444`).
         if let crate::play::Mode::Factory(t) = play.mode() {
             // The warbot designer, while it is up, is drawn and nothing else (`0x1008d444`).
-            if self.designer.is_open() {
-                let previews = designer::draw(self, &mut ink, play, now_ms);
-                return Drawn {
-                    batches: ink.painter.batches,
-                    text: ink.text,
-                    menu_text: ink.menu_runs,
-                    previews,
-                    ..Drawn::default()
-                };
-            }
-            let previews =
-                if play.units.get(t).is_some_and(|u| u.type_word == crate::selection::RESEARCH_CENTRE) {
-                    research::screen(self, &mut ink, play, now_ms)
-                } else {
-                    let previews = factory::draw(self, &mut ink, play, t, now_ms);
-                    ink.painter.pin = Pin::TOP_RIGHT;
-                    map::draw(self, &mut ink, play, now_ms);
-                    previews
-                };
+            let previews = if self.designer.is_open() {
+                designer::draw(self, &mut ink, play, now_ms)
+            } else if play.units.get(t).is_some_and(|u| u.type_word == crate::selection::RESEARCH_CENTRE) {
+                research::screen(self, &mut ink, play, now_ms)
+            } else {
+                let previews = factory::draw(self, &mut ink, play, t, now_ms);
+                ink.painter.pin = Pin::TOP_RIGHT;
+                map::draw(self, &mut ink, play, now_ms);
+                previews
+            };
+            // Mode 5 shows the cursor (`0x1008d4f1`, over the designer `0x1008d457`), and in
+            // view state 1 it is always `ARROW` (docs/36, "The cursor in mode 5").
+            commander::cursor(self, &mut ink, crate::pick::ARROW, now_ms);
             return Drawn {
                 batches: ink.painter.batches,
                 text: ink.text,
@@ -240,6 +234,8 @@ impl Cockpit {
         if play.mode().commands() {
             if self.designer.is_open() {
                 let previews = designer::draw(self, &mut ink, play, now_ms);
+                // The pick answers kind 0 while the designer is up: `ARROW` (`0x1008dae5`).
+                commander::cursor(self, &mut ink, crate::pick::ARROW, now_ms);
                 return Drawn {
                     batches: ink.painter.batches,
                     text: ink.text,

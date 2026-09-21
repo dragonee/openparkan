@@ -66,6 +66,29 @@ pub struct Screen {
     pub stepped_ms: f64,
 }
 
+/// The percentage the production row shows for a build's `progress`: rounded, and 0 in batch
+/// at 100 (`0x1009765d`–`0x10097676`).
+pub fn shown_progress(progress: f32, batch: bool) -> i32 {
+    let percent = (progress * 100.0).round() as i32;
+    if batch && percent == 100 { 0 } else { percent }
+}
+
+/// The progress bar's fill for `percent`, as (x, y down from the row's top, width, height)
+/// and its colour. The panel hands the bar primitive the percentage it prints
+/// (`0x10097709`–`0x1009772f`), and the primitive fills from its pen, drawing left to
+/// right here, 2 in from the bar's left edge to `percent` of its 136 rounded, 3 in from the
+/// row's top and bottom, in the colour it picks for the percentage (`0x1009a63d`–
+/// `0x1009a6b4`): the weapons list's. It fills nothing at 0.
+pub fn progress_fill(percent: i32) -> Option<([f32; 4], u32)> {
+    if percent <= 0 {
+        return None;
+    }
+    let width = BAR[1] - BAR[0];
+    let end = BAR[0] + (percent.min(100) as f32 * width / 100.0).round();
+    let start = BAR[0] + 2.0;
+    Some(([start, 3.0, end - start, ROW_HEIGHT - 6.0], fill_colour(percent)))
+}
+
 fn inside([x0, y0, x1, y1]: [f32; 4], [x, y]: [f32; 2]) -> bool {
     (x0..=x1).contains(&x) && (y0..=y1).contains(&y)
 }
@@ -149,8 +172,8 @@ pub fn resource_rows(cockpit: &mut Cockpit, ink: &mut Ink, play: &Play, now_ms: 
         let bar_right = pen;
         let bar_left = piece(ink, &mut pen, "ccres_ray_body", BAR_WIDTH);
         if value > 0 {
-            // STAND-IN: docs/36-factory.md#the-resource-rows -- the fill colour the rows
-            // hand their bar is not read: the weapons list's thresholds.
+            // The rows hand their bar only the percentage, and the bar primitive picks the
+            // fill's colour from it (`0x1009a530`–`0x1009a54c`): the weapons list's.
             let x0 = bar_right - BAR_WIDTH * value.min(100) as f32 / 100.0;
             ink.painter.fill(
                 Blend::Alpha,
@@ -310,7 +333,10 @@ pub fn panel(
     put(ink, "ccres_ray_emitter_off", [106.0, y, 116.0, y + ROW_HEIGHT], WHITE);
     put(ink, "ccres_ray_body", [BAR[0], y, BAR[1], y + ROW_HEIGHT], WHITE);
     if f.build.is_some() {
-        let percent = (f.progress() * 100.0).round() as i32;
+        let percent = shown_progress(f.progress(), f.batch);
+        if let Some(([x, dy, w, h], colour)) = progress_fill(percent) {
+            ink.painter.fill(Blend::Alpha, [x, y + dy, w, h], argb(colour));
+        }
         let text = format!("{percent}%");
         ink.centred(&text, BAR[0], BAR[1] - BAR[0], y + text_down, WHITE);
     }
@@ -328,4 +354,29 @@ pub fn panel(
     }
     put(ink, "ccres_ending_stub", [368.0, y, 362.0, y + ROW_HEIGHT], WHITE);
     previews
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::cockpit::weapons::{FILL_HIGH, FILL_LOW, FILL_MIDDLE};
+
+    #[test]
+    fn the_progress_bar_fills_from_its_left_edge_in_the_bars_own_colour_for_the_percentage() {
+        // Nothing at 0, which is also what an idle factory shows.
+        assert_eq!(progress_fill(0), None);
+        // 1% of 136 rounds to 1, so the fill's right edge, 117, stands left of its left, 118,
+        // as the primitive hands the rectangle on.
+        assert_eq!(progress_fill(1), Some(([118.0, 3.0, -1.0, 13.0], FILL_LOW)));
+        assert_eq!(progress_fill(50), Some(([118.0, 3.0, 66.0, 13.0], FILL_MIDDLE)));
+        assert_eq!(progress_fill(100), Some(([118.0, 3.0, 134.0, 13.0], FILL_HIGH)));
+    }
+
+    #[test]
+    fn a_batch_at_a_hundred_percent_shows_nought() {
+        assert_eq!(shown_progress(0.994, false), 99);
+        assert_eq!(shown_progress(1.0, false), 100);
+        assert_eq!(shown_progress(1.0, true), 0);
+        assert_eq!(shown_progress(0.5, true), 50);
+    }
 }

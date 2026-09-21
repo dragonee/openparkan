@@ -579,10 +579,6 @@ pub fn draw(
 /// cursor draws in the top layer: the HUD's text is laid out into its own pass, drawn after
 /// all of the art, so the rows and the order menu under the pointer painted over it, where
 /// the interface drawing the cursor last leaves nothing on top of it.
-///
-/// STAND-IN: docs/42-selection.md#the-cursor-shows-a-state--read-and-measured -- whether the
-/// display's slot 12 answers, which picks the system's cursor, is not read: the software
-/// cursor is drawn, the system's hidden.
 fn band_and_cursor(cockpit: &Cockpit, ink: &mut Ink, now_ms: f64) {
     let panel = &cockpit.commander;
     if let Some([[x0, y0], [x1, y1]]) = panel.band {
@@ -593,11 +589,25 @@ fn band_and_cursor(cockpit: &Cockpit, ink: &mut Ink, now_ms: f64) {
             ink.painter.line(Blend::Alpha, a, b, w, colour);
         }
     }
+    cursor(cockpit, ink, panel.cursor_state, now_ms);
+}
+
+/// The software cursor of cursor state `state` at the commander's cursor (`0x100585b0`,
+/// `0x10057060`), in the top layer, pinned top left as the cursor is laid out. A building's
+/// screen and the warbot designer show it in state 1, `ARROW`: the frame runs the chooser
+/// wherever the cursor is shown (`0x10060c95`), and the pick answers kind 0 in view state 1
+/// and while the designer is up (`0x1008daa4`–`0x1008dae5`), docs/36, "The cursor in mode 5".
+///
+/// STAND-IN: docs/42-selection.md#the-cursor-shows-a-state--read-and-measured -- whether the
+/// display's slot 12 answers, which picks the system's cursor, is not read: the software
+/// cursor is drawn, the system's hidden.
+pub(super) fn cursor(cockpit: &Cockpit, ink: &mut Ink, state: u8, now_ms: f64) {
     let (Some(at), Some((offset, hot)), Some(&page)) =
-        (panel.cursor, crate::pick::cursor_object(panel.cursor_state), cockpit.pages.get("new_ui1"))
+        (cockpit.commander.cursor, crate::pick::cursor_object(state), cockpit.pages.get("new_ui1"))
     else {
         return;
     };
+    ink.painter.pin = Pin::TOP_LEFT;
     let side = crate::pick::CURSOR_SIDE;
     let phase = ((now_ms / crate::pick::CURSOR_PHASE_MS).floor() as i64).rem_euclid(4) as f32;
     let layer = std::mem::replace(&mut ink.painter.layer, Layer::OverText);

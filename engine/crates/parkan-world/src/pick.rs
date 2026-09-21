@@ -100,6 +100,10 @@ pub const STRING_BUILDING_CANCELLED: u32 = 6207;
 /// The buildings a unit's capture pick refuses: a main teleport, a bridge, a ruin.
 const UNTAKEABLE: [u32; 3] = [0x8000_0200, 0x8000_1000, 0x8000_2000];
 
+/// Cursor state 1, `ARROW`: the state a pick of kind 0 shows, and so the state wherever the
+/// pick answers nothing, as in a building's screen and the warbot designer (docs/36).
+pub const ARROW: u8 = 1;
+
 /// The cursor state a pick's kind shows (`0x10058740`, table `0x100587b4`): 1 `ARROW`,
 /// 2 `PICK`, 3 `PLACE`, 4 `TARGET`, 5 `GUARD`, 6 `CAPTURE`, 9 `WRONG_PLACE`.
 pub fn cursor_state(kind: u8) -> u8 {

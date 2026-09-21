@@ -1282,6 +1282,14 @@ impl Screen {
         if self.session.is_some() {
             return Ok(());
         }
+        // Opening writes 9 into the flags of the view the world is drawn from (`0x10055c9b`):
+        // 8 keeps the world from being drawn behind the designer, and the whole word is
+        // replaced, the infrared's `0x20` with it. On a building's screen that view is the
+        // hero's camera, so its night sight is off once the designer closes (docs/36, "The
+        // designer does not pause the world"). In command mode it is the command camera's.
+        if matches!(play.mode(), crate::play::Mode::Factory(_)) {
+            play.hero.pilot.switches.infrared = false;
+        }
         self.opened += 1;
         let path = format!("UNITS\\designer_{}.dat", self.opened);
         let now = play.hero.time_ms;

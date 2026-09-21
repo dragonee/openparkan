@@ -44,6 +44,52 @@ fn mission_02s_factory_pod_captures_the_factory_and_opens_its_screen() {
     assert_eq!(p.progress.owner(0x8000_0001_u32 as i32), 0);
 }
 
+/// Mode 5 shows the cursor as command mode does, and in view state 1 the pick answers
+/// nothing, so it is `ARROW`, drawn last over the screen's text and over the designer's too.
+/// The designer's opening replaces the view's flag word, the infrared's `0x20` with it
+/// (docs/36, "The cursor in mode 5", "The designer does not pause the world").
+#[test]
+#[ignore = "needs the game install"]
+fn the_factory_screen_and_its_designer_draw_the_arrow_last_and_the_designer_puts_out_the_night_sight() {
+    use glam::Mat4;
+    use parkan_world::cockpit::Cockpit;
+    use parkan_world::hud::{Layer, Pages, Space};
+    use parkan_world::play::Mode;
+    use parkan_world::text::GameFont;
+
+    let game = gamedir::find(None).expect("a Parkan install: set PARKAN_DIR");
+    let (mut play, _) = mission_02_play();
+    let factory = play.buildings.iter().position(|b| b.doors.len() == 3).unwrap();
+    let t = play.buildings[factory].target;
+    play.units[t].clan = Some(play.player_clan);
+    play.modes.push(Mode::Factory(t));
+    let pages = Pages::open(&game).unwrap();
+    let mut cockpit = Cockpit::open(&game, &pages, &play).unwrap();
+    let (font, menu) = (GameFont::ui(&game, "GAME_FONT").unwrap(), GameFont::ui(&game, "MENU_FONT").unwrap());
+    let arrow_page = *cockpit.pages.get("new_ui1").expect("the cursors' page");
+    // Left over from command mode: the screen's own pick decides, not this.
+    cockpit.commander.cursor_state = 2;
+    cockpit.commander.cursor = Some([200.0, 100.0]);
+    let last_is_the_arrow = |drawn: &parkan_world::cockpit::Drawn| {
+        let top: Vec<_> = drawn.batches.iter().filter(|b| b.layer == Layer::OverText).collect();
+        let last = drawn.batches.last().unwrap();
+        top.len() == 1
+            && last.layer == Layer::OverText
+            && last.vertices.len() == 6
+            && last.vertices.iter().all(|v| v.page == Some(arrow_page) && v.uv[1] <= 16.0)
+    };
+    cockpit.update(&mut play, 0.0);
+    let drawn = cockpit.draw(&play, Space::new(640.0, 480.0), &font, &menu, Mat4::IDENTITY);
+    assert!(!drawn.text.is_empty(), "the screen's words");
+    assert!(last_is_the_arrow(&drawn), "the factory screen ends in ARROW's quad on new_ui1's top row");
+
+    play.hero.pilot.switches.infrared = true;
+    cockpit.designer.open(&mut play, t, &cockpit.strings).unwrap();
+    assert!(!play.hero.pilot.switches.infrared, "the designer's 9 leaves no 0x20 in the hero's view");
+    let drawn = cockpit.draw(&play, Space::new(640.0, 480.0), &font, &menu, Mat4::IDENTITY);
+    assert!(last_is_the_arrow(&drawn), "over the designer too");
+}
+
 #[test]
 #[ignore = "needs the game install"]
 fn mission_02s_factory_door_opens_for_the_hero_on_its_forecourt_and_shuts_after_it_leaves() {

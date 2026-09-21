@@ -67,19 +67,67 @@ The panel reads the factory's order through the building's `IAgent` slot 6
 **Entering mode 5** (the transition handler `0x10064430`, table `0x10104b18`
 entry 0 → 5):
 - It finds the player's hero record.
+- It clears the keyboard: `World3D.dll`'s `stdClearKeyboard` (`0x10064452`),
+  which drops every pending key and mouse message and the key state
+  ([39-boarding.md](39-boarding.md#boarding--read)).
+- It turns the outer camera off (`0x10038ad0`) and clears the unit selection
+  (`0x1007d270`).
 - It hands the hero back from the player (`0x10074ff0` with 0, which clears the
-  record's `+0xa2`; see [39-boarding.md](39-boarding.md)).
+  record's `+0xa2`; see [below](#what-the-hero-does-while-the-screen-is-up--read)),
+  then gives the hero's own word to the player (its `Wizard.dll` object's slot 9
+  with mask 1 and 3, `0x10064480`–`0x10064485`).
 - It stores the building as the view's building (level `+0xaf0`, `0x100a5680`)
   and the hero as the view's unit (`+0xaec`, `0x100a5660`).
 - It sets the level's state word back to 1 (`0x100a4f90`).
 
-The world is not paused: nothing in the transition or the draw pauses it
-(*derived*).
+The world is not paused: nothing on a building's screen or in the designer
+writes the pause byte, and the `Mission` handler runs on
+([below](#the-designer-does-not-pause-the-world--read)).
 
 *Seen*, on Mission 02: the screen is up at 106.4 s. It appears on the same frame
 as *"from: System / Building is captured"* (string 5039), and the cockpit's HUD
-goes. How the capture and the opening fall on one frame is
-[27-ownership.md](27-ownership.md)'s.
+goes.
+
+**The capture and the opening are one call** (*read*). The building's computer
+calls its callback once, from its tick, when the pod has opened on the hero
+([27-ownership.md](27-ownership.md#capture--read)). For another clan's building
+the callback (`0x10061050`) changes the owner and calls the ownership change
+(`0x100611b0` → `0x100a48a0`), and that routine, on every path:
+1. shows 5039 as a System line (`0x1007eb60`, at `0x100a49d9`, `0x100a4aa6` or
+   `0x100a4b73`, one for each voice) and queues the voice;
+2. for a plant, makes the clan's factory record (`0x100875e0`, `0x100a4c02`),
+   which the opening hands the factory panel;
+3. ends in the opening itself (`0x10062630`, `0x100a4e2d`), which every branch
+   joins at `0x100a4e1e`.
+
+For the player's own building the callback calls the opening straight away
+(`0x100611cc`). So the line, the record and mode 5 all come out of one building
+tick, and the frame the capture is shown on is the frame the screen opens on.
+
+### What the hero does while the screen is up — *read*
+
+**It stands, and the player's keys do not move it.**
+- **Handing back** (`0x10074ff0` with 0, `0x1007510c`) sends the hero's agent
+  the object message (6, 7, 0). Its `Wizard.dll` object takes the 0 as its mode:
+  **0, the AI's** (`Wizard.dll:0x10001ced`). It then sets every one of the
+  Wizard's words to 2, neither side's (mask `0xfff`), and the word for mask
+  `0x10` to 1, the AI's (`0x10075122`–`0x10075145`). It clears `+0xa2`.
+- **The keys' rows run only in the player's mode.** The Wizard hands the frame's
+  update to the manual manager that runs the key rows only while its mode is 1
+  (`Wizard.dll:0x10001ca2`,
+  [14-controls.md](14-controls.md#a-row-that-stays-down--read)). With mode 0 no
+  row runs, so no key, mouse movement or button reaches the hero.
+- **Its AI does not move it either.** The transition's word 3 for mask 1
+  (`0x10064485`) is the unit's own word, `+0x200`. With it at 3 the Wizard does
+  not follow its points (the Wizard's takt,
+  [24-motion.md](24-motion.md#how-the-ai-drives-a-machine--read-and-measured)), and
+  the behaviour's movement and fight flags, which need a word of 1 or a 0 in
+  the AI's mode (`Wizard.dll:0x10003890`), are all off.
+- **What its AI keeps** is mask `0x10`'s word, `+0x208`: the group whose
+  components the permission loop finds in class group 5, the shields and armour
+  ([29-weapons.md](29-weapons.md#who-may-drive-a-units-guns--read)).
+- **Leaving** hands it back to the player (`0x10074ff0` with 1: every word 3 and
+  (6, 7, 1)), and sets `+0xa2` again.
 
 ## What is drawn — *read*, and *seen*
 
@@ -110,6 +158,28 @@ things:
 With the column left out the list of the clan's factories is not drawn
 (`0x100838eb`).
 
+**From first person only pages 4 and 5 are ever up** (*read*). Mode 5 draws
+whatever page the panel is on, but only the pods turn it there: 5 for a plant,
+4 for a research centre (`0x10062723`, `0x1006276a`). The other ways to a page
+are closed in mode 5:
+- the column, which opens pages 1 to 8, is not drawn, and the panel's click
+  reaches the column's buttons only in modes 3 and 4 (`0x1008427a` sends mode 5
+  to `0x10084389`, which tests for 3 and 4 at `0x1008439b`);
+- the letter keys that turn the page act only in mode 3 (`0x10071782`);
+- a click in the world turns to a unit's page only for the unit it picks
+  (`0x10090640`–`0x10090679`), and the pick answers nothing in view state 1
+  (`0x1008daa4`, [42-selection.md](42-selection.md#the-mouses-way-in--read)).
+
+The page setter (`0x10084d80`) has 42 calls, all in `iron3d.dll` (a raw scan of
+its `call`s). Besides the pods, the column, the keys and the world click, they
+pass 0, the page already up, or 5 (a factory row, `0x100861fe`), or sit in the
+transitions into modes 3 and 4
+(`0x10063a20`, `0x10063ca0`) and in a click handler that works on command mode's
+selection (`0x1008fb00`); none was found turning a page in mode 5.
+
+So what pages 1–3 and 6–8 show is command mode's, and is
+[41-commander.md](41-commander.md#the-pages--read)'s.
+
 ### The resource rows
 
 Two rows, right to left from x 640 (`0x1006d6cc`): **Ore** (string 5092) at
@@ -128,6 +198,15 @@ y 0 and **Energy** (5093) at y 21 (`0x1006d7b0`). Each row, right to left:
   (`0x1006d59c`: `0xff80ff80 + 0x7e32b2`).
 - **A zero blinks.** The text is shown or hidden alternately every 0.5 s
   (`+0x4c`, `+0x48`).
+- **The fill is the bar's own** (*read*). Each row hands the bar primitive its
+  displayed value (`+0x24` for Ore at `0x1006d770`, `+0x28` for Energy at
+  `0x1006d860`), the value's colour for the label, and nothing for the fill.
+  The primitive picks the fill's colour from the percentage itself
+  (`0x1009a530`–`0x1009a54c`, and again for the other direction at
+  `0x1009a665`–`0x1009a685`): `0x80800000` under 20, `0x80808000` under 80,
+  `0x80008000` from 80, and no fill at 0 or below. These are the weapons list's
+  colours ([35-hud.md](35-hud.md#the-weapons-list--read-and-measured)) because
+  it is the same primitive; all 12 of its calls in `iron3d.dll` get them.
 - **What the values are.** They are [23-economy.md](23-economy.md#what-the-hud-shows--read)'s:
   held ore over 4500, and net power over the map's power. The displayed number
   steps toward them while the panel is drawn.
@@ -190,7 +269,7 @@ the message box is. **The panel takes a click** anywhere in (51, 21)–(369, 185
 | 51–56 | `0x10099a30`, variant 0 | `ending_stub` | |
 | 56–106 | `0x1009a9e0`, variant 1 | long button, `constructor_icon` at (+10, +2) | **Warbot constructor** (1511) |
 | 106–116 | `0x10099d80` | `ray_emitter_off` | |
-| 116–252 | `0x1009a380`, width 136 | `ray_body` | the progress bar, `"%d%%"` of the progress; empty and 0 while idle; 0 in batch at 100 |
+| 116–252 | `0x1009a380`, width 136 | `ray_body` | the progress bar, `"%d%%"` of the progress; empty and 0 while idle; 0 in batch at 100; filled to that percentage |
 | 252–263 | `0x10099d80`, right to left | `ray_emitter_off`, mirrored | |
 | 263–313 | `0x1009a9e0` | long button | **batch**: `batch_build_icon` while idle, 6238 *Start batch production*; `batch_stop_build_icon` otherwise, 6239 *Stop batch production* |
 | 313–363 | `0x1009a9e0` | long button | **build**: `build_icon` while idle, 1553 *Start production*; `stop_build_icon` otherwise, 3070 *Stop production* |
@@ -230,6 +309,88 @@ the screen.**
 
 Nothing in the mode-5 transition or draw tints the scene (*read*: the calls
 listed above). The pod's look is [27-ownership.md](27-ownership.md)'s.
+
+## The cursor in mode 5 — *read*
+
+**Mode 5 shows the cursor the way command mode does**, through the same flag and
+the same draw ([42-selection.md](42-selection.md#the-cursor-shows-a-state--read-and-measured)).
+
+- **The screens' draw turns it on.** In mode 5 with the hero as the view's unit
+  it sets the cursor-shown byte `0x1010b5c8` (`0x1008d4f1`) and, when the
+  display's slot 12 answers, calls `USER32`'s `ShowCursor(TRUE)` until the
+  system's count is positive (`0x1008d508`–`0x1008d516`; the import is
+  `0x100e41bc`). Over the designer it does the same (`0x1008d457`), and so does
+  the designer's own opening (`0x10055cb2`). The case for mode 0 turns it off
+  again: cursor state 1, the byte cleared, `ShowCursor(FALSE)` until the count
+  is negative (`0x1008d3b8`–`0x1008d3ee`), and so does mode 5 with a driven bot
+  as the view's unit (`0x1008d4a9`).
+- **The frame draws it.** While the byte is set the game frame runs the chooser
+  and the draw (`0x10058710`, called at `0x10060c95` unless the cursor is in
+  state 8).
+- **It is `ARROW`.** The chooser takes the state from the pick's kind
+  (`0x10058740`), and the pick answers kind 0 in view states 1, 3, 4 and 6 and
+  while the designer is up (`0x1008daa4`–`0x1008dae5`, the early exit
+  `0x1008e1b1` returns 0). Mode 5 runs in view state 1, so the state is 1, and
+  its draw is `ARROW`'s object `0x1010b2d8` (`0x100586c6`).
+- **Software or system.** The software strip is drawn only when slot 12 does not
+  answer (`0x10057060`), as in command mode; which it is on a given display is
+  not read (42-selection's *Not established*).
+
+`0x100a4fc0`, which the transition's state setter ends in and which this page
+once left unfollowed, is not the cursor: it hands the mouse filter the zoom of
+the view state's unit ([30-turrets.md](30-turrets.md#the-zoom--read-and-measured)).
+
+## The designer does not pause the world — *read*
+
+**The flag word it sets is the view's, and its flag 8 is "draw no world".**
+- **Whose word.** The designer's opening passes 9 to slot 13 of the level's `+0`
+  (`0x10055c90`–`0x10055c9b`). That is the view the world is drawn from: the
+  state setter stores there what `0x100a1c30` picks for the view state
+  (`0x100a4fb2`), and in view state 1 that is the view's unit's camera view
+  (`0x1007e6a0`, its record's `+0x4c`). On a building's screen that unit is the
+  hero; in command mode the view is the command camera's.
+- **What the word is.** It is `Terrain.dll`'s `CCamera` flags (vtable
+  `0x1009c620`), slot 13 storing it whole at `+0x164` (`0x10084a79`) and slot 20
+  reading it (`0x10084ad6`). The unit camera's getter turns flag 1 on
+  (`0x1007e707`), and `0x20` is the infrared
+  ([35-hud.md](35-hud.md#the-indicators--read-and-seen)).
+- **What 8 does.** `CCamera::Render` (`0x100844c0`,
+  [03-terrain.md](03-terrain.md#when-it-draws--read)) tests it twice. With it
+  set it skips the world's `0x800` pass (`0x100845e5`) and the world and its
+  `0x1000` pass (`0x100846fb`). Of the 18 instructions in `Terrain.dll` that
+  address a `+0x164`, those two are the only tests of 8.
+- **Closing** clears 8 alone (`0x10055d27`, and the exit, accept and Esc paths at
+  `0x100514a0`, `0x10051843`, `0x10055f04`). A search of eight modules
+  (`iron3d`, `Control`, `World3D`, `Terrain`, `Behavior`, `AniMesh`, `Effect`,
+  `ai`) for a slot-20 call followed by a mask of 8, or a slot-13 call handed 8
+  or 9, finds these five sites; its three other hits call other interfaces with
+  three or four arguments (`iron3d.dll:0x1005abb7`, `Behavior.dll:0x10032a9d`,
+  `0x10032b93`).
+
+So **behind the designer the world is not drawn, and it goes on running.** The
+opening's 9 replaces the whole word, so on a building's screen **the hero's
+night sight is off after the designer** (*derived*).
+
+**Nothing on these screens pauses the game.** The pause byte `+0xe8` has two
+writers in `iron3d.dll`: the game's constructor (`0x1005c512`) and the setter
+`0x1005f620`, which alone calls `World3D`'s `PauseGameTime` and
+`ResumeGameTime`. The setter's five calls are the interface's pause and resume
+(`0x1008d830`, `0x1008d850`), which the character handler's code `0x13`
+toggles while playing (`0x10071094`–`0x100710e9`) and Esc lifts
+(`0x10070df2`); the help screen opening and closing
+(`0x10067895`, `0x10067935`) and a widget's show slot, which pauses while it
+is shown (`0x100656d3`, slot 11 of the vtable at `0x100e61ec`). That widget
+is the game menu's (*guess*: the transition into mode 7 calls slot 11 of the
+interface's `+0xc` with 1, `0x10064616`). Neither the transitions into and out
+of mode 5 (`0x10064430`, `0x100644b0`) nor the designer's open and close call
+it. The search is the one that finds the setter's own store at `0x1005f630`,
+the thing known to be there.
+
+**So the `Mission` handler runs** while a building's screen or the designer is
+up: its gates are the pause byte, the game's state word at 3 and the level's
+view state at 5 (`0x1005ed5d`–`0x1005ed7f`,
+[34-progression.md](34-progression.md#when-the-mission-handler-runs--read)), and
+mode 5 sets the view state to 1.
 
 ## What the controls do — *read*
 
@@ -395,8 +556,10 @@ when there are none (*derived*).
   `fr_b_plant`, size 4, with `FreeBotNum` 100. The design is a large chassis,
   so the build takes no ore and 1 power, and 60 s
   ([23-economy.md](23-economy.md#construction--read)'s large × large).
-- **One free mind.** Plr has 2 minds and the hero holds one, so the panel reads
-  1, and 0 once the build starts ([34-progression.md](34-progression.md)).
+- **One free mind** (*read*, and *measured*). Plr has 2 minds, and the hero,
+  its one placed robot, took one as the mission placed it
+  ([23-economy.md](23-economy.md#the-bot-limit-is-the-clans-mind-count--read-and-measured)),
+  so the panel reads 1, and 0 once the build starts.
 - *Seen*:
   - 106.4 s: the screen opens. Energy counts up from 0; the CPU count reads 1;
     `free_bots_icon` shows.
@@ -415,11 +578,14 @@ when there are none (*derived*).
    factory and it fires:
    - select the factory (`VOICE_SELECTED` if it was not selected);
    - close the wingman menu;
-   - hand the hero's control away (it stands);
+   - hand the hero's control away: no key reaches it and its AI does not move
+     it, so it stands;
    - push view mode 5;
    - hide the cockpit HUD;
    - draw the screen and the message box at (374, 352), 266 wide;
-   - show the mouse cursor (*seen*).
+   - show the cursor, `ARROW`, as command mode shows its own;
+   - capturing a plant and opening it are one step: its System line and its
+     screen come on the same frame.
 2. **Draw, on 640 × 480:**
    - the Ore and Energy rows at the top right, as tabulated;
    - the header "Factory" (1607) from (51, 0) with the exit button at
@@ -436,7 +602,9 @@ when there are none (*derived*).
    - the recent-project buttons at x 59 + 23i;
    - the free-bots icon at 279;
    - the brain icon and the free-mind count at 324 and 344;
-   - the bottom row at y 150 as tabulated;
+   - the bottom row at y 150 as tabulated, the progress bar filled from 2 in
+     from its left edge to its percentage of 136, in the weapons list's colours;
+   - the resource rows' fills in the same colours;
    - tooltips by rectangle.
 3. **Controls:**
 
@@ -461,24 +629,61 @@ when there are none (*derived*).
      a warbot"* at the next Mission run.
    - Queue `VOICE_UNIT_READY` for the player's clan.
    - In batch, restart while a mind is free.
-5. **While up**, the mission runs on. The pod's green glass stays around the
-   camera until the hero steps off.
+5. **While up**, the mission runs on, the `Mission` handler included; neither the
+   screen nor the designer pauses anything. The designer draws no world behind
+   it, and puts the hero's night sight out. The pod's green glass stays around
+   the camera until the hero steps off.
 
 ## Not established
 
-- The mechanism that puts the capture and the screen on one frame on Mission 02
-  ([27-ownership.md](27-ownership.md)).
+- ~~The mechanism that puts the capture and the screen on one frame on Mission 02~~
+  — **read**, and already in [27-ownership.md](27-ownership.md#capture--read)
+  before this line was queued: the ownership change ends in the opening
+  (`0x100a4e2d`), so one pod firing both takes the plant and opens it
+  ([How the screen opens](#how-the-screen-opens--read)).
 - The stat lines `0x1006fc00` draws in the box, and the preview's camera and
   turn rate. They are shared with the designer
   ([37-designer.md](37-designer.md), [38-designs.md](38-designs.md)).
-- What handing the hero back does to it while the screen is up, beyond clearing
-  `+0xa2` ([39-boarding.md](39-boarding.md)), and whether the player's keys
-  still move it.
-- Whether the designer pauses the world. It sets bit 8 of the level's flag word
-  when it opens and clears it when it closes (`0x10055c9b`, `0x10055d27`), and
-  what that bit does was not read.
-- How the cursor is shown in mode 5 (`0x100a4fc0` in state 1 was not followed).
+- ~~What handing the hero back does to it while the screen is up, beyond clearing
+  `+0xa2`, and whether the player's keys still move it~~ — **read**: its Wizard
+  goes to the AI's mode, in which no key row runs, and with its own word at 3
+  and every other at 2 neither the player nor its AI moves it; only its shields
+  and armour stay the AI's
+  ([What the hero does](#what-the-hero-does-while-the-screen-is-up--read)).
+- ~~Whether the designer pauses the world (bit 8 of the level's flag word,
+  `0x10055c9b`, `0x10055d27`)~~ — **read**: it does not. The word is the view's
+  camera flags, and 8 stops the world being drawn behind the designer; nothing
+  on a building's screen or in the designer writes the pause byte, so the
+  `Mission` handler runs
+  ([The designer does not pause the world](#the-designer-does-not-pause-the-world--read)).
+- ~~How the cursor is shown in mode 5 (`0x100a4fc0` in state 1 was not
+  followed)~~ — **read**: as in command mode, the screens' draw turning it on and
+  the frame drawing it, always `ARROW` because the pick answers nothing in view
+  state 1; `0x100a4fc0` is the mouse filter's zoom
+  ([The cursor in mode 5](#the-cursor-in-mode-5--read)). Whether it is the
+  system's cursor or the software strip is the display's slot 12, which
+  [42-selection.md](42-selection.md#not-established) has not read.
 - The heading the escape leaves the new bot with, and whether a flyer climbs on
-  its way out.
-- What commander pages 1–4 and 6–8 show from first person; only page 5 is read
-  here.
+  its way out. *Narrowed.*
+  - The escape sets no heading of its own. The bot is made facing +x and ends
+    facing as its walk leaves it: the walker's last point and the stop after
+    it, through the Wizard's heading curve (`Wizard.dll:0x10003d80`), which
+    [24-motion.md](24-motion.md#not-established) has not read.
+  - The climb is the height a flyer's walk points are given, which
+    [24-motion.md](24-motion.md#how-the-ai-drives-a-machine--read-and-measured)
+    and [31-packages.md](31-packages.md#not-established) leave open. One
+    candidate is now ruled out. `Movement_FlyHeight` and
+    `Movement_FlyNearLandHeight` are bound into a profile at `+0xa8` and
+    `+0xac` (`Behavior.dll:0x1001681e`, `0x10016836`). One routine reads them,
+    setting a point's z to the ground under it plus one or the other
+    (`0x100153a0`), and **nothing calls it**. A raw scan of `Behavior.dll`
+    finds no `call` or `jmp` to it and no stored copy of its address, where the
+    same scan finds the seven calls of the ground routine it uses
+    (`0x100146b0`). Of the module's float reads at a `+0xa8` or `+0xac`, the
+    profile's are that routine's two.
+- ~~What commander pages 1–4 and 6–8 show from first person; only page 5 is read
+  here~~ — **read**: from first person only pages 4 and 5 are ever up. Mode 5
+  reaches no other page: the column works only in modes 3 and 4 and the page
+  keys only in mode 3 ([What is drawn](#what-is-drawn--read-and-seen)). What
+  the other pages show is command mode's, in
+  [41-commander.md](41-commander.md#the-pages--read).

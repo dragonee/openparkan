@@ -1237,15 +1237,19 @@ impl App {
     /// The commander's cursor this frame: the ghost follows it, and the pick under it picks
     /// the cursor's state (`0x10058710`).
     fn command_cursor(&mut self) {
-        // Over the warbot designer the system's cursor shows, as on the factory screen.
+        // Command mode, a building's screen and the designer over either show the cursor
+        // (`0x1008d51c`, `0x1008d4f1`, `0x1008d457`), and the cockpit draws it in software in
+        // place of the system's (docs/42, "The cursor shows a state").
+        let shown = self.play.as_ref().is_some_and(|p| p.mode().shows_cursor());
+        if let Some(r) = self.running.as_ref()
+            && shown != self.cursor_hidden
+        {
+            r.window.set_cursor_visible(!shown);
+            self.cursor_hidden = shown;
+        }
+        // Over the designer the pick answers nothing, and the cursor is `ARROW` (`0x1008dae5`).
         let designer = self.hud.as_ref().is_some_and(|h| h.cockpit.designer.is_open());
         let command = !designer && self.play.as_ref().is_some_and(|p| p.mode().commands());
-        if let Some(r) = self.running.as_ref()
-            && command != self.cursor_hidden
-        {
-            r.window.set_cursor_visible(!command);
-            self.cursor_hidden = command;
-        }
         if !command {
             return;
         }
@@ -1294,10 +1298,8 @@ impl App {
     }
 
     fn redraw(&mut self) {
-        // A building's screen shows the cursor (docs/36, "For an engine").
-        //
-        // STAND-IN: docs/36-factory.md#not-established -- how the cursor is shown in mode 5
-        // is not followed: the system's cursor, the grab let go.
+        // A building's screen shows the cursor, as command mode does (docs/36, "The cursor in
+        // mode 5"): the grab is let go, and the cockpit draws the cursor.
         if self.grabbed && self.play.as_ref().is_some_and(|p| p.mode().shows_cursor()) {
             self.grab(false);
         }

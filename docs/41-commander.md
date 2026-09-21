@@ -42,7 +42,7 @@ the screens draw (`0x1008d200`):
 | when | arguments | what shows |
 |---|---|---|
 | `CState` modes 3 and 4 (`0x1008d51c`), no designer up | 0, 0 | everything: resource rows, the column, the page |
-| mode 5 (`0x1008d444`), the view's unit not driven | 0, 1 | resource rows and the page ([36-factory.md](36-factory.md#what-is-drawn--read-and-seen)) |
+| mode 5 (`0x1008d444`), the view's unit not driven | 0, 1 | resource rows and the page, which is only ever 4 or 5 there ([36-factory.md](36-factory.md#what-is-drawn--read-and-seen)) |
 | the cursor kind (`0x10104148`) is 8 (`0x1008d326`) | 1, 0 | the resource rows alone |
 
 - **In modes 3 and 4** the screens draw first shows the cursor, then the unit
