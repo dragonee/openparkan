@@ -641,9 +641,12 @@ when there are none (*derived*).
   before this line was queued: the ownership change ends in the opening
   (`0x100a4e2d`), so one pod firing both takes the plant and opens it
   ([How the screen opens](#how-the-screen-opens--read)).
-- The stat lines `0x1006fc00` draws in the box, and the preview's camera and
-  turn rate. They are shared with the designer
-  ([37-designer.md](37-designer.md), [38-designs.md](38-designs.md)).
+- ~~The stat lines `0x1006fc00` draws in the box, and the preview's camera and
+  turn rate~~ — **read**, in the designer's docs: the lines are the unit box
+  ([38-designs.md](38-designs.md#the-unit-box--read-and-measured)), and the camera
+  stands on −x looking along +x, its 60° across the view's width
+  ([37-designer.md](37-designer.md#the-previews--read-and-seen)). What scene colour
+  a preview's materials take while the screen is up is still open there.
 - ~~What handing the hero back does to it while the screen is up, beyond clearing
   `+0xa2`, and whether the player's keys still move it~~ — **read**: its Wizard
   goes to the AI's mode, in which no key row runs, and with its own word at 3

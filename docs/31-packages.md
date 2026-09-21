@@ -855,8 +855,9 @@ agree with the recording.
   capturer takes. The hall way's shortest way from the nearest exit is a
   stand-in.
 - How high a flyer's points are put, and so whether it touches down at its
-  corner or hovers there (`Movement_FlyHeight` 40 and `FlyNearLandHeight` 15,
-  by name only).
+  corner or hovers there. ~~`Movement_FlyHeight` 40 and `FlyNearLandHeight` 15~~
+  are ruled out: their only reader, `Behavior.dll:0x100153a0`, is never called
+  ([24-motion.md](24-motion.md#how-the-ai-drives-a-machine--read-and-measured)).
 - Why the helicopter covered its first 443 m at about 10 m/s, a third of its
   33.3 m/s forward top speed.
 - What held it at (715, 847) from 362 s: a roaming search plans again whenever
@@ -1875,9 +1876,13 @@ captures by logic id 34 times.
   ([25-sensors.md](25-sensors.md#what-moves-an-attitude-being-shot-and-nothing-else--read));
   what `IGameObject` slot 21, the test that the firer still exists, answers; how
   high a flying medusa holds against its attack's three-dimensional circle.
-- What a unit record's `+0x30` is. The wingman menu lets only 1 or 2 capture, the
-  same records speak `_S` voices, 4 and 5 speak `_B`, and boarding wants 4
-  ([27-ownership.md](27-ownership.md#a-neutral-unit-is-taken-by-the-hero--read-and-measured)).
+- ~~What a unit record's `+0x30` is. The wingman menu lets only 1 or 2 capture, the
+  same records speak `_S` voices, 4 and 5 speak `_B`, and boarding wants 4~~ —
+  **read**: the size class. One bind, `iron3d.dll:0x1007e3c0`, writes it for a
+  unit's record and a building's alike, from what the object answers for `0x201`,
+  `MBehaviour`'s `+0x960`, the size letter of its root name
+  ([38-designs.md](38-designs.md#the-catalogue--read-and-measured),
+  [27-ownership.md](27-ownership.md#a-neutral-unit-is-taken-by-the-hero--read-and-measured)).
 - ~~The two labels a wingman line draws beside its number (`iron3d.dll:0x10077120`).~~
   Answered: the unit's two icons and its name over its life
   ([The wingman menu from first person](#the-wingman-menu-from-first-person--read-and-measured)).

@@ -2955,7 +2955,12 @@ All three controllers are mode 0, with no gravity term
 nothing more than a walker does: timed points with flags 0 or 1, the cubic's
 velocity in the machine's frame each tick, and the yaw spin. The height its
 points are given is not traced. `Movement_FlyHeight` is 40 and
-`FlyNearLandHeight` 15, by name only.
+`FlyNearLandHeight` 15, and they reach no point: the profile binds them at
+`+0xa8` and `+0xac`, and their one reader, `Behavior.dll:0x100153a0`, which sets a
+point's z to the ground under it plus one of the two, is never called — no call or
+jump reaches it, its address stands in no shipped DLL as a pointer, and it is not
+exported, where the same scan finds all 7 calls of the ground routine
+`0x100146b0` it calls ([36-factory.md](36-factory.md#not-established)).
 
 ### The global path — *read*, and *measured*
 
@@ -3236,7 +3241,9 @@ patrol runs past it.
   the link's tail words 1 and 5
   ([The hall-way gates](#the-hall-way-gates-in-the-shipped-buildings--read-and-measured));
   the Wizard's heading curve
-  (`0x10003d80`), and who reads `Movement_FlyHeight`.
+  (`0x10003d80`); ~~who reads `Movement_FlyHeight`~~ — **read**: only
+  `Behavior.dll:0x100153a0`, which nothing calls
+  ([How the AI drives a machine](#how-the-ai-drives-a-machine--read-and-measured)).
 - Whether the walker's clear (`0x1003c540`) also empties the points the Wizard
   already holds. `ClearWizardPath` is logged at `0x10040e3b`.
 - **What lets a mover past a face flagged `0x20`.** The collision's own two

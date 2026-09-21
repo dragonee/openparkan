@@ -743,8 +743,8 @@ Capturing a bot is not done at a pod. It is the hero's **Enter** —
    an ally's bot cannot be taken this way.
 
 For a unit, `Capture` changes only its clan, SuperAI and areal map
-(`Behavior.dll:0x10009051`). The mind it then needs is taken the way any
-placed or captured bot takes one
+(`Behavior.dll:0x10009051`), and **writes no mind**: a unit the hero's Enter
+takes holds none, where a placed or built one takes a free entry as it is made
 ([23-economy.md](23-economy.md#the-bot-limit-is-the-clans-mind-count--read-and-measured)).
 Nothing else found calls `Capture` on a unit: the AI clans have no way to take
 a neutral bot (a search, not a proof).

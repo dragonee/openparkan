@@ -305,8 +305,9 @@ institute `…400`, mine `…04`, plant `…10`, storage `…08`, main teleport
 `0x80200000` — and a bunker (17) the small, medium or large bunker `Type` by
 its size; teleports (22), tower parts (23) and ruins (28) give 0. A turret
 (kind 9, sub-kind 33) gives a unit `Type` by its role: transport
-`0x1004000`, builder `0x1010000`, HQ `0x1020000`, hero `0x1002000`, and a
-battle robot `0x1008000` for anything else. *Measured*: **164 of 167** placed
+`0x1002000`, builder `0x1004000`, HQ `0x1010000`, hero `0x1020000`, and a
+battle robot `0x1008000` for anything else — `varset.var`'s `ROBOT_TRANSPORT`,
+`ROBOT_BUILDER`, `ROBOT_HQ`, `ROBOT_HERO` and `ROBOT_BATTLEUNIT`. *Measured*: **164 of 167** placed
 buildings carry the `Type` their root part derives; the other three are ruins,
 placed as `0x80002000` where the derivation gives 0. Over the 395 parts of a
 tree, **293 derive 0** and 102 name a building or a unit — the same split in

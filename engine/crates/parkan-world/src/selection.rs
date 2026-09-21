@@ -176,10 +176,8 @@ impl Play {
         self.commander.units.iter().copied().filter(|&t| self.own_alive(t, KIND_UNIT)).collect()
     }
 
-    /// The record `+0x30` of unit `t`.
-    ///
-    /// STAND-IN: docs/31-packages.md#not-established -- what the record's `+0x30` is is not
-    /// read: the size class of the chassis's name.
+    /// The record `+0x30` of unit `t`: its size class, which the record's bind asks the
+    /// object for (message `0x201`) and the chassis's name gives (docs/38, "The catalogue").
     pub fn record_class(&self, t: usize) -> u8 {
         self.units.get(t).map_or(0, |u| u.designation.size_class)
     }

@@ -414,7 +414,8 @@ both, and both to it ([04-missions.md](04-missions.md)).
 
 Four trees make up the rest. There is no mine or storage, so the factory
 screen's Ore reads 0% the whole mission ([23-economy.md](23-economy.md#what-the-hud-shows--read)).
-The player's two minds are one for the hero and one to spare, so the player
+The player's two minds are one for the hero and one to spare — the hero takes
+its entry as the mission places it, *read* — so the player
 can have **one bot besides the hero** ([23-economy.md](23-economy.md#the-bot-limit-is-the-clans-mind-count--read-and-measured)).
 
 **The island is ringed by a lake bed.** Tut_2's water is 126 faces, all at
@@ -948,9 +949,10 @@ one as on Mission 03
 ([23-economy.md](23-economy.md#the-bot-limit-is-the-clans-mind-count--read-and-measured)).
 Once the HQ is taken, the recording's factory panel still shows **1 free**
 (*seen*, below), and then 0 when the build starts. So of the hero, the
-helicopter and the HQ, one holds no mind. Which one is not established;
-Mission 03's four free of seven, beside three placed units, points at the HQ
-taken by Enter.
+helicopter and the HQ, one holds no mind, and it is the **HQ**: every unit a
+mission places takes a free entry as it is made, and the `Capture` that Enter
+runs on a unit writes none
+([23-economy.md](23-economy.md#the-bot-limit-is-the-clans-mind-count--read-and-measured)).
 
 ### Seen in a recording
 

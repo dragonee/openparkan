@@ -157,7 +157,8 @@ something, and it does not index anything (*read*). `Behavior.dll`'s reader
 (`0x10004c40`): when `GiveDefaultOrder` is on, the behaviour is not locked
 (`LockBehaviour`, `0x10066bac`, off; two of the behaviour's own flags clear),
 and **the behaviour's `+0xa00` equals `DefaultOrderPhase`**, it gives a battle
-robot (`Type` `0x1008000`) order 13 and the hero (`0x1002000`) order 6 —
+robot (`Type` `0x1008000`) order 13 and a transport (`0x1002000`,
+`ROBOT_TRANSPORT`) order 6 —
 `ORDER_ROBOT_RANDOMGO` and `ORDER_ROBOT_TRANSPORT` by
 [31-packages.md](31-packages.md)'s numbering (`0x10004c80`). So it is a phase
 number compared with a behaviour field, not an index. *Derived*: the only
