@@ -906,26 +906,30 @@ exception:
 `0xf0f1` magic at `0x10054f5f`, and the class word after it is decided at
 `0x10054505`–`0x10054551`:
 
-- **An animal.** The test is `cmp byte ptr [ecx], 0x61` on the design state's
-  `+0x370`, answering `0x20000000` when the string begins with **lower-case
-  `a`**. *Corrected 2026-09-20*: this line read that string as the chassis's
-  name, and it is not. Measured over all **29** trees, the **27** chassis part
-  ids are identical in every one and **all 27 are upper case** — `A_L_01`..
-  `A_L_05` are the five animal ones — so **0 of the 783** examined begin with
-  lower-case `a`, and this test would never fire on a chassis id. What `+0x370`
-  holds is *not established*; the designer's kind prefix, spelled `r_`, `fr_`
-  and `a_`, is the likely candidate but no store into the field was found
-  ([38-designs.md](38-designs.md#not-established)). It makes no
-  difference to a robot design, where the base part is a chassis and the `Type`
-  comes from the turret either way.
+- **An animal.** The test is `cmp byte ptr [ecx], 0x61` on the destination
+  panel's `+0x370` (the designer's `+0xbca0`), answering `0x20000000` when the
+  string begins with **lower-case `a`**. *Corrected 2026-09-20*: this line read
+  that string as the chassis's name, and it is not. Measured over all **29**
+  trees, the **27** chassis part ids are identical in every one and **all 27 are
+  upper case** — `A_L_01`..`A_L_05` are the five animal ones — so **0 of the
+  783** examined begin with lower-case `a`, and this test would never fire on a
+  chassis id. **It is the designer's kind string** (*read*): the panel's Chassis
+  tab keeps a string at `+0x36c`, its text at `+0x370`, and the destination's
+  builder (`0x1004bf70`) copies into it the string the layout hands both panels
+  (`0x1004ca24`–`0x1004ca91`; `0x1004ebca`, `0x1004ebd6`) — `"r"` from the
+  factory, `r_`, `fr_` or `a_` from a clear (`0x100513c5`). So only the animal
+  designer, which nothing opens, answers an animal
+  ([38-designs.md](38-designs.md#not-established)); for a robot design the base
+  part is a chassis and the `Type` comes from the turret.
 - **Otherwise the base part.** `0x1008a500` fills a record for the design's
-  base part (design `+0x39c`) through the research tree's reader. It takes
+  base part (the Chassis row's research item, the panel's `+0x39c`) through the
+  research tree's reader. It takes
   slot 12 (`+0x23`), slot 11 (`+0x24`), slot 18 (`+0x25`), slot 14 (`+0x22`,
   the role) and slot 17 (`+0x26`, the size): `MisLoad.dll:0x10002d50`,
   `0x10002d80`, `0x10002de0`, `0x10002e10`, `0x10002db0`.
 - **A chassis passes the question on.** If the base part's `+0x23` is 9, the
-  record is filled again for the design's second part (`+0xd240`), the
-  turret.
+  record is filled again for the design's second part, the turret: the Turrets
+  row's research item, the panel's `+0xd240` ([37-designer.md](37-designer.md#a-rows-record--read-and-measured)).
 - **The Type** (`0x1008a590`):
 
 | `+0x23` | `+0x24` | Type |

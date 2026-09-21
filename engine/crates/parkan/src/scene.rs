@@ -463,7 +463,15 @@ pub fn draw_hud(
         })
         .collect();
     let mut views: Vec<parkan_render::ModelView> = views;
-    views.extend(previews(renderer, device, queue, hud, play, &drawn.previews));
+    views.extend(previews(
+        renderer,
+        device,
+        queue,
+        hud,
+        play,
+        &drawn.previews,
+        lighting.map(|l| l.scene_colour),
+    ));
     renderer.set_views(device, views);
     (drawn.voices, drawn.sounds)
 }
@@ -478,6 +486,7 @@ fn previews(
     hud: &mut Hud,
     play: &mut Play,
     shown: &[parkan_world::cockpit::designer::Preview],
+    scene_colour: Option<[f32; 3]>,
 ) -> Vec<parkan_render::ModelView> {
     let keys: Vec<_> = shown.iter().map(|p| p.key.clone()).collect();
     if keys != hud.preview_keys {
@@ -511,15 +520,20 @@ fn previews(
         .enumerate()
         .map(|(i, p)| {
             renderer.set_preview_instance(queue, i, p.model, true);
-            // STAND-IN: docs/37-designer.md#the-previews--read-and-seen -- the two lights'
-            // colours and the view's scene colour are not read: grey 0.4 and 0.15.
-            let light = |direction| parkan_render::frame::Light { direction, colour: [0.4, 0.4, 0.4] };
+            // The two lights turn with the model and are (2, 2, 2) each (docs/37, "The
+            // previews").
+            let [a, b] = p.lights.map(|d| p.model.transform_vector3(d).normalize_or(glam::Vec3::NEG_Z));
+            let colour = [parkan_world::cockpit::designer::PREVIEW_LIGHT_COLOUR; 3];
+            let light = |direction| parkan_render::frame::Light { direction, colour };
             parkan_render::ModelView {
                 viewport: p.viewport,
                 view_proj: p.view_proj,
                 lighting: parkan_render::frame::Lighting {
-                    lights: [light(p.lights[0]), light(p.lights[1])],
-                    scene_colour: [0.15, 0.15, 0.15],
+                    lights: [light(a), light(b)],
+                    // STAND-IN: docs/37-designer.md#the-previews--read-and-seen -- the scene
+                    // colour a preview's materials take: the sky's, as every drawn material
+                    // takes it (docs/10), whose value while the designer is up is not traced.
+                    scene_colour: scene_colour.unwrap_or([0.15; 3]),
                     fog_start: f32::MAX,
                     fog_end: f32::MAX,
                     eye: glam::Vec3::ZERO,

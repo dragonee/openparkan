@@ -247,18 +247,24 @@ class Designer:
         return Part(part, -1, CLASS_CHASSIS, self.defaults(part))
 
     def fit_turret(self, design: Part, part: str) -> Part:
-        """The turret on the chassis node labelled ``e_tur_``, its slots filled."""
+        """The turret on the chassis node labelled ``e_tur_``, its slots filled.
+
+        The game's fit is never asked to replace a turret: its takt adds one only into an
+        empty Turrets row (``iron3d.dll:0x100509ba``), so a fitted turret is refused here.
+        """
+        if any(c.kind == CLASS_TURRET for c in design.children):
+            raise ValueError(f"{design.part} has a turret fitted; take it off first")
         node = next(i for i, s in enumerate(self.labels(design.part))
                     if s.lower().startswith(TURRET_PREFIX))
-        design.children = [c for c in design.children if c.kind != CLASS_TURRET]
         turret = Part(part, node, CLASS_TURRET, self.defaults(part))
         design.children.append(turret)
         return turret
 
     def fit_gun(self, turret: Part, part: str, socket: int) -> Part:
-        """A gun on turret node ``socket``, its clip slot filled."""
-        turret.children = [c for c in turret.children
-                           if not (c.kind == CLASS_GUN and c.attach == socket)]
+        """A gun on turret node ``socket``, its clip slot filled; refused on a socket that
+        holds one, as the game's takt refuses it (``0x10050a0e``)."""
+        if any(c.kind == CLASS_GUN and c.attach == socket for c in turret.children):
+            raise ValueError(f"{turret.part} node {socket} holds a gun; take it off first")
         gun = Part(part, socket, CLASS_GUN, self.defaults(part))
         turret.children.append(gun)
         return gun

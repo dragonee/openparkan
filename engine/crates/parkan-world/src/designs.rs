@@ -324,10 +324,9 @@ fn read(assembly: &mut Assembly, reference: &objects::ResourceRef) -> Option<Vec
 
 impl Designer {
     /// A designer for `catalogue`, graded for a factory of size class `grade`, with the unit
-    /// box's `[TEMP]` ranges from `Iron_3D.ini`.
-    ///
-    /// STAND-IN: docs/38-designs.md#not-established -- that the factory record's `+0x30`, the
-    /// grade, is the building's size class is derived from its readers, not its writer.
+    /// box's `[TEMP]` ranges from `Iron_3D.ini`. The grade is the factory record's `+0x30`,
+    /// which the record's bind writes from the building's property `0x201`, its size class
+    /// (`iron3d.dll:0x1007e549`; docs/38, "The grade is the factory's size").
     pub fn new(game: &Path, catalogue: Catalogue, grade: usize) -> Designer {
         let temp = |key: &str, default: f32| {
             crate::settings::value(game, TEMP_SECTION, key).and_then(|v| v.parse().ok()).unwrap_or(default)
@@ -394,30 +393,31 @@ impl Designer {
         Node::new(part, -1, CLASS_CHASSIS, children)
     }
 
-    /// The turret on the chassis node labelled `e_tur_`, its slots filled, replacing any
-    /// turret and what hangs on it.
-    ///
-    /// STAND-IN: docs/38-designs.md#not-established -- what the turret fit does to guns on a
-    /// replaced turret is not read: they go with it.
+    /// The turret on the chassis node labelled `e_tur_`, its slots filled; false when a turret
+    /// is fitted already. The game's fit is never asked to replace one: its takt adds a turret
+    /// only into an empty Turrets row (`iron3d.dll:0x100509ba`), and taking a turret off takes
+    /// its radar, its deflector and its guns with it (docs/38, "Fitting").
     pub fn fit_turret(&mut self, assembly: &mut Assembly, design: &mut Node, part: &str) -> bool {
         let labels = self.labels(assembly, &design.part);
         let Some(node) = labels.iter().position(|l| l.to_ascii_lowercase().starts_with(TURRET_PREFIX)) else {
             return false;
         };
+        if design.children.iter().any(|c| c.class == CLASS_TURRET) {
+            return false;
+        }
         let children = self.defaults(assembly, part);
-        design.children.retain(|c| c.class != CLASS_TURRET);
         design.children.push(Node::new(part, node as i32, CLASS_TURRET, children));
         true
     }
 
-    /// A gun on turret node `socket`, its clip slot filled, replacing the gun there.
-    ///
-    /// STAND-IN: docs/38-designs.md#not-established -- what swapping a gun does to its clip is
-    /// not read: the old gun and its clip go.
+    /// A gun on turret node `socket`, its clip slot filled; false when the socket holds a gun
+    /// already, which the game's takt never fits into (`iron3d.dll:0x10050a0e`).
     pub fn fit_gun(&mut self, assembly: &mut Assembly, design: &mut Node, part: &str, socket: i32) -> bool {
         let children = self.defaults(assembly, part);
         let Some(turret) = design.turret_mut() else { return false };
-        turret.children.retain(|c| !(c.class == CLASS_GUN && c.attach == socket));
+        if turret.children.iter().any(|c| c.class == CLASS_GUN && c.attach == socket) {
+            return false;
+        }
         turret.children.push(Node::new(part, socket, CLASS_GUN, children));
         true
     }
@@ -666,8 +666,14 @@ impl Designer {
     }
 
     /// A round's damage, range and blast: its nodes' hit points and their explosions' damage,
-    /// its controller's first bound, and its first node's area blast radius
-    /// (docs/29-weapons.md).
+    /// its controller's first bound, and the reach of its blasts (docs/29-weapons.md).
+    ///
+    /// The blast is what a gun keeps at `+0x178` from the round it makes as it links, the
+    /// round's property `0xa5` (`Control.dll:0x1002983a`, `0x100136c0` with 1): node 0's
+    /// `.exp` radius, raised to the farthest any other node's blast reaches from it -- the
+    /// distance between the two nodes' level-0 slot spheres' centres, through each node's
+    /// matrix, plus that node's radius. Every explosion counts whatever its kind, and a
+    /// round's radius is absolute (docs/38, "A part's box").
     fn round(&mut self, assembly: &mut Assembly, member: &str) -> Option<Round> {
         let key = member.to_ascii_lowercase();
         if let Some(found) = self.rounds.get(&key) {
@@ -681,15 +687,36 @@ impl Designer {
             let slot = record.slot_with_suffix("ndp")?.clone();
             let rows = ndp::parse(&read(assembly, &slot)?, &slot.member).ok()?;
             let mut damage: f32 = rows.iter().map(|r| r.durability).sum();
-            let mut blast = 0.0;
+            let loaded = record.mesh().cloned().and_then(|m| assembly.mesh(&m));
+            let centre = |node: usize| -> Option<[f64; 3]> {
+                let loaded = loaded.as_ref()?;
+                let slot = loaded.mesh.nodes.get(node)?.slot_index[0];
+                let s = loaded.mesh.slots.get(usize::from(slot)).filter(|_| slot != mesh::NO_SLOT)?;
+                Some(
+                    loaded
+                        .mesh
+                        .world_pose(node)
+                        .apply([s.sphere[0], s.sphere[1], s.sphere[2]].map(f64::from)),
+                )
+            };
+            let mut radii = vec![0.0f32; rows.len()];
             for (i, row) in rows.iter().enumerate().filter(|(_, r)| r.explosion.is_set()) {
                 if let Some(e) =
                     read(assembly, &row.explosion).and_then(|b| exp::parse(&b, &row.explosion.member).ok())
                 {
                     damage += e.damage;
-                    if i == 0 && e.kind == exp::HIT_AREA {
-                        blast = e.radius;
-                    }
+                    radii[i] = e.radius;
+                }
+            }
+            let mut blast = radii.first().copied().unwrap_or(0.0);
+            if let Some(origin) = centre(0) {
+                for (i, &r) in radii.iter().enumerate().skip(1) {
+                    let Some(at) = centre(i) else { continue };
+                    let d = ((at[0] - origin[0]).powi(2)
+                        + (at[1] - origin[1]).powi(2)
+                        + (at[2] - origin[2]).powi(2))
+                    .sqrt() as f32;
+                    blast = blast.max(d + r);
                 }
             }
             Some(Round { damage, range: controller.bounds[0], blast })
@@ -838,16 +865,12 @@ impl Designer {
         (ore, energy, ok)
     }
 
-    /// A part's box: its `TRFA` rows, each value by its field, one decimal (docs/38, "A part's
-    /// box"). A quoted field prints as written.
+    /// A part's box: its `TRFA` rows, each value by its field (docs/38, "A part's box"). The
+    /// row draw prints every number `"%6.1f"` whatever the template's width and decimals
+    /// (`iron3d.dll:0x1006eb5e`), and a quoted field `"%6s"`, as written (`0x1006eb11`).
     ///
-    /// STAND-IN: docs/38-designs.md#not-established -- `Epower` is not traced to a record
-    /// value and prints 0.0; the properties behind `regener` (0x77), `capacity` (113),
-    /// `throughput` (164), `shotnum` (0x55) and `blast` (0x76) are taken as the record values
-    /// the recording's figures fit: a shield's second value and a repair unit's first, a
-    /// battery's first ÷ 1000 and its power figure, a gun's or clip's magazine, and its round's
-    /// first area blast radius; `Adfactor` prints 0.0; and the formatter that prints one
-    /// decimal whatever the template asks is not read.
+    /// The values are those of the part's own preview object, taken the way `0x1006f300`
+    /// asks for them: its first device, a new part at full condition and level.
     pub fn part_box(&mut self, assembly: &mut Assembly, part: &str) -> Vec<BoxLine> {
         let Some(template) = self.catalogue.item(part).map(|i| i.template.clone()) else { return Vec::new() };
         let component = objects::Component {
@@ -864,6 +887,22 @@ impl Designer {
         let member = first.as_ref().map(|d| d.resource.member.clone()).unwrap_or_default();
         let round = if member.is_empty() { None } else { self.round(assembly, &member) };
         let of = |class: i32| first.as_ref().filter(|d| d.type_id == class);
+        // Property 113, the batteries' capacity (`Control.dll:0x1000e44f`, device query id 2 at
+        // `0x1002b4e9`): every battery's value 0 summed; a negative one answers itself, and a
+        // sum at or below 0 fails, so the box shows 0.
+        let capacity = {
+            let mut total = 0.0f32;
+            let mut negative = None;
+            for d in assembled.iter().flat_map(|a| a.of_type(control::BATTERY_TYPE)) {
+                if d.values[0] < 0.0 {
+                    negative = Some(d.values[0]);
+                    break;
+                }
+                total += d.values[0];
+            }
+            negative.unwrap_or(if total > 0.0 { total } else { 0.0 })
+        };
+        let top_speed = controller.as_ref().map_or(0.0, |c| c.triples[control::TRIPLE_TOP_SPEED][1]);
         let mut out = Vec::new();
         for row in parse_template(&template) {
             let value = match row.field.as_str() {
@@ -875,33 +914,48 @@ impl Designer {
                     });
                     continue;
                 }
-                "shotnum" => {
-                    let shots = of(control::GUN_TYPE).map_or(0.0, |d| d.values[0]);
-                    out.push(BoxLine { label: row.label, value: whole(f64::from(shots)), unit: row.unit });
-                    continue;
-                }
                 "weight" => assembled.as_ref().map_or(0.0, |a| a.load().0 * 0.001),
                 "payload" => controller.as_ref().map_or(0.0, |c| c.payload * 0.001),
-                "maxspeed" => {
-                    controller.as_ref().map_or(0.0, |c| c.triples[control::TRIPLE_TOP_SPEED][1] * 3.6)
-                }
+                "maxspeed" => top_speed * 3.6,
+                // Case 4 is property 144 as it stands (`0x1006f442`); no shipped template asks.
+                "product" => top_speed,
+                // A gun's energy a shot (query `0x1300`), else the device's power figure, its
+                // record's `+0x20` (query `0x500`, `0x1002bca4`).
                 "wattage" => first.as_ref().map_or(0.0, |d| {
                     if d.type_id == control::GUN_TYPE { d.values[GUN_SHOT_ENERGY] } else { d.power }
                 }),
                 "Frate" => of(control::GUN_TYPE).map_or(0.0, |d| 1000.0 / d.values[GUN_INTERVAL].max(1.0)),
-                "range" => round.map_or(0.0, |r| r.range),
+                // The round frame's +108, or 723 when the device is no gun (`0x1006f4ac`).
+                "range" => match first.as_ref() {
+                    Some(d) if d.type_id == control::GUN_TYPE => round.map_or(0.0, |r| r.range),
+                    _ => 723.0,
+                },
                 "damage" => round.map_or(0.0, |r| r.damage),
-                "blast" => round.map_or(0.0, |r| r.blast),
+                // Query `0x900`: a gun's `+0x178`, its linked round's blast reach.
+                "blast" => of(control::GUN_TYPE).and(round).map_or(0.0, |r| r.blast),
+                // Query `0x1200`: an engine's power figure × its value 0 × its condition.
+                "Epower" => of(control::ENGINE_TYPE).map_or(0.0, |d| d.power * d.values[0]),
+                "capacity" => capacity * 0.001,
+                // Query `0xe00` (`0x1002bf47`), a device's own figure by its class.
+                "Adfactor" => first.as_ref().map_or(0.0, |d| match d.type_id {
+                    control::DETECT_SHIELD_TYPE => d.values[..3].iter().sum::<f32>() / 3.0,
+                    control::DEFLECTOR_TYPE => d.values[..6].iter().sum::<f32>() / 6.0,
+                    control::EFFICIENCY_TYPE | control::ENGINE_TYPE => d.values[0],
+                    _ => 0.0,
+                }),
                 "sensrange" => of(control::RADAR_TYPE).map_or(0.0, |d| d.values[control::RADAR_RANGE]),
-                "density" => of(ARMOUR_TYPE).map_or(0.0, |d| d.values[0]),
-                "effic" => of(control::DEFLECTOR_TYPE).map_or(0.0, |d| d.values[0] * 100.0),
-                "Spower" => of(control::FIGHT_SHIELD_TYPE).map_or(0.0, |d| d.values[0]),
+                // Query `0x1100`: a repair system's value 0, a fight shield's value 1.
                 "regener" => of(control::FIGHT_SHIELD_TYPE)
                     .map(|d| d.values[1])
                     .or_else(|| of(control::REPAIR_TYPE).map(|d| d.values[0]))
                     .unwrap_or(0.0),
-                "capacity" => of(control::BATTERY_TYPE).map_or(0.0, |d| d.values[0] * 0.001),
-                "throughput" => of(control::BATTERY_TYPE).map_or(0.0, |d| d.power),
+                // Property 164 (`0x1000e40f`): device 0's power figure, query `0x500`.
+                "throughput" => first.as_ref().map_or(0.0, |d| d.power),
+                // Query `0x800`: a gun's magazine as a whole number, printed as the rest are.
+                "shotnum" => of(control::GUN_TYPE).map_or(0.0, |d| d.values[0].round_ties_even()),
+                "effic" => of(control::DEFLECTOR_TYPE).map_or(0.0, |d| d.values[0] * 100.0),
+                "Spower" => of(control::FIGHT_SHIELD_TYPE).map_or(0.0, |d| d.values[0]),
+                "density" => of(ARMOUR_TYPE).map_or(0.0, |d| d.values[0]),
                 _ => 0.0,
             };
             out.push(BoxLine { label: row.label, value: format!("{value:.1}"), unit: row.unit });

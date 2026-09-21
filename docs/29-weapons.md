@@ -857,7 +857,7 @@ reading property 0x800 (magazine) and writing 0x700 (rounds left)
 | Wattage, MWt | value 2, the energy a shot |
 | Rate of fire, 1/s | `1000 ÷ max(1, value 3)` |
 | Damage, HP | the round: the sum over its nodes of hit points plus level ratio × `.exp` damage (`Control.dll:0x10013620`) |
-| Blast, m | the round's explosion radius — node 0's; the loop over the other nodes is not read (`0x100136c0`) |
+| Blast, m | the round's blast reach (`0x100136c0`): node 0's explosion radius, raised to each other node's distance from node 0 plus its radius, whatever the explosion's kind — a direct hit's 1 m shows as 1.0 ([38-designs.md](38-designs.md#a-parts-box--read)) |
 | Range, m | the round controller's **+108** (`iron3d.dll:0x1006f4a0`), which `Control.dll:0x1000cfd0` also uses to hold a round within that distance of where it was fired |
 
 The gun computes damage and blast from a sample round it spawns in its

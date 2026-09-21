@@ -44,20 +44,37 @@ pub const GREEN: u32 = 0xff00_ff00;
 pub const NO_ITEMS_GREEN: u32 = 0xff00_9600;
 pub const RED: u32 = 0xffff_0000;
 pub const FIGURE: u32 = 0xffb4_b4ff;
-/// *Seen*: every row's text is light grey.
+/// A row's text colour.
+///
+/// STAND-IN: docs/37-designer.md#the-rows--read-and-seen -- the game hands the font a
+/// gradient down the glyph, `0xffc8c8c8`, white, `0xffc8c8c8` on a selected row and
+/// `0xff323296`, white, `0xff9696fa` on the rest (`iron3d.dll:0x10046c5e`); a text run here
+/// takes one colour, the light grey the recording reads.
 pub const ROW_TEXT: u32 = 0xffc8_c8c8;
+/// Where a part box row's value ends and its unit starts, from the row's x (`0x1006ebe5`,
+/// `0x1006ec01`).
+pub const PART_BOX_VALUE_RIGHT: f32 = 125.0;
+pub const PART_BOX_UNIT: f32 = 128.0;
 pub const LAMP_COLOUR: u32 = 0xffc8_ffc8;
 pub const BUTTON_ICON: u32 = 0xff9b_9bff;
 pub const BUTTON_ICON_OFF: u32 = 0xff4d_4d7f;
 /// A preview's camera stands K × the model's radius from its centre, K = 1 ÷ sin 30°, across
-/// a field of 60°; the model is pitched by −0.5 rad and turns at 0.75 rad a second
-/// (`0x1009dc10`, `0x1009f300`, `0x1009ef1c`).
+/// a field of 60°; the model is pitched by −0.5 rad about y and turns at 0.75 rad a second
+/// (`0x1009dc10`, `0x1009ec9d`, `0x1009ef1c`).
 pub const PREVIEW_K: f32 = 2.0;
 pub const PREVIEW_FIELD: f32 = std::f32::consts::FRAC_PI_3;
 pub const PREVIEW_PITCH: f32 = -0.5;
 pub const PREVIEW_TURN_RATE: f32 = 0.00075;
+/// A preview's two lights, in the model's own frame: the view sets both directions every
+/// draw through the model's placement (`0x1009f087`–`0x1009f114`, space 2), so they turn
+/// with it; and their colour, (2, 2, 2) each (`0x1009e888`).
+pub const PREVIEW_LIGHTS: [[f32; 3]; 2] = [[-1.0, 0.0, -1.0], [1.0, 0.0, -1.0]];
+pub const PREVIEW_LIGHT_COLOUR: f32 = 2.0;
 /// The scan bands' cycle, and the strips they are drawn from.
 pub const BAND_CYCLE_MS: f64 = 4000.0;
+/// The colour of every texel of the three `ui_tex5` strips the bands draw, (255, 221, 255):
+/// their pattern is in their alpha alone (*measured*, `tests/test_designs.py`).
+pub const BAND_STRIP: [f32; 3] = [1.0, 221.0 / 255.0, 1.0];
 
 /// Tab `i`: its tooltip, frame, icon position and cut on the `icons` page, and its icon's
 /// colours off, normal and selected (docs/37, "The tabs").
@@ -289,6 +306,8 @@ pub struct Preview {
     pub viewport: [f32; 4],
     pub view_proj: Mat4,
     pub model: Mat4,
+    /// The two lights' directions in the model's own frame, which the draw turns through
+    /// `model` ([`preview_lights`]).
     pub lights: [Vec3; 2],
     /// Drawn flat in this colour, with no lights: the placement ghost (docs/32).
     pub paint: Option<[f32; 3]>,
@@ -302,6 +321,9 @@ pub struct Session {
     pub tab: Tab,
     /// Which tabs can be selected, both panels alike.
     pub enabled: [bool; 6],
+    /// Each tab's own selected destination row, as the destination panel keeps one per tab
+    /// (`+0xcec8` + k × `0xcea4`); the tab on shows its row in `destination`.
+    pub remembered: [Option<usize>; 6],
     pub source: Panel,
     pub destination: Panel,
     pub rating: Option<Rating>,
@@ -431,6 +453,7 @@ impl Session {
             design: None,
             tab: Tab::Chassis,
             enabled: [true, false, false, false, false, false],
+            remembered: [None; 6],
             source: Panel::default(),
             destination: Panel::default(),
             rating: None,
@@ -454,10 +477,8 @@ impl Session {
 
     /// The rows, the boxes and the design's figures again, after a change: the destination's
     /// rows are the design's places on the tab, the source's what the destination's selected
-    /// place offers.
-    ///
-    /// STAND-IN: docs/37-designer.md#not-established -- which destination row a tab selects as
-    /// it turns on is not read: the first, as the recording shows a turret's first socket lit.
+    /// place offers. A tab with no row selected yet starts at its first, as the panel's builder
+    /// sets it (`0x1004c9fe`).
     pub fn refresh(&mut self, assembly: &mut Assembly, strings: &BTreeMap<u32, String>) {
         let places = self.designer.places(assembly, self.design.as_ref(), self.tab);
         let rows: Vec<Row> = places
@@ -556,46 +577,92 @@ impl Session {
         }
     }
 
-    /// Select tab `tab` in both panels, if it is enabled (`0x10035920`).
+    /// Select tab `tab` in both panels, if it is enabled (`0x10035920`). Turning a tab on
+    /// touches no row (`0x10049e50`): the destination shows the row that tab had selected last.
     pub fn select_tab(&mut self, tab: Tab, assembly: &mut Assembly, strings: &BTreeMap<u32, String>) -> bool {
         if !self.enabled[tab_index(tab)] || self.tab == tab {
             return false;
         }
+        self.remembered[tab_index(self.tab)] = self.destination.selected;
         self.tab = tab;
-        self.destination = Panel::default();
+        self.destination = Panel { selected: self.remembered[tab_index(tab)], ..Panel::default() };
         self.source = Panel::default();
         self.refresh(assembly, strings);
+        self.show_selected();
         true
     }
 
-    /// The tabs a fit enables: a chassis Turrets and Internal systems, and Armour when it
-    /// has an armour slot; a turret Weapons and Internal systems; a weapon Ammo.
-    ///
-    /// STAND-IN: docs/37-designer.md#not-established -- the condition under which a chassis
-    /// enables Armour (`0x10052491`) is not read: when the chassis has an armour slot.
-    fn enable_after_fit(&mut self, assembly: &mut Assembly, tab: Tab) {
+    /// Whether the design gives tab `tab` any destination rows.
+    fn has_rows(&mut self, assembly: &mut Assembly, tab: Tab) -> bool {
+        !self.designer.places(assembly, self.design.as_ref(), tab).is_empty()
+    }
+
+    /// Turn tab `tab` on in both panels at its first row, when the design gives it rows.
+    fn open_tab(&mut self, assembly: &mut Assembly, tab: Tab) -> bool {
+        let rows = self.has_rows(assembly, tab);
+        if rows {
+            self.enabled[tab_index(tab)] = true;
+            self.remembered[tab_index(tab)] = Some(0);
+        }
+        rows
+    }
+
+    /// What a fit into tab `tab` does to the tabs (docs/37, "Which tab and row a fit
+    /// leaves"), and the tab it turns both panels to, if any:
+    /// - a chassis (`0x10051f3a`–`0x100524ae`) turns Turrets, Internal systems and Armour on,
+    ///   each only when the chassis gives it a row, at its first row, and turns the panels to
+    ///   Turrets when it is on;
+    /// - a turret (`0x10052912`–`0x100529ac`, `0x10052c24`) turns Internal systems and, when
+    ///   it has a gun socket, Weapons on at their first rows, and the panels to Weapons;
+    /// - a gun turns Ammo on at its first row (`0x10053407`–`0x10053425`).
+    fn after_fit(&mut self, assembly: &mut Assembly, tab: Tab) -> Option<Tab> {
         match tab {
             Tab::Chassis => {
-                self.enabled = [true, true, false, false, true, false];
-                let armour = self.designer.places(assembly, self.design.as_ref(), Tab::Armour);
-                self.enabled[tab_index(Tab::Armour)] = !armour.is_empty();
+                self.enabled = [true, false, false, false, false, false];
+                self.remembered = [None; 6];
+                let turrets = self.open_tab(assembly, Tab::Turrets);
+                self.open_tab(assembly, Tab::Internal);
+                self.open_tab(assembly, Tab::Armour);
+                turrets.then_some(Tab::Turrets)
             }
             Tab::Turrets => {
-                self.enabled[tab_index(Tab::Weapons)] = true;
-                self.enabled[tab_index(Tab::Internal)] = true;
+                self.open_tab(assembly, Tab::Internal);
+                self.open_tab(assembly, Tab::Weapons).then_some(Tab::Weapons)
             }
-            Tab::Weapons => self.enabled[tab_index(Tab::Ammo)] = true,
-            _ => {}
+            Tab::Weapons => {
+                self.enabled[tab_index(Tab::Ammo)] = true;
+                self.remembered[tab_index(Tab::Ammo)] = Some(0);
+                None
+            }
+            _ => None,
+        }
+    }
+
+    /// What taking a turret or a gun off leaves of the tabs its parts had rows on: each such
+    /// tab left with no rows is turned off in both panels, and one that keeps rows starts again
+    /// at its first (`0x10053f0e`–`0x100540ea`, `0x1005432d`–`0x100543a5`).
+    fn after_removal(&mut self, assembly: &mut Assembly, tab: Tab) {
+        let touched: &[Tab] = match tab {
+            Tab::Turrets => &[Tab::Internal, Tab::Weapons, Tab::Ammo],
+            Tab::Weapons => &[Tab::Ammo],
+            _ => &[],
+        };
+        for &t in touched {
+            if self.has_rows(assembly, t) {
+                self.remembered[tab_index(t)] = Some(0);
+            } else {
+                self.enabled[tab_index(t)] = false;
+                self.remembered[tab_index(t)] = None;
+            }
         }
     }
 
     /// A double click from `side` on its selected row (`0x100506d0`): from the source the
     /// part is added, a chassis only to an empty project and a turret or a gun only into an
-    /// empty slot; from the destination a chassis, turret or gun is removed.
-    ///
-    /// STAND-IN: docs/37-designer.md#not-established -- which tab the panels turn to after a
-    /// fit, and which row it leaves selected, are not read; *seen*: a chassis turns them to
-    /// Turrets and a turret to Weapons. A tab that keeps them steps to its next row.
+    /// empty slot; from the destination a chassis, turret or gun is removed. Every fit and
+    /// every removal steps its own tab's selection to the next row, wrapping round
+    /// (`0x10052754`, `0x10052ec6`, `0x100530e9`, `0x100536c6`, `0x10053966`; `0x10054170`,
+    /// `0x10054414`).
     pub fn double_click(
         &mut self,
         side: Side,
@@ -618,25 +685,19 @@ impl Session {
                 if !allowed || !self.designer.fit(assembly, &mut self.design, &place, &part) {
                     return false;
                 }
-                self.enable_after_fit(assembly, tab);
-                let next = match tab {
-                    Tab::Chassis => Some(Tab::Turrets),
-                    Tab::Turrets => Some(Tab::Weapons),
-                    _ => None,
-                };
-                match next {
-                    Some(next) => {
-                        self.tab = next;
-                        self.destination = Panel::default();
-                        self.source = Panel::default();
-                    }
-                    // A tab the fit stays on steps to its next slot, so the sockets of a
-                    // turret, the armour, the systems and the clips are filled one after the
-                    // other and the source panel offers the next slot's parts without another
-                    // click.
-                    None => self.step_destination(),
+                // The tab the fit was made on steps to its next row, so the sockets of a
+                // turret, the armour, the systems and the clips fill one after the other and
+                // the source panel offers the next slot's parts without another click.
+                self.step_destination();
+                if let Some(next) = self.after_fit(assembly, tab) {
+                    self.remembered[tab_index(tab)] = self.destination.selected;
+                    self.tab = next;
+                    self.destination =
+                        Panel { selected: self.remembered[tab_index(next)], ..Panel::default() };
+                    self.source = Panel::default();
                 }
                 self.refresh(assembly, strings);
+                self.show_selected();
                 true
             }
             Side::Destination => {
@@ -650,10 +711,20 @@ impl Session {
                 if self.design.is_none() {
                     self.clear(assembly, strings);
                 } else {
+                    self.after_removal(assembly, tab);
+                    self.step_destination();
                     self.refresh(assembly, strings);
+                    self.show_selected();
                 }
                 true
             }
+        }
+    }
+
+    /// The destination's list scrolled so that its selected row shows.
+    fn show_selected(&mut self) {
+        if let Some(row) = self.destination.selected {
+            self.destination.first = self.destination.first.clamp(row.saturating_sub(ROWS_SHOWN - 1), row);
         }
     }
 
@@ -719,6 +790,7 @@ impl Session {
     pub fn clear(&mut self, assembly: &mut Assembly, strings: &BTreeMap<u32, String>) {
         self.design = None;
         self.enabled = [true, false, false, false, false, false];
+        self.remembered = [None; 6];
         self.tab = Tab::Chassis;
         self.source = Panel::default();
         self.destination = Panel::default();
@@ -857,29 +929,42 @@ impl Session {
 }
 
 /// A model view's camera and model matrix for a model of sphere (`centre`, `radius`) in a
-/// `viewport` (docs/37, "The previews"): the camera `K × radius` back along −y, looking at
-/// the origin with z up across a 60° field; the model's centre moved to the origin, turned
-/// by `angle` about z and pitched by −0.5 rad.
+/// `viewport` (docs/37, "The previews").
 ///
-/// STAND-IN: docs/37-designer.md#the-previews--read-and-seen -- which way the camera looks,
-/// which axis the pitch turns about and which of the view's sides the field spans are not
-/// read: from −y, about x, so the top of the model tips toward the camera, and the field
-/// spans the narrower side, where a sphere 2 radii off just fits it; the radius is the one
-/// about the drawn level-0 vertices.
+/// The camera is a `CCamera` placed once at (−K × radius, 0, 0) with no turn
+/// (`iron3d.dll:0x1009ec03`–`0x1009ec61`), so it looks along +x with z up, and its 60° is the
+/// view's field, which spans the view's width (`Terrain.dll:0x100848a0` → the view's slot
+/// 10; docs/10, "The sun and the moon are drawn"). The model's centre is moved to the origin, it is turned by
+/// `angle` about z and pitched by −0.5 rad about y, which tips its top toward the camera
+/// (`0x1009ec9d`–`0x1009ed6c`). The radius is the one about the drawn level-0 vertices.
 pub fn preview_camera(centre: Vec3, radius: f32, angle: f32, viewport: [f32; 4]) -> (Mat4, Mat4) {
     let distance = PREVIEW_K * radius.max(0.1);
     let aspect = (viewport[2] / viewport[3].max(1.0)).max(0.01);
-    let eye = Vec3::new(0.0, -distance, 0.0);
+    let eye = Vec3::new(-distance, 0.0, 0.0);
     let far = distance + radius * 4.0 + 1.0;
     let near = (distance - radius * 2.0).max(0.05);
-    let field_y =
-        if aspect < 1.0 { 2.0 * ((PREVIEW_FIELD / 2.0).tan() / aspect).atan() } else { PREVIEW_FIELD };
+    let field_y = 2.0 * ((PREVIEW_FIELD / 2.0).tan() / aspect).atan();
     let view_proj =
         Mat4::perspective_rh(field_y, aspect, far, near) * Mat4::look_at_rh(eye, Vec3::ZERO, Vec3::Z);
-    let model = Mat4::from_rotation_x(-PREVIEW_PITCH)
-        * Mat4::from_rotation_z(angle)
-        * Mat4::from_translation(-centre);
+    let model =
+        Mat4::from_rotation_y(PREVIEW_PITCH) * Mat4::from_rotation_z(angle) * Mat4::from_translation(-centre);
     (view_proj, model)
+}
+
+/// The tint that draws a scan band's strip as the device lit it, `g` being the specular's
+/// green, 0 to 254: the strip times the diffuse `0xff009b00` plus the specular (⅔g, g, ⅔g),
+/// held to 1, over the strip's own colour [`BAND_STRIP`].
+pub fn band_tint(g: f32) -> [f32; 4] {
+    let diffuse = argb(0xff00_9b00);
+    let specular = [g * 2.0 / 3.0 / 255.0, g / 255.0, g * 2.0 / 3.0 / 255.0];
+    let [r, gg, b] = [0, 1, 2].map(|i| (BAND_STRIP[i] * diffuse[i] + specular[i]).min(1.0) / BAND_STRIP[i]);
+    [r, gg, b, 1.0]
+}
+
+/// The directions a preview's two lights travel this draw: [`PREVIEW_LIGHTS`] through the
+/// model's matrix, normalised.
+pub fn preview_lights(model: Mat4) -> [Vec3; 2] {
+    PREVIEW_LIGHTS.map(|d| model.transform_vector3(Vec3::from_array(d)).normalize_or(Vec3::NEG_Z))
 }
 
 /// Where a layout point projects in a preview: the layout point of `point` in the model's
@@ -988,14 +1073,17 @@ fn draw_session(
         if lines.is_empty() {
             ink.text(cockpit.string(STRING_NO_DATA), [x0 + 15.0, 415.0], RED);
         } else {
+            // The row draw (`0x1006ea50`): the label at x, the value right-aligned to end at
+            // x + 90 + 35, the unit at x + 128, x being X₀ + 15.
             let step = (text_height + 2.0).round();
             for (i, line) in lines.iter().enumerate() {
                 let y = 415.0 + step * i as f32;
-                ink.text(&line.label, [x0 + 15.0, y], GREEN);
-                let value_right = x0 + 15.0 + 120.0;
+                let x = x0 + 15.0;
+                ink.text(&line.label, [x, y], GREEN);
+                let value_right = x + PART_BOX_VALUE_RIGHT;
                 let w = ink.font.advance(&line.value);
-                ink.text(&line.value, [value_right - w, y], FIGURE);
-                ink.text(&line.unit, [value_right + 3.0, y], GREEN);
+                ink.text(&line.value, [(value_right - w).round(), y], FIGURE);
+                ink.text(&line.unit, [x + PART_BOX_UNIT, y], GREEN);
             }
         }
     }
@@ -1150,7 +1238,7 @@ fn draw_session(
     }
 
     // The previews.
-    let lights = [Vec3::new(-1.0, 0.0, -1.0).normalize(), Vec3::new(1.0, 0.0, -1.0).normalize()];
+    let lights = PREVIEW_LIGHTS.map(Vec3::from_array);
     let mut previews = Vec::new();
     let viewport = |rect: [f32; 4]| {
         let [px, py] = space.pixel([rect[0], rect[1]], Pin::CENTRE);
@@ -1247,18 +1335,12 @@ fn draw_session(
         }
         let g = 254.0 * (1.0 - 2.0 * (t - 0.5).abs());
         let strip = [0.0, 202.0 + 17.0 * (((now_ms / 16.0) as u64 % 3) as f32), 163.0, 16.0];
-        // STAND-IN: docs/37-designer.md#the-scan-bands--read-and-seen -- the band's green
-        // specular is taken as an added colour of (⅔g, g, ⅔g).
+        // The quad goes out in phase 1, the strip times its diffuse `0xff009b00`, and the device
+        // adds its specular (⅔g, g, ⅔g) to that, held to 1, before blending by the strip's
+        // alpha (docs/37, "The scan bands"). Every texel of the three strips is BAND_STRIP, so
+        // that sum is one colour, which the painter's tint gives the strip exactly.
         if let Some(p) = page("page5") {
-            ink.painter.sprite_to(
-                Blend::Alpha,
-                p,
-                strip,
-                [x0, top, x1 - x0, bottom - top],
-                argb(0xff00_9b00),
-            );
-            let add = [g * 2.0 / 3.0 / 255.0, g / 255.0, g * 2.0 / 3.0 / 255.0, 1.0];
-            ink.painter.sprite_to(Blend::Add, p, strip, [x0, top, x1 - x0, bottom - top], add);
+            ink.painter.sprite_to(Blend::Alpha, p, strip, [x0, top, x1 - x0, bottom - top], band_tint(g));
         }
     }
     ink.painter.layer = Layer::UnderViews;
@@ -1393,6 +1475,55 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn a_previews_camera_looks_along_x_its_field_spans_the_width_and_the_top_tips_toward_it() {
+        let radius = 3.0;
+        let distance = PREVIEW_K * radius;
+        for viewport in [[0.0, 0.0, 250.0, 290.0], [0.0, 0.0, 160.0, 151.0]] {
+            let (view_proj, model) = preview_camera(Vec3::ZERO, radius, 0.0, viewport);
+            let ndc = |p: Vec3| {
+                let clip = view_proj * p.extend(1.0);
+                clip.truncate() / clip.w
+            };
+            // Placed at (−K r, 0, 0) with no turn: +y, its left, is the view's left edge
+            // where the half field of 30° meets it, across the width whatever the height.
+            let edge = distance * (PREVIEW_FIELD / 2.0).tan();
+            let left = ndc(Vec3::new(0.0, edge, 0.0));
+            assert!((left.x + 1.0).abs() < 1e-4 && left.y.abs() < 1e-4, "{viewport:?} {left}");
+            let aspect = viewport[2] / viewport[3];
+            let top = ndc(Vec3::new(0.0, 0.0, edge / aspect));
+            assert!((top.y - 1.0).abs() < 1e-4, "{viewport:?} {top}");
+            // The pitch is about y: the model's up leans toward the camera, at −x.
+            let up = model.transform_vector3(Vec3::Z);
+            assert!(up.x < -0.47 && up.y.abs() < 1e-6 && (up.z - 0.5f32.cos()).abs() < 1e-5, "{up}");
+        }
+    }
+
+    #[test]
+    fn a_previews_lights_turn_with_the_model() {
+        for angle in [0.0, 0.7, 2.0, 4.5] {
+            let (_, model) = preview_camera(Vec3::new(1.0, 2.0, 3.0), 2.0, angle, [0.0, 0.0, 160.0, 151.0]);
+            let lights = preview_lights(model);
+            for (light, own) in lights.iter().zip(PREVIEW_LIGHTS) {
+                let back = model.inverse().transform_vector3(*light).normalize();
+                assert!(back.distance(Vec3::from_array(own).normalize()) < 1e-5, "{angle} {back}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_scan_band_is_its_strip_times_green_plus_the_specular_held_to_one() {
+        let lit = |g: f32| {
+            let t = band_tint(g);
+            [0, 1, 2].map(|i| t[i] * BAND_STRIP[i])
+        };
+        let dark = lit(0.0);
+        assert!(dark[0] == 0.0 && dark[2] == 0.0 && (dark[1] - BAND_STRIP[1] * 155.0 / 255.0).abs() < 1e-6);
+        let mid = lit(254.0);
+        assert!((mid[0] - 254.0 * 2.0 / 3.0 / 255.0).abs() < 1e-6 && mid[1] == 1.0, "{mid:?}");
+        assert_eq!(mid[0], mid[2], "red and blue alike");
     }
 
     #[test]

@@ -14799,6 +14799,162 @@ def check_designs(check, game: Path) -> None:
           f"stream-10 socket label, {rising} rise in node order under their host -- and "
           f"only {ordinals} would match an ordinal over the host's sockets, so the field "
           f"is the node index the fits' loop counts with, not the socket's place in the list")
+    _check_designer_reads(check, game, shop, at, cat)
+
+
+#: The part box's field names in the order ``iron3d.dll:0x1006f070`` numbers them, -1
+#: for none; ``0x1006f300`` switches on the number.
+PART_BOX_FIELDS = ("payload", "maxspeed", "weight", "wattage", "product", "Frate", "range",
+                   "damage", "blast", "Epower", "capacity", "Adfactor", "sensrange", "regener",
+                   "Peffic", "Eeffic", "fastness", "Pincrease", "experience", "throughput",
+                   "shotnum", "effic", "Spower", "density")
+
+
+def _stat_templates(path: Path) -> list[tuple[tuple[str, ...], str]]:
+    """Every item of a research tree with its ``TRFA`` stat template."""
+    data = path.read_bytes()
+    archive = NResArchive(data)
+    blob = {e.tag: archive.read(e) for e in archive.entries}
+    tree = research.parse(data, path)
+    out = []
+    for item in tree.items:
+        panel = struct.unpack_from("<4f4iH6B", blob["TRF0"], item.index * research.RECORD)[7]
+        out.append((item.parts, blob["TRFA"][panel:].split(b"\0")[0].decode("latin-1")))
+    return out
+
+
+def _check_designer_reads(check, game: Path, shop, at, cat) -> None:
+    """The designer's figures read in the sixth round's M11 audit (docs/37, docs/38)."""
+    # The grade: the factory record's +0x30 is written by the record's bind, 0x1007e3c0,
+    # from interface 0x10 slot 26 asked for 0x201 (0x1007e538-0x1007e549), which both the
+    # building record's bind (0x10032d69) and the unit record's (0x10074d68) call; the
+    # behaviour answers 0x201 with its size class, a building's from its fourth letter.
+    bind = at(0x1007E538, 0x14)
+    binds = (b"\x68\x01\x02\x00\x00" in bind and b"\xff\x51\x68" in bind
+             and b"\x89\x56\x30" in bind
+             and (0x10032D69, 0x1007E3C0) in _calls(at, 0x10032D69, 6)
+             and (0x10074D68, 0x1007E3C0) in _calls(at, 0x10074D68, 6))
+    placed: Counter[tuple[str, int]] = Counter()
+    for d in gamedir.missions(game):
+        for o in mission.load(d / "data.tma").objects:
+            parts = o.path.replace("\\", "/").split("/")
+            if len(parts) < 4 or parts[2].upper() != "PLANT":
+                continue
+            found = next((p for p in game.glob("UNITS/BUILDS/PLANT/*")
+                          if p.name.lower() == parts[-1].lower()), None)
+            if found is None:
+                continue
+            root = objects.load_unit(found).components[0].ref.member.lower()
+            placed[(root, profiles.BUILDING_SIZE.get(root[3:4], 0))] += 1
+    check("designer: a factory's grade is its record's +0x30, the building's size class",
+          binds and placed and all(size in (2, 3, 4) for _, size in placed),
+          f"iron3d.dll:0x1007e549 stores property 0x201 into +0x30 for both record kinds "
+          f"{binds}; the {sum(placed.values())} factories the missions place are "
+          f"{dict(sorted(placed.items()))} -- grades 2 to 4, so the chassis page offers up "
+          f"to r_l, r_m and r_b")
+
+    # The part box: which fields the shipped templates name, and how a number prints.
+    names: Counter[str] = Counter()
+    families: dict[str, set[str]] = defaultdict(set)
+    for path in research.trees(game):
+        for parts, text in _stat_templates(path):
+            for field in re.findall(r"@G@.*?@[Bb],([^,@]*)", text):
+                names[field] += 1
+                families[field].add(parts[0][:5].lower() if parts else "?")
+    unnamed = [f for f in PART_BOX_FIELDS if not names[f]]
+    printed = at(0x10104D98, 6) == b"%6.1f\0" and at(0x10104DA0, 4) == b"%6s\0" \
+        and at(0x1006EB5E, 5) == b"\x68\x98\x4d\x10\x10"
+    check("designer: the part box's fields, and one decimal whatever the template asks",
+          printed and set(unnamed) == {"product", "Adfactor", "Peffic", "Eeffic", "fastness",
+                                        "Pincrease", "experience"}
+          and families["shotnum"] == families["blast"]
+          and all(f.startswith("i_c") for f in families["shotnum"])
+          and families["Epower"] == {"i_eng"} and families["capacity"] == {"i_pws"},
+          f"the row draw pushes '%6.1f' at 0x1006eb5e (a quoted field '%6s') {printed}; over "
+          f"{len(research.trees(game))} trees the templates never name {unnamed}; shotnum and "
+          f"blast only on clips, Epower on {sorted(families['Epower'])}, capacity and "
+          f"throughput on {sorted(families['capacity'])}")
+
+    # Epower (0x79 -> component query 0x1200, Control.dll:0x1002c23c): an engine's power
+    # figure times its value 0 times its condition.  LEng1 is i_eng_b_df.
+    engines = {}
+    for part in sorted(shop.library.records):
+        if part.startswith("i_eng_"):
+            parsed = shop.armoury.controller(part)
+            first = parsed.components[0] if parsed and parsed.components else None
+            if first is not None and first.type_id == control.ENGINE_TYPE:
+                v = struct.unpack("<f", struct.pack("<f", first.power * first.values[0]))[0]
+                engines[part] = f"{v:.1f}"
+    epower = cat(0x1002C23C, 0x34)
+    check("designer: Epower is the engine's power figure times its value 0",
+          len(engines) == 12 and engines.get("i_eng_b_df") == "3.1"
+          and b"\x83\x38\x05" in epower and b"\x8b\x40\x20" in epower
+          and b"\x68\x00\x01\x00\x00" in epower,
+          f"query 0x1200 answers a class-5 device's record +0x20 x its value 0x100; all "
+          f"{len(engines)} engines' first device is class 5, and LEng1 prints "
+          f"{engines.get('i_eng_b_df')} MWt as the recording's box does")
+
+    # blast (0x76 -> 0x900): a gun's +0x178, which its link fills from its round's property
+    # 0xa5 (0x1002983a): node 0's .exp radius, raised by each other node's distance from it
+    # plus its radius, whatever the explosion's kind.
+    reach: Counter[str] = Counter()
+    for part in sorted(shop.library.records):
+        if not (part.startswith("i_c") and part[3:5].isdigit()):
+            continue
+        try:
+            parsed = shop.armoury.controller(part)
+        except KeyError:
+            continue
+        first = parsed.components[0] if parsed and parsed.components else None
+        if first is None or first.type_id != control.GUN_TYPE:
+            continue
+        record = shop.library.get(first.resource.member)
+        rows = objects.parse_damage(shop.armoury.read(record.damage), record.damage.member)
+        radii = [effects.parse_explosion(shop.armoury.read(r.explosion), r.explosion.member)
+                 if r.explosion else None for r in rows]
+        model = objmesh.parse(shop.armoury.read(record.mesh), record.mesh.member)
+
+        def centre(n: int, model=model):
+            slot = model.nodes[n].slot_index[0]
+            if slot == objmesh.NO_SLOT or slot >= len(model.slots):
+                return None
+            return objmesh.apply(model.world_pose(n), model.slots[slot].sphere[:3])
+        blast = radii[0].radius if radii and radii[0] else 0.0
+        origin = centre(0)
+        for n in range(1, len(rows)):
+            here = centre(n)
+            if origin is not None and here is not None:
+                blast = max(blast, math.dist(origin, here) + (radii[n].radius if radii[n] else 0.0))
+        kind = radii[0].kind if radii and radii[0] else 0
+        reach[f"{len(rows)} node(s), kind {kind}, {blast:.1f}"] += 1
+    check("designer: a clip's blast is its round's reach, whatever the explosion's kind",
+          reach and reach["4 node(s), kind 3, 60.7"] == 2 and reach["4 node(s), kind 3, 45.5"] == 4
+          and sum(n for k, n in reach.items() if k.startswith("1 node(s), kind 2, 1.0")) == 14,
+          f"{sum(reach.values())} clips with a gun device: {dict(sorted(reach.items()))}")
+
+    # The tabs a fit turns on: a chassis's Turrets, Internal systems and Armour only where it
+    # gives them rows; a turret's Weapons only with a gun socket.
+    chassis_rows: Counter[tuple[bool, bool, bool]] = Counter()
+    designer = designs.Designer(shop, None)
+    for part in sorted(shop.library.records):
+        if not (part[:2] == "r_" and part[2:3] in "tlmbh" and part[3:4] == "_"):
+            continue
+        parsed = shop.armoury.controller(part)
+        slots = [c.label.lower() for c in parsed.components] if parsed else []
+        sockets = designer.labels(part)
+        chassis_rows[(any(s.lower().startswith(designs.TURRET_PREFIX) for s in sockets),
+                      any(s.startswith(designs.ARMOUR_PREFIX) for s in slots),
+                      any(s and not s.startswith((designs.ARMOUR_PREFIX, designs.BRAIN_PREFIX))
+                          for s in slots))] += 1
+    socketless = sorted(p for p in shop.library.records if p.startswith(designs.TURRET_PREFIX)
+                        and not any(s.lower().startswith(("central_", "universal_"))
+                                    for s in designer.labels(p)))
+    check("designer: which tabs a fit can turn on",
+          chassis_rows[(True, True, True)] == 20 and chassis_rows[(False, True, True)] == 2
+          and chassis_rows[(False, False, True)] == 2 and len(socketless) == 7,
+          f"of {sum(chassis_rows.values())} chassis, (turret socket, armour slot, system "
+          f"slot) {dict(chassis_rows)}; {len(socketless)} turrets have no gun socket, so their "
+          f"fit leaves the panels on Turrets: {socketless}")
 
 
 def check_units(check, game: Path) -> None:
@@ -22111,6 +22267,29 @@ def check_designer_screen(check, game: Path) -> None:
           f"model view: 0.00075 rad a ms, pitch -0.5, K = 1/sin(pi/6), field 2 x pi/6, 50000, "
           f"300 and 0.5: {view}; bands over (185, 10)-(455, 304), (1, 241)-(182, 396), "
           f"(458, 241)-(639, 396), 4 s, h x 5/57: {bands}")
+
+    # The camera is placed at (-distance, 0, 0) with no turn: the block's first float is the
+    # distance negated (0x1009ec06-0x1009ec0f) and the three angles after it are zero.  The
+    # two lights are (2, 2, 2) (0x1009e888-0x1009e896) and each draw sets their directions
+    # in space 2, through the model's placement (0x1009f0c8, 0x1009f110).
+    placed = at(0x1009EC06, 3) == bytes.fromhex("d945e8") and at(0x1009EC0B, 2) == b"\xd9\xe0" \
+        and at(0x1009EC0F, 6) == bytes.fromhex("d99d40ffffff") \
+        and all(at(va, 10) == b"\xc7\x85" + bytes([disp]) + b"\xff\xff\xff" + bytes(4)
+                for va, disp in ((0x1009EC2F, 0x4C), (0x1009EC39, 0x50), (0x1009EC43, 0x54)))
+    lit = all(at(va, 7)[3:] == b"\x00\x00\x00\x40" for va in (0x1009E888, 0x1009E88F, 0x1009E896)) \
+        and at(0x1009F0C8, 2) == b"\x6a\x02" and at(0x1009F110, 2) == b"\x6a\x02"
+    lib = NResArchive.open(game / "ui" / "ui.lib")
+    strips = texm.decode(lib.read(next(e for e in lib if e.name.lower() == "ui_tex5.tex")))
+    colours: Counter[tuple[int, ...]] = Counter()
+    for y in (y for top in (202, 219, 236) for y in range(top, top + 16)):
+        for x in range(163):
+            i = (y * strips.width + x) * 4
+            colours[tuple(strips.rgba[i:i + 3])] += 1
+    check("iron3d.dll: a preview's camera looks along +x, and its two lights are (2, 2, 2)",
+          placed and lit and list(colours) == [(255, 221, 255)],
+          f"placed at (-K r, 0, 0), angles 0: {placed}; colour (2, 2, 2, 0) and directions "
+          f"set in the model's space every draw: {lit}; the scan bands' three page5 strips "
+          f"are one colour, {dict(colours)}, their pattern in their alpha alone")
 
 
 def check_command_mode(check, game: Path) -> None:

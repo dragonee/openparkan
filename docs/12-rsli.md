@@ -273,8 +273,10 @@ twelve indices**, a triangle strip 0-1-2-3-4-5 expanded to four triangles
 
 The half-pixel is the usual D3D sample offset; the 1.0 added to the right edge
 is the literal at `0x10031684` (`0x10011187`). The three rows exist so that the
-six colours at `+0x08` can be a gradient down the glyph; both shipped callers
-set all six the same.
+six colours at `+0x08` can be a gradient down the glyph; `camSetFontColor` and
+the loader set all six the same, and the warbot designer's rows do set one,
+colour *i* on vertex *i* (`iron3d.dll:0x10046c5e`,
+[37-designer.md](37-designer.md#the-rows--read-and-seen)).
 
 **The pen then moves `advance + word 3`** — `0x10011118` adds the header word,
 `0x1001113f` adds the record's advance — and the string-width routine (slot

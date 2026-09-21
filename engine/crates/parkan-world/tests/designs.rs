@@ -251,12 +251,57 @@ fn mission_02s_part_boxes_read_as_the_recording_shows() {
         [&flame[0], &flame[2], &flame[3], &flame[4]],
         ["Weight 3.3 t", "Rate of fire 0.7 1/s", "Damage 790.0 HP", "Range 200.0 m"]
     );
-    assert_eq!(values("i_eng_b_df")[..2], ["Weight 1.6 t", "Wattage 4.5 MWt"]);
+    // LEng1's Power is its engine's power figure times its value 0 (docs/38, "A part's box").
+    assert_eq!(values("i_eng_b_df"), ["Weight 1.6 t", "Wattage 4.5 MWt", "Power 3.1 MWt"]);
+    let battery = values("i_pws_b_df");
+    assert!(battery.contains(&"Capacity 22.0 kWth".to_owned()), "{battery:?}");
+    assert!(battery.contains(&"Throughput 25.5 MWt".to_owned()), "{battery:?}");
     assert_eq!(values("i_arm_b_df"), ["Density 17.5 kg/m2"]);
     assert_eq!(values("i_fsh_b_01")[2..], ["Regeneration 60.0 HP/s", "Power 3500.0 HP"]);
     assert_eq!(values("i_rps_b_01")[2], "Regeneration 60.0 HP/s");
     assert_eq!(values("i_rdr_b_01")[2], "Sensor range 400.0 m");
     assert_eq!(values("i_def_b_01")[2], "Efficiency 85.0 %");
+}
+
+/// A clip's box prints its magazine with one decimal as every number is, and its blast is its
+/// round's reach whatever the explosion's kind: a rail gun's direct hit 1 m, a winged SSM's
+/// four blasts reaching 60.7 m and 45.5 m (docs/38, "A part's box").
+#[test]
+#[ignore = "needs the game install"]
+fn a_clips_box_prints_its_shots_with_a_decimal_and_its_rounds_blast_reach() {
+    let game = gamedir::find(None).expect("a Parkan install: set PARKAN_DIR");
+    let mut assembly = Assembly::new(&game).unwrap();
+    let mut designer = Designer::new(&game, everything(&game), 4);
+    let mut field = |part: &str, label: &str| -> String {
+        designer
+            .part_box(&mut assembly, part)
+            .into_iter()
+            .find(|l| l.label.starts_with(label))
+            .map(|l| l.value)
+            .unwrap_or_else(|| panic!("{part} has no {label}"))
+    };
+    assert_eq!(field("i_c05_b_01", "Blast"), "1.0", "a direct hit's radius counts");
+    assert_eq!(field("i_c17_b_01", "Blast"), "60.7");
+    assert_eq!(field("i_c18_b_01", "Blast"), "45.5");
+    let shots = field("i_c05_b_01", "Shots");
+    assert!(shots.ends_with(".0") && shots != "0.0", "{shots}");
+}
+
+/// The takt fits a turret or a gun only into an empty place, so a fit never replaces one
+/// (docs/38, "Fitting").
+#[test]
+#[ignore = "needs the game install"]
+fn a_turret_or_a_gun_is_never_fitted_over_another() {
+    let game = gamedir::find(None).expect("a Parkan install: set PARKAN_DIR");
+    let mut assembly = Assembly::new(&game).unwrap();
+    let mut designer = Designer::new(&game, everything(&game), 4);
+    let mut design = designer.chassis(&mut assembly, "R_B_02");
+    assert!(designer.fit_turret(&mut assembly, &mut design, "e_tur_bb_01"));
+    assert!(!designer.fit_turret(&mut assembly, &mut design, "e_tur_bb_02"), "a turret is in");
+    let socket = designer.places(&mut assembly, Some(&design), Tab::Weapons)[0].attach;
+    assert!(designer.fit_gun(&mut assembly, &mut design, "e_gun_bl_15", socket));
+    assert!(!designer.fit_gun(&mut assembly, &mut design, "e_gun_bl_15", socket), "a gun is in");
+    assert_eq!(design.turret().unwrap().part, "e_tur_bb_01");
 }
 
 /// Every `data.tma` in the install, campaign missions included.

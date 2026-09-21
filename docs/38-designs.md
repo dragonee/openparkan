@@ -87,14 +87,39 @@ item is in the tree and researched** (`iron3d.dll:0x1008a780`):
 | weapons | `e_gun_` and the socket label's last two letters, found from the label's length; both `<s>c` and `<s>l` when the last is `r`, cannons listed first (`0x100482f2`–`0x100483c1`) |
 | armour, internal systems, ammunition | the slot's label from the part's controller, `i_arm_b`, `i_eng_b`, `i_c15_b` |
 
-**The grade is the factory's size.** The factory screen opens the constructor
-through `0x10055c70`, which keeps its fifth argument at `+0x18`
-(`0x10055ca6`). The factory passes its own unit record's `+0x30`
-(`0x1009810a`), the record field [31-packages.md](31-packages.md) reads as 1 to
-2 for a small unit and 4 to 5 for a big one. That it is the building's size
-letter — small 2, medium 3, large 4 — is *derived*: it gives the rule of
-[23-economy.md](23-economy.md) that a factory builds chassis up to its own
-size.
+**The grade is the factory's size** — *read*, and *measured*. The factory
+screen opens the constructor through `0x10055c70`, which keeps its fifth
+argument at `+0x18` (`0x10055ca6`). The factory passes its own record's `+0x30`
+(`0x100980f1`, pushed for the call at `0x1009810a`), the record the level's
+building list `+0x71c` gives for the building (`0x10086de0`). Who writes that
+field is now read:
+
+- **One bind writes it for every record.** `0x1007e3c0`, slot 3 of the base
+  record's vtable (`0x100e6548`), binds a record to its object: it keeps the
+  object's interface `0x10` at `+0x44` (`0x1007e435`), and stores the first
+  dword of that interface's slot 26 asked for `0x201` into `+0x30`
+  (`0x1007e538`–`0x1007e549`). The building record's and the unit record's
+  slot 3 (`0x10032d30`, `0x10074d30`) call it first (`0x10032d69`,
+  `0x10074d68`); those are its only two calls in the module.
+- **`0x201` is the size class.** Interface `0x10` is the `MBehaviour`, its slot
+  26 `Behavior.dll:0x1000a490`, and variable `0x201` answers `&[this + 0x960]`
+  (`0x1000a533`), which `0x10005e8f` sets from the machine's slot 54
+  (`0x1000cee0`) — a building's size from the **fourth letter** of its root
+  component's member name, `l` 2, `m` 3, `b` 4, `e` 5, and a unit's from the
+  third ([24-motion.md](24-motion.md#not-established)). Checked here at the
+  tables (`0x1000cffc`, `0x1000cfe8`): every other letter answers 0.
+- *Measured*: the **28** factories the missions place (Type `0x80000010`) are
+  16 `fr_b_plant`, 2 `fr_m_plant` and 10 `fr_l_plant`, grades 4, 3 and 2; the 8
+  `.dat` files of `UNITS/BUILDS/PLANT` are the same three roots. So the chassis
+  switch (`0x10048b21`, grades 1 to 4) offers a small factory `r_t` and `r_l`, a
+  medium one `r_m` besides, and the Large Factory every size — the rule of
+  [23-economy.md](23-economy.md) that a factory builds chassis up to its own
+  size, now from the writer rather than the readers.
+
+The same bind is what fills a unit record's `+0x30`, which the wingman menu,
+the voices and boarding read ([31-packages.md](31-packages.md#not-established)):
+the size class of the chassis's third letter, `t` 1, `l` and `h` 2, `m` 3,
+`b` 4.
 
 **Mission 02's player is offered 32 parts** (`MISSIONS/SCRIPTS/tut2_pl.trf`,
 *measured*):
@@ -163,6 +188,31 @@ the turret fit (`0x10052a92`, radar and deflector) and the gun fit
   has a `_df` part: 270 of 270 (*measured*).
 - The recording's weights come out only with the defaults fitted: the L-2f
   alone reads 26 t, not its body's 10 t (*seen*, re-derived below).
+
+**A fit never replaces a turret or a gun** — *read*. The takt adds a turret
+only while the destination's selected Turrets row holds no part
+(`0x100509ba`), and a gun only while its Weapons row holds none
+(`0x10050a0e`); the project loader fills a fresh project row by row
+(`0x10055190`, its adds at `0x100552d9`–`0x1005561d`). Those are all the
+callers of the add (`0x100519e0`) but the fits' own default fills, so neither
+fit is ever handed a filled socket. To change one, the player takes the old
+one off first, and **the removal takes everything hung on it**:
+
+- **A turret off** (`0x10053df0`) walks the Internal systems rows and the
+  Weapons rows whose host is the turret (a row's `+0x00`, the handle of the
+  part whose slot or socket it is, [37-designer.md](37-designer.md#a-rows-record--read-and-measured)),
+  last to first. Each that holds a part is taken off through the same removal
+  (`0x10053a50`, at `0x10053e6d` and `0x10053fdc`) — the radar, the deflector,
+  every gun — and then the row itself is deleted. The turret leaves the
+  project (`+0xbc90` slot 13, 6 and `0x14`), and its Turrets row is emptied.
+- **A gun off** (`0x10054210`) does the same over the Ammo rows the gun hosts
+  (`0x1005428c`): its clip goes with it, and so does the clip's row.
+- A tab left with no rows is then turned off in both panels, and one that keeps
+  rows starts again at its first ([37-designer.md](37-designer.md#which-tab-and-row-a-fit-leaves--read)).
+
+So a design never holds a gun without its turret or a clip without its gun.
+`openparkan.designs` and the engine refuse a fit over a fitted turret or gun,
+as the takt does.
 
 **Size never has to be checked.** A slot takes parts by its label, which
 carries the size, and a socket by its label, so a design cannot hold a part
@@ -251,33 +301,71 @@ A part's box is drawn from the same object code, over a preview of the part
 alone (`0x1006f300`). Its rows are the research item's stat template, `TRFA`
 ([19-descriptions.md](19-descriptions.md)). A row is
 `@G@<label>@B,<field>,G,<unit>,<width>,<decimals>@`; a quoted field (`"2"`)
-prints as written. The recording prints one decimal on every number, whatever
-the template says (*seen*).
+prints as written.
+
+**Every number prints `"%6.1f"`** — *read*. The row draw (`0x1006ea50`) formats
+a field's value with the constant `"%6.1f"` (`0x10104d98`, pushed at
+`0x1006eb5e`) and a quoted one with `"%6s"` (`0x10104da0`, `0x1006eb11`). It
+reads four things of the parsed row — the label (`+8`), the field's number
+(`+0x18`, `0xff` for a quoted one), the quoted text (`+0x1c`) and the unit
+(`+0x2c`) — and never the template's width or decimals, which is why the
+recording shows one decimal on `effic`'s 2 and `Frate`'s none alike (*seen*). A
+whole number such as `shotnum` is loaded as an integer and printed the same way:
+300 rounds read `300.0`. Where the row stands is [37-designer.md](37-designer.md#a-panel--read)'s.
+
+The values, by the field's number (the keyword list `0x1006f070`; the 24-way
+switch `0x1006f654` in `0x1006f300`). "Device query *n*" is the preview
+object's interface `0x202` slot 3 asked for id *n* on device 0
+(`Control.dll:0x1002e580`), which turns *n* into a component query on that
+device (`0x1002bb40`, the `IDeviceManager`'s slot 6); a property is the control
+system's (`0x1000dcc0`, a machine's overrides at `0x1000e6c0`). The part is new:
+its condition and its level are 1.
 
 | field | value | seen on Mission 02 |
 |---|---|---|
 | `weight` | property 124 × 0.001 | L-2f 10.0 t, 4L1 5.0, LRL36S 2.8, LFT 3.3, LEng1 1.6 |
 | `payload` | 136 × 0.001 | 55.0 t |
 | `maxspeed` | 144 × 3.6 | 110.0 kmph |
-| `wattage` | device 0's value `0x1300` (a gun's energy a shot), else its value `0x63` | LRL36S 0.2 MWt (0.24), LEng1 4.5 |
-| `Frate` | device 0's `0x65`: 1000 ÷ max(1, interval) | LRL36S 1.3 1/s, LFT 0.7 |
-| `range` | device 0's round controller +108 | 250.0 m, 200.0 m |
-| `damage` | device 0's `0x68`, the round's damage | 225.0 HP, 790.0 HP |
-| `blast` | device 0's `0x76` | — |
-| `Epower` | device 0's `0x79` | LEng1 3.1 MWt (not traced) |
-| `capacity` | 113 × 0.001 | — |
-| `Adfactor` | device 0's `0x78` | — |
+| `product` | 144 as it stands (`0x1006f442`) | no template names it |
+| `wattage` | a gun's energy a shot (query `0x1300` through `0x204`, its value 2), else device query `0x63`: query `0x500`, **the device's power figure**, its `.ctl` record's `+0x20` (`0x1002bca4`) | LRL36S 0.2 MWt (0.24), LEng1 4.5 |
+| `Frate` | device query `0x65` (`0xa00`): 1000 ÷ max(1, interval) | LRL36S 1.3 1/s, LFT 0.7 |
+| `range` | device query `0x64`, a gun's round frame, its `+0x58` — the round controller's +108; **723** when device 0 is no gun (`0x1006f4ac`) | 250.0 m, 200.0 m |
+| `damage` | device query `0x68` (6): a gun's `+0x174`, the damage of the round its link made | 225.0 HP, 790.0 HP |
+| `blast` | device query `0x76` (`0x900`, `0x1002bd30`): **a gun's `+0x178`**, below | — |
+| `Epower` | device query `0x79` (`0x1200`, `0x1002c23c`): **a class-5 engine's power figure × its value 0 × its condition**; nothing on any other class | LEng1 3.1 MWt |
+| `capacity` | property 113 (`0x1000e44f`), the device getter's id 2 (`0x1002b4e9`): **every battery's value 0 summed**, × 0.001; a negative one answers itself, a sum at or below 0 fails and prints 0 | — |
+| `Adfactor` | device query `0x78` (`0xe00`, `0x1002bf47`): a detection shield's mean of values 0–2, a deflector's of 0–5 and an efficiency component's value 0, each × condition × level; an engine's value 0 × condition | no template names it |
 | `sensrange` | `0x50`, the radar's range | 400.0 m |
-| `regener` | device 0's `0x77` | shield 60.0 HP/s, repair 60.0 |
-| `throughput` | 164 | — |
-| `shotnum` | device 0's `0x55`, an integer | — |
+| `regener` | device query `0x77` (`0x1100`): a repair system's value 0, a fight shield's value 1, × condition ([26-damage.md](26-damage.md#repair-a-units-own-repair-unit-switched-on-and-off--read-and-measured)) | shield 60.0 HP/s, repair 60.0 |
+| `throughput` | property 164 (`0x1000e40f`): query `0x500` on device 0, **its power figure** | — |
+| `shotnum` | device query `0x55` (`0x800`, `0x1002bcf0`): **a gun's value 0, the magazine**, rounded to a whole number | — |
 | `effic` | 134 × 100 | deflector 85.0 % |
 | `Spower` | 132 | shield 3500.0 HP |
 | `density` | 163, armour's rating | ARM 1 17.5 kg/m2, ARM 2 22.5 |
-| `Peffic`, `Eeffic`, `fastness`, `Pincrease`, `experience` | 0 | — |
+| `Peffic`, `Eeffic`, `fastness`, `Pincrease`, `experience` | 0.0, the constant `0x100e50a8` | no template names them |
 
-The keyword list is `0x1006f070`; the values `0x1006f300`, a 24-way switch
-(`0x1006f654`).
+**Which fields the templates use** — *measured*, over the 29 trees. `shotnum`
+and `blast` are on the clips alone (`i_cNN`), `Epower` on the engines alone,
+`capacity` and `throughput` on the batteries alone, `regener` on shields and
+repair units. `product`, `Adfactor`, `Peffic`, `Eeffic`, `fastness`, `Pincrease`
+and `experience` are named by **no** template. All 12 engines' first device is
+class 5, so LEng1's Power, `i_eng_b_df`'s 4.5 × 0.7, prints 3.1; all 16
+batteries' first device is their one class-19 battery, so a battery's capacity
+is its value 0 ÷ 1000 and its throughput its power figure.
+
+**A clip's blast is its round's reach.** A gun's link makes a round of its own
+and keeps two of its properties (`0x100296f0`): `0x35` at `+0x174`, the damage,
+and **`0xa5` at `+0x178`** (`0x1002983a`). Property `0xa5` is `0x100136c0` asked
+with 1: node 0's `.exp` radius (absolute on a round, `+0x50` = 9), raised to the
+farthest any other node's blast reaches — the distance from node 0 to that node,
+between their spheres as interface `0x20` slot 3 gives them per node (the
+level-0 slot sphere through the node's matrix, `AniMesh.dll:0x1000f3b0`), plus
+its radius, 0 where it has none. There is **no test of the explosion's kind**.
+*Measured* over the 58 clips with a gun device: 44 single-node area blasts
+print their radius (2.0 to 12.0 m); **14 direct-hit rounds print 1.0**, their
+`.exp` radius, though they hit one node only; and the six winged-SSM packs'
+four-node rounds reach **60.7** (`bm_b_04`) and **45.5** m (`bm_m_04`), past
+their 60 and 45 m radii.
 
 ## The name — *read*, and *seen*
 
@@ -292,7 +380,8 @@ The unit box's title is `"%s-%s %s"` (`0x100765e0`, called at `0x1004f37b`):
   6202 Warrior, 6203 Comm. Center, 6204 Human, else 6205 Unknown.
 
 The Type is the turret's role ([16-research.md](16-research.md)), or an animal
-for a chassis whose name starts `a`. Without a turret it is 0, so the L-2f
+in the animal designer, whose kind string starts `a`
+([Not established](#not-established)). Without a turret it is 0, so the L-2f
 alone reads **"LF?-X Unknown"** and with the 4L1 **"LFW-X Warrior"** (*seen*,
 *measured*).
 
@@ -378,8 +467,11 @@ free bot spares it is [36-factory.md](36-factory.md)'s.
 2. **Fitting.**
    - Choosing a chassis starts a new design and fills every labelled slot but
      brains with `<label>_df`, when offered.
-   - A turret goes on the `e_tur_` node and fills its radar and deflector.
-   - A gun goes on its socket and fills its clip.
+   - A turret goes on the `e_tur_` node, when none is there, and fills its radar
+     and deflector.
+   - A gun goes on its socket, when it is empty, and fills its clip.
+   - Taking a turret off takes its radar, deflector, guns and their clips;
+     taking a gun off takes its clip.
    - A part chosen on a slot page replaces that slot's part.
    - Accept is allowed only with a turret and spare payload above 0.
 3. **Numbers.**
@@ -388,7 +480,8 @@ free bot spares it is [36-factory.md](36-factory.md)'s.
      defence, offence and radar range as above.
    - Print `"%-.f / %-.f t"` (red when spare ≤ 0), `"%-.f kph"`, `"%d %"`
      twice over `[TEMP]`, and `"%-.f m"`.
-   - A part's box: its `TRFA` rows, values by the field table, one decimal.
+   - A part's box: its `TRFA` rows, values by the field table, each `"%6.1f"`
+     whatever the template asks; a quoted field as written.
 4. **Name.** "letters-X word" in the constructor; the built bot takes its
    clan's running count + 1.
 5. **File.**
@@ -401,32 +494,50 @@ free bot spares it is [36-factory.md](36-factory.md)'s.
 
 ## Not established
 
-- **The grade's source.** That the factory record's `+0x30` holds the
-  building's size class is derived from its other readers, not from its writer.
-- **`Epower`.** The engine's "Power" figure, device value `0x79` (LEng1 3.1
-  MWt), is not traced to a record value.
-- **The part box's number format.** The recording prints one decimal on every
+- ~~**The grade's source.** That the factory record's `+0x30` holds the
+  building's size class is derived from its other readers, not from its writer.~~
+  **Read**, and **measured**: the record's bind (`0x1007e3c0`, slot 3 of every
+  record) stores property `0x201` there (`0x1007e549`), the behaviour's size
+  class, a building's from its root's fourth letter; the 28 placed factories are
+  grades 4, 3 and 2 ([The catalogue](#the-catalogue--read-and-measured)).
+- ~~**`Epower`.** The engine's "Power" figure, device value `0x79` (LEng1 3.1
+  MWt), is not traced to a record value.~~ **Read**: component query `0x1200`,
+  a class-5 engine's power figure × its value 0 × its condition
+  (`Control.dll:0x1002c23c`); LEng1's 4.5 × 0.7 prints 3.1, as the recording's
+  box does ([A part's box](#a-parts-box--read)).
+- ~~**The part box's number format.** The recording prints one decimal on every
   template; the formatter that ignores the template's decimals field was not
-  read.
-- **The turret and gun fits.** They were read only as far as their `_df`
+  read.~~ **Read**: the row draw formats every value `"%6.1f"` (`0x1006eb5e`)
+  and never reads the template's width or decimals
+  ([A part's box](#a-parts-box--read)). With it, the properties behind
+  `capacity` (113, the batteries' summed value 0), `throughput` (164, device 0's
+  power figure), `shotnum` (`0x800`, a gun's magazine) and `blast` (`0x900`, the
+  reach of the round a gun makes as it links) are read, and `regener`'s was
+  already ([26-damage.md](26-damage.md#repair-a-units-own-repair-unit-switched-on-and-off--read-and-measured)).
+- ~~**The turret and gun fits.** They were read only as far as their `_df`
   lookups (`0x10052a92`, `0x100532ed`) and the turret flag. What they do to
   guns already on a replaced turret, or to clips when a gun is swapped, is not
   read. `openparkan.designs` drops the old turret's subtree and a socket's old
-  gun.
+  gun.~~ **Read**: neither fit is ever handed a filled socket — the takt adds a
+  turret or a gun only into an empty row (`0x100509ba`, `0x10050a0e`) — and the
+  removal that must come first takes a turret's radar, deflector, guns and their
+  clips, and a gun's clip, rows and all (`0x10053df0`, `0x10054210`;
+  [Fitting](#fitting--read-and-measured)).
 - **Rounding.** `"%-.f"` and `fistp` both round half to even under the default
   FPU mode, which Python's formatting matches; a value exactly on a half was
   not met.
 - **Other modes.** The constructor has two more: buildings, `fr_`, and
   animals, `a_` (`0x10051413`). Only the factory's robot mode has a caller.
-- **What the design state's `+0x370` is.** All three readers of the design's
+- ~~**What the design state's `+0x370` is.** All three readers of the design's
   `Type` begin with `cmp byte ptr [ecx], 0x61` on it and answer `0x20000000`,
-  an animal, when it matches (`0x1004f318`, `0x100514fb`, `0x100544f9`).
-  [30-turrets.md](30-turrets.md) reads that string as the chassis's name
-  ("a chassis whose name starts with `a`"), but the test is against **lower-case
-  `a`** and all 27 chassis part ids are upper case — `A_L_01`..`A_L_05` are the
-  five animal ones (*measured*, over all 29 trees). So it is some other string,
-  most likely the designer's kind prefix, which is spelled `r_`, `fr_` and `a_`
-  and is handed to the layout at `0x1004dff0`; no store into `+0x370` was found
-  in `iron3d.dll`, so that is *inferred*, not read. It makes no difference to a
-  robot design, where the base part is a chassis and the `Type` comes from the
-  turret either way.
+  an animal, when it matches (`0x1004f318`, `0x100514fb`, `0x100544f9`).~~
+  **Read**: it is the **destination panel's** (the designer's `+0xbca0`), the
+  Chassis tab's string (`+0x36c`, its text at `+0x370`), and it holds the
+  designer's kind string. The layout (`0x1004dff0`) copies the string it is
+  given to `+0xb668` and hands it to both panels' builders (`0x1004ebca`,
+  `0x1004ebd6`); the destination's builder (`0x1004bf70`) copies it into that
+  string (`0x1004ca24`–`0x1004ca91`). The factory lays the designer out with
+  `"r"`, and a clear with `r_`, `fr_` or `a_` (`0x100513c5`), so the test finds
+  `a` in the animal designer alone, which nothing opens. The line in
+  [30-turrets.md](30-turrets.md#the-turret-decides-what-the-unit-is--measured-and-read) that read it
+  as the chassis's name is corrected there.

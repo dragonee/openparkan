@@ -215,3 +215,58 @@ fn a_fit_steps_the_destination_to_the_next_slot_and_the_source_offers_what_that_
     double(&mut play, &mut screen, row(0.0, 0), &strings);
     assert_eq!(screen.session.as_ref().unwrap().destination.selected, Some(1));
 }
+
+/// Each tab keeps its own selected row, which it shows again when it turns back on; a fit
+/// turns on only the tabs the part gives rows; taking a turret off turns Weapons and Ammo off,
+/// and the tab a removal is made on steps to its next row (docs/37, "Which tab and row a fit
+/// leaves").
+#[test]
+#[ignore = "needs the game install"]
+fn each_tab_keeps_its_row_and_a_removal_turns_off_the_tabs_it_empties() {
+    let mut play = mission_02_play();
+    let game = gamedir::find(None).unwrap();
+    let strings = parkan_world::resources::game_strings(&game).unwrap();
+    let t = play.factories[0].target;
+    let mut screen = Screen::default();
+    screen.open(&mut play, t, &strings).unwrap();
+    double(&mut play, &mut screen, row(0.0, 0), &strings);
+    {
+        let s = screen.session.as_ref().unwrap();
+        // Turrets, Armour and Internal systems: the L-2f gives each a row.
+        assert_eq!(s.enabled, [true, true, false, true, true, false]);
+        assert_eq!((s.tab, s.destination.selected), (Tab::Turrets, Some(0)));
+    }
+    // Internal systems at its third row, then away and back: the third row again.
+    let s = screen.session.as_mut().unwrap();
+    assert!(s.select_tab(Tab::Internal, &mut play.assembly, &strings));
+    assert_eq!(s.destination.selected, Some(0), "a tab starts at its first row");
+    click(&mut play, &mut screen, row(designer::DESTINATION_X, 2), &strings);
+    let s = screen.session.as_mut().unwrap();
+    assert_eq!(s.destination.selected, Some(2));
+    assert!(s.select_tab(Tab::Turrets, &mut play.assembly, &strings));
+    assert!(s.select_tab(Tab::Internal, &mut play.assembly, &strings));
+    assert_eq!(s.destination.selected, Some(2), "the row it was left on");
+    assert!(s.select_tab(Tab::Turrets, &mut play.assembly, &strings));
+
+    // The turret turns the panels to Weapons; two guns; then Weapons steps as a gun comes off.
+    double(&mut play, &mut screen, row(0.0, 0), &strings);
+    assert_eq!(screen.session.as_ref().unwrap().tab, Tab::Weapons);
+    double(&mut play, &mut screen, row(0.0, 0), &strings);
+    double(&mut play, &mut screen, row(0.0, 0), &strings);
+    let s = screen.session.as_ref().unwrap();
+    assert_eq!(s.destination.selected, Some(2), "two sockets filled, the third selected");
+    assert!(s.enabled[5], "a gun turns Ammo on");
+    double(&mut play, &mut screen, row(designer::DESTINATION_X, 0), &strings);
+    let s = screen.session.as_ref().unwrap();
+    assert!(s.destination.rows[0].part.is_none(), "the first gun is off");
+    assert_eq!(s.destination.selected, Some(1), "and the removal stepped to the next socket");
+    assert!(s.enabled[5], "a gun is left, so Ammo stays on");
+
+    // The turret off: Weapons and Ammo go off with it.
+    let s = screen.session.as_mut().unwrap();
+    assert!(s.select_tab(Tab::Turrets, &mut play.assembly, &strings));
+    double(&mut play, &mut screen, row(designer::DESTINATION_X, 0), &strings);
+    let s = screen.session.as_ref().unwrap();
+    assert!(s.design.as_ref().unwrap().turret().is_none());
+    assert_eq!(s.enabled, [true, true, false, true, true, false], "Weapons and Ammo are off");
+}
