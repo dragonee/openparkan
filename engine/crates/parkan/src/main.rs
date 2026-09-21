@@ -23,6 +23,10 @@
 //! `--trace` prints where the hero is every second, and the window's key, modifier and
 //! focus events.
 //!
+//! The flags that say where the hero starts and what it is driving — `--at`, `--face`,
+//! `--pod`, `--drive`, `--take`, `--hq`, `--build`, `--wingmen`, `--capture` — apply in all
+//! three, the window included.
+//!
 //! Cmd frees the cursor and lets every key up, as leaving the window does, so a system
 //! shortcut such as Cmd-Shift-4 leaves nothing held.
 //!
@@ -1857,6 +1861,12 @@ fn main() -> Result<()> {
     let mut play = if args.fly { None } else { scene::play(&game, &loaded, &args)? };
     let mut view = None;
     if let Some(p) = play.as_mut() {
+        // Where the hero starts and what it is driving are set in the window too: `--at`,
+        // `--face`, `--pod`, `--drive`, `--take` and the rest had reached only `--screenshot`
+        // and `--headless`, so opening a window with one of them left the hero at the
+        // mission's own start. `--ticks` is 0 unless it is asked for, so nothing is played
+        // out here.
+        rehearse(p, &loaded, &args);
         view = Some(scene::own_view(&mut world.objects, &mut world.store, p)?);
         p.draw_rounds(&mut world.store, &mut world.objects)?;
         // `--hold` presses keys in the window too, for trying things without hands.
