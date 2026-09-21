@@ -9169,6 +9169,121 @@ def check_hall_way_gates(check, game: Path) -> None:
           f"{len(links) - blank - named} gated")
 
 
+def check_batch_word_and_collision_flags(check, game: Path) -> None:
+    """The batch word a mover's face query tests, the node a portal names, the collision flags
+    a control gives its mover, a door's capsule and a building's second computer.
+
+    docs/24-motion.md, "The ground inside a building" and "Walking into a building".
+    """
+    names = frozenset(p.name.lower() for p in all_archives(game))
+    # 1. The batch record's first dword is the word; its +6 halfword names a portal's room.
+    total = portals = named = other_ffff = own = 0
+    portal_materials: Counter[str] = Counter()
+    for path in all_archives(game):
+        archive = NResArchive.open(path)
+        members = {e.name.lower(): e for e in archive}
+        for entry in list(archive):
+            if entry.tag != "MESH":
+                continue
+            inner = NResArchive(archive.read(entry), entry.name)
+            stream = next((e for e in inner if e.type_id == objmesh.STREAM_BATCH), None)
+            if stream is None:
+                continue
+            raw = inner.read(stream)
+            model = objmesh.parse(archive.read(entry), entry.name)
+            wea = members.get(entry.name.lower().rsplit(".", 1)[0] + ".wea")
+            wear = objmesh.read_wea(archive.read(wea)) if wea else []
+            level0 = {}
+            for n, node in enumerate(model.nodes):
+                si = node.slot_index[0]
+                if si != objmesh.NO_SLOT and si < len(model.slots):
+                    s = model.slots[si]
+                    level0.update((b, n) for b in range(s.first_batch, s.first_batch + s.batch_count))
+            for i in range(stream.element_count):
+                f = struct.unpack_from("<10H", raw, i * objmesh.BATCH_SIZE)
+                word, node = f[0] | f[1] << 16, f[3]
+                total += 1
+                if not word & objmesh.ROUND_SKIPS_BATCH:
+                    other_ffff += node == 0xFFFF
+                    continue
+                portals += 1
+                material = wear[f[2] & 0xFF].upper() if (f[2] & 0xFF) < len(wear) else "?"
+                portal_materials[f"{path.name}:{material}"] += 1
+                named += node < len(model.nodes)
+                own += i in level0 and node == level0[i]
+    check("the batch word's 8 marks exactly fortif.rlb's doorway and portal quads, "
+          "and their record's +6 names another node",
+          (total, portals, named, other_ffff, own) == (15153, 633, 633, 14520, 0)
+          and set(portal_materials) == {"fortif.rlb:DEFAULT", "fortif.rlb:PORTAL_001",
+                                        "fortif.rlb:PORTAL_004"},
+          f"{portals} of {total} batches carry 8 ({dict(portal_materials)}), {named} of them "
+          f"naming a node at +6 and {own} their own; {other_ffff} others hold 0xFFFF there")
+
+    # 2. A mover's collision flags: 8 unless its state's word carries 4. No controller mixes.
+    split: Counter[str] = Counter()
+    mixed = []
+    hero = None
+    for path in all_archives(game):
+        archive = NResArchive.open(path)
+        for entry in list(archive):
+            if not entry.name.lower().endswith(".ctl"):
+                continue
+            try:
+                c = control.parse(archive.read(entry), names)
+            except control.ControlFormatError:
+                continue
+            if not c.states:
+                continue
+            fours = sum(1 for s in c.states if s.mode & 4)
+            if 0 < fours < len(c.states):
+                mixed.append(entry.name)
+            split["walks" if fours else "keeps floors"] += 1
+            split["0x4000000"] += all(s.mode & 0x4000000 for s in c.states)
+            if entry.name.lower() == "r_h_02.ctl":
+                hero = (fours, len(c.states))
+    check("no controller mixes states with and without bit 4, so a mover's flag 8 is fixed",
+          not mixed and (split["walks"], split["keeps floors"], split["0x4000000"]) == (99, 107, 31)
+          and hero == (105, 105),
+          f"{split['walks']} controllers carry bit 4 in every state and {split['keeps floors']} "
+          f"in none; {split['0x4000000']} carry 0x4000000; mixed {mixed}; the hero {hero}")
+
+    # 3. A door part's capsule, and the second computer the filing leaves running.
+    fortif = NResArchive.open(game / "fortif.rlb")
+    entries = {e.name.lower(): e for e in fortif}
+    pick = [(0, 0, 0), (1, 0, 0), (1, 1, 0), (0, 1, 0), (0, 1, 1), (0, 0, 1), (1, 0, 1), (1, 1, 1)]
+    parts = narrower = two = 0
+    front = None
+    for name, entry in sorted(entries.items()):
+        if not name.endswith(".ctl") or name[:-4] + ".msh" not in entries:
+            continue
+        c = control.parse(fortif.read(entry), names)
+        two += sum(1 for k in c.components if k.type_id == control.COMPUTER_TYPE) == 2
+        model = objmesh.parse(fortif.read(entries[name[:-4] + ".msh"]), name)
+        for k in c.components:
+            if k.type_id != 12:
+                continue
+            for e in k.entries:
+                n = c.channels[e].node
+                s = model.slots[model.nodes[n].slot_index[0]]
+                pose = model.world_pose(n)
+                cs = [objmesh.apply(pose, tuple((s.aabb_min, s.aabb_max)[p][i] for i, p in enumerate(pk)))
+                      for pk in pick]
+                e7 = [cs[7][i] - cs[0][i] for i in range(3)]
+                ends = ((5, 7), (0, 2)) if e7[2] >= e7[0] and e7[2] >= e7[1] else (
+                    ((1, 7), (0, 4)) if e7[0] >= e7[1] else ((3, 7), (0, 6)))
+                a, b = ([(cs[i][x] + cs[j][x]) / 2 for x in range(3)] for i, j in ends)
+                radius = math.dist(a, cs[7])
+                parts += 1
+                narrower += radius < s.sphere[3]
+                if name == "fr_b_plant.ctl" and n == 3:
+                    front = (round(math.dist(a, b), 2), round(radius, 2))
+    check("a door part's capsule is narrower than its node's sphere, and 18 buildings "
+          "carry a second computer",
+          (parts, narrower, two) == (56, 56, 18) and front == (22.08, 7.73),
+          f"{narrower} of {parts} door parts' capsules are narrower than the sphere; the Large "
+          f"Factory's front door is {front} long and wide; {two} controllers carry two computers")
+
+
 def _building_places(game: Path) -> dict[str, tuple[str, list[int]]]:
     """Building root record -> (folder, hall-way flag words), via its ``.bas``."""
     lib = objects.ObjectLibrary(game / "objects.rlb")
@@ -10343,6 +10458,25 @@ def check_building_route(check, game: Path) -> None:
           f"{ {e: (round(w[0], 1), w[1]) for e, w in ways.items() if w} }; the front group "
           f"{front} reaches it: {any(shortest(f, pod) for f in front)}; the west way's nodes "
           f"{nodes}")
+
+    #    For a walker only the west exit leads in: the east and upper west exits reach the
+    #    interior across four links whose gate is a flyer's, and no link joins the three groups
+    #    with the gated ones counted (docs/24, "For a walker only the low west exit leads in").
+    gated = sorted((link.start, link.end) for link in graph.links if link.gate)
+    everything = dict(links)
+    links.clear()
+    for link in graph.links:
+        if not link.gate:
+            links[link.start].add(link.end)
+            links[link.end].add(link.start)
+    walkers = {e: shortest(e, pod) is not None for e in exits}
+    links.clear()
+    links.update(everything)
+    check("fortif.rlb: a walker reaches the Large Factory's pod from the low west exit alone",
+          gated == [(41, 64), (60, 46), (64, 68), (69, 60)]
+          and all(link.gate == objmesh.LINK_FLYER_ONLY for link in graph.links if link.gate)
+          and walkers == {67: True, 68: False, 69: False},
+          f"gated links {gated}; over the ungated ones exits reach the pod: {walkers}")
 
     # 2. Under that way every walkable face is a ramp of at most 30 degrees, flagged 2.
     posed = plant.posed_positions()
@@ -24222,6 +24356,7 @@ def run(game: Path) -> int:
         check_motion, check_playback, check_ground, check_sensors, check_hit_test,
         check_collision, check_lake_and_buoys,
         check_combat, check_ownership, check_owner_word, check_hall_way_gates,
+        check_batch_word_and_collision_flags,
         check_capture, check_building_entry, check_pod_zone, check_door_shot,
         check_building_lighting,
         check_building_ground,

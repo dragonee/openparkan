@@ -384,10 +384,12 @@ fn mission_02s_large_factory_cuts_the_ground_from_under_it_and_lets_the_hero_thr
     assert_eq!(under.solid.map(|s| s.0), Some(0), "{under:?}");
     assert!((under.point.z - 139.35).abs() < 0.5, "{under:?}");
     assert!(play.ground.cut(391.28, 740.08) && !play.ground.cut(300.0, 556.0));
-    // Walked at the entrance, the hero goes through its black doorway into the hall.
+    // Walked at the entrance, the hero goes through its black doorway into the hall: the door
+    // starts opening once the hero's sphere reaches the leaf's capsule, 7.7 wide across the
+    // doorway, and is open 2.25 s on (docs/24, "Walking into a building").
     assert!(play.stand_at(395.8, 915.0, 3.117));
     play.hero.key("SCAN_W", true);
-    for _ in 0..(6 * 60) {
+    for _ in 0..(7 * 60) {
         play.hero.update_input();
         play.tick(1000.0 / 60.0, [0.0; 2]);
     }

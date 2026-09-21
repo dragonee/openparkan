@@ -709,6 +709,9 @@ pub fn struck_wear<'a>(part: &Part, wear: &'a [String], p0: Vec3, p1: Vec3) -> O
 /// The game works one push out per pair and moves both sides by opposite shares of it; the
 /// engine runs each unit as the mover in its own turn, so each side takes its own share of
 /// the push the other's faces make.
+///
+/// A mover whose collision flags carry 8 is pushed by a building's floors too (`keeps_floors`,
+/// [`parkan_sim::machine::Machine::keeps_floors`]).
 fn collision_push(
     solids: &[Solid],
     from: Vec3,
@@ -716,6 +719,7 @@ fn collision_push(
     radius: f32,
     mover: Option<usize>,
     mover_mass: f32,
+    keeps_floors: bool,
 ) -> Vec3 {
     let mut total = Vec3::ZERO;
     for (i, obstacle) in solids.iter().enumerate() {
@@ -733,7 +737,7 @@ fn collision_push(
         {
             continue;
         }
-        total += solid::push(from, end, radius, obstacle) * share(obstacle.mass, mover_mass);
+        total += solid::push(from, end, radius, obstacle, keeps_floors) * share(obstacle.mass, mover_mass);
     }
     total
 }
@@ -896,7 +900,7 @@ impl Play {
             .collect();
         let materials_for = |t: usize, part: usize, material: u16| {
             let name = battle.wears.get(t)?.get(part)?.get(usize::from(material & 0xFF))?;
-            materials.get(name).map(|m| (m.surface, m.damage_rate, crate::models::doorway(name)))
+            materials.get(name).map(|m| (m.surface, m.damage_rate))
         };
         ground.solids = battle
             .combat
@@ -1894,7 +1898,7 @@ impl Play {
         let solid =
             Solid::from_parts(&target.parts, target.centre, target.radius, building, |part, material| {
                 let name = wears.get(part)?.get(usize::from(material & 0xFF))?;
-                materials.get(name).map(|m| (m.surface, m.damage_rate, crate::models::doorway(name)))
+                materials.get(name).map(|m| (m.surface, m.damage_rate))
             });
         let mut solid = solid;
         if let Some(b) = self.buildings.iter().find(|b| b.target == t) {
@@ -3311,6 +3315,13 @@ impl Play {
             let mass = robot
                 .heft
                 .mass(|p, n| node_share(target.parts.get(p).and_then(|part| part.life.as_ref()), n));
+            // STAND-IN: docs/24-motion.md#the-ground-inside-a-building--read-in-part-and-measured
+            // -- a flyer's collision flags are read to carry 8, so a building's floors push it
+            // too, and taken whole since its states lack bit 4. With that, Mission 02's flyer
+            // made at the Large Factory's creation vertex is pushed 31 m up off the floor and
+            // over the shut front door; how a flyer's height (docs/24, "A flyer's height") and
+            // this push meet is not read. No robot keeps the floors.
+            let keeps_floors = robot.walker.keeps_floors() && !robot.flyer;
             let push = collision_push(
                 &self.ground.solids,
                 from,
@@ -3318,6 +3329,7 @@ impl Play {
                 robot.collision.1,
                 Some(*t),
                 mass,
+                keeps_floors,
             );
             if push.length_squared() >= NO_CONTACT {
                 robot.walker.take_push(push);
@@ -3618,6 +3630,7 @@ impl Play {
             self.hero.collision.1,
             None,
             mass,
+            self.hero.walker.keeps_floors(),
         );
         if push.length_squared() >= NO_CONTACT {
             self.hero.walker.take_push(push);

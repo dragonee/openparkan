@@ -806,9 +806,9 @@ is no per-face material field.** Stream 13 groups the index buffer into draw
 batches and names a material for each.
 
 ```
-uint16  0, 0
+uint32  flags             the batch word: 2 struck from behind, 8 a portal
 uint16  material          low byte indexes the wear; high byte 0xFF or 0x00
-uint16  0xFFFF
+uint16  node              0xFFFF, or on a portal the room beyond it
 uint16  index count       3 x the triangles in this batch
 uint16  first index       offset into stream 6
 uint16  0
@@ -823,6 +823,18 @@ batches over 39 materials and uses every one of them.
 
 The element count comes from the stream's own NRes directory entry, which is
 also how the 20-byte stride was pinned down; a hex dump alone suggested 12.
+
+**The first dword is the batch word every face query tests, and the `+6`
+halfword names a portal's room** (*read*, and *measured*). `AniMesh.dll`'s face
+source hands a face's batch record back through interface `0x18` slot 3
+(`0x100134d0`): its first dword as the answer's first word, which the
+collision's push-out keeps as the face's batch word, and its `+6` halfword,
+plus the part's first node, as the node `CBuilding::PortalDrawNotify` reads.
+Over the install's **15153** batches the word carries 2 on 1477, 8 on **633**
+and `0x200` on none; the 633 are `fortif.rlb`'s `DEFAULT`, `PORTAL_001` and
+`PORTAL_004` batches — the doorway and portal quads a mover passes — and the
+`+6` halfword is a node on exactly those, `0xFFFF` on the other 14520
+([24-motion.md](24-motion.md#the-ground-inside-a-building--read-in-part-and-measured)).
 
 ### Stream 7 is the per-face record
 
@@ -1136,8 +1148,14 @@ leaf drawn first hides the leaves behind it where its texels are not clear.
 `TF2`, the palm's texture, has an alpha of 0 on 30,413 of its 65,536 texels and
 255 on 21,113; `FTREE1` and `HTREE1` are 4-bit, 0 on 38% and 50%.
 
-Not established: where a batch word's 8 and `0x100` come from (the same
-unwritten word the push-out reads, [24-motion.md](24-motion.md#not-established)),
+Not established: ~~where a batch word's 8 and `0x100` come from (the same
+unwritten word the push-out reads, [24-motion.md](24-motion.md#not-established))~~
+— the push-out's word is **read** to be the batch record's own first dword
+([Materials are per batch](#materials-are-per-batch-not-per-face)), which
+carries 8 on 633 batches and `0x100` on 2953; whether the word `CShade`'s mesh
+draw tests at `0x1004552a` is that same dword is not traced here, and if it
+is, the 2953 batches carrying either — every one of the 633 carries `0x100`
+as well, and 1430 more are two-sided `0x102` ones — are filed see-through;
 which sort type each of the queue's layers is created with (`CreatePrimLayer`,
 `0x10031760`, takes 0 to 5, and type 3 is `CCamDistSortLayerVB`, whose render is
 `0x1003e1d0`), and so whether a layer's items are drawn in distance order.

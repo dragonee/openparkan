@@ -106,9 +106,9 @@ pub struct Part {
     /// (`AniMesh.dll:0x1000a79d`, `Control.dll:0x10008c6a`, docs/28, "The order parts load
     /// in"), so the part's nodes go when the socket does.
     pub host: Option<(usize, usize)>,
-    /// The portal quads, by triangle: a segment passes them whatever their flags, as a
-    /// mover does (docs/24, "Portal quads stand between the rooms"). Empty on a mesh that
-    /// wears none, which is every mesh but a building's.
+    /// The triangles of the batches whose word carries 8, the portal quads: a segment passes
+    /// them whatever their flags, as a mover does (docs/24, "The doorways are portal quads").
+    /// Empty on a mesh that has none, which is every mesh but a building's.
     pub portals: Rc<Vec<bool>>,
 }
 

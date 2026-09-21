@@ -525,7 +525,9 @@ keeps its mesh's stream-2 header — box, sphere, cylinder
 (`AniMesh.dll:0x1000a891`) — and the agent's sphere is recomputed from them at
 the current pose: the parts' centres weighted by their radii, a radius reaching
 the farthest part's sphere, then the centre times each scale and the radius
-times the largest (`0x10009510`). Interface `0x18` slot 9 hands that sphere
+times the largest (`0x10009510`). That runs at the attach, as each part is
+loaded and as one is removed, and at no frame's step
+([24-motion.md](24-motion.md#finding-the-ground--read)). Interface `0x18` slot 9 hands that sphere
 out, its centre moved to world space and its radius as it is
 (`0x10014580`), and message 1 stores that radius. A round is one part, so its
 radius is its header's radius — 0.103 to 1.41 on the 67 `BULL` rounds, 0.121

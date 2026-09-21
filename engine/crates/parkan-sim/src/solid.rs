@@ -7,6 +7,8 @@
 
 use glam::Vec3;
 
+use parkan_formats::mesh::BATCH_TWO_SIDED;
+
 use crate::combat::Part;
 use crate::ground::WALKABLE_NORMAL_Z;
 use crate::hit::inside;
@@ -18,6 +20,15 @@ pub const WALK_MARGIN: f32 = 0.5;
 pub const COLLISION_SKIPS_FACE: u16 = 0x4;
 /// A triangle flagged 2 is a floor, which the push-out passes for a mover without flag 8.
 pub const FLOOR_FACE: u16 = 0x2;
+/// A batch whose word carries 8 lets every mover through, and a round (`Control.dll:0x1001db25`,
+/// `0x1001d9fa`). The word is the stream-13 batch record's first dword: interface `0x18` slot 3
+/// (`AniMesh.dll:0x100134d0`) hands it back as its answer's first word, which the push-out
+/// copies to a gathered face's `+0x40` (`0x1000d71f`). *Measured*: 633 of the install's 15153
+/// batches carry it, every one a `DEFAULT`, `PORTAL_001` or `PORTAL_004` batch of `fortif.rlb`
+/// -- a building's doorway and portal quads -- and each of them names a node in its `+6`
+/// halfword, where the other 14520 hold `0xFFFF`. The query passes `0x200` too unless the
+/// mover's flags carry 4, and no shipped batch carries `0x200`.
+pub const COLLISION_SKIPS_BATCH: u32 = 0x8;
 /// A triangle flagged `0x20` is see-through -- a building's console glass and the energy
 /// bridge's additive `B_A_BRIGE` ([07](../../../docs/07-objects.md#the-flags-word)) -- and
 /// lets a mover through as one flagged 4 does. See [`passes`].
@@ -35,6 +46,9 @@ pub struct SolidFace {
     /// The world normal, from the file's.
     pub normal: Vec3,
     pub triangle_flags: u16,
+    /// The flags word of the batch it is drawn in: [`COLLISION_SKIPS_BATCH`] lets a mover
+    /// through it, and `BATCH_TWO_SIDED` makes it hide the faces behind it from either side.
+    pub batch_flags: u32,
     /// The ground surface id of the face's material, if it has one.
     pub surface: Option<u8>,
     /// The damage a second the material deals what touches it (`+0x1a4`).
@@ -78,7 +92,7 @@ fn vec(v: [f64; 3]) -> Vec3 {
 
 impl Solid {
     /// The faces of a target's posed parts, with `surface(part, material)` naming a batch's
-    /// material's surface id, damage rate and whether its faces let a mover through: each node's level-0 slot of the variant its
+    /// material's surface id and damage rate: each node's level-0 slot of the variant its
     /// stage draws, and nothing of a hidden node, which the walk-face and push visitors pass
     /// over (`AniMesh.dll:0x1000ce90`, `0x1000dfe0`).
     pub fn from_parts(
@@ -86,7 +100,7 @@ impl Solid {
         centre: Vec3,
         radius: f32,
         ground: bool,
-        surface: impl Fn(usize, u16) -> Option<(u8, f32, bool)>,
+        surface: impl Fn(usize, u16) -> Option<(u8, f32)>,
     ) -> Self {
         let mut faces = Vec::new();
         let mut nodes = Vec::new();
@@ -114,14 +128,13 @@ impl Solid {
                         (from..from + count).contains(&t)
                     });
                     let material = batch.and_then(|b| surface(p, b.material));
-                    let passes = material.is_some_and(|m| m.2);
-                    let flags = mesh.face_flags.get(t).copied().unwrap_or(0);
                     faces.push(SolidFace {
                         a,
                         b,
                         c,
                         normal,
-                        triangle_flags: if passes { flags | COLLISION_SKIPS_FACE } else { flags },
+                        triangle_flags: mesh.face_flags.get(t).copied().unwrap_or(0),
+                        batch_flags: batch.map_or(0, |b| b.flags),
                         surface: material.map(|m| m.0),
                         damage_rate: material.map_or(0.0, |m| m.1),
                     });
@@ -288,20 +301,13 @@ fn hides(face: &SolidFace, q: Vec3) -> bool {
 /// How near 0 an edge's value lets a point into a hiding face (`AniMesh.dll:0x1002097c`).
 pub const HIDDEN_EDGE: f32 = 1e-5;
 
-/// Whether a face lets a mover through.
+/// Whether a face lets a mover through: a triangle flagged 4, a batch flagged 8
+/// ([`COLLISION_SKIPS_BATCH`]), and a floor -- a triangle flagged 2 -- unless the mover's
+/// collision flags carry 8, which `keeps_floors` says (`Control.dll:0x1001db1e`-`0x1001dbd1`).
 ///
-/// STAND-IN: docs/24-motion.md#collision-between-objects--read -- the query also passes
-/// batches flagged 8, and 0x200 unless the mover's flags carry 4; a mesh's batch record
-/// carries no such word, so they are a flag set on the loaded batch that is not traced,
-/// and no batch passes, as a round's query takes it.
-///
-/// The push-out's own filter drops the floors, triangles flagged 2, unless the mover's
-/// collision flags carry 8 (`Control.dll:0x1001db2b`, `0x1001dbce`, docs/24, "The way to the
-/// pod").
-///
-/// STAND-IN: docs/24-motion.md#not-established -- who sets a collision object's flags is
-/// not read: no mover carries 8, so every floor lets a mover by, as a recording shows the
-/// hero walking the Large Factory's ramps and stairs.
+/// Those flags are its control's current state's word, set through the collision object's
+/// slot 5 (`Control.dll:0x1001f670`, from `0x10007bd0`): 8 unless the word carries 4, the bit a
+/// walker's every state has and a flyer's none (docs/24, "The ground inside a building").
 ///
 /// STAND-IN: docs/24-motion.md#standing-on-a-bridge--read-and-measured -- a triangle flagged
 /// `0x20` passes here too, which the read of the collision's filters does not give (their
@@ -311,8 +317,14 @@ pub const HIDDEN_EDGE: f32 = 1e-5;
 /// anything crossing; three of them flag that cap **4** and the fourth, `fr_e_brige`, flags it
 /// **`0x20`**, the bit its energy material carries throughout. Without this the hero crosses
 /// C00 Mission 01's `m_bridge` and stops dead in the middle of C02 Mission 04's.
-fn passes(face: &SolidFace, _obstacle: &Solid) -> bool {
-    face.triangle_flags & (COLLISION_SKIPS_FACE | FLOOR_FACE | SEE_THROUGH_FACE) != 0
+///
+/// STAND-IN: docs/24-motion.md#the-ground-inside-a-building--read-in-part-and-measured -- the
+/// segment's filter keeps the floors whatever the mover's flags, and this passes them for it
+/// as the push-out's does.
+fn passes(face: &SolidFace, keeps_floors: bool) -> bool {
+    let floors = if keeps_floors { 0 } else { FLOOR_FACE };
+    face.triangle_flags & (COLLISION_SKIPS_FACE | floors | SEE_THROUGH_FACE) != 0
+        || face.batch_flags & COLLISION_SKIPS_BATCH != 0
 }
 
 /// Whether a straight move from `start` to `end` runs into a shut face of `obstacle` — a wall
@@ -321,13 +333,14 @@ fn passes(face: &SolidFace, _obstacle: &Solid) -> bool {
 /// planned over the areal map knows nothing of a building's walls (docs/24, "What the links
 /// cost"), so a walk into one asks this before it sets off.
 pub fn blocked(start: Vec3, end: Vec3, obstacle: &Solid) -> bool {
+    // A walker's: the floors let it by.
     obstacle
         .nodes
         .iter()
         .filter(|n| !n.open)
         .flat_map(|n| n.faces.clone())
         .map(|f| &obstacle.faces[f])
-        .filter(|f| !passes(f, obstacle))
+        .filter(|f| !passes(f, false))
         .any(|face| {
             crate::hit::plane_crossing(start, end, face.normal, face.a)
                 .is_some_and(|q| inside(q, face.a, face.b, face.c, face.normal))
@@ -347,16 +360,19 @@ pub fn blocked(start: Vec3, end: Vec3, obstacle: &Solid) -> bool {
 /// A face touches the sphere as [`touch`] reads `0x1000e900`, and hides another as the test
 /// at `0x1000d7a5` reads it ([`crossing`], [`hides`]).
 ///
+/// A mover whose collision flags carry 8 (`keeps_floors`) is pushed by the floors as well
+/// ([`passes`]).
+///
 /// STAND-IN: docs/24-motion.md#collision-between-objects--read -- the small-face stop needs
 /// the mover's class 3 or more, and the hero's is taken as its size class, 2, so it never
 /// applies.
-pub fn push(start: Vec3, end: Vec3, radius: f32, obstacle: &Solid) -> Vec3 {
+pub fn push(start: Vec3, end: Vec3, radius: f32, obstacle: &Solid, keeps_floors: bool) -> Vec3 {
     let mut end = end;
     let mut total = Vec3::ZERO;
     let move_ = end - start;
     if move_.length_squared() > 0.0 {
         let shut = obstacle.nodes.iter().filter(|n| !n.open).flat_map(|n| n.faces.clone());
-        for face in shut.map(|f| &obstacle.faces[f]).filter(|f| !passes(f, obstacle)) {
+        for face in shut.map(|f| &obstacle.faces[f]).filter(|f| !passes(f, keeps_floors)) {
             if move_.dot(face.normal) < 0.0
                 && let Some(q) = crate::hit::plane_crossing(start, end, face.normal, face.a)
                 && inside(q, face.a, face.b, face.c, face.normal)
@@ -384,12 +400,9 @@ pub fn push(start: Vec3, end: Vec3, radius: f32, obstacle: &Solid) -> Vec3 {
     near.sort_by(|a, b| a.0.total_cmp(&b.0));
     // Drop the hidden faces (`0x1000d7a5`–`0x1000dac0`), from the farthest to the nearest: a
     // face goes when the segment from the centre to its centroid crosses another face still
-    // gathered, from its front into its back, inside its triangle. A face dropped hides
-    // nothing after.
-    //
-    // STAND-IN: docs/24-motion.md#collision-between-objects--read -- a hider whose batch word
-    // (record `+0x40`) carries 2 is crossed either way (`0x1000d86c`); where the batch word
-    // comes from is not traced and the engine carries none, so every hider is one-sided.
+    // gathered, from its front into its back, inside its triangle -- or from its back into its
+    // front as well where the hider's batch word carries 2 (`0x1000d86c`), the batch's own
+    // flags dword. A face dropped hides nothing after.
     let mut i = near.len();
     while i > 0 {
         i -= 1;
@@ -397,7 +410,10 @@ pub fn push(start: Vec3, end: Vec3, radius: f32, obstacle: &Solid) -> Vec3 {
         let centroid = (face.a + face.b + face.c) / 3.0;
         let hidden = near.iter().enumerate().rev().any(|(j, &(_, _, g))| {
             let other = &obstacle.faces[g];
-            j != i && crossing(other, end, centroid).is_some_and(|q| hides(other, q))
+            let two_sided = other.batch_flags & BATCH_TWO_SIDED != 0;
+            let crossed = crossing(other, end, centroid)
+                .or_else(|| two_sided.then(|| crossing(other, centroid, end)).flatten());
+            j != i && crossed.is_some_and(|q| hides(other, q))
         });
         if hidden {
             near.remove(i);
@@ -406,7 +422,7 @@ pub fn push(start: Vec3, end: Vec3, radius: f32, obstacle: &Solid) -> Vec3 {
     // Then filter (`0x1000db93`).
     let kept: Vec<(f32, Vec3)> = near
         .iter()
-        .filter(|&&(_, _, f)| !passes(&obstacle.faces[f], obstacle))
+        .filter(|&&(_, _, f)| !passes(&obstacle.faces[f], keeps_floors))
         .map(|&(d, n, _)| (d, n))
         .collect();
 
@@ -445,8 +461,16 @@ mod tests {
             Vec3::new(10.0, 10.0, z),
             Vec3::new(0.0, 10.0, z),
         );
-        let face =
-            |a, b, c| SolidFace { a, b, c, normal, triangle_flags: 0, surface: Some(5), damage_rate: 0.0 };
+        let face = |a, b, c| SolidFace {
+            a,
+            b,
+            c,
+            normal,
+            triangle_flags: 0,
+            batch_flags: 0,
+            surface: Some(5),
+            damage_rate: 0.0,
+        };
         Solid {
             centre: Vec3::new(5.0, 5.0, z),
             radius: 7.1,
@@ -492,6 +516,7 @@ mod tests {
             c,
             normal: -Vec3::X,
             triangle_flags: 0,
+            batch_flags: 0,
             surface: None,
             damage_rate: 0.0,
         };
@@ -512,27 +537,44 @@ mod tests {
             }],
         };
         // Standing 1.5 in front of it with a radius of 2: pushed back by 0.5.
-        let p = push(Vec3::new(-1.5, 0.0, 0.0), Vec3::new(-1.5, 0.0, 0.0), 2.0, &wall);
+        let p = push(Vec3::new(-1.5, 0.0, 0.0), Vec3::new(-1.5, 0.0, 0.0), 2.0, &wall, false);
         assert!((p - Vec3::new(-0.5, 0.0, 0.0)).length() < 1e-4, "{p}");
         // Walking through it: the end goes back to the start.
-        let p = push(Vec3::new(-3.0, 0.0, 0.0), Vec3::new(1.0, 0.0, 0.0), 2.0, &wall);
+        let p = push(Vec3::new(-3.0, 0.0, 0.0), Vec3::new(1.0, 0.0, 0.0), 2.0, &wall, false);
         assert!((p.x - -4.0).abs() < 1e-4, "{p}");
         // Leaves pass.
         let mut leaves = wall.clone();
         leaves.faces.iter_mut().for_each(|f| f.triangle_flags = COLLISION_SKIPS_FACE);
-        assert_eq!(push(Vec3::new(-3.0, 0.0, 0.0), Vec3::new(1.0, 0.0, 0.0), 2.0, &leaves), Vec3::ZERO);
+        assert_eq!(
+            push(Vec3::new(-3.0, 0.0, 0.0), Vec3::new(1.0, 0.0, 0.0), 2.0, &leaves, false),
+            Vec3::ZERO
+        );
         // And so does a see-through face: the end cap the energy bridge carries where its two
         // halves meet is flagged 0x20 where the other three bridges flag theirs 4.
         let mut glass = wall.clone();
         glass.faces.iter_mut().for_each(|f| f.triangle_flags = SEE_THROUGH_FACE);
-        assert_eq!(push(Vec3::new(-3.0, 0.0, 0.0), Vec3::new(1.0, 0.0, 0.0), 2.0, &glass), Vec3::ZERO);
+        assert_eq!(push(Vec3::new(-3.0, 0.0, 0.0), Vec3::new(1.0, 0.0, 0.0), 2.0, &glass, false), Vec3::ZERO);
         assert!(!blocked(Vec3::new(-3.0, 0.0, 0.0), Vec3::new(1.0, 0.0, 0.0), &glass));
         assert!(blocked(Vec3::new(-3.0, 0.0, 0.0), Vec3::new(1.0, 0.0, 0.0), &wall), "a wall still stops");
+        // A doorway or portal quad is a wall whose batch word carries 8: every mover passes it.
+        let mut portal = wall.clone();
+        portal.faces.iter_mut().for_each(|f| f.batch_flags = 0x4108);
+        assert_eq!(push(Vec3::new(-3.0, 0.0, 0.0), Vec3::new(1.0, 0.0, 0.0), 2.0, &portal, true), Vec3::ZERO);
+        assert!(!blocked(Vec3::new(-3.0, 0.0, 0.0), Vec3::new(1.0, 0.0, 0.0), &portal));
+        // A floor pushes only a mover whose collision flags carry 8: a flyer, not a walker.
+        let mut floor = wall.clone();
+        floor.faces.iter_mut().for_each(|f| f.triangle_flags = FLOOR_FACE);
+        assert_eq!(
+            push(Vec3::new(-1.5, 0.0, 0.0), Vec3::new(-1.5, 0.0, 0.0), 2.0, &floor, false),
+            Vec3::ZERO
+        );
+        let p = push(Vec3::new(-1.5, 0.0, 0.0), Vec3::new(-1.5, 0.0, 0.0), 2.0, &floor, true);
+        assert!((p - Vec3::new(-0.5, 0.0, 0.0)).length() < 1e-4, "{p}");
     }
 
     fn face(a: Vec3, b: Vec3, c: Vec3, triangle_flags: u16) -> SolidFace {
         let normal = (b - a).cross(c - a).normalize();
-        SolidFace { a, b, c, normal, triangle_flags, surface: None, damage_rate: 0.0 }
+        SolidFace { a, b, c, normal, triangle_flags, batch_flags: 0, surface: None, damage_rate: 0.0 }
     }
 
     #[test]

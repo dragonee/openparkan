@@ -494,9 +494,13 @@ impl Walker {
             }
         }
         // STAND-IN: docs/24-motion.md#the-ground-inside-a-building--read-in-part-and-measured
-        // -- how a walker climbs a building's stairs is not read; a recording shows the hero
-        // climbing the Large Factory's, whose faces stand at up to 67°, so on a building's
-        // faces the slope brake is left out.
+        // -- the brake reads the ground normal the lift last averaged whoever's faces the
+        // contacts stood on (`0x100156c6`, body `+0x194`, written only by the lift at
+        // `0x10015e47`), so a building's stairs brake a climber as a hillside does. The
+        // recordings show the hero climbing out of the Large Factory up its 30-degree stairs and
+        // up Mission 04's teleport chamber at a walk, and with the brake on building faces the
+        // engine's hero never reaches that chamber's field; what reconciles the two is not read.
+        // On a building's faces the brake is left out.
         let on_building = self.ground.is_some_and(|h| h.solid.is_some());
         if self.controller.mode == SLOPE_MODE && !on_building {
             let along = self.body.to_world(Vec3::from_array(self.body.velocity));
@@ -692,6 +696,17 @@ impl Walker {
         let (lo, hi) = ground.world_box();
         let centre = self.body.position + self.body.to_world(self.centre);
         self.take_push(motion::edge_push(centre, self.sphere_radius, lo, hi));
+    }
+
+    /// Whether the machine's collision flags carry 8, so a building's floors (triangle flag 2)
+    /// push it too. The control sets them through the collision object's slot 5
+    /// (`Control.dll:0x1001f670`, called at `0x10007bd0` as message 4 initialises the machine)
+    /// from its current state's word: 8 unless the word carries 4. *Measured*: of the install's
+    /// 206 controllers with states, none mixes states with and without bit 4 -- 99 carry it in
+    /// every state, every walker and every wheeled and tracked chassis among them, and 107 in
+    /// none: the nine flying chassis, two animals, the 30 buildings and the 66 rounds.
+    pub fn keeps_floors(&self) -> bool {
+        !self.controller.states.get(self.machine.current).is_some_and(|s| s.mode & STATE_GROUND_CONTACTS != 0)
     }
 
     /// Message `0x1b` (`0x1000c990`): a push moves the position, the velocity kept; in a

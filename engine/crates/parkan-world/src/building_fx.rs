@@ -52,24 +52,6 @@ fn read(assembly: &mut Assembly, library: &str, member: &str) -> Option<Vec<u8>>
     assembly.archive(library)?.read_name(member).ok().map(<[u8]>::to_vec)
 }
 
-/// Where on its node an action-3 effect stands: the centre of the node's level-0 bounding
-/// sphere, in the node's own frame, or the node's origin where it draws nothing.
-///
-/// STAND-IN: docs/13-control.md#a-buildings-load-group--read-and-measured -- the instance's
-/// frame is read to be the node's matrix (`Effect.dll:0x1000625a`, property 2), whose
-/// translation is the node's authored origin. On 68 of the 112 door sounds in `fortif.rlb`
-/// that origin stands more than 10 m from the door it is meant to sound at, 30.8 m on the
-/// three factories' side doors, so the sound is all but inaudible inside its 5 m near and
-/// 60 m far distances; the sphere's centre stands on every one of them. Where the node's
-/// matrix comes from is not traced.
-fn node_centre(part: &Part, node: usize) -> [f64; 3] {
-    let Some(slot) = part.slot(node).and_then(|s| part.mesh.slots.get(usize::from(s))) else {
-        return [0.0; 3];
-    };
-    let [cx, cy, cz, _] = slot.sphere;
-    [cx, cy, cz].map(|v| f64::from(v * part.scale))
-}
-
 /// The value an owner node's animation shows through a rising or falling mode: mode 16 follows
 /// the value up and to 0, holding it while it falls; mode 17 follows it down and to 1, holding
 /// it while it rises (docs/11, "Effect time t").
@@ -137,7 +119,14 @@ impl BuildingEffects {
         Some((f(at), f(dir)))
     }
 
-    /// The frame an effect hangs on now.
+    /// The frame an effect hangs on now. An action-3 effect's is its node's world matrix: the
+    /// instance asks `IAnimation` (interface `0xb`) slot 4 for the node with 2
+    /// (`Effect.dll:0x1000625a`), which hands back the node record's `+0x20`
+    /// (`AniMesh.dll:0x10005320`), the matrix the pose walk builds as the object's world matrix
+    /// times the node's chain of keyed poses (`0x10008b30`, `0x1000919a`). So it stands at the
+    /// node's own origin as the node is posed now, wherever the geometry the node draws lies:
+    /// on 68 of `fortif.rlb`'s 112 door sounds more than 10 m from the door, 30.8 m on the three
+    /// factories' side doors (docs/13, "A building's load group").
     pub fn frame(&self, part: &Part, on: On) -> Option<Frame> {
         match on {
             On::Points(points) => {
@@ -147,7 +136,7 @@ impl BuildingEffects {
             On::Node(node) => {
                 let pose = part.nodes.get(node)?;
                 let f = |v: [f64; 3]| Vec3::new(v[0] as f32, v[1] as f32, v[2] as f32);
-                let at = f(pose.apply(node_centre(part, node)));
+                let at = f(pose.translation);
                 let y = f(rotate(pose.rotation, [0.0, 1.0, 0.0]));
                 Some(Frame::along(at, y, 1.0))
             }

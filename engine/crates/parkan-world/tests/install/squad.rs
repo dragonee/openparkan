@@ -1313,7 +1313,7 @@ fn a_capture_walks_round_c02_m03s_mine_to_the_door_it_can_reach_rather_than_at_i
     // the mine's east door stands 28 m over the terrain, up its own ramps, which the areal map
     // does not carry, so the ground-level door on the west is taken instead.
     let from = play.robots.iter().find(|(rt, _)| *rt == t).unwrap().1.walker.body.position;
-    let way = play.way_in(mine, from, pod).expect("a way in");
+    let way = play.way_in(mine, from, pod, false).expect("a way in");
     let door = way[0];
     let under = play.ground.below(door.x, door.y, door.z + 40.0).expect("ground under the door").point.z;
     assert!(door.z - under < 20.0, "a door {:.1} over the ground under it: {door}", door.z - under);

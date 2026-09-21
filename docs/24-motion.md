@@ -1018,6 +1018,28 @@ and that group picks the step by surface
      box's diagonal and its radius half the diagonal (`0x1000f694`); a node
      with no level-0 slot is a point at its origin. Node 0 is asked as the whole
      object while the sums are still empty, so it adds nothing.
+   - **When the two are worked out** (*read*). Both sums are the one routine
+     `0x10009510`, which has three call sites and no pointer to it in
+     `AniMesh.dll`, all in the agent mesh's message handler (`0x10006fc0`,
+     slot 2 of the vtable at `0x1002057c`):
+     - message 4 with a non-zero argument, the attach's second pass
+       (`0x100070bd`);
+     - the `0x80000020` part load, after the merge `0x1000a460`, when the load
+       record's `+0x40` is set (`0x10007254`–`0x10007261`), as the unit's
+       parts are assembled
+       ([28-chassis.md](28-chassis.md#the-order-parts-load-in-and-what-a-slot-keeps--read-and-measured));
+     - message 20 (`0x10007285`, after `0x1000aa70`), which the agent's part
+       removal (`0x10003c40`) sends with the part's id once it has dropped the
+       part from its list; the agent's handler runs that removal on a sub-code
+       of 20 (`0x1000155d`), and who sends it in play is not traced.
+
+     It first runs the pose walk (`0x10008b30`), so the nodes' boxes are taken
+     at the frames the mesh holds then. The mesh's constructor (`0x100068a0`)
+     leaves both frames and the blend between them at 0 (`+0x1e4`, `+0x1e8`,
+     `+0x1f4`) and sets the two bytes the walk tests (`+0x1fc`, `+0x1fd`), so
+     at the attach and through the assembly the nodes stand at **frame 0**,
+     the rest pose; a part removed in play is measured at whatever pose the
+     machine is in. No frame's own step calls it.
 
    So **the contact holds the body by the agent's sphere's radius about the
    node sphere's centre** (*read*). An earlier reading took both from the
@@ -1830,9 +1852,29 @@ takes a push that points down whole (message `0x1b`). A bridge's deck pushes
 the hero crossing it, except where its faces are flagged 2.
 
 **Doors** (*read*). `CBuilding` files each class-12 item as a door, with the
-nodes its channels play (`Terrain.dll:0x100583a2`–`0x100584e8`). A door has a
-state, the time it opened, a lock flag and value, and a hold.
+nodes its channels play (`Terrain.dll:0x100583a2`–`0x100584e8`), and each
+class-13 item as a computer. A door has a state, the time it opened, a lock
+flag and value, and a hold.
 
+- **Filed, it is shut** (*read*). Once every item is filed, the filing hands
+  each door's item, and the **first** computer's, switch word 2 through
+  `IItemManager` (interface `0x202`, `CBuilding +0x3c`) slot 6
+  (`0x10058532`–`0x1005854f`, `0x100585a1`–`0x100585be`; `Control.dll:0x1002ed30`
+  sets the item's property `0x600`, its switch word). That is the word the
+  timed close sends (`0x1005766d`). It then puts the door's state at 2, closing,
+  and its lock flags and hold at 0; the computer's state at 0. A word of 2 runs
+  the progress back from its 0, which is an end at once, so the item holds 0
+  and clears its word
+  ([28-chassis.md](28-chassis.md#what-a-devices-value-turns--read-and-measured)):
+  every door and pod starts shut and still, whatever the constructor's 5.
+- **A second computer is left running** (*read*, and *measured*). The filing
+  switches index 0 of the computer list alone (`0x1005858e`), and
+  `CBuilding::SendMsg` drives that one alone (`0x100577ad`–`0x100577ed`). **18 of
+  `fortif.rlb`'s 30 controllers carry two class-13 records**, each second one
+  on a single node beside the first's: the Outpost's `o04` beside its pod `o03`,
+  the Small Bunker's `i14` beside `i13`. The second keeps the constructor's word
+  5, open and wrapping, so its node plays round for ever; 10 of those 18
+  channels wrap.
 - **It opens for a child that comes near.** A child that moves tells its
   parent (event 1: an object setting its matrix tells its parent,
   `AniMesh.dll:0x10017be1`). The building's notification (`CBuilding` slot 20,
@@ -1843,6 +1885,30 @@ state, the time it opened, a lock flag and value, and a hold.
   opens (`0x1005b480`) and that child holds it (`0x1005a5a0`). A door locked
   shut (the lock flag with value 1) is passed over. A child that leaves
   (event 3) drops the holds it made.
+- **The capsule is the part's box stood on its longest side** (*read*). The
+  call is `IJointMesh` (interface `0x20`, `CBuilding +0x38`) slot 5
+  (`AniMesh.dll:0x1000fd60`), asked in world space (2) about the door part's
+  node. It asks its own slot 4 for that node's level-0 box — the current
+  variant's, its eight corners through the node's matrix (`0x1000f760`) — and
+  takes the diagonal *E* = corner 7 − corner 0 in the world. The corners are
+  laid out as `0x10011850` writes them: 0 the minimum, 7 the maximum, and 1, 2,
+  3, 4, 5, 6 taking the maximum on x; x and y; y; y and z; z; x and z.
+  - Along **z** when *E*'s z is at least its x and its y (`0x1000fdd3`): from
+    the middle of corners 5 and 7 to the middle of 0 and 2, the centres of the
+    box's top and bottom faces.
+  - Otherwise along **x** when its x is at least its y (`0x1000ff32`): from the
+    middle of 1 and 7 to the middle of 0 and 4.
+  - Otherwise along **y** (`0x1001007e`): from the middle of 3 and 7 to the
+    middle of 0 and 6.
+  - The radius is the distance from the first end to corner 7 (`0x100101b1`),
+    half the diagonal of the end face.
+
+  *Measured* over `fortif.rlb`'s **56** door parts at rest: 19 run along x,
+  25 along y and 12 along z, and the capsule is narrower than the node's
+  level-0 sphere on **56 of 56**. The Large Factory's front door `i05` is a
+  capsule 22.1 long and 7.73 wide across the doorway at mid-height, against a
+  sphere of 13.48; its side doors `i19` and `i21` are 11.5 long and 3.08 wide,
+  against 6.53; the Small Bunker's `i03` 9.8 and 2.92, against 5.70.
 - **Its states** (`CBuilding::SendMsg`, `0x10057550`). Opening switches the
   item on. Once the item stops, the door is open and the time is kept; the
   building sees it stop when the state word clears, at 0.9 ÷ rate
@@ -1918,9 +1984,11 @@ nothing. Inside the Outpost, at 334–338 s, it is captured the same way.
    child. The building keeps its children and their bounding-sphere centres.
 2. For each child that moved: drop every door's hold. For each door not locked
    shut, for each of its nodes, if the child's centre is within
-   (child radius + part radius) of the part's axis, open the door (switch its
-   item on, unless already open or opening) and hold it. Until the mesh's
-   capsule is read, a part's level-0 slot bounds stand in.
+   (child radius + capsule radius) of the part's capsule's segment, open the
+   door (switch its item on, unless already open or opening) and hold it. The
+   capsule is the node's level-0 box stood on its longest world axis, from one
+   end face's centre to the other's, as wide as half an end face's diagonal
+   ([above](#walking-into-a-building--read-and-measured)).
 3. Tick every door: opening → open when its item stops (the time kept);
    open → closing when unheld, not locked open, and 5 s past opening; closing
    → shut when the item stops. A door's item steps like any other
@@ -1991,10 +2059,11 @@ opens for a hero on its floor as the hero's own does.
   own ramp. The ramp falls from z 3.47 at y −35 to −5.56 at y −3, and lies
   below the landscape under it from about y −18 on. So a walker coming down
   it stands on the bunker's faces, the bunker's child.
-- **The reach.** The door's slot sphere has centre (−0.22, −1.11, −2.83) and
-  radius 5.70. On the ramp at y −6, a hero's centre is 4.9 from it, well inside
-  2.01 + 5.70, the stand-in for the capsule. So walking down should open the
-  door with no shot (*derived*).
+- **The reach.** The door's capsule runs across the doorway along x, from
+  (4.58, −2.07, −2.83) to (−5.03, −0.16, −2.83), 2.92 wide
+  ([above](#walking-into-a-building--read-and-measured)). On the ramp at y −6,
+  a hero's centre on the doorway's middle line is 4.8 from its segment, inside
+  2.01 + 2.92. So walking down should open the door with no shot (*derived*).
 
 **Against the recording** (*seen*, 5 fps from 164.4 s):
 - 164.4–166.6 s: the hero walks down the ramp toward the closed door, which is
@@ -2048,8 +2117,46 @@ face's node, and the face is dropped while it is open.
 *Measured*: triangle flag `0x10` is the **door face**. On 17 of the 20 meshes
 that carry it, the flagged triangles lie exactly on the controller's class-12
 door nodes. On two institutes they lie on all their door nodes but one. On the
-generator they lie on other nodes than its doors. Where a face's batch word
-(`8`, `0x200`) comes from is not traced.
+generator they lie on other nodes than its doors.
+
+**The batch word is the file's** (*read*, and *measured*). The gathered face's
+batch word is the first word of what the face source's slot 3 returns
+(`AniMesh.dll:0x1000d71f`), and that slot, interface `0x18`'s
+(`0x100134d0`), looks the batch record up in the node's mesh — stream 13, 20
+bytes a record — and copies its **first dword** into its answer's first word
+(`0x10013534`–`0x10013538`). The ray walker keeps the same dword for its own
+batch masks (`0x100081ca`,
+[26-damage.md](26-damage.md#the-query-record-and-what-a-round-excludes--read-and-measured)).
+So bits 8 and `0x200` are the
+file's, and so is the 2 that makes a hider hide both ways (`0x1000d865`).
+Across the install's **15153** batches: **8 is on 633**, every one a
+`DEFAULT`, `PORTAL_001` or `PORTAL_004` batch of `fortif.rlb` — 567 of its 594
+`DEFAULT` batches and all 66 `PORTAL_*` ones, the 27 others lying in
+lower levels of detail and damage variants, none at level 0 of the intact
+variant — and **`0x200` is on none**. Each of the 633 also names a node in
+its record's `+6` halfword, where the other 14520 hold `0xFFFF`
+([below](#a-building-is-drawn-cell-by-cell-through-its-portals--read)).
+
+**Who sets a mover's collision flags** (*read*, and *measured*). The flags the
+query reads (collision object `+0x30`) are written by the object's slot 5
+(`Control.dll:0x1001f670`): 2 from the word's `0x20000`, 4 from its
+`0x4000000`, and **8 unless the word carries 4**. Its only callers in the
+install are the two control dispatchers, at the end of message 4 with a
+non-zero argument (`0x10007bd0`, `0x100319c5`), passing the current state's
+flag word (`+0x104`, the state's `+0x04` copied to `+0x100`), to the object
+the control keeps as interface `0x28` (asked for at its attach, `0x10007966`)
+— the id the agent's build asks its new collision object for
+(`AniMesh.dll:0x10003389`). A sweep of the sixteen modules for calls through `+0x14` that
+push no argument and load `edx` finds these two and no other whose receiver is
+a control's interface `0x28`. *Measured* over
+the install's **206** controllers with states: **none mixes** states with and
+without bit 4. **99 carry it in every state** — the 15 chassis of `bases.rlb`
+that do not fly, the hero's `r_h_02` among them with 105 of 105; three
+animals; the 80 trees and stones of `static.rlb`; and one of `system.rlb` —
+and so lack 8; **107 carry it in none**: the nine flying chassis (`r_t_02`, `r_l_02`, `_05`, `_06`, `_07`,
+`r_m_02`, `r_b_02`, `_07`, `_08`), the animals `a_a_l2` and `a_a_l3`, the 30
+buildings and 66 rounds, and so carry 8. `0x20000` is on no state; `0x4000000`
+on 31, all rounds, which pass batches flagged `0x200` (none is).
 
 **The doorways are portal quads** (*measured*, *read*, and *seen*). `fr_b_plant`
 carries 87 triangles of the material `DEFAULT`, all with triangle flags 0. 80
@@ -2075,13 +2182,14 @@ doorway, a step outside the door `i05`, with a third quad at y 87.4 on the hall
   shows through the windows beside it. A drawn quad would hide both.
 - The Large Factory's entrance still reads black from outside at 88–93 s because
   the hall behind it is unlit, not because the quad covers it.
-- It does not stop a walker either (*derived*). By the filter above, something
-  passes it: its batch word carrying `8` or `0x200` is the only way the read
-  code allows, and that it does is a *guess*. **A round passes it too**: the
-  round's query builds its filter the same way (`Control.dll:0x1001d9fa`), and
-  with the quad solid a shot at the Large Factory's entrance strikes node 1,
-  `o01`, a metre in front of the door, so no shot could ever open a door that
-  has a doorway quad (*measured* on openparkan's engine).
+- It does not stop a walker either (*read*, and *measured*): every level-0
+  doorway and portal batch carries 8 in its batch word, which the query
+  excludes for every mover ([above](#the-ground-inside-a-building--read-in-part-and-measured)).
+  **A round passes it too**: the round's query builds its filter the same way
+  (`Control.dll:0x1001d9fa`), and with the quad solid a shot at the Large
+  Factory's entrance strikes node 1, `o01`, a metre in front of the door, so no
+  shot could ever open a door that has a doorway quad (*measured* on
+  openparkan's engine).
 
 #### A building is drawn cell by cell through its portals — *read*
 
@@ -2120,11 +2228,28 @@ with the room it hangs under, and `i16`, `i17` (`0x451`) with `i15`.
 (`0x1005f24d`, `0x1005f26f`) and nothing reads them; `Ngi32.dll` exports
 `n3dGetPortalClipRect` and no module imports it.
 
+**What a portal names** (*read*, and *measured*). `PortalDrawNotify` is slot 4
+of the interface at `CBuilding +0x10` (vtable `0x1009b4ec`, whose slot 11 is
+`Render`), and takes one argument, a face handle. It hands that to the
+building's `IMesh2`, interface `0x18` (`CBuilding +0x2c`, so named by its
+constructor's panic at `0x10055efa`; the notify reads it as its own `+0x1c`),
+slot 3 (`AniMesh.dll:0x100134d0`), and reads the node
+from the answer's `+0x18` (`0x1005a5ed`–`0x1005a5fc`). That slot fills `+0x18`
+with the face's **batch record's `+6` halfword** plus its part's first node
+(`0x1001353e`–`0x10013550`), and the notify refuses a node past the count
+(*"Illegal joint #"*, `0x1005a60d`). *Measured*: that halfword is `0xFFFF` on
+14520 of the install's 15153 batches and a node index on the other 633 — the
+batches flagged 8, every doorway and portal quad — and on **625 of the 625** of
+those that lie in a level-0 slot it is another node than the batch's own: the
+room beyond. On `fr_b_plant` the entrance quads on `o01` name `i06`, `i06`'s
+name `o01` and `i01`, and the `PORTAL_001` pair at the ramp's foot names `i15`
+from `i13` and `i13` from `i15`. **Not read**: who calls the notify with a
+portal's face — no call through that slot is found — and so when during a
+cell's draw it happens.
+
 **Not implemented**: openparkan draws every cell of a building at once and only
 drops the portal quads. What the cells hide is geometry behind a wall the camera
 cannot see through anyway, so the picture is the same and the cost is frame time.
-How a portal face reaches `PortalDrawNotify`, and which node it names, is not
-read.
 
 **The hall way's second word is the vertex's node** (*measured*). Posed through
 the node it names, a vertex lands where it belongs:
@@ -2137,11 +2262,32 @@ Raw, the same vertices sit tens of metres off.
 
 **The Large Factory's hall way is three groups with no link between them**
 (*measured*): the forecourt and entrance, 9 vertices on nodes 1 and 4; the
-interior with the pod, 62 vertices; and the rear, 13. The front group never
-reaches the pod. The interior group does, from its three side exits (flag 1):
-vertex 67 on the west at z 2.3, 68 above it at 9.4, and 69 on the east. Along
-the links their ways to the pod are 115.5, 161.4 and 170.3 m. What joins the
-three groups is not read.
+interior with the pod, 62 vertices; and the rear, 13. Counting all 85 links,
+the four gated ones among them
+([The hall-way gates](#the-hall-way-gates-in-the-shipped-buildings--read-and-measured)),
+the groups stay apart, with three lone vertices (18, 19, 20) beside them. The
+front group never reaches the pod. The interior group does, from its three
+side exits (flag 1): vertex 67 on the west at z 2.3, 68 above it at 9.4, and 69
+on the east. Along the links their ways to the pod are 115.5, 161.4 and
+170.3 m.
+
+**For a walker only the low west exit leads in** (*measured*). The four gated
+links are all a flyer's (`0x10000`) and all inside the interior group: 69–60
+and 60–46 on the east, 68–64 and 64–41 on the west. With them out of the graph
+68, 69, 60 and 64 stand alone, and the interior is 58 vertices whose one exit
+is 67. So the only way to the pod the search gives a walker is 67's, through
+the west side door `i21`, which the recording's hero takes; 68 and 69 are a
+flyer's.
+
+**What joins the groups is the areal map** (*read*). An exit is linked to the
+walkable areal under it at a cost of 1 (`ArealMap.dll:0x1002363f`,
+[The global path](#the-global-path--read-and-measured)), and each group has
+its own: the front group's 2, 78 and 79 (flag `0x10000001`, any size), the
+rear group's 70, 73 and 76, and the interior's 67. On Tut_2 all nine exits
+stand over areals whose word is 1 (*measured*, the placement turning them into
+the world as the table below does: 67 lands at (337.4, 790.0)). So a walker
+sent to the pod from the forecourt is led off the front group, over the areals
+round the building and in at 67 (*derived*).
 
 From the front there is a way on the faces alone (*measured*). A flood over
 the walkable level-0 faces on a half-metre grid, from the forecourt at 0,
@@ -2237,8 +2383,9 @@ face into a 72-byte record (18 words, `AniMesh.dll:0x1000d75d`):
 - its triangle word `+0x44` is the first word of the triangle record that the
   source's slot 5 returns for (2, 3) (`0x1000d668`, stored at `0x1000d738`).
 
-No instruction in `AniMesh.dll` writes 8, `0x200` or `0x2000` into a `+0x40`.
-So where a face's batch word is set is not traced.
+No instruction in `AniMesh.dll` writes 8, `0x200` or `0x2000` into a `+0x40`,
+because nothing needs to: the word is the batch record's own first dword
+([above](#the-ground-inside-a-building--read-in-part-and-measured)).
 
 The pair's query builds its filter with a constructor of six words
 (`Control.dll:0x10013f60`). Its first word is the OR of five of the mask
@@ -2289,9 +2436,27 @@ horizontal part p sin θ, and after the rule the lesser of p and 4 p sin θ:
 Such a push would land each time the pass runs, and shove the hero down every
 ramp, and back against every one on the way out. The recording shows the hero
 walk in at about 12 m/s and out again from 158 to 166.5 s. So the hero's
-collision flags lack 8 (*derived*). Who sets a collision object's flags, and
-which movers carry 8, is not traced. Triangle flag 2 marks exactly the
-walk-through floors ([07-objects.md](07-objects.md#stream-7-is-the-per-face-record)).
+collision flags lack 8, which was *derived* here first and is now **read**:
+every state of the hero's controller carries bit 4, and a walker's flags take
+8 only from a state that lacks it
+([above](#the-ground-inside-a-building--read-in-part-and-measured)). A flyer's
+states all lack it, so a building's floors push a flyer. Triangle flag 2 marks
+exactly the walk-through floors
+([07-objects.md](07-objects.md#stream-7-is-the-per-face-record)).
+
+**The slope brake reads a building's floors too** (*read*). The mode-2 brake
+tests the body's ground normal `+0x194` (`0x100156c6`), whose only writers are
+the body's constructor and the lift (`0x10015e47`), which averages the normals
+of whatever faces the sphere and the flag-1 contacts stood on, a building's or
+the landscape's; nothing in between asks whose they are
+([Holding the body](#holding-the-body-on-the-ground--read-and-measured)). So
+the 30° stairs brake a hero climbing out, to 2 (cos 30° − cos 0.6) ÷
+(1 − cos 0.6) = 0.47 of its speed (*derived*). The recording's hero walks out
+from 158 to 166.5 s, a second slower than in, which a braked climb up 12.5 m of
+stairs would account for. But openparkan's engine, with the brake on a
+building's faces, never gets its hero up Mission 04's teleport chamber to the
+field, which the recording's hero reaches in 4.6 s. What reconciles those is
+not read, and the engine leaves the brake out on a building's faces.
 
 **Steps and lift** (*read*,
 [Finding the ground](#finding-the-ground--read) and
@@ -2315,19 +2480,23 @@ neither limit comes into play.
 3. Collide against the building's faces, the one stood on included, except:
    - triangles flagged 4;
    - door faces (flag `0x10`) while their door is open;
-   - STAND-IN, from the recording and the probe: see-through faces with
-     triangle flags 0, the `DEFAULT`, `PORTAL_001` and `PORTAL_004` quads.
+   - faces whose batch's flags dword carries 8: the `DEFAULT`, `PORTAL_001` and
+     `PORTAL_004` quads, and only they.
 4. In the push-out, drop faces flagged 2 unless the mover's collision flags
-   carry 8. STAND-IN until those flags are traced: no walker carries 8. The
-   floors and ramps are then climbed by the lift alone. The stairs' 64° side
-   pieces carry no 2 and still push, and the hero still walks the stairs
-   (*measured* on openparkan's engine).
+   carry 8: a walker's, every one of whose states carries bit 4, never do, and
+   a flyer's do. The floors and ramps are then climbed by the lift alone. The
+   stairs' 64° side pieces carry no 2 and still push, and the hero still walks
+   the stairs (*measured* on openparkan's engine). STAND-IN in openparkan: no
+   robot keeps the floors; with them, Mission 02's flyer made at the Large
+   Factory's creation vertex is pushed 31 m up off its floor and over the shut
+   front door, and how a flyer's height meets this push is not read.
 5. Take the push as the machine does: with state bit 4, whole when the parent
    is a building and z ≤ 0; otherwise flattened, lengthened to |P| and at
    most ×4.
-6. The way to the Large Factory's pod is the hall way's from the nearest side
-   exit: for the west one, vertices 67, 66, 65, 58, 59, 37, 36, 6, 7, 25, 35, 28
-   and 31, in the world as the table gives them. The side door opens as the
+6. The way to the Large Factory's pod is the hall way's, over the links the
+   unit may cross: for a walker, from the west exit alone, vertices 67, 66, 65,
+   58, 59, 37, 36, 6, 7, 25, 35, 28 and 31, in the world as the table gives
+   them; a flyer may come in at 68 or 69 as well. The side door opens as the
    walker nears it (step 2 of
    [Walking into a building](#walking-into-a-building--read-and-measured)),
    and takes 2.5 s to open at rate 0.4.
@@ -2335,8 +2504,9 @@ neither limit comes into play.
    the openings between the building's cells, and a drawn one hides the door a
    step behind it and the next room beyond it
    ([above](#a-building-is-drawn-cell-by-cell-through-its-portals--read)).
-8. Pass them with a round as well as with a mover, so a shot reaches the door
-   behind the doorway ([A shot opens a door](#a-shot-opens-a-door--read-and-seen)).
+8. Pass them with a round as well as with a mover, by the same batch word, so
+   a shot reaches the door behind the doorway
+   ([A shot opens a door](#a-shot-opens-a-door--read-and-seen)).
 
 #### The ways into Mission 03's Small Generator and Small Bunker — *measured*, and *seen*
 
@@ -3077,8 +3247,10 @@ patrol runs past it.
   ([The cap where two halves meet](#the-cap-where-two-halves-meet--measured-and-a-stand-in)).
   The batch word is the obvious other candidate — the query excludes batches
   flagged 8, and the energy batches carry `0x100` and no 8 — so either a third
-  filter or a flag set on the loaded batch is doing it. The engine passes
-  `0x20` as a stand-in.
+  filter or ~~a flag set on the loaded batch~~ is doing it. The batch word is
+  now read to be the file's own dword, set by nothing at load
+  ([The ground inside a building](#the-ground-inside-a-building--read-in-part-and-measured)),
+  so it is not the word. The engine passes `0x20` as a stand-in.
 
 - ~~How interface `0x25` slot 3 turns an object's level-0 triangles into a
   push, and what slot 2 does with its 0.5~~ — **read**: the push accumulates
@@ -3133,8 +3305,15 @@ patrol runs past it.
   ever push a hero standing on it~~ — **read**: it does, and the world's pass
   runs the building's, so they do
   ([Walking into a building](#walking-into-a-building--read-and-measured)).
-- How the building's mesh builds the capsule a door part is tested against
-  (`Terrain.dll:0x1005a27f`). ~~The node whose box bounds a pod's zone in
+- ~~How the building's mesh builds the capsule a door part is tested against
+  (`Terrain.dll:0x1005a27f`).~~ — **read**: `IJointMesh` slot 5
+  (`AniMesh.dll:0x1000fd60`) stands the node's level-0 box on its longest world
+  axis, from one end face's centre to the other's, as wide as half an end
+  face's diagonal; over the 56 shipped door parts it is narrower than the
+  node's sphere on 56
+  ([Walking into a building](#walking-into-a-building--read-and-measured)).
+  Also **read** there: the filing leaves every door and the first computer shut,
+  and a building's second computer running. ~~The node whose box bounds a pod's zone in
   height (`0x10058607`)~~ — **read**: the pod node's parent, its level-0 box
   in world space
   ([27-ownership.md](27-ownership.md#the-zones-height-is-the-pod-nodes-parents-box--read-and-measured)).
@@ -3145,17 +3324,40 @@ patrol runs past it.
   **read** and **measured**. The push-out drops triangles flagged 2 unless the
   mover's collision flags carry 8, and every floor on the way carries 2. The way
   runs in by the west side door, down 30° stairs and a 21° ramp
-  ([The way to the pod](#the-way-to-the-pod--measured-and-seen)). Still open:
+  ([The way to the pod](#the-way-to-the-pod--measured-and-seen)). ~~Still open:
   who sets a collision object's flags (`+0x10`), and which movers carry 8 and 4.
-  That the hero lacks 8 is *derived* from the recording.
-- Where a gathered face's batch word comes from. It is the first word of what
+  That the hero lacks 8 is *derived* from the recording.~~ — **read**, and
+  **measured**: the control, through the collision object's slot 5
+  (`Control.dll:0x1001f670`), from its state's word — 8 unless the word
+  carries 4, 4 from `0x4000000`. None of the 206 controllers mixes; every
+  walker lacks 8 and every flyer carries it, and 4 is on 31 rounds alone
+  ([The ground inside a building](#the-ground-inside-a-building--read-in-part-and-measured)).
+  ~~Whether the slope brake reads a building's stair faces~~ — **read**: it
+  does, since its normal is whatever faces the lift stood on; how the
+  recordings' heroes climb at a walk anyway is not read (same section).
+- ~~Where a gathered face's batch word comes from. It is the first word of what
   the face source's slot 3 returns (`AniMesh.dll:0x1000d71f`), and the 8 and
   `0x200` the collision query excludes are not written by `AniMesh.dll`. Also
-  open: whether the `DEFAULT` and `PORTAL_*` quads carry that word, what the
-  filter's first word `0x41e` selects, where the push-out uses its third
-  argument (the step-1 filter), and what else reads triangle flag 2.
-- What joins the Large Factory's three hall-way groups; the front group never
-  reaches the pod.
+  open: whether the `DEFAULT` and `PORTAL_*` quads carry that word~~ — **read**,
+  and **measured**: the batch record's own first dword (`0x100134d0`); 8 is on
+  633 of the 15153 batches, exactly the doorway and portal quads, and `0x200`
+  on none
+  ([The ground inside a building](#the-ground-inside-a-building--read-in-part-and-measured)).
+  Still open: what the filter's first word `0x41e` selects, where the
+  push-out uses its third argument (the step-1 filter), and what else reads
+  triangle flag 2.
+- ~~What joins the Large Factory's three hall-way groups; the front group never
+  reaches the pod.~~ — **read**: the areal map, each group's exits linked to
+  the walkable areal under them at a cost of 1, and the front group still never
+  reaches the pod, with all 85 links counted. For a walker only the west exit
+  67 does: the east and upper west exits join the interior across four links
+  only a flyer crosses
+  ([A building is drawn cell by cell](#a-building-is-drawn-cell-by-cell-through-its-portals--read),
+  where the hall way's groups are measured).
+- Who calls `CBuilding::PortalDrawNotify` with a portal's face. ~~Which node a
+  portal names~~ — **measured**: its batch record's `+6` halfword, the room
+  beyond, on all 625 level-0 portal batches
+  ([A building is drawn cell by cell](#a-building-is-drawn-cell-by-cell-through-its-portals--read)).
 - ~~Which `Land.msh` faces carry the world face bit `0x8` and class bit 8 that
   the ground search excludes; the landscape converts them to its own mask at
   `Terrain.dll:0x10022da0` (world `0x8` → `0x20`, `0x200` → `0x20000`,

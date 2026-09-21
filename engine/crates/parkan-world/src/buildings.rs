@@ -115,12 +115,14 @@ fn mesh_nodes(part: &Part) -> usize {
     part.mesh.nodes.len().min(part.nodes.len())
 }
 
-/// A controller's items of `class`, switched off at their start.
+/// A controller's items of `class`, switched off as `CBuilding` files them.
 ///
-/// STAND-IN: docs/24-motion.md#walking-into-a-building--read-and-measured -- what `CBuilding`
-/// does to an item's switch word as it files it is not read; the records leave it at the
-/// constructor's 5, which would wrap for ever and never let a pod report open, so a door
-/// and a pod start shut, their word 0 and their progress 0.
+/// The filing (`Terrain.dll:0x100580b0`) hands every door's item and the **first** computer's
+/// switch word 2 through `IItemManager` slot 6 (`Control.dll:0x1002ed30`, property `0x600`;
+/// `Terrain.dll:0x10058532`, `0x100585a1`), the word its own timed close sends
+/// (`0x1005766d`), and marks the door closing and the computer idle. A word of 2 runs the
+/// progress back from its 0, which is at an end at once, so the item holds 0 and clears its
+/// word: shut and still (docs/24, "Walking into a building").
 fn items(controller: &Controller, class: i32) -> Vec<Item> {
     controller
         .components
@@ -155,8 +157,8 @@ pub fn started(mut item: Item) -> Item {
 }
 
 /// The controller's items that run by themselves: every component that names a channel and
-/// is neither a door nor a control pod, in the switch word its own record gives it
-/// (`Control.dll:0x10021d86`, else the constructor's 5).
+/// that `CBuilding` does not switch -- every one but a door and the first computer -- in the
+/// switch word its own record gives it (`Control.dll:0x10021d86`, else the constructor's 5).
 ///
 /// The component factory (`0x1002d4b0`) files **every** class it builds in the controller's
 /// timed list, and the time driver (`0x1002d260`) runs each one's update, so a class the
@@ -166,14 +168,53 @@ pub fn started(mut item: Item) -> Item {
 /// rings and `fr_e_brige`'s hub -- and **29**, two records, the Small and Large Towers' masts.
 /// Class 26 is a plain base item (case 11 of the factory) and class 29 falls to its default
 /// case, which is the base item too.
+///
+/// A **second computer** runs as well. The filing switches only the first of the computer list
+/// (`Terrain.dll:0x1005858e`, index 0), and `CBuilding::SendMsg` drives only that one
+/// (`0x100577ad`), so the other keeps the constructor's 5 and wraps for ever. *Measured*: 18 of
+/// `fortif.rlb`'s 30 controllers carry two class-13 records, each second one on a single node
+/// beside the first's -- the Outpost's `o04` beside its pod `o03` -- and 10 of those 18
+/// channels wrap.
 pub fn running_items(controller: &Controller) -> Vec<Item> {
+    let first_computer = controller.components.iter().position(|c| c.type_id == COMPUTER_TYPE);
     controller
         .components
         .iter()
         .enumerate()
-        .filter(|(_, c)| !matches!(c.type_id, DOOR_TYPE | COMPUTER_TYPE) && !c.entries.is_empty())
+        .filter(|&(i, c)| c.type_id != DOOR_TYPE && Some(i) != first_computer && !c.entries.is_empty())
         .map(|(i, c)| started(Item::new(i, c, &controller.channels)))
         .collect()
+}
+
+/// A door part's capsule, two points and a radius (`IJointMesh` slot 5, `AniMesh.dll:0x1000fd60`,
+/// asked by `Terrain.dll:0x1005a27f`), from the eight corners of the node's level-0 box in the
+/// world as `IJointMesh` slot 4 gives them. It runs along whichever of the box diagonal's world
+/// x, y and z is largest -- z when it is at least both others, else x when it is at least y,
+/// else y -- from the centre of the box's face at the upper end of that axis to the centre of
+/// the face at the lower, and it is as wide as the upper centre is far from the last corner.
+///
+/// The corners are numbered as `0x10011850` lays them out: 0 the minimum and 7 the maximum,
+/// 1 (x), 2 (x, y), 3 (y), 4 (y, z), 5 (z) and 6 (x, z) taking the maximum on the axes named.
+pub fn capsule(corners: &[Vec3; 8]) -> (Vec3, Vec3, f32) {
+    let c = corners;
+    let e = c[7] - c[0];
+    let (upper, lower) = if e.z >= e.x && e.z >= e.y {
+        (c[5] + c[7], c[0] + c[2])
+    } else if e.x >= e.y {
+        (c[1] + c[7], c[0] + c[4])
+    } else {
+        (c[3] + c[7], c[0] + c[6])
+    };
+    let (a, b) = (upper * 0.5, lower * 0.5);
+    (a, b, a.distance(c[7]))
+}
+
+/// How far `p` lies from the segment `a`-`b`.
+pub fn to_segment(p: Vec3, a: Vec3, b: Vec3) -> f32 {
+    let ab = b - a;
+    let t =
+        if ab.length_squared() > 0.0 { ((p - a).dot(ab) / ab.length_squared()).clamp(0.0, 1.0) } else { 0.0 };
+    p.distance(a + ab * t)
 }
 
 impl Building {
@@ -331,6 +372,21 @@ impl Building {
         self.doors.iter().any(|d| d.phase == Phase::Open && d.nodes.contains(&node))
     }
 
+    /// A node's level-0 box in the world, the eight corners [`capsule`] numbers, from `part`'s
+    /// poses: the variant its stage draws, as `IJointMesh` slot 4 takes it (`0x100124d0` with
+    /// level 0 and variant -1), and none once the node is hidden.
+    pub fn corners(part: &Part, node: usize) -> Option<[Vec3; 8]> {
+        let slot = part.mesh.slots.get(usize::from(part.slot(node)?))?;
+        let pose = part.nodes.get(node)?;
+        let (lo, hi) = (slot.aabb_min, slot.aabb_max);
+        let pick = [(0, 0, 0), (1, 0, 0), (1, 1, 0), (0, 1, 0), (0, 1, 1), (0, 0, 1), (1, 0, 1), (1, 1, 1)];
+        Some(pick.map(|(x, y, z)| {
+            let at = [[lo[0], hi[0]][x], [lo[1], hi[1]][y], [lo[2], hi[2]][z]];
+            let w = pose.apply(at.map(|v| f64::from(v * part.scale)));
+            Vec3::new(w[0] as f32, w[1] as f32, w[2] as f32)
+        }))
+    }
+
     /// A node's level-0 slot sphere in the world, from `part`'s poses.
     fn sphere(part: &Part, node: usize) -> Option<(Vec3, f32)> {
         let slot = part.mesh.slots.get(usize::from(part.mesh.nodes.get(node)?.slot_index[0]))?;
@@ -380,14 +436,12 @@ impl Building {
     }
 
     /// One tick at `now_ms` with the units standing on the building: the doors open for a
-    /// child near them and close once free; the pod opens for a child in its zone and fires
-    /// when it has opened with that child still there. Returns whether any channel moved, and
-    /// the pod's firing.
+    /// child whose bounding sphere reaches a door part's [`capsule`] and close once free; the
+    /// pod opens for a child in its zone and fires when it has opened with that child still
+    /// there. Returns whether any channel moved, and the pod's firing.
     ///
-    /// STAND-IN: docs/24-motion.md#walking-into-a-building--read-and-measured -- the capsule
-    /// a door's part is measured against (`Terrain.dll:0x1005a27f`) is not read: the door
-    /// node's level-0 slot sphere stands in for it. Holds are worked out afresh from every
-    /// child each tick rather than on each child's move.
+    /// STAND-IN: docs/24-motion.md#walking-into-a-building--read-and-measured -- holds are worked
+    /// out afresh from every child each tick rather than on each child's move.
     /// Returns whether the doors' or the pod's channels moved, whether a running item's did,
     /// and a pod that fired.
     pub fn tick(&mut self, now_ms: f64, part: &Part, children: &[Standing]) -> (bool, bool, Option<Fired>) {
@@ -400,8 +454,9 @@ impl Building {
             d.held = children.iter().any(|c| {
                 d.nodes
                     .iter()
-                    .filter_map(|&n| Self::sphere(part, n))
-                    .any(|(centre, r)| centre.distance(c.centre) <= c.radius + r)
+                    .filter_map(|&n| Self::corners(part, n))
+                    .map(|corners| capsule(&corners))
+                    .any(|(a, b, r)| to_segment(c.centre, a, b) <= c.radius + r)
             });
             if d.held && matches!(d.phase, Phase::Shut | Phase::Closing) {
                 d.item.switch(true);
@@ -526,4 +581,39 @@ pub fn open_shot_doors(
         }
     }
     opened
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A box's eight corners in `0x10011850`'s order.
+    fn corners(lo: Vec3, hi: Vec3) -> [Vec3; 8] {
+        [(0, 0, 0), (1, 0, 0), (1, 1, 0), (0, 1, 0), (0, 1, 1), (0, 0, 1), (1, 0, 1), (1, 1, 1)].map(
+            |(x, y, z): (usize, usize, usize)| Vec3::new([lo.x, hi.x][x], [lo.y, hi.y][y], [lo.z, hi.z][z]),
+        )
+    }
+
+    #[test]
+    fn a_door_leafs_capsule_runs_along_its_longest_side_between_its_end_faces() {
+        // A leaf 22 wide, 15.4 tall and a step thick, as the Large Factory's front door is: its
+        // capsule runs across it at mid-height, from one end's face centre to the other's, as
+        // wide as half that face's diagonal.
+        let (a, b, r) = capsule(&corners(Vec3::new(-11.0, 0.0, 0.0), Vec3::new(11.0, 1.7, 15.4)));
+        assert!(
+            a.distance(Vec3::new(11.0, 0.85, 7.7)) < 1e-4 && b.distance(Vec3::new(-11.0, 0.85, 7.7)) < 1e-4
+        );
+        assert!((r - 0.85f32.hypot(7.7)).abs() < 1e-4);
+        // So a hero of radius 2 standing 9 m out in front of its middle holds it, and one 11 m out
+        // does not -- where the box's sphere, 13.5 in radius, reached out to 15.5.
+        let held = |y: f32| to_segment(Vec3::new(0.0, 0.85 + y, 7.7), a, b) <= 2.0 + r;
+        assert!(held(9.0) && !held(11.0));
+        // A tall box runs up, from its top face's centre to its bottom's.
+        let (a, b, r) = capsule(&corners(Vec3::new(-1.0, -2.0, 0.0), Vec3::new(1.0, 2.0, 10.0)));
+        assert!(a.distance(Vec3::new(0.0, 0.0, 10.0)) < 1e-4 && b.distance(Vec3::ZERO) < 1e-4);
+        assert!((r - 5f32.sqrt()).abs() < 1e-4);
+        // And a deep one along y.
+        let (a, b, _) = capsule(&corners(Vec3::ZERO, Vec3::new(1.0, 8.0, 2.0)));
+        assert!(a.distance(Vec3::new(0.5, 8.0, 1.0)) < 1e-4 && b.distance(Vec3::new(0.5, 0.0, 1.0)) < 1e-4);
+    }
 }

@@ -855,9 +855,25 @@ origin to the centre of its level-0 bounding sphere:
 60 m ([11-effects.md](11-effects.md#how-a-sound-is-heard--read-and-measured)),
 so at 30.8 m it plays at a sixth of its gain — all but inaudible standing in
 the doorway, while the Small Generator's, whose origins are on its doors, plays
-whole. **STAND-IN**: openparkan stands an action-3 effect at the centre of the
-node's level-0 bounding sphere instead, which puts every one of the 112 on its
-door. Where the node's matrix itself comes from is not traced.
+whole.
+
+**The node's matrix is its world matrix** (*read*). The effect manager keeps
+its owner's interface `0xb` at `+0x1c` (asked for at `Effect.dll:0x10003f81`)
+and, for an instance on a node, calls its slot 4 with the node and 2
+(`0x1000625a`). That slot,
+`AniMesh.dll:0x10005320`, runs the pose walk (`0x10008b30`) and hands back the
+node record's `+0x20` for 2 (`0x1000535a`–`0x10005375`), its `+0x60` for 0,
+and a fixed matrix for 1. The walk builds `+0x20` as the object's world matrix
+(`+0x164`, from `IGameObject` slot 8 at the attach) times the root's `+0x60`,
+and each other node's as its parent's `+0x20` times its own keyed pose `+0xa0`
+(`0x10009096`–`0x100090a2`, `0x10009186`–`0x100091a3`). So the frame is the
+node's pose in the world as it plays now, and its translation the node's own
+origin, carried by the door's animation. Where no node is named the instance
+takes the owner's world matrix instead (interface 6 slot 8, `0x1000626c`).
+openparkan stands an action-3 effect there, on its node's origin, so the three
+factories' side-door sounds play 30.8 m from their doors as the game's do. The
+same slot, asked with 2, is what carries a beam's muzzle with its shooter
+([29-weapons.md](29-weapons.md#a-beam-outlives-its-round--read-and-measured)).
 
 **For an engine:** when a building is placed, run its controller's load group
 as the hero's turret's is run. That means the effects of actions 3 and 4 on

@@ -116,13 +116,10 @@ pub fn segment_mesh_slots(
     segment_mesh_skipping(mesh, world, scale, p0, p1, passes, slot_of, |_| false)
 }
 
-/// [`segment_mesh_slots`], passing every triangle `skip` names whatever its flags.
-///
-/// STAND-IN: docs/24-motion.md#the-ground-inside-a-building--read-in-part-and-measured --
-/// the mover's face query drops a batch by a word that is not traced, and the stand-in for
-/// it is the portal materials; a round's query builds its filter the same way
-/// (`Control.dll:0x1001d9fa`), so it passes the same faces. Without it a shot at a building's
-/// door strikes the black doorway quad a step in front of it and no door opens.
+/// [`segment_mesh_slots`], passing every triangle `skip` names whatever its flags: the
+/// triangles of a batch whose word carries 8, which a round's query drops as a mover's does
+/// (`Control.dll:0x1001d9fa`, docs/24, "The doorways are portal quads"). Without it a shot at
+/// a building's door strikes the black doorway quad a step in front of it and no door opens.
 #[allow(clippy::too_many_arguments)]
 pub fn segment_mesh_skipping(
     mesh: &Mesh,

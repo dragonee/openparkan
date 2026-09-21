@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use glam::Vec3;
-use parkan_formats::hallway::{self, HallWay, PLACE_POD};
+use parkan_formats::hallway::{self, HallWay, LINK_FLYER_ONLY, LINK_SHUT, Link, PLACE_POD};
 use parkan_formats::mission::KIND_BUILDING;
 use parkan_sim::behaviour::Places;
 use parkan_sim::path::{Refusal, Way};
@@ -79,9 +79,24 @@ pub fn announcement(
     }
 }
 
-/// The shortest ways along a hall way's links from `from` to every vertex: each vertex's
-/// distance and the vertex before it, `positions` giving the vertices in the world.
-fn shortest(hall_way: &HallWay, positions: &[Option<Vec3>], from: usize) -> (Vec<f32>, Vec<Option<usize>>) {
+/// Whether a unit crosses hall-way link `link`: never one flagged [`LINK_SHUT`], and one flagged
+/// [`LINK_FLYER_ONLY`] only if it flies (`Behavior.dll:0x10042c90`, `0x10036934`; docs/24, "The
+/// hall-way gates"). *Measured*: the Large Factory's east exit and its upper west exit join its
+/// inside only across four such links, so a walker's one way to its pod is the low west door.
+pub fn crosses(link: &Link, flyer: bool) -> bool {
+    let flags = link.flags();
+    flags & LINK_SHUT == 0 && (flyer || flags & LINK_FLYER_ONLY == 0)
+}
+
+/// The shortest ways along a hall way's links from `from` to every vertex, over the links a
+/// unit that does or does not fly may cross: each vertex's distance and the vertex before it,
+/// `positions` giving the vertices in the world.
+fn shortest(
+    hall_way: &HallWay,
+    positions: &[Option<Vec3>],
+    from: usize,
+    flyer: bool,
+) -> (Vec<f32>, Vec<Option<usize>>) {
     let n = hall_way.vertices.len();
     let (mut dist, mut prev, mut done) = (vec![f32::INFINITY; n], vec![None; n], vec![false; n]);
     if from >= n {
@@ -93,7 +108,7 @@ fn shortest(hall_way: &HallWay, positions: &[Option<Vec3>], from: usize) -> (Vec
     };
     while let Some(u) = next(&dist, &done) {
         done[u] = true;
-        for link in &hall_way.links {
+        for link in hall_way.links.iter().filter(|l| crosses(l, flyer)) {
             let (a, b) = (link.start as usize, link.end as usize);
             let v = if a == u {
                 b
@@ -227,7 +242,8 @@ impl Play {
     /// The way into building `t` for a unit at `from` bound for the hall-way vertex nearest
     /// `goal` — its pod, for a capture, or one of its docks, for a refit: the hall way's
     /// shortest way there from the door, or a vertex within 5 of `from`, that makes the whole
-    /// way shortest, counting the way to it straight; that vertex first.
+    /// way shortest, counting the way to it straight; that vertex first. A walker (`flyer`
+    /// false) crosses no link only a flyer may ([`crosses`]).
     ///
     /// A door the walk outside cannot reach is passed over: one standing more than
     /// [`WAY_DOOR_STEP`] over the ground under it is on an upper storey, up the building's own
@@ -236,11 +252,11 @@ impl Play {
     ///
     /// STAND-IN: docs/31-packages.md#not-established -- how the walker joins the hall way is
     /// not read: straight to that vertex, then along the links.
-    pub fn way_in(&mut self, t: usize, from: Vec3, goal: Vec3) -> Option<Vec<Vec3>> {
+    pub fn way_in(&mut self, t: usize, from: Vec3, goal: Vec3, flyer: bool) -> Option<Vec<Vec3>> {
         let (h, points) = self.hall_way_points(t)?;
         let near = |i: &usize| points[*i].map_or(f32::INFINITY, |p| p.distance(goal));
         let end = (0..h.vertices.len()).min_by(|a, b| near(a).total_cmp(&near(b)))?;
-        let (dist, prev) = shortest(&h, &points, end);
+        let (dist, prev) = shortest(&h, &points, end, flyer);
         let to = |i: usize| points[i].map_or(f32::INFINITY, |p| p.distance(from));
         let whole = |i: usize| to(i) + dist[i];
         let joins: Vec<usize> = (0..h.vertices.len())
@@ -265,16 +281,16 @@ impl Play {
     }
 
     /// The way out of building `t` for a unit at `from` bound for `to`: from its nearest
-    /// hall-way vertex along the links to the exit that makes the way to `to` shortest,
-    /// counting the rest straight.
+    /// hall-way vertex along the links it may cross ([`crosses`]) to the exit that makes the
+    /// way to `to` shortest, counting the rest straight.
     ///
     /// STAND-IN: docs/31-packages.md#the-escape--read -- the building's own paths an escape is
     /// routed out by ("LEAVE IS TOO !!!") are not read: the hall way's.
-    pub fn way_out(&mut self, t: usize, from: Vec3, to: Vec3) -> Option<Vec<Vec3>> {
+    pub fn way_out(&mut self, t: usize, from: Vec3, to: Vec3, flyer: bool) -> Option<Vec<Vec3>> {
         let (h, points) = self.hall_way_points(t)?;
         let near = |i: &usize| points[*i].map_or(f32::INFINITY, |p| p.distance(from));
         let start = (0..h.vertices.len()).min_by(|a, b| near(a).total_cmp(&near(b)))?;
-        let (dist, prev) = shortest(&h, &points, start);
+        let (dist, prev) = shortest(&h, &points, start, flyer);
         let total =
             |i: usize| dist[i] + points[i].map_or(f32::INFINITY, |p| p.truncate().distance(to.truncate()));
         let exit = (0..h.vertices.len())
@@ -358,6 +374,11 @@ impl Play {
         }
     }
 
+    /// Whether robot target `t` flies, and so may cross a hall-way link only a flyer crosses.
+    fn flies(&self, t: usize) -> bool {
+        self.robots.iter().find(|(rt, _)| *rt == t).is_some_and(|(_, r)| r.flyer)
+    }
+
     /// The legs of a walk for robot target `t` at `from` to `goal`: out of the building it
     /// walked into first while it still stands inside that building's outer ring. Once outside,
     /// the building is forgotten.
@@ -365,7 +386,8 @@ impl Play {
         let mut legs = Vec::new();
         if let Some(&b) = self.construction.ways.entered.get(&t) {
             if self.battle.combat.targets.get(b).is_some_and(|x| x.alive) && self.within_contour(b, from) {
-                legs = self.way_out(b, from, goal).unwrap_or_default();
+                let flyer = self.flies(t);
+                legs = self.way_out(b, from, goal, flyer).unwrap_or_default();
             } else {
                 self.construction.ways.entered.remove(&t);
             }
@@ -436,7 +458,8 @@ impl Play {
         if from.distance(goal) <= POD_ARRIVED {
             return Vec::new();
         }
-        let way = self.way_in(b, from, goal).unwrap_or_else(|| vec![goal]);
+        let flyer = self.flies(t);
+        let way = self.way_in(b, from, goal, flyer).unwrap_or_else(|| vec![goal]);
         // A unit that joins the hall way where it stands walks it straight: the global path is
         // over the areals, which lie over the building, and it is under them. The vertex it
         // stands by is behind it, so the walk goes on from the next one.
@@ -445,7 +468,6 @@ impl Play {
         }
         // A flyer goes over the walls; a walker goes round them where its way to the door
         // would run into one, and straight at it where the way is clear.
-        let flyer = self.robots.iter().find(|(rt, _)| *rt == t).is_some_and(|(_, r)| r.flyer);
         let walled = !flyer
             && self
                 .ground
@@ -496,8 +518,46 @@ mod tests {
         };
         let points: Vec<Option<Vec3>> =
             h.vertices.iter().map(|v| Some(Vec3::from_array(v.position))).collect();
-        let (dist, prev) = shortest(&h, &points, 0);
+        let (dist, prev) = shortest(&h, &points, 0, false);
         assert_eq!(dist, vec![0.0, 10.0, 20.0, 5.0]);
         assert_eq!(walk_back(&prev, 2), vec![0, 1, 2]);
+    }
+
+    #[test]
+    fn a_walker_crosses_no_link_only_a_flyer_may_and_nothing_crosses_a_shut_one() {
+        // The Large Factory's shape: the pod 0 is reached from exit 2 along ordinary links and
+        // from exit 3 only over a link whose tail's word 1 is zero and word 5 is not, which
+        // makes it a flyer's (`ArealMap.dll:0x1000a274`, docs/24, "The hall-way gates").
+        let v = |x: f32, flags: u32| Vertex { position: [x, 0.0, 0.0], flags, joint: 0 };
+        let open = [0xffff_ffff; 8];
+        let mut flyers = open;
+        flyers[1] = 0;
+        let mut shut = flyers;
+        shut[5] = 0;
+        let h = HallWay {
+            vertices: vec![
+                v(0.0, PLACE_POD),
+                v(10.0, 0),
+                v(30.0, PLACE_EXIT),
+                v(-5.0, PLACE_EXIT),
+                v(-9.0, 0),
+            ],
+            links: vec![
+                Link { start: 1, end: 0, tail: open },
+                Link { start: 2, end: 1, tail: open },
+                Link { start: 3, end: 0, tail: flyers },
+                Link { start: 4, end: 3, tail: shut },
+            ],
+        };
+        assert!(crosses(&h.links[2], true) && !crosses(&h.links[2], false));
+        assert!(!crosses(&h.links[3], true) && !crosses(&h.links[3], false));
+        let points: Vec<Option<Vec3>> =
+            h.vertices.iter().map(|v| Some(Vec3::from_array(v.position))).collect();
+        let (walk, _) = shortest(&h, &points, 0, false);
+        assert_eq!(walk[2], 30.0, "the walker's exit is the far one");
+        assert!(walk[3].is_infinite() && walk[4].is_infinite(), "the flyers' exit is out of its reach");
+        let (fly, _) = shortest(&h, &points, 0, true);
+        assert_eq!(fly[3], 5.0, "a flyer takes the near exit");
+        assert!(fly[4].is_infinite(), "and nobody the shut link");
     }
 }

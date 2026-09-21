@@ -637,7 +637,7 @@ fn c02_m03s_wheeled_warbot_drives_down_the_factorys_first_ramp_to_its_pod() {
         .and_then(|p| p.pod)
         .expect("the factory has a pod");
     let from = play.robots.iter().find(|(t, _)| *t == bot).unwrap().1.walker.body.position;
-    let mut way = play.way_in(plant, from, pod).expect("a way in");
+    let mut way = play.way_in(plant, from, pod, false).expect("a way in");
     way.push(pod);
     let ramp = way.windows(2).position(|w| w[0].z - w[1].z > 4.0).expect("a ramp down on the way in");
 
@@ -690,12 +690,11 @@ fn c02_m04s_tower_raises_its_gun_mast_out_of_the_ground_and_leaves_it_up() {
     let tower = object_target(&play, &m, "mtow01.dat");
 
     let building = play.buildings.iter().find(|b| b.target == tower).expect("the tower is a building");
-    assert_eq!(building.running.len(), 1, "one item runs by itself: the mast");
-    assert_eq!(
-        building.running[0].channels.iter().map(|c| c.node).collect::<Vec<_>>(),
-        vec![1, 2, 3, 13],
-        "the arm's three nodes and the mast"
-    );
+    // Two items run by themselves: the second computer, which `CBuilding` never switches
+    // (`Terrain.dll:0x1005858e`), turning its node 10 round for ever, and the mast.
+    let nodes: Vec<Vec<i32>> =
+        building.running.iter().map(|i| i.channels.iter().map(|c| c.node).collect()).collect();
+    assert_eq!(nodes, vec![vec![10], vec![1, 2, 3, 13]], "node 10, and the arm's three nodes and the mast");
 
     // The mast (node 13) and everything standing on it: the turret is part 1.
     let z = |play: &parkan_world::play::Play, part: usize, node: usize| {

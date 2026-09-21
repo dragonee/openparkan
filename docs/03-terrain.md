@@ -520,6 +520,22 @@ while the stream reads at 256 to the unit
 ([above](#how-each-of-these-was-established)),
 so the foundation tiles **every 3.8 world units**, against the landscape's 50.
 
+**The two builders are callbacks over a walk** (*read*). The insertion passes
+each, with an object, to `0x10007f00` (362 bytes, 8 callers: six in the
+insertion and one each in `StartCheckMaxBasementAngle` and
+`CheckMaxBasementAngle`), which loops over the object and calls the callback
+for each piece it holds (`0x10007f7d`, `0x10007fe7`). The first is handed one
+object per landscape face of state 3, a **cut** face, from a list at the
+insertion's `[ebp−0x74c]` (`0x10011b84`–`0x10011cc5`), after that face's own
+flags and texture pair are copied into the template. The second, which names
+itself `AddBasementFaceProc()` in its assertion, is handed one object for the
+whole insertion (`[ebp−0x24]`, `0x10011ce9`). The count the insertion logs as
+*"New basement faces qty"* (`0x10011a22`) is printed before either runs, so the
+game calls both sets basement faces. **Not established**: what a piece is and
+where the band is triangulated — in the builders, which are 3972 and 3285
+bytes, or where the objects are built — and so which area each cut face's
+object covers, the part of the cut face outside the outer ring or more.
+
 **Layer-1 slot 0 is the footing material, and nothing else uses it**
 (*measured*). `Land1.wea` names slot 0 `B_S0` on 32 of the 33 maps and
 `B_MTP_01` on FINAL; `B_S0`'s texture is `B_FOUND`, a grey foundation slab. Of
@@ -543,8 +559,10 @@ which is why a building in the game stands on a band of stone.
    [32-builder.md](32-builder.md#the-test-isplacementvalid--read), builds the
    same two rings to measure the slope).
    STAND-IN until read: how the band is triangulated between the two rings, and
-   which of the band's faces the first builder makes with the ground's own
-   texture pair rather than the foundation.
+   how far a cut face's own triangles, which keep the ground's texture pair,
+   reach in towards the outer ring; the first builder is handed one set per cut
+   face and the foundation's builder one set for the whole
+   ([above](#what-a-basement-face-wears--read-and-measured)).
 4. Inside the inner ring, the building's level-0 faces are the ground.
 
 ## What fparkan's notes add, and what they do not

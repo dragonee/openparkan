@@ -59,7 +59,7 @@ fn the_heros_breath_is_not_heard_while_its_steps_are() {
 
 #[test]
 #[ignore = "needs the game install"]
-fn the_factorys_door_sounds_stand_on_their_doors_not_on_their_nodes_origins() {
+fn the_factorys_door_sounds_stand_on_their_nodes_origins_the_side_doors_30_8_m_from_the_door() {
     use glam::Vec3;
     use parkan_world::fx::Owner;
 
@@ -68,7 +68,9 @@ fn the_factorys_door_sounds_stand_on_their_doors_not_on_their_nodes_origins() {
     let t = play.buildings[b].target;
     let part_index = play.buildings[b].part;
     // `door_open_01` on each door's node, ids 8000, 8002 and 8004 (docs/13, "A building's
-    // load group"). Their nodes' origins stand 8 m and 30.8 m from the doors themselves.
+    // load group"). Each takes its node's world matrix as its frame, whose translation is the
+    // node's own origin (`Effect.dll:0x1000625a`, `AniMesh.dll:0x10005320`), and their nodes'
+    // origins stand 8 m and 30.8 m from the doors themselves.
     for (d, id) in [(0usize, 8000i32), (1, 8002), (2, 8004)] {
         let node = play.buildings[b].doors[d].nodes[0];
         let door = door_centre(&play, t, part_index, node);
@@ -76,7 +78,10 @@ fn the_factorys_door_sounds_stand_on_their_doors_not_on_their_nodes_origins() {
         let origin = Vec3::new(origin[0] as f32, origin[1] as f32, origin[2] as f32);
         let at: Vec<Vec3> = play.fx.owned(Owner::Building(t, id)).map(|i| i.frame.origin).collect();
         assert_eq!(at.len(), 1, "one open sound on door {d}");
-        assert!(at[0].distance(door) < 0.01, "door {d}'s sound stands on it: {at:?} against {door}");
+        assert!(
+            at[0].distance(origin) < 0.01,
+            "door {d}'s sound stands on its node's origin: {at:?} against {origin}"
+        );
         if d > 0 {
             assert!(
                 (origin.distance(door) - 30.8).abs() < 0.5,

@@ -301,7 +301,7 @@ impl Battle {
                 life.armour = armour;
             }
             blasts.push(part_blasts);
-            let portals = Rc::new(crate::models::portal_triangles(&mesh, &loaded.wear));
+            let portals = Rc::new(crate::models::passing_triangles(&mesh));
             let host = usize::try_from(part.host)
                 .ok()
                 .and_then(|h| loaded_as.get(h).copied().flatten())

@@ -32,12 +32,8 @@ pub const NO_LIGHTMAP: u16 = 0xFF;
 pub const PORTAL_MATERIALS: [&str; 3] = ["DEFAULT", "PORTAL_001", "PORTAL_004"];
 
 /// Whether a face of material `name` is a portal: a doorway or room opening, which is not
-/// drawn and which a mover and a round pass through.
-///
-/// STAND-IN: docs/24-motion.md#the-ground-inside-a-building--read-in-part-and-measured --
-/// where a gathered face's batch word, whose 8 and 0x200 the collision query passes, comes
-/// from is not traced; a recording shows the hero walking through the Large Factory's black
-/// `DEFAULT` doorway and its `PORTAL_001` quads, so those materials' faces pass.
+/// drawn. A mover and a round pass it by its batch's word ([`passing_triangles`]), which the
+/// same quads, and only they, carry.
 pub fn doorway(name: &str) -> bool {
     PORTAL_MATERIALS.iter().any(|m| name.eq_ignore_ascii_case(m))
 }
@@ -51,6 +47,26 @@ pub fn portal_triangles(mesh: &Mesh, wear: &Wear) -> Vec<bool> {
     }
     let mut out = vec![false; mesh.triangles.len()];
     for batch in mesh.batches.iter().filter(|b| portal(b.material)) {
+        let (first, count) = batch.triangles();
+        for flag in out.iter_mut().skip(first).take(count) {
+            *flag = true;
+        }
+    }
+    out
+}
+
+/// Which of `mesh`'s triangles a round passes by its batch's word, as a mover does
+/// (`parkan_sim::solid::COLLISION_SKIPS_BATCH`): the batches flagged 8, the query's filter
+/// built the same way for a round (`Control.dll:0x1001d9fa`). Empty where none is, so a mesh
+/// without portals costs nothing. *Measured*: the 633 such batches are `fortif.rlb`'s doorway
+/// and portal quads, so a shot reaches the door behind the black doorway.
+pub fn passing_triangles(mesh: &Mesh) -> Vec<bool> {
+    let passes = |flags: u32| flags & parkan_sim::solid::COLLISION_SKIPS_BATCH != 0;
+    if !mesh.batches.iter().any(|b| passes(b.flags)) {
+        return Vec::new();
+    }
+    let mut out = vec![false; mesh.triangles.len()];
+    for batch in mesh.batches.iter().filter(|b| passes(b.flags)) {
         let (first, count) = batch.triangles();
         for flag in out.iter_mut().skip(first).take(count) {
             *flag = true;

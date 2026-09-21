@@ -182,7 +182,7 @@ fn mission_02s_factory_builds_a_free_warbot_which_leaves_by_the_front_door_and_c
     assert!((59.9..60.2).contains(&seconds), "built in {seconds} s");
     let (unit, robot) = play.robots.last().unwrap();
     assert_eq!(play.units[*unit].clan, Some(play.player_clan));
-    let at = robot.walker.body.position;
+    let (at, flyer) = (robot.walker.body.position, robot.flyer);
     assert!((at.truncate() - glam::Vec2::new(393.75, 854.91)).length() < 1.0, "at the creation vertex: {at}");
     assert!(matches!(robot.behaviour.task(), parkan_sim::behaviour::Task::Leave { .. }));
 
@@ -190,7 +190,7 @@ fn mission_02s_factory_builds_a_free_warbot_which_leaves_by_the_front_door_and_c
     // hall way from the creation vertex north through the front door, at world y 854.9,
     // 873.4 just inside the door, and 885.4 on the forecourt outside it.
     let bot = play.robots.len() - 1;
-    let way = play.way_out(t, at, glam::Vec3::new(535.7, 727.9, 154.0)).expect("a way out");
+    let way = play.way_out(t, at, glam::Vec3::new(535.7, 727.9, 154.0), flyer).expect("a way out");
     let ys: Vec<f32> = way.iter().map(|p| p.y).collect();
     assert!(way.len() == 5 && ys[0] < 855.0 && ys[3] > 885.0, "out through the front door: {way:?}");
 
@@ -201,6 +201,7 @@ fn mission_02s_factory_builds_a_free_warbot_which_leaves_by_the_front_door_and_c
     let door = |play: &parkan_world::play::Play| {
         play.buildings.iter().find(|b| b.target == t).expect("the factory's doors").doors[0].phase
     };
+    let mut opening_at = None;
     let mut opened_at = None;
     let mut out_at = None;
     for tick in 0..(12 * 60) {
@@ -208,6 +209,9 @@ fn mission_02s_factory_builds_a_free_warbot_which_leaves_by_the_front_door_and_c
         let phase = door(&play);
         let robot = &play.robots[bot].1;
         let at = robot.walker.body.position;
+        if phase == parkan_world::buildings::Phase::Opening && opening_at.is_none() {
+            opening_at = Some((tick as f32 / 60.0, at.y));
+        }
         if phase == parkan_world::buildings::Phase::Open && opened_at.is_none() {
             opened_at = Some(tick as f32 / 60.0);
         }
@@ -218,11 +222,21 @@ fn mission_02s_factory_builds_a_free_warbot_which_leaves_by_the_front_door_and_c
             out_at = Some(tick as f32 / 60.0);
         }
     }
-    // The door is rate 0.4, and the building sees it open at 0.9 / rate, 2.25 s (docs/27,
-    // "Capture"). The bot is through it and back on the landscape within four seconds of that.
+    // The door starts opening once the bot's sphere reaches the leaf's capsule, which runs
+    // across the doorway at mid-height 7.7 wide (`IJointMesh` slot 5, docs/24, "Walking into a
+    // building"): not from the creation vertex 21 m in, as the leaf's 13.5 sphere had it, but
+    // a few metres on. The door is rate 0.4, and the building sees it open at 0.9 / rate,
+    // 2.25 s later (docs/27, "Capture"). The bot is through it and back on the landscape
+    // within four seconds of that.
+    let (opening, from_y) = opening_at.expect("the front door starts opening for the bot");
     let opened = opened_at.expect("the front door opens for the bot");
     let out = out_at.expect("the bot walks out onto the landscape");
-    assert!((2.2..2.4).contains(&opened), "the door opens in {opened} s");
+    assert!(opening > 0.0 && from_y > 855.5, "held from {from_y} at {opening} s, not the creation vertex");
+    assert!(
+        (2.2..2.4).contains(&(opened - opening)),
+        "the door opens {} s after it starts",
+        opened - opening
+    );
     assert!(out > opened && out - opened < 4.0, "out {out} s after the door opened at {opened} s");
 
     assert_eq!(play.factories[f].free_bots, 99);
