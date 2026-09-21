@@ -116,8 +116,11 @@ pub struct Cockpit {
     pub gun_codes: BTreeMap<String, String>,
 }
 
-/// Each part's code in the player clan's research tree, by lower-case part name.
-fn gun_codes(game: &Path, play: &Play) -> BTreeMap<String, String> {
+/// Each part's code in the player clan's research tree, by lower-case part name: `IResearch`
+/// slot 2 finds the first `TRFB` entry whose part name matches, case folded
+/// (`MisLoad.dll:0x10002a40`), and slot 13 gives its item's short code (`0x10002e70`). No part
+/// name is listed twice in any of the 29 shipped trees.
+pub fn gun_codes(game: &Path, play: &Play) -> BTreeMap<String, String> {
     let tree =
         usize::try_from(play.player_clan).ok().and_then(|c| play.clans.get(c)).map(|c| c.behaviour.clone());
     let Some(tree) = tree.filter(|t| !t.is_empty()) else { return BTreeMap::new() };
@@ -125,14 +128,13 @@ fn gun_codes(game: &Path, play: &Play) -> BTreeMap<String, String> {
         return BTreeMap::new();
     };
     let Ok(tree) = parkan_formats::research::parse(&data, &tree) else { return BTreeMap::new() };
-    tree.part_ids
-        .iter()
-        .zip(&tree.part_items)
-        .filter_map(|(part, &item)| {
-            let code = tree.items.get(item)?.code.clone();
-            Some((part.to_ascii_lowercase(), code))
-        })
-        .collect()
+    let mut codes = BTreeMap::new();
+    for (part, &item) in tree.part_ids.iter().zip(&tree.part_items) {
+        if let Some(it) = tree.items.get(item) {
+            codes.entry(part.to_ascii_lowercase()).or_insert_with(|| it.code.clone());
+        }
+    }
+    codes
 }
 
 impl Cockpit {

@@ -721,7 +721,9 @@ Capturing a bot is not done at a pod. It is the hero's **Enter** —
      `+0x30` is 4 and which `0x10076d30` does not refuse.
    - That test refuses a missing record, an object already removed (its class
      word is `0xfffe`), a unit with no class-1 turret, and one whose turret's
-     node has no life left (property `0x52`, the component's node life).
+     node has no life left: property `0x52`, the life over the maximum of the
+     node the component names — node 1, the turret's body, on every turret
+     part ([39-boarding.md](39-boarding.md#the-turrets-life-is-its-bodys-node-1--read-and-measured)).
    - So **a bot whose turret is shot off cannot be boarded**.
    - **A captured unit the hero does not board answers** (`0x10072050`–`0x100720b3`):
      its record's `+0x30` picks a voice as an order's acknowledgement does
@@ -896,8 +898,9 @@ it refuses when any of four things holds:
 2. the record has no `IControl` (`+0x60`);
 3. that control system has **no class-1 item** — slot 9 with index 0 and class
    1 returns −1;
-4. that item's value `0x52`, its node's life, is **0 or below** (against the
-   0.0 at `0x100e50a8`).
+4. that item's value `0x52`, its node's life over its maximum
+   ([39-boarding.md](39-boarding.md#the-turrets-life-is-its-bodys-node-1--read-and-measured)),
+   is **0 or below** (against the 0.0 at `0x100e50a8`).
 
 It is one of three copies of the same code: `0x10076d30` asks the same of class
 1 on a bot the hero would board, and `0x10076da0` of class 30, a builder's beam

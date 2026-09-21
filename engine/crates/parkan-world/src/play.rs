@@ -2301,16 +2301,14 @@ impl Play {
     }
 
     /// Whether Enter boards target `t` (`iron3d.dll:0x10071ff8`, `0x10076d30`, docs/39,
-    /// "Boarding"): a unit of the player's clan, of size class 4, whose turret still has life,
-    /// less than 20 away across the ground, while the player is on foot.
-    ///
-    /// STAND-IN: docs/39-boarding.md#boarding--read -- which of the turret's nodes property
-    /// `0x52` reads the life of is not traced: the turret part's node 0.
+    /// "Boarding"): a unit of the player's clan, of size class 4, whose turret still has life
+    /// (the node its first class-1 component names, a fitted turret's body), less than 20 away
+    /// across the ground, while the player is on foot.
     pub fn boardable(&self, t: usize) -> bool {
         let Some(u) = self.units.get(t) else { return false };
         let Some((_, robot)) = self.robots.iter().find(|(rt, _)| *rt == t) else { return false };
         let Some(target) = self.battle.combat.targets.get(t) else { return false };
-        let turret_alive = node_alive(target.parts.get(robot.turret_part).and_then(|p| p.life.as_ref()), 0);
+        let turret_alive = turret_alive(robot, target);
         let near = robot.walker.body.position.truncate().distance(self.hero.walker.body.position.truncate())
             < CAPTURE_REACH;
         self.mode() == Mode::OnFoot
@@ -2370,7 +2368,7 @@ impl Play {
         u.kind == KIND_UNIT
             && u.clan == Some(self.player_clan)
             && target.alive
-            && node_alive(target.parts.get(robot.turret_part).and_then(|p| p.life.as_ref()), 0)
+            && turret_alive(robot, target)
             && robot.order.is_none_or(|o| o.code != ORDER_UPGRADE)
     }
 
@@ -2397,8 +2395,8 @@ impl Play {
     /// Leave the boarded bot (`0x10063350`, `0x100638c0`, docs/39, "Leaving"): the first of
     /// eight places about it, both node spheres' radii out, with landscape under it that is not
     /// water, and for a flyer less than 10 below it, takes the hero 8 above the highest surface
-    /// there, facing the bot. With none, "Risk area! Landing impossible." and the player stays
-    /// aboard.
+    /// there, heading as [`leave_yaw`] reads. With none, "Risk area! Landing impossible." and the
+    /// player stays aboard.
     pub fn leave(&mut self) -> bool {
         let Some(d) = self.driving.as_ref() else { return false };
         let t = d.target;
@@ -2433,10 +2431,7 @@ impl Play {
             return false;
         };
         let top = self.ground.below(place.x, place.y, 10_000.0).map_or(place.z, |h| h.point.z);
-        let toward = (at - place).with_z(0.0).normalize_or(Vec3::Y);
-        // STAND-IN: docs/39-boarding.md#not-established -- the heading is read as (F.x, −F.y)
-        // under an assumed matrix layout; the hero is turned to face the bot.
-        let yaw = (-toward.x).atan2(toward.y);
+        let yaw = leave_yaw(place, at);
         self.let_go();
         if let Some(at) = self.modes.iter().rposition(|m| *m == Mode::Driving(t)) {
             self.modes.truncate(at);
@@ -3835,6 +3830,27 @@ pub fn node_alive(life: Option<&parkan_sim::damage::Life>, node: usize) -> bool 
     life.and_then(|l| l.nodes.get(node)).is_none_or(|l| !l.destroyed)
 }
 
+/// The yaw the hero leaves a bot at `bot` with, put out at `place` (`iron3d.dll:0x10063699`,
+/// docs/39, "Leaving"). With F the unit vector from the place to the bot across the ground, the
+/// game writes the rows (−F × z, place x), (−F, place y), (z, place z) and hands the matrix to the
+/// hero's control system as it is (`Control.dll:0x10004690`) and to its object as its world
+/// matrix (`IGameObject` slot 7, kind 2). A unit's forward axis is that matrix's y column, as
+/// the own panel's camera reads it (`0x1004186f`), which is (F.x, −F.y): the hero faces the bot
+/// from the places due +x and −x of it, faces away from those due +y and −y, and stands
+/// side-on at the four between.
+pub fn leave_yaw(place: Vec3, bot: Vec3) -> f32 {
+    let f = (bot - place).with_z(0.0).normalize_or(Vec3::Y);
+    // The engine's yaw turns +y to (−sin, cos): facing (F.x, −F.y).
+    (-f.x).atan2(-f.y)
+}
+
+/// The component test's turret half (`iron3d.dll:0x10076d30`): `robot`, which is `target` in
+/// the battle, has a class-1 component and the node it names has life left — its property
+/// `0x52`, that node's life over its maximum, above 0 (docs/39, "Boarding").
+fn turret_alive(robot: &Robot, target: &Target) -> bool {
+    robot.turret_life().is_some_and(|(p, n)| node_alive(target.parts.get(p).and_then(|x| x.life.as_ref()), n))
+}
+
 /// A node's condition, its life over its maximum (docs/23, "What a value id is"), and whether
 /// it is destroyed; a part that takes no damage is whole.
 pub fn node_share(life: Option<&parkan_sim::damage::Life>, node: usize) -> (f32, bool) {
@@ -3935,6 +3951,34 @@ mod tests {
             life: None,
             portals: Rc::default(),
             host: None,
+        }
+    }
+
+    /// `iron3d.dll:0x10063699`: the hero put out of a bot faces (F.x, −F.y), F the unit vector
+    /// from its place to the bot: towards the bot from the places due ±x of it, away from it at
+    /// those due ±y, and side-on between.
+    #[test]
+    fn the_hero_put_out_of_a_bot_faces_the_mirror_of_the_bot_about_x() {
+        let bot = Vec3::new(100.0, 200.0, 160.0);
+        let facing = |i: usize| {
+            let a = i as f32 * std::f32::consts::FRAC_PI_4;
+            let place = bot + Vec3::new(a.cos(), a.sin(), 0.0) * 13.43;
+            let body = parkan_sim::motion::Body::new(place, leave_yaw(place, bot));
+            let toward = (bot - place).with_z(0.0).normalize();
+            (body.forward(), toward)
+        };
+        for i in [0, 4] {
+            let (forward, toward) = facing(i);
+            assert!(forward.distance(toward) < 1e-5, "place {i}: {forward} faces the bot {toward}");
+        }
+        for i in [2, 6] {
+            let (forward, toward) = facing(i);
+            assert!(forward.distance(-toward) < 1e-5, "place {i}: {forward} faces away from {toward}");
+        }
+        for i in [1, 3, 5, 7] {
+            let (forward, toward) = facing(i);
+            assert!(forward.dot(toward).abs() < 1e-5, "place {i}: {forward} side-on to {toward}");
+            assert!((forward - Vec3::new(toward.x, -toward.y, 0.0)).length() < 1e-5);
         }
     }
 

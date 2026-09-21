@@ -123,8 +123,32 @@ type 2, a gun, in device order (`0x1009fe50`). Each entry keeps:
 - **The name.** On the hero (`ROBOT_HERO`), the guns take `iron3d.dll`'s
   strings 3071–3074 in turn, filled at `0x10074b71`: *AUTOCANNON 25mm*,
   *PLASMA RIFLE LS*, *BATTLE LASER ER* and *AWB MISSILE*. Any other unit
-  looks a name up from the component through `0x1008a470` and `0x1008a4b0`
-  (not followed), and falls back to *NONAME*.
+  names a gun by the **research code of the part its device belongs to**, and
+  falls back to *NONAME* (*read*, `0x10075a61`–`0x10075ac9`):
+  1. interface `0x202` slot 16 (`Control.dll:0x1002eca0`) gives the device's
+     `+8`, the part the load message named when the factory built it
+     (`0x1002d7a5`). A clip fitted to a gun re-parses the gun's device and
+     leaves `+8` alone (`0x1002d890`), so a clipped gun is still its gun part;
+  2. the object's interface `0x24` slot 2 (`AniMesh.dll:0x100025e0`) finds that
+     part in the agent's part table and gives its member name, the
+     `objects.rlb` record — `e_gun_bl_15`;
+  3. `0x1008a470` hands the name to the player clan's tree at `0x1010c380`
+     ([16-research.md](16-research.md)), `IResearch` slot 2
+     (`MisLoad.dll:0x10002a40`): the first `TRFB` entry whose `TRF6` part id
+     matches under `_stricmp` (`0x1000d950`) gives its item, else −1;
+  4. `0x1008a4b0` asks slot 13 (`0x10002e70`) for that item's `TRF7` short
+     code, which answers 0 for an item out of range — and the name stays
+     *NONAME*.
+
+  So a fitted gun reads its own code, a gun built into a turret or an animal
+  its turret's or its chassis's — the seven turrets with guns of their own are
+  `e_tur_bb_11`, `_12`, `e_tur_bt_11`, `_12`, `e_tur_lb_07`, `e_tur_lt_07` and
+  the hero's `e_tur_ht_02` — and a part the player's tree does not list reads
+  *NONAME*. *Measured*: no part id is listed twice in any of the 29 trees, so
+  the first match is the only one. Mission 02's warbot reads LRL36S, LRL36S and
+  LFT from `e_gun_bl_15` twice and `e_gun_bc_06` in `tut2_pl.trf`, as the
+  recording shows from 249.4 s
+  ([39-boarding.md](39-boarding.md#against-the-recording--seen)).
 
 **Where.** The id-6 holder (`0x1003ecb0`) draws one row a gun, while the unit
 has guns:
@@ -383,7 +407,10 @@ recording shows the lock.
   the game menu ([39-boarding.md](39-boarding.md#the-game-view-keeps-a-stack-of-modes--read)).
   The names at `0x1005a5cc`, once read as its modes, belong to a separate
   global.
-- How a non-hero unit's gun gets its name (`0x1008a470`, `0x1008a4b0`).
+- ~~How a non-hero unit's gun gets its name (`0x1008a470`, `0x1008a4b0`).~~
+  **Read**: the short code the player clan's research tree gives the part the
+  gun's device belongs to, found by the part's name, or *NONAME*
+  ([The weapons list](#the-weapons-list--read-and-measured)).
 - Whether `getTimer` runs on real time or on a clock. Its slots read the clock
   object at `+4` when one is set (slot 0 sets it), else `timeGetTime`. So it is
   not known whether the guided lock's beeps pause with the game.
@@ -962,9 +989,14 @@ for a building (its object's slot 11 answering 3). Otherwise:
   MFW-1 once captured.
 - **Any other unit** with a component whose value `0x400` is above 0 and whose
   value 6 is at least 10,000 gets 6255 *"Dangerous!"* in red `0xffc80000`
-  (`0x100766f0`). Value 6 is a gun's round damage; heavy rounds are 10,000 or
-  more
-  ([29-weapons.md](29-weapons.md)).
+  (`0x100766f0`). The values are `IDeviceManager`'s (the record's `+0x64`,
+  slot 6, `Control.dll:0x1002bb40`): `0x400` is the life left in the device's
+  node over its maximum, the value the boarding test reads as property `0x52`
+  ([39-boarding.md](39-boarding.md#the-turrets-life-is-its-bodys-node-1--read-and-measured)),
+  so the device must not be shot off; value 6 is a class-2 gun's `+0x174`, the
+  damage of the last round it made
+  ([13-control.md](13-control.md#not-established)); heavy rounds are 10,000 or
+  more ([29-weapons.md](29-weapons.md)).
 
 ### Distance — *read*
 
@@ -1038,7 +1070,10 @@ hit, and prints *"SSW-1 Warrior"* above a falling distance.
 - What interface `0x20`'s sphere is, beside interface `0x18`'s bounding sphere.
 - Which caller hands the name its class word, and who writes the panel level at
   `AniMesh.dll:0x100225e8`.
-- The component value `0x400` in the *"Dangerous!"* test.
+- ~~The component value `0x400` in the *"Dangerous!"* test.~~ **Read**: the
+  life left in the device's node over its maximum, `IDeviceManager` slot 6's
+  case `0x1002bc3c`
+  ([Name and status](#name-and-status--read-and-seen)).
 - The other six bits of draw flags `0x7f0`.
 - Whether the view's begin (interface `0x12` slot 3) clears depth.
 

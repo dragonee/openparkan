@@ -611,6 +611,34 @@ impl Robot {
         }))
     }
 
+    /// Where the boarding test reads the turret's life (see [`turret_life_node`]): a part and
+    /// a node of it, `None` for a unit with no class-1 component, which the test refuses.
+    pub fn turret_life(&self) -> Option<(usize, usize)> {
+        let socket = self
+            .parts
+            .get(self.turret_part)
+            .and_then(|p| Some((usize::try_from(p.host).ok()?, usize::try_from(p.node).ok()?)));
+        turret_life_node(
+            &self.walker.controller,
+            self.chassis_part,
+            &self.turret_controller,
+            self.turret_part,
+            socket,
+        )
+    }
+
+    /// The part whose research code names gun `i` in the weapons list (docs/35, "The weapons
+    /// list"): the device's own part, the id it keeps at `+8` (`Control.dll:0x1002d7a5`) — a gun
+    /// fitted as a part of its own, or else the part whose controller carries the gun, the
+    /// turret's or an animal's chassis's. A clip fitted to a gun keeps the gun's id, since its
+    /// re-parse (`0x1002d890`) leaves `+8` alone.
+    pub fn gun_part(&self, i: usize) -> usize {
+        match self.gun_parts.get(i) {
+            Some(Some(g)) => g.part,
+            _ => self.turret_part,
+        }
+    }
+
     /// The live limits again (`0x1000fca0`), from each node's life: `life(part, node)` is its
     /// life over its maximum and whether it is gone. The game recomputes them the tick after a
     /// node is damaged and when one reaches or leaves its last stage; the same figures come of
@@ -1111,9 +1139,69 @@ impl Robot {
     }
 }
 
+/// Where a unit's first class-1 component reads its life (`iron3d.dll:0x10076d30`, docs/39,
+/// "Boarding"): the part and the node it names, given the chassis's controller and the turret
+/// part's, and the socket the turret part hangs on. Property `0x52` of that component is its
+/// node's life over its maximum: interface `0x202` slot 3 answers it with `IDeviceManager`'s
+/// value `0x400` (`Control.dll:0x1002e68c`), which asks `ILifeSystem` slot 3 for id 1 of the
+/// node the device keeps at `+4` (`0x1002bc3c`). Parts load chassis first, so a chassis with a
+/// turret component of its own answers before a fitted turret; and a fitted part's node 0 is
+/// the socket it hangs on (`0x10009081`), so a component naming it reads its host's node. All
+/// 58 turret controllers in `turrets.rlb` name node 1, the turret's body.
+pub fn turret_life_node(
+    chassis: &Controller,
+    chassis_part: usize,
+    turret: &Controller,
+    turret_part: usize,
+    socket: Option<(usize, usize)>,
+) -> Option<(usize, usize)> {
+    let first = |c: &Controller| {
+        c.components.iter().find(|k| k.type_id == TURRET_TYPE).and_then(|k| usize::try_from(k.node).ok())
+    };
+    if let Some(n) = first(chassis) {
+        return Some((chassis_part, n));
+    }
+    match first(turret)? {
+        0 if turret_part != chassis_part => socket,
+        n => Some((turret_part, n)),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn with_turret(node: i32) -> Controller {
+        let turret = Component {
+            type_id: TURRET_TYPE,
+            resource: Default::default(),
+            index: None,
+            entries: Vec::new(),
+            label: String::new(),
+            values: [0.0; 16],
+            power: 0.0,
+            node,
+            mass: 0.0,
+            flags: 0,
+            group: -1,
+            weights: [0.0; 2],
+        };
+        Controller { components: vec![turret], ..Controller::default() }
+    }
+
+    #[test]
+    fn the_boarding_test_reads_the_life_of_the_node_the_first_turret_component_names() {
+        let bare = Controller::default();
+        // A fitted turret names its own node 1, its body, as every shipped one does.
+        assert_eq!(turret_life_node(&bare, 0, &with_turret(1), 2, Some((0, 5))), Some((2, 1)));
+        // Its node 0 would be the socket on the host it hangs from.
+        assert_eq!(turret_life_node(&bare, 0, &with_turret(0), 2, Some((0, 5))), Some((0, 5)));
+        // A chassis's own turret component loads first: an animal's, or `r_l_06`'s.
+        assert_eq!(turret_life_node(&with_turret(0), 0, &with_turret(0), 0, None), Some((0, 0)));
+        assert_eq!(turret_life_node(&with_turret(1), 0, &with_turret(1), 2, Some((0, 5))), Some((0, 1)));
+        // No class-1 component: refused.
+        assert_eq!(turret_life_node(&bare, 0, &bare, 2, Some((0, 5))), None);
+    }
 
     fn node(part: usize, node: usize, weight: f32, area: f32, flags: i32) -> HeftNode {
         HeftNode { part, node, weight, area, flags, root: part == 0 }

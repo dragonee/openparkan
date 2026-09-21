@@ -431,7 +431,7 @@ fn mission_02s_hero_boards_its_warbot_flies_it_and_gets_out_where_it_may_land() 
         "{:?}",
         play.says
     );
-    // F sinks to the ground; then the hero gets out beside the bot, facing it.
+    // F sinks to the ground; then the hero gets out beside the bot.
     play.key("SCAN_F", true);
     for _ in 0..(6 * 60) {
         play.update_input();
@@ -459,6 +459,74 @@ fn mission_02s_hero_boards_its_warbot_flies_it_and_gets_out_where_it_may_land() 
     let a = first as f32 * std::f32::consts::FRAC_PI_4;
     let place = bot.truncate() + glam::Vec2::new(a.cos(), a.sin()) * reach;
     assert!(out.truncate().distance(place) < 0.5, "out at {out}, the bot at {bot}, {reach}: {gaps:?}");
+    // Put out due north of the bot, the hero faces (F.x, −F.y) for F = (0, −1): north, away from
+    // it (docs/39, "Leaving").
+    let forward = play.hero.walker.body.forward();
+    assert!(forward.distance(glam::Vec3::Y) < 1e-3, "the hero faces {forward}");
+}
+
+/// The Mission 02 warbot spawned beside the hero, as the boarding test makes it.
+fn mission_02_warbot() -> (parkan_world::play::Play, usize) {
+    use parkan_world::factory::Project;
+
+    let (mut play, _) = mission_02_play();
+    let project = Project {
+        path: "UNITS\\bld_unit_-2147483647.dat".to_owned(),
+        name: "LFW-2 Warrior".into(),
+        type_word: 0x0100_8000,
+        chassis_size: 4,
+        ore: 0.0,
+        power: 0.0,
+        lines: Vec::new(),
+        sphere: None,
+    };
+    let hero_at = play.hero.walker.body.position;
+    let t = play
+        .spawn(&project, play.player_clan, hero_at + glam::Vec3::new(8.0, 0.0, 1.0), 0.0)
+        .expect("the L-2f");
+    for _ in 0..30 {
+        play.tick(1000.0 / 60.0, [0.0; 2]);
+    }
+    (play, t)
+}
+
+/// The boarding test reads the life of the node the bot's first class-1 component names
+/// (`iron3d.dll:0x10076d30`, docs/39, "Boarding"): the L-2f's `e_tur_bb_01` names its node 1,
+/// its body `BTmn`, where its node 0 is the chassis's socket. Shot off, the bot cannot be
+/// boarded.
+#[test]
+#[ignore = "needs the game install"]
+fn mission_02s_warbot_cannot_be_boarded_once_its_turrets_body_is_shot_off() {
+    let (mut play, t) = mission_02_warbot();
+    let robot = &play.robots.iter().find(|(rt, _)| *rt == t).unwrap().1;
+    let (part, node) = robot.turret_life().expect("a turret component");
+    assert_eq!((part, node), (robot.turret_part, 1));
+    assert_eq!(robot.parts[part].record.to_ascii_lowercase(), "e_tur_bb_01");
+    assert!(play.boardable(t));
+    let life = play.battle.combat.targets[t].parts[part].life.as_mut().unwrap();
+    assert!(life.nodes[1].max > life.nodes[0].max, "the body, not the socket's 1 hit point");
+    life.hit(1, f32::MAX / 4.0);
+    assert!(!play.boardable(t), "its turret's body is gone");
+}
+
+/// A bot's gun is named by the research code of the part it belongs to in the player clan's
+/// tree (`0x1008a470`, `0x1008a4b0`, docs/35, "The weapons list"): the design's rocket
+/// launchers `e_gun_bl_15` read LRL36S and its flamers `e_gun_bc_06` LFT, the codes the
+/// recording's weapons list shows from 249.4 s. Each carries a clip, which keeps the gun's part.
+#[test]
+#[ignore = "needs the game install"]
+fn mission_02s_warbot_names_its_guns_by_their_research_codes() {
+    let game = gamedir::find(None).expect("a Parkan install: set PARKAN_DIR");
+    let (play, t) = mission_02_warbot();
+    let codes = parkan_world::cockpit::gun_codes(&game, &play);
+    let robot = &play.robots.iter().find(|(rt, _)| *rt == t).unwrap().1;
+    let names: Vec<&str> = (0..robot.guns.len())
+        .map(|i| {
+            let record = robot.parts[robot.gun_part(i)].record.to_ascii_lowercase();
+            codes.get(&record).map_or("NONAME", String::as_str)
+        })
+        .collect();
+    assert_eq!(names, ["LRL36S", "LRL36S", "LFT", "LFT"]);
 }
 
 #[test]

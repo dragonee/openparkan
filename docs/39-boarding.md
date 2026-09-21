@@ -75,8 +75,9 @@ records, its front the mode the player is in.
    (`0x10071ff8`). `+0x30` is the size class, object property `0x201`: T 1,
    S 2, M 3, **L 4** ([35-hud.md](35-hud.md#name-and-status--read-and-seen)),
    the chassis's `b` letter. The test refuses a missing record, a removed
-   object, a unit with no class-1 turret and one whose turret node has no life
-   ([27-ownership.md](27-ownership.md));
+   object, a unit with no class-1 turret and one whose turret has no life left
+   ([27-ownership.md](27-ownership.md)) — the life of the turret's **body, its
+   node 1** ([below](#the-turrets-life-is-its-bodys-node-1--read-and-measured));
 7. a neutral target is captured first (27-ownership). Otherwise the target's
    clan (`+0x24`) must be the player's (`+0xad0`, `0x100720d3`).
 
@@ -84,6 +85,49 @@ Then `0x10062bc0(1, 0, bot)` (`0x100720e8`). So **only a large bot can be
 boarded, it need not land or stop, and nothing in the order or behaviour is
 asked** (*derived*). *Measured:* 86 of the turreted robot assemblies in
 `UNITS/UNITS` stand on a size-4 chassis; 10 of them fly.
+
+### The turret's life is its body's, node 1 — *read*, and *measured*
+
+`0x10076d30` asks the record's `+0x60`, the control system's interface `0x202`
+(bound at `0x1007e4e6`; `+0x64` is `IDeviceManager`, `0x204`, bound at
+`0x1007e510`), in two calls:
+
+1. **Slot 9 with index 0 and class 1** (`0x1002ea80`, handed to
+   `IDeviceManager` slot 17) gives the first class-1 device, the turret, or −1.
+2. **Slot 3 with that device and property `0x52`** (`Control.dll:0x1002e580`,
+   case `0x1002e68c`) is `IDeviceManager` slot 6 (`0x1002bb40`) with value
+   `0x400`, whose case (`0x1002bc3c`) asks the device's life system (`+0x44`)
+   slot 3 with id 1 for the node the device keeps at `+4`. `ILifeSystem` slot 3
+   (`0x1000dc40`) answers id 1 with that node record's `+0x14`: **life over
+   maximum** ([26-damage.md](26-damage.md#what-a-damaged-node-a-destroyed-part-and-a-dead-unit-draw--read-and-measured)).
+   At 0 or below (the 0.0 at `0x100e50a8`) the test refuses.
+
+**Which node that is** (*read*). The device's `+4` is its `.ctl` record's `+4`,
+which the shared parser copies when the factory builds a device (`0x10021d72`,
+flag 1 from `0x1002d79f`). The loader then rebases it for every part but the
+chassis (`Control.dll:0x1000906a`–`0x10009095`): **node 0 becomes the node the
+part hangs on**, the load message's `+0xc4`, and node *k* becomes the part's
+first node less one plus *k*, the first node being what the mesh's slot 14
+answers for the part (`0x10008b57`). The control points are rebased the same
+way (`0x10008be8`), and the `.ndp` rows match by a fitted part skipping its
+first (`0x10008c6a`,
+[28-chassis.md](28-chassis.md#the-order-parts-load-in-and-what-a-slot-keeps--read-and-measured)).
+
+**What the files give** (*measured*): the install carries 64 class-1
+components.
+
+- **All 58 in `turrets.rlb` name node 1**; the chassis `r_l_06`'s own names its
+  node 1, `Turr`; the five animals' (`a_a_l1`…`a_a_l5`) name node 0, their root,
+  since an animal is one part.
+- **All 60 turret parts** (`e_tur_*`, `e_tow_*`, `e_bnt_*`) have a node 0 of 1
+  hit point, `Base_TL` or `Base_TM` — the socket, whose place in the unit the
+  host's node takes — and a node 1 that carries the turret: `BTmn` with 3,000
+  on the L-2f's `e_tur_bb_01`, `LTmn` with 270 on most small turrets, `TMmn`
+  with 720 on the medium ones, up to 80,000 on `e_tur_bb_12`. The one exception
+  is the hero's `e_tur_ht_02`, whose node 1 is the 1-point pivot `Turn`.
+
+So **a bot can be boarded, and taken over from command mode, until its turret's
+body is shot to nothing**, whatever its socket or its other turret nodes.
 
 **What the mode 0 → 1 handler does** (`0x100637c0`), in order:
 
@@ -130,9 +174,32 @@ player's mode, and `+0xa2` is set.
   while aboard. **A recording contradicts that** (*seen*): on Mission 02 route
   4's message plays while the hero flies the warbot over the lake, 500 m from
   where it boarded ([34-progression.md](34-progression.md#seen-in-a-recording)).
-  So the route is reported where the bot goes, by a path not read. Whether
-  other managers (collision, the areal map) still hold the hero is not
-  established.
+  So the route is reported where the bot goes, by a path not read.
+- **it leaves the collision manager** (*read*). `CGameObject::DetachChild`
+  (`AniMesh.dll:0x10017680`, and the copy the landscape's `IGameObject` slot 5
+  runs, `Terrain.dll:0x1008a8a0`; both name themselves in a panic string) tells
+  the parent 3 and the child 7 (`0x100176f3`, `0x1001770e`; `0x1008a913`,
+  `0x1008a92e`). The agent passes the 7 on as
+  message 21 to its mesh, its control system and its collision object
+  (`IGameObject` slot 20, `0x10001ba0`), and sub-code 7 takes the collision
+  object out of its manager and puts it in none (`Control.dll:0x1001f579` →
+  `0x1001fea0`). Putting the hero out sends 6, which also joins the first
+  ancestor that answers `0x203` (`0x1001f585`–`0x1001f58e`): the world's
+  manager, or a building's
+  ([24-motion.md](24-motion.md#walking-into-a-building--read-and-measured)).
+  So nothing collides with a boarded hero.
+- **the areal map is not told** (*read*). The system areal map's attach and
+  detach hook (slot 3, `ArealMap.dll:0x1001f660`) returns at once for anything
+  whose kind is not 10, a tree or a stone (`0x1001f68e`). What it lists of a
+  unit are the tactical areals, the routes, which only the unit's behaviour
+  report changes
+  ([34-progression.md](34-progression.md#who-stands-in-a-route--read)). That
+  report reads the object's position from its kind-2 world matrix, elements 3,
+  7 and 11 (`Behavior.dll:0x10014f90`, `IGameObject` slot 8), and a detached
+  object keeps that matrix as it was: slot 8 composes it afresh only under a
+  parent (`AniMesh.dll:0x10002470`). So the hero's own report would keep it on
+  the routes about the place it boarded, and how the recording's route 4 comes
+  to hold it is still not read.
 
 ## Driving — *read*, and *measured*
 
@@ -237,14 +304,36 @@ Leaving ends in `stdClearKeyboard`, which removes that pending character
   ([35-hud.md](35-hud.md#the-indicators--read-and-seen)), and the handler
   refuses: the player stays aboard (`0x10063542`–`0x10063694`).
 
-**The matrix the hero is given** (`0x10063699`–`0x1006379f`). With F the unit
-vector from the place to the bot across the ground and R = (−F) × **z** =
-(−F.y, F.x, 0), it writes the rows (R, place x), (−F, place y), (**z**, place
-z), (0, 0, 0, 1). Read as the rest of the game's matrices are, with the axes
-in the columns and the translation in the fourth (`MisLoad.dll:0x10001d80`),
-the hero's forward axis is (F.x, −F.y): **towards the bot from the first place,
-due +x of it**, and mirrored about x from the others (*derived*). In the
-recording the hero comes out looking at the bot (*seen*, 331.8 s).
+**The matrix the hero is given** (`0x10063699`–`0x1006379f`, *read*). With F
+the unit vector from the place to the bot across the ground and R = (−F) ×
+**z** = (−F.y, F.x, 0), it writes the rows (R, place x), (−F, place y), (**z**,
+place z), (0, 0, 0, 1) over a copy of the identity at `0x1010b620`: the place
+goes into elements 3, 7 and 11. **The matrix goes on as it is** (*read*):
+
+- `IControl` slot 12 (`Control.dll:0x10004690`) copies the sixteen words
+  unchanged into the hull's matrix `+0x264` (kind 3), `+0x2a4` (kind 1) or all
+  of `+0x2e4`, `+0x2a4` and `+0x264` (kind 2). Where the control system moves
+  all three by one offset (`0x1000cb03`–`0x1000cb5f`) it adds to their elements
+  3, 7 and 11: the layout the leaving routine writes.
+- `IGameObject` slot 7 with kind 2 (`AniMesh.dll:0x10001fb0`) compares it word
+  by word with the object's world matrix and, where it differs, copies it there
+  unchanged (`+0x778`, `0x1000212b`), working the local matrix out from the
+  parent's. Slot 8 with kind 2 hands that world matrix back (`0x1000248e`),
+  composed again from the parent's and the local one.
+- **A unit's forward axis is that matrix's y column.** The own panel's camera
+  takes slot 8's kind-2 matrix and reads its elements 1, 5 and 9 as the way the
+  unit faces (`iron3d.dll:0x1004186f`–`0x10041884`,
+  [35-hud.md](35-hud.md#the-unit-in-the-middle--read-and-seen)), as the motion
+  takes y for forward
+  ([24-motion.md](24-motion.md#the-hull-leans-and-rights-itself--read-and-measured)).
+
+So **the hero faces (F.x, −F.y)**, F mirrored about x (*derived* from the
+reads). From the places due +x and −x of the bot (0 and 4) it faces the bot;
+from those due +y and −y (2 and 6) it faces straight away from it; from the
+four between it stands side-on. The rotation is a proper one (its determinant
+is F.x² + F.y² = 1), so the hero is turned, not mirrored. In the recording the
+hero comes out looking at the bot (*seen*, 331.8 s), from the first place, due
++x, which passes there ([below](#against-the-recording--seen)).
 
 **What the mode 1 → 0 handler does** (`0x100638c0`), in order:
 
@@ -304,8 +393,8 @@ and hidden.
 | time (s) | what |
 |---|---|
 | 232.3 | the hero's target becomes the LFW-2 Warrior and the wingman line shows it at the top left |
-| 236–249 | the bot comes over and hovers low above the hero; the left panel reads "LFW-2 Warrior (no order)" |
-| 249.3 → 249.4 | a hard cut into the bot's cockpit, blue and yellow frame; weapons LAL365, LAL365, LFT; the right panel shows the bot; the box turns to *"Manual control of warbots…"* from the Information assistant (message 100); the wingman line is gone |
+| 234–249 | the hero walks to the bot, which hovers off the Large Factory's end where its escape left it; the left panel reads "LFW-2 Warrior (no order)" (below) |
+| 249.3 → 249.4 | a hard cut into the bot's cockpit, blue and yellow frame; weapons LRL36S, LRL36S, LFT with 36, 36 and 30 rounds, which the font draws as "LAL365"; the right panel shows the bot; the box turns to *"Manual control of warbots…"* from the Information assistant (message 100); the wingman line is gone |
 | 255–322 | flying to the island, firing, setting down by the Outpost |
 | 311.6 | a box about large warbots, which expires at 331.6 |
 | 326 → 331.5 | setting down by the Outpost, sampled twice a second: the altitude figure falls 33, 29, 26, 23, 19, 16, 13, then 11 from 329.5 s, and holds 11 to 331.5 s while the speed figure falls from 24 to 6; the target panel reads the Small Outpost 31–33 m off |
@@ -313,6 +402,23 @@ and hidden.
 | 332 → 335 | the hero's altitude figure 6, then 3 from 332.5 s as it stands |
 
 Neither cut fades or moves the camera between the two views.
+
+**The weapons' names** are the research tree's short codes of the bot's gun parts,
+`e_gun_bl_15` and `e_gun_bc_06`
+([35-hud.md](35-hud.md#the-weapons-list--read-and-measured)). The game's font draws
+R much as it draws A: the hero's own list reads "PLASMA AIFLE LS" and "BATTLE
+LASEA EA" for strings 3072 and 3073 in the same frames.
+
+**How the bot came to the hero** (*seen*, against what is *read*). Nobody sent it.
+The factory gives a new bot the escape, no target, replacing
+(`Behavior.dll:0x1002aa6e`, [36-factory.md](36-factory.md#production--read)): a
+random point within 150 m on usable ground. The panel reads "[escaping]" at 232.5 s
+and "[no order]" by 234.5 s, once it has got there
+([36-factory.md](36-factory.md#mission-02--measured-derived-and-seen)). Sampled
+every second from 234 s, the Large Factory grows in the view while the bot hovers
+off its end, its shadow on the ground under it: the hero walks to the bot, which
+keeps its place, and at 248 s it hangs overhead. Its status reads "(no order)"
+throughout, where a Follow me would have read "[following]".
 
 **The altitude it was left at** (*derived*). The figure is the record's
 `+0xc`, rounded, over the water at z 150, and the height test above reads the
@@ -335,10 +441,11 @@ would read 9.
    Esc pops; a pop from 1 to 0 may be refused.
 2. **Board on Enter** when on foot and driving the hero, and the hero's current
    target is a unit of the player's clan, of size class 4 (a `b` chassis), with
-   a turret whose node is alive, less than 20 m away in x and y. No landing,
+   a turret whose body — the node its class-1 component names, node 1 on every
+   turret part — has life left, less than 20 m away in x and y. No landing,
    speed or order test.
 3. **On boarding:** take the hero out of the world (not drawn, simulated,
-   struck or listed; position frozen); select the bot and play
+   struck, collided with or listed; position frozen); select the bot and play
    `VOICE_SELECTED_B`; give the player the bot at auto-driver level 0 (the bot's
    AI off); make it the driven unit for the eye, the cockpit (fifth slots) and
    the whole HUD; drop every held key; in the training campaign, if the bot
@@ -350,7 +457,8 @@ would read 9.
    summed, starting at +x and turning by π/4; a place needs landscape under it
    that is not water, and a flyer less than 10 m above it. Put the hero at the
    first, 8 m above the highest landscape or building surface, heading (F.x,
-   −F.y) for F the unit vector from the place to the bot. With none, show 6211,
+   −F.y) for F the unit vector from the place to the bot: towards the bot only
+   from the places due ±x of it. With none, show 6211,
    play `VOICE_RISK_AREA`, light indicator 4 red for 3 s and stay aboard.
    Then put the hero back in the world, hand it to the player, hand the bot
    back to its AI (with an escape if it stands on a building), deselect it,
@@ -370,12 +478,40 @@ would read 9.
   show the key; Mission 04's shows Esc closing the satellite map and the
   commander's page before it leaves an HQ's command view
   ([40-command-mode.md](40-command-mode.md#leaving)).
-- The facing: the heading above follows the column convention the placement
+- ~~The facing: the heading above follows the column convention the placement
   matrices use elsewhere. That the leaving matrix is read the same way is
-  *derived*, not traced into `IControl` slot 8's mode 5 or `IGameObject` slot 7.
-- Whether a detached hero stays in the collision manager's or the areal map's
-  lists.
-- Why the recording's bot came to the hero between 236 and 249 s: an order the
-  player gave, or its own behaviour after production.
+  *derived*, not traced into `IControl` slot 8's mode 5 or `IGameObject` slot 7.~~
+  **Read**: `IControl` slot 12 and `IGameObject` slot 7 keep the matrix word for
+  word, and the kind-2 world matrix it becomes is the one whose y column the own
+  panel takes for a unit's forward axis, so the hero faces (F.x, −F.y): towards
+  the bot from the places due ±x, away from it from those due ±y
+  ([Leaving](#leaving--read)). Slot 8's mode 5 hands the object at control
+  `+0x34` its slot 3 (`Control.dll:0x1000477d`) and takes no matrix.
+- ~~Whether a detached hero stays in the collision manager's or the areal map's
+  lists.~~ **Read** for both: its collision object leaves its manager on the
+  detach and joins the world's on the re-attach, and the areal map's attach hook
+  passes over everything but trees and stones
+  ([What becomes of the hero](#boarding--read)). Still open: how the hero's route
+  follows the bot, when its own report would hold the world matrix it boarded
+  with.
+- ~~Why the recording's bot came to the hero between 236 and 249 s: an order the
+  player gave, or its own behaviour after production.~~ **Neither**: the hero
+  walks to it (*seen*). The bot hovers off the factory's end, where the escape
+  the factory gives every new bot left it at 234.5 s
+  ([Against the recording](#against-the-recording--seen)).
 - The wingman line's own layout (`0x1009d970`).
-- What game messages `0x3f1` and `0x3f2` carry to other machines.
+- What game messages `0x3f1` and `0x3f2` do on other machines. **What they
+  carry is read**: the hero's object id (its record's `+0x28`, `IGameObject`
+  slot 9 as the record is bound, `0x1007e51c`), posted to −1 on `World3D.dll`'s
+  queue (`GetQueue`, slot 28) — `0x3f1` as the hero is detached (`0x10063817`),
+  `0x3f2` as it is put back (`0x10063949`; and `0x10060474`, where a case of the
+  game's message callback attaches a player's parentless object under the
+  level's `+0xae0`). `World3D.dll`
+  posts `0x3f2` itself when `SetStateForGameObjects` finds a player's hero (Type
+  `0x1020000`) with no parent and attaches it to the queue's root
+  (`0x10005de5`–`0x10005e2a`), so the pair says which hero left the world and
+  came back. The receiving side is not found: a sweep of `iron3d.dll`,
+  `World3D.dll`, `Net.dll` and `Behavior.dll` for either code as an immediate
+  finds those four sends and `Net.dll`'s dialog control ids (`0x10001ed4`), and
+  no compare. The game's own message callback takes codes 0 to 14 alone
+  (`iron3d.dll:0x1005fabb`). A dispatch through a table would escape the sweep.

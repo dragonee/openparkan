@@ -223,17 +223,13 @@ pub fn draw(cockpit: &mut Cockpit, ink: &mut Ink, play: &Play) -> Vec<&'static s
         let (name, name_colour) = if out_of_range && gun.selected && !selecting {
             (cockpit.string(STRING_OUT_OF_RANGE).to_owned(), OUT_OF_RANGE)
         } else if play.driving.is_some() {
-            // Any unit but the hero looks its gun's name up from the component
-            // (`0x1008a470`), and falls back to NONAME.
-            //
-            // STAND-IN: docs/35-hud.md#the-weapons-list--read-and-measured -- the lookup is not
-            // followed: the gun part's code in the player clan's research tree.
+            // Any unit but the hero names a gun by the research code of the part its device
+            // belongs to, looked up by the part's name in the player clan's tree
+            // (`0x1008a470`, `0x1008a4b0`), and falls back to NONAME.
             let robot = play.driven();
             let code = robot
-                .gun_parts
-                .get(i)
-                .and_then(Option::as_ref)
-                .and_then(|g| robot.parts.get(g.part))
+                .parts
+                .get(robot.gun_part(i))
                 .and_then(|p| cockpit.gun_codes.get(&p.record.to_ascii_lowercase()))
                 .cloned();
             (code.unwrap_or_else(|| NONAME.to_owned()), row_colour)

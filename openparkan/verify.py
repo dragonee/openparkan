@@ -22396,6 +22396,69 @@ def check_boarding(check, game: Path) -> None:
           f"== 4 at iron3d.dll:0x10071ff8), {large_fly} of them flying; r_b_02 mode {l2f.mode}, "
           f"top speed {tuple(round(v, 2) for v in top)} m/s")
 
+    # The turret's life the boarding test reads: property 0x52 is the life of the node the
+    # first class-1 component names (docs/39, "The turret's life is its body's, node 1").
+    archives: dict[str, NResArchive] = {}
+
+    def member(ref) -> bytes | None:
+        name = ref.library.lower()
+        if name not in archives:
+            path = next((p for p in game.iterdir() if p.name.lower() == name), None)
+            if path is None:
+                return None
+            archives[name] = NResArchive.open(path)
+        try:
+            return archives[name].read_name(ref.member)
+        except KeyError:
+            return None
+
+    class1: Counter[tuple[str, int]] = Counter()
+    for rlb in sorted(game.glob("*.rlb")):
+        try:
+            ar = NResArchive.open(rlb)
+        except NotAnNResArchive:
+            continue
+        for e in ar.entries:
+            if e.name.lower().endswith(".ctl"):
+                for k in control.parse(ar.read(e)).components:
+                    if k.type_id == control.TURRET_TYPE:
+                        class1[(rlb.name.lower(), k.node)] += 1
+    turret_parts = []
+    for name, record in sorted(lib.records.items()):
+        ctl, ndp, msh = record.slot_with_suffix("ctl"), record.damage, record.mesh
+        if record.tag != "EXTO" or ctl is None or ndp is None or msh is None:
+            continue
+        blob = member(ctl)
+        kinds = [] if blob is None else [k.type_id for k in control.parse(blob).components]
+        if control.TURRET_TYPE not in kinds:
+            continue
+        rows = objects.parse_damage(member(ndp) or b"", ndp.member)
+        nodes = objmesh.parse(member(msh) or b"", msh.member).subobjects
+        turret_parts.append((name, rows[0].durability, rows[1].durability, nodes[0], nodes[1]))
+    sockets = {n0 for _, _, _, n0, _ in turret_parts}
+    body = {name: (hp, n1) for name, _, hp, _, n1 in turret_parts}
+    check("turrets.rlb: every turret component names node 1, the body, over a 1-point socket",
+          class1 == Counter({("turrets.rlb", 1): 58, ("bases.rlb", 1): 1, ("animals.rlb", 0): 5})
+          and len(turret_parts) == 60 and all(hp0 == 1.0 for _, hp0, _, _, _ in turret_parts)
+          and sockets == {"Base_TL", "Base_TM"} and body["e_tur_bb_01"] == (3000.0, "BTmn_m1o1")
+          and body["e_tur_ht_02"] == (1.0, "Turn_m1o1"),
+          f"class-1 components by archive and node: {dict(class1)}; {len(turret_parts)} turret "
+          f"parts, node 0 {sorted(sockets)} of 1 point on "
+          f"{sum(1 for _, hp0, _, _, _ in turret_parts if hp0 == 1.0)}; the L-2f's e_tur_bb_01 "
+          f"node 1 {body.get('e_tur_bb_01')}, the hero's e_tur_ht_02 {body.get('e_tur_ht_02')}")
+
+    # A non-hero gun's name: its part's short code in the player clan's tree, first match.
+    trees = [research.read(p) for p in research.trees(game)]
+    twice = sum(1 for t in trees for n in Counter(x.lower() for x in t.part_ids).values() if n > 1)
+    tut2 = next((t for t in trees if t.source.name.lower() == "tut2_pl.trf"), None)
+    codes = {p: (tut2.item_for(p).code if tut2 and tut2.item_for(p) else None)
+             for p in ("e_gun_bl_15", "e_gun_bc_06")}
+    check("*.trf: a gun part's short code names it in a bot's weapons list, as Mission 02's shows",
+          len(trees) == 29 and twice == 0
+          and codes == {"e_gun_bl_15": "LRL36S", "e_gun_bc_06": "LFT"},
+          f"{len(trees)} trees, {twice} part ids listed twice in one; tut2_pl.trf gives {codes}, "
+          f"the recording's LRL36S, LRL36S and LFT at 249.4 s")
+
     found = defaultdict(list)
     for path in sorted((game / "MISSIONS").rglob("messages.cfg")):
         for m in briefing.messages(path):
