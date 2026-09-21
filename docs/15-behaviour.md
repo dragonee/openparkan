@@ -170,7 +170,7 @@ freely. Those 23 are exactly the things you cannot assign to:
 |---|---|
 | `f0`–`f9` | the float literals 0 to 9 |
 | `d0`–`d9` | the integer literals 0 to 9 |
-| `dCurrentProblem`, `dCurrentSender`, `fDifficulty` | written by the engine |
+| `dCurrentProblem`, `dCurrentSender`, `fDifficulty` | written by the engine ([`fDifficulty` is the game level](#fdifficulty-is-the-game-level-0-05-or-1--read)) |
 
 That last row is confirmed from the other side: the SuperAI constructor
 resolves `dCurrentProblem` and `dCurrentSender` by name right after the table
@@ -603,12 +603,52 @@ index at or past the candidate count falls back to 0, and `n = 0` — what the
 constructor leaves — always takes index 0. So the count is a **spread**: how
 far down its own ranking the clan's next build may fall.
 
+### What each `SELECT_*` scores — *read*
+
 Which field is scored is the script's `SELECT_*`. The pick's second argument is
 that constant, and `mode − 1` indexes a six-arm jump table at `0x10010bbc`,
-each arm copying a different float of the 0x124-byte design record (`+0x110`,
-`+0x114`, `+0x11c`, …) into the score array. `SELECT_SMALLEST`, 6, skips the
-draw altogether and takes the last of the ranking (`0x10010aab`,
-`0x10010b65`). The scripts pass the mode as the `TARGET_BY_NAME` target of
+whose six targets are read here one at a time:
+
+| mode | | arm | what it puts in the score array |
+|---:|---|---|---|
+| 1 | `SELECT_BEST_WEAPON` | `0x10010895` | `+0x114`, the guns |
+| 2 | `SELECT_BEST_ARMOR` | `0x10010919` | `+0x110`, property 54's hit points |
+| 3 | `SELECT_BEST_RANGE` | `0x100108d7` | `+0x11c`, which the store's fill never writes |
+| 4 | `SELECT_FASTEST` | `0x1001095b` | `+0x118`, property 145's live top speed |
+| 5 | `SELECT_BEST_COMBAT` | `0x1001099d` | `0x1000fc70(+0x110, +0x114)` — **the strength formula** |
+| 6 | `SELECT_SMALLEST` | `0x100109eb` | the same strength, and then the **last** of the ranking |
+
+An earlier reading of this page said `SELECT_BEST_COMBAT` and `SELECT_FASTEST`
+"rank by hit points and by speed". Only the second half was right, and the
+mistake matters: **"best combat" is `(guns + 0.8) × hit points × 1e-5`, guns
+over armour**, and it is `SELECT_BEST_ARMOR` that ranks by hit points alone. On
+the 59 warrior designs in `UNITS\UNITS\AI\` the difference is the whole
+character of an enemy clan's force (*measured*): by hit points the top five are
+all large chassis, the first of them `AI_LS_10` at 93,008 points; by the
+strength formula the top three are the size-2 `23_swlk1`, `wswlk12` and
+`wswlk13` at 228.6 against its 207.2 — 5,715 hit points apiece and four
+thousand of guns. A clan asking for `SELECT_BEST_COMBAT` builds **small,
+heavily armed** warbots, not the biggest hull it can.
+
+`SELECT_SMALLEST`, 6, skips the draw altogether and takes the last of the
+ranking (`0x10010aab`, `0x10010b65`) — the *weakest* by that same strength, not
+the least chassis.
+
+**The candidates** are every design whose `+0x108` Type **equals** the order's —
+an equality, not a mask (`0x10010833`) — whose `+0x104` byte is set and whose
+Type does not carry `CLASS_BUILDING` (`0x1001083d`).
+
+**The factory-size gate is dead code** (*read*). Before the draw, `0x10006820`
+walks the clan's own object list for every entry of type `BUILDING_PLANT`, asks
+each for property `0x201` and keeps the **largest** — the biggest factory the
+clan owns. Its answer is then thrown away: `or eax, 0xffffffff` at
+`0x10010af5` overwrites `eax` before the comparison at `0x10010b0f` that would
+have used it, so that comparison tests a size class against `0xffffffff`
+unsigned and always passes. The pick applies no size limit; a design too big
+for the factory is refused later, when `M_Task_Construct` starts
+([36-factory.md](36-factory.md#production--read)).
+
+The scripts pass the mode as the `TARGET_BY_NAME` target of
 their `ORDER_BUILDING_CONSTRUCT`, out of the problem's third parameter
 (`dT1 = fn29(d2)`): all **108** raises of `PBM_ROBOT_NEEDED` in the corpus pass
 a `SELECT_*` there — 65 `SELECT_BEST_COMBAT`, 42 `SELECT_FASTEST`, one
@@ -634,6 +674,42 @@ the three that never call 69 — `c1m3e`, `c1m4e`, `scream` — keep the spread 
 **Neither function's result is ever read**: 0 of the 14 calls of 57 and 0 of
 the 7 of 69 name a destination, so what 69 leaves in the result slot goes
 nowhere.
+
+## `fDifficulty` is the game level, 0, 0.5 or 1 — *read*
+
+`varset.var` declares `fDifficulty` 0.5 and marks it *"Be careful this var
+changing from CPP code"*; what writes it, and with what, is read here.
+`ai.dll:0x10005d00` is the only code in the module that names the variable
+(`'fDifficulty'` at `0x1003d784`, one reference, `0x10005d17`). It takes an
+**index**, stores it at the SuperAI's `+0x384`, builds a six-float array on its
+own stack, looks the variable up in the table by name through the interpreter's
+slot 4 and writes it with the float setter (`0x10013650`):
+
+| index | the float it writes |
+|---:|---|
+| 0 | 0.0 |
+| 1 | 0.5 |
+| 2 | 1.0 |
+| 3, 4, 5 | 0.0 |
+
+Its one caller is the SuperAI's constructor (`0x10001270`), which passes one of
+`CreateSuperAI`'s own arguments (`0x10001265`, `[esp + 0x7fc]`). The index is
+therefore `iron3d.dll`'s game level — `Iron_3D.ini`'s `[CS] GAME_LEVEL`, 0
+easy, 1 medium, 2 hard ([22-settings.md](22-settings.md)), the same 0/1/2 the
+level ratio is picked by ([26-damage.md](26-damage.md)) — which the constructor
+is handed per clan; that last step is *derived*, from there being no other
+0-to-2 level in the engine and from the declared default, 0.5, being exactly
+this table's medium.
+
+**So every difficulty branch in the corpus is the game level.** `fDifficulty`
+appears in 25 of the 24 distinct formula lines the scripts carry
+([What the corpus uses](#what-the-corpus-uses--measured)), and the three shapes
+it takes on C02 M03 alone are the spread of the design draw
+(`6 − 4·fDifficulty`, so 6 at easy and 2 at hard), the gate on the whole
+`PBM_BASE_DEFENCE` block (`if fDifficulty > f0`, so **no base defence at all**
+at easy) and `dPlaceProtectHits` (`100 − 40·fDifficulty`, and a flat 100 at
+easy). Elsewhere it moves the Convoy's two raid timers by 300 and 400 seconds
+([34-progression.md](34-progression.md#the-convoys-two-raids--read-and-measured)).
 
 ## What a strength is — *read*, and *measured*
 
@@ -773,6 +849,18 @@ walks it four times, in this order:
    `[SuperAI + code × 4 + 0xb4]`. If a handler leaves its problem neither
    solved nor solving, a flag is set and **the whole pass runs again**
    (`0x10001e3d`), so one takt drains the list from the heaviest down.
+
+**Two things the pass's reading leaves open**, both of which an engine running
+it has to answer. `fn8(ST_SOLVED)` is read as far as releasing the problem's
+units; whether the record then keeps its slot is not, and it matters, because
+the raise's duplicate test (`0x10004c50`) matches on code, `p1` and `p2` alone
+and would block the next want for as long as a solved record stood — which
+[23-economy.md](23-economy.md#the-bot-limit-is-the-clans-mind-count--read-and-measured)'s
+reading of the nine build sites says does not happen. And the `_Start` pass's
+repeat is read as *while any handler left its problem unstarted*: taken
+literally that never ends, because `PBM_ROBOT_NEEDED_Start` returns without
+setting a state whenever the clan has no factory, and the pass would offer the
+same problem again every round. What the repeat excludes is not read.
 
 **Nothing else writes `dCurrentProblem` or `dCurrentSender`** (*read*). The
 SuperAI keeps pointers to the two variables at `+0x868` and `+0x86c`
@@ -1248,8 +1336,18 @@ capturer — which is why the table stops one call deep.
   69](#function-69-sets-how-sloppy-the-ais-design-pick-is--read-and-measured)).
   What `MESSAGE_INFO`'s value selects in `iron3d.dll` was already
   read: a `messages.cfg` id, played as [34-progression.md](34-progression.md)
-  describes. Still not read: what the design store **scores** — the six floats
-  at the design record's `+0x110` upward that `SELECT_*` chooses between.
+  describes. ~~Still not read: what the design store **scores** — the six floats
+  at the design record's `+0x110` upward that `SELECT_*` chooses between.~~ All
+  six arms are now read ([What each `SELECT_*`
+  scores](#what-each-select_-scores--read)), and the first reading of two of
+  them here was wrong: `SELECT_BEST_COMBAT` is the strength formula, guns over
+  armour, not hit points, and `SELECT_SMALLEST` takes the weakest by that same
+  figure rather than the least chassis. What is still unread is the one float
+  `SELECT_BEST_RANGE` reads, `+0x11c`, which the store's own fill never writes,
+  and which no shipped raise asks for.
+- ~~**What writes `fDifficulty`.**~~ Read: the SuperAI's constructor, from a
+  six-float table indexed by the game level ([`fDifficulty` is the game
+  level](#fdifficulty-is-the-game-level-0-05-or-1--read)).
 - ~~**Whether any script depends on a constant landing inside a false block.**~~
   Now answered: **no**, over all 121 (constant, enclosing `if`) pairs, with a
   control that returns 98 on the writes the block does guard ([Does any script

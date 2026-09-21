@@ -295,8 +295,9 @@ fn c03_m02s_enemy_raids_the_players_bunker_twice_on_its_own_timers() {
     assert_eq!(init, [(12, orders::SHUTDOWN), (8, orders::PATROL)]);
     p.orders.clear();
 
-    // Twenty minutes of takts, the units standing where they were placed.
-    let (mut raids, mut messages) = (Vec::new(), Vec::new());
+    // Twenty minutes of takts, the units standing where they were placed. Both enemy clans
+    // plan as well, so their build orders are counted apart from the two raids.
+    let (mut raids, mut messages, mut builds) = (Vec::new(), Vec::new(), 0);
     let mut now = 0.0;
     while now < 1_200_000.0 {
         now += 100.0;
@@ -306,12 +307,18 @@ fn c03_m02s_enemy_raids_the_players_bunker_twice_on_its_own_timers() {
             }
         }
         if !p.orders.is_empty() {
-            let orders: Vec<ScriptOrder> = std::mem::take(&mut p.orders);
-            raids.push((now / 1000.0, p.others[enemy].takt.clock(), orders));
+            let given: Vec<ScriptOrder> = std::mem::take(&mut p.orders);
+            builds += given.iter().filter(|o| o.order.code == orders::CONSTRUCT).count();
+            let given: Vec<ScriptOrder> =
+                given.into_iter().filter(|o| o.order.code != orders::CONSTRUCT).collect();
+            if !given.is_empty() {
+                raids.push((now / 1000.0, p.others[enemy].takt.clock(), given));
+            }
         }
     }
     assert_eq!(raids.len(), 2, "two raids and no more: {raids:#?}");
     assert_eq!(messages, [0, 1], "each raid says its own message");
+    assert!(builds > 0, "and the clans' planners ask their factories for warbots besides");
 
     // `fDifficulty` stands at `varset.var`'s own 0.5, so the first timer is 472 s and the second
     // 920; the clock steps a flat 7 s a takt, and a timer is passed once the clock is above it.
@@ -708,4 +715,209 @@ fn c02_m04s_tower_raises_its_gun_mast_out_of_the_ground_and_leaves_it_up() {
     }
     assert!((z(&play, 0, 13) - held).abs() < 0.2, "the mast stays up: {}", z(&play, 0, 13));
     eprintln!("the mast rises {up:.2} m and holds");
+}
+
+/// C02 Mission 03, *The Lost Key*: the enemy clan's planner, `c2m3e`'s, first takt. Its
+/// `Problems0` counts its free minds and its factories and raises `PBM_ROBOT_NEEDED` for a
+/// `ROBOT_BATTLEUNIT` by `SELECT_BEST_COMBAT`; the `_Start` pass finds the clan's
+/// `BUILDING_PLANT` and hands it `ORDER_BUILDING_CONSTRUCT` to the end of its queue, with the
+/// `SELECT_*` as the order's `TARGET_BY_NAME` (docs/15, "The planner", and docs/36,
+/// "Production"). Its three `PBM_PLACE_PROTECT` raises put its warbots on patrol about the
+/// places `Problems0` names, and `PBM_N_OPTIMAL_TRANSPORT` sends its transport out.
+#[test]
+#[ignore = "needs the game install"]
+fn c02_m03s_enemy_planner_orders_its_factory_to_build_a_warbot() {
+    use parkan_sim::orders;
+    use parkan_sim::planner::{self, ROBOT_BATTLEUNIT, SELECT_BEST_COMBAT};
+    use parkan_world::progress::ScriptOrder;
+
+    let (mut p, _) = campaign_progression(gamedir::C02_MISSION_03);
+    let enemy = 1_i64;
+    let plant = -2147483608_i32;
+    assert_eq!(p.progress.owner(plant), enemy as u32, "the enemy's Large Factory");
+    let init: Vec<(i32, i32)> = std::mem::take(&mut p.orders).iter().map(|o| (o.id, o.order.code)).collect();
+    assert_eq!(init, [(28, orders::SHUTDOWN)], "`Init` shuts one unit down and plans nothing");
+
+    // One clan takt, which is the first thing after `Init` that plans anything.
+    p.tick(100.0, |_| None);
+    let given: Vec<ScriptOrder> = std::mem::take(&mut p.orders);
+    let build = given.iter().find(|o| o.order.code == orders::CONSTRUCT).expect("a build order");
+    assert_eq!(build.id, plant, "to its own Large Factory");
+    assert_eq!(build.order.parameter as u32, ROBOT_BATTLEUNIT);
+    assert_eq!(build.order.target, orders::Target::Select(SELECT_BEST_COMBAT));
+    assert_eq!(build.insert, orders::INSERT_TO_END, "to the end of the factory's queue");
+
+    // What the takt left standing: the build, the three places and the transport.
+    let planner = p.planner_of(enemy).expect("the enemy runs a script");
+    let mut codes: Vec<u32> = planner.standing().map(|(_, q)| q.code).collect();
+    codes.sort_unstable();
+    assert_eq!(codes, [4, 6, 11, 11, 11], "one transport, one robot wanted, its three places");
+    let robot = planner.standing().find(|(_, q)| q.code == 6).expect("PBM_ROBOT_NEEDED").1;
+    assert_eq!(robot.name, "PBM_ROBOT_NEEDED");
+    assert_eq!((robot.life, robot.drain), (25, 24), "raised 25/24, so it stands two takts");
+    assert_eq!(robot.p, [ROBOT_BATTLEUNIT, 0, SELECT_BEST_COMBAT]);
+    assert_eq!(robot.state, planner::ST_SOLVING, "the factory took the order");
+    // The factory is the problem's own critical unit, and its idling is what ends the problem.
+    assert_eq!(robot.units.iter().map(|u| (u.id, u.critical)).collect::<Vec<_>>(), [(plant, true)]);
+    assert_eq!(
+        robot.actions.iter().map(|a| (a.action, a.target)).collect::<Vec<_>>(),
+        [(planner::ACTION_NOTHING_DOING, plant)]
+    );
+
+    // Its patrols went to its own warbots, at the places `Problems0` names.
+    let patrols: Vec<[f32; 3]> = given
+        .iter()
+        .filter(|o| o.order.code == orders::PATROL)
+        .filter_map(|o| match o.order.target {
+            orders::Target::Place(at) => Some(at),
+            _ => None,
+        })
+        .collect();
+    assert!(!patrols.is_empty(), "the place-protect problems put warbots on patrol");
+    let places = [[1301.0, 1077.0, 0.0], [265.0, 1079.0, 0.0], [265.0, 1540.0, 0.0]];
+    assert!(patrols.iter().all(|at| places.contains(at)), "at the places `Problems0` names: {patrols:?}");
+    assert!(given.iter().any(|o| o.order.code == orders::TRANSPORT), "and its transport goes out");
+}
+
+/// And the order reaches the factory: its own design store ranks the designs of the type
+/// asked for and the factory builds one, until the clan's minds run out and it stands idle
+/// (docs/23, "The bot limit is the clan's mind count").
+///
+/// `SELECT_BEST_COMBAT` scores a design by the **strength formula**, guns over armour
+/// (`ai.dll:0x1001099d`), which puts the small, heavily armed `23_swlk1` class above the
+/// 93,008-hit-point `AI_LS_10` — so the enemy turns out *SSW-X Warriors* of chassis size 2,
+/// not the biggest hull in the store. Each costs its design's ore, which its one Small Mine
+/// has to dig: only the first is free.
+#[test]
+#[ignore = "needs the game install"]
+fn c02_m03s_enemy_factory_turns_out_small_warbots_until_the_clans_minds_run_out() {
+    use parkan_world::play::CLASS_ROBOT;
+
+    let mut play = campaign_play(gamedir::C02_MISSION_03);
+    let tick = 1000.0 / 30.0;
+    let enemy = 1_i64;
+    let placed = play.units.len();
+    let plant = play.units.iter().position(|u| u.logical_id == -2147483608).expect("its Large Factory");
+    assert!(play.factories.iter().any(|f| f.target == plant), "which the play knows as a factory");
+
+    let mut made: Vec<(f32, u32, u8)> = Vec::new();
+    for step in 0..(100 * 30) {
+        play.tick(tick, [0.0; 2]);
+        while placed + made.len() < play.units.len() {
+            let t = placed + made.len();
+            let u = &play.units[t];
+            assert_eq!(u.clan, Some(enemy), "made for the enemy clan");
+            let size = play.robots.iter().find(|(rt, _)| *rt == t).map_or(0, |(_, r)| r.size_class);
+            made.push((step as f32 / 30.0, u.type_word, size));
+        }
+    }
+    assert_eq!(made.len(), 3, "three warbots, one a mind: {made:?}");
+    assert!(made.iter().all(|&(_, t, _)| t & CLASS_ROBOT != 0), "every one a robot: {made:?}");
+    assert!(made.iter().all(|&(_, _, size)| size == 2), "and every one a small chassis: {made:?}");
+    // The free bot first: a large factory building a small chassis takes 20 s (docs/23,
+    // "Construction"). The two behind it are paid, and wait on the mine's ore.
+    assert!((15.0..30.0).contains(&made[0].0), "the free one at {} s", made[0].0);
+    assert!(made[1].0 > made[0].0 + 15.0, "and the paid ones dig for theirs: {made:?}");
+    assert_eq!(play.free_minds(enemy), 0, "the clan's minds are all held now");
+    let factory = play.factories.iter().find(|f| f.target == plant).unwrap();
+    assert!(factory.idle(), "so the factory stands idle rather than queueing another");
+    // The design it built is one of the AI's own store, and it was paid for.
+    let store = play.stores.get(&enemy).expect("the enemy's design store is loaded");
+    assert!(store.designs.len() > 50, "the whole of UNITS\\UNITS\\AI: {}", store.designs.len());
+    let best = store.pick(0x0100_8000, parkan_sim::planner::SELECT_BEST_COMBAT, 0).expect("a design");
+    assert!(best.chassis_size <= 2, "the best combat design is a small one: {best:?}");
+    assert!(best.ore > 100.0, "and it is not free: {} ore", best.ore);
+}
+
+/// And the capture: the player takes the enemy's Generator, the enemy's SuperAI runs
+/// `Fort_Captured` for the building it has just lost — which raises `PBM_BUILDING_INF_CAPTURE`
+/// at 0.7 plus what function 66 says a generator is worth — and its nearest capturer is sent
+/// to take it back (docs/15, "What the functions do", and docs/27, "Capture").
+#[test]
+#[ignore = "needs the game install"]
+fn c02_m03s_enemy_sends_a_warbot_to_take_its_generator_back() {
+    use parkan_sim::orders;
+    use parkan_sim::planner::{ACTION_CAPTURE_BUILDING, ACTION_DESTROY, ST_SOLVING};
+
+    let mut play = campaign_play(gamedir::C02_MISSION_03);
+    let tick = 1000.0 / 30.0;
+    let enemy = 1_i64;
+    let generator = play.units.iter().position(|u| u.logical_id == -2147483647).expect("the generator");
+    assert_eq!(play.units[generator].type_word, 0x8000_0002, "a generator");
+    assert_eq!(play.units[generator].clan, Some(enemy), "the enemy's");
+    assert!(play.stand_on_pod(generator), "the hero stands on its pod");
+
+    let (mut taken, mut ordered, mut back) = (None, None, None);
+    for step in 0..(100 * 30) {
+        play.update_input();
+        play.tick(tick, [0.0; 2]);
+        let at = step as f32 / 30.0;
+        if taken.is_none() && play.units[generator].clan == Some(play.player_clan) {
+            taken = Some(at);
+        }
+        if taken.is_some() && ordered.is_none() {
+            ordered = play
+                .robots
+                .iter()
+                .find(|(t, r)| {
+                    play.units[*t].clan == Some(enemy) && r.order.map(|o| o.code) == Some(orders::CAPTURE)
+                })
+                .map(|(t, _)| (at, play.units[*t].logical_id));
+        }
+        if taken.is_some() && back.is_none() && play.units[generator].clan == Some(enemy) {
+            back = Some(at);
+            break;
+        }
+    }
+    let taken = taken.expect("the hero's pod fires and the generator changes hands");
+    let (ordered_at, capturer) = ordered.expect("the enemy answers with a capture order");
+
+    // The problem the event raised: weight 0.7 + 0.04, the generator as its first parameter,
+    // and the two actions that end it — the building destroyed, or taken.
+    let planner = play.progression.as_ref().unwrap().planner_of(enemy).unwrap();
+    let problem = planner.standing().map(|(_, q)| q).find(|q| q.code == 14);
+    if let Some(q) = problem {
+        assert_eq!(q.name, "PBM_BUILDING_INF_CAPTURE");
+        assert!((q.weight - 0.74).abs() < 1e-5, "0.7 + a generator's 0.04: {}", q.weight);
+        assert_eq!(q.p[0] as i32, play.units[generator].logical_id);
+        assert_eq!(q.state, ST_SOLVING);
+        let mut actions: Vec<u32> = q.actions.iter().map(|a| a.action).collect();
+        actions.sort_unstable();
+        assert_eq!(actions, [ACTION_DESTROY, ACTION_CAPTURE_BUILDING]);
+    }
+    let back = back.expect("and its warbot walks in and takes the generator back");
+    assert!(
+        ordered_at > taken && back > ordered_at,
+        "{taken} s taken, {ordered_at} s ordered, {back} s back"
+    );
+    eprintln!("taken at {taken:.1} s, unit {capturer} ordered at {ordered_at:.1} s, back at {back:.1} s");
+}
+
+/// The game level reaches the scripts. The SuperAI's constructor writes `fDifficulty` from a
+/// six-float table indexed by `Iron_3D.ini`'s `[CS] GAME_LEVEL` — 0 easy, 1 medium, 2 hard
+/// giving 0.0, 0.5 and 1.0 (`ai.dll:0x10005d00`) — and every difficulty branch the campaign's
+/// scripts carry hangs off it. On C02 M03 `c2m3e`'s `Init` sets the design store's spread to
+/// `6 − 4 × fDifficulty`, its `Problems0` gates the whole `PBM_BASE_DEFENCE` block on
+/// `fDifficulty > 0`, and `dPlaceProtectHits` is `100 − 40 × fDifficulty`.
+#[test]
+#[ignore = "needs the game install"]
+fn c02_m03s_enemy_reads_the_game_level_through_f_difficulty() {
+    use parkan_formats::gamedir;
+    use parkan_sim::planner;
+
+    let game = gamedir::find(None).expect("a Parkan install: set PARKAN_DIR");
+    let level = parkan_world::settings::game_level(&game);
+    let difficulty = planner::difficulty(level);
+    assert_eq!(planner::DIFFICULTY[..3], [0.0, 0.5, 1.0], "easy, medium, hard");
+
+    let (p, _) = campaign_progression(gamedir::C02_MISSION_03);
+    let enemy = p.others.iter().find(|o| o.clan == 1).expect("the enemy runs c2m3e");
+    assert_eq!(enemy.script.float("fDifficulty"), Some(difficulty), "written before `Init` runs");
+    // What `Init` made of it: `fn69(6 − 4 × fDifficulty)`, the draw's spread.
+    let spread = (6.0 - 4.0 * difficulty) as u32;
+    assert_eq!(enemy.planner.spread, spread, "the design spread at game level {level}");
+    // And `dPlaceProtectHits`, which `Init` sets to 100 at difficulty 0 and 100 − 40·d above.
+    let hits = enemy.script.dword("dPlaceProtectHits").expect("the variable");
+    let expected = if difficulty <= 0.0 { 100 } else { (100.0 - 40.0 * difficulty) as u32 };
+    assert_eq!(hits, expected);
 }

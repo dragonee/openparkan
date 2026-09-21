@@ -1124,6 +1124,10 @@ fn c02_m01s_wingmen_follow_the_hero_over_the_bridge_and_keep_out_of_the_canyon()
     use parkan_world::play::Play;
 
     let mut play = campaign_play(gamedir::C02_MISSION_01);
+    // This is a test of the walk, and the south bank is inside the enemy clan's patrol: since
+    // M18 its planner puts warbots on `PBM_PLACE_PROTECT` there, and they shoot one of the two
+    // followers apart before it reaches the deck. The progression goes, so no clan plans.
+    play.progression = None;
     let graph = play.graph.clone().expect("KM_4 has an areal map");
     let hero_id = play.hero_id;
     // The player's two `21swlk1`, logical ids 9 and 10, brought to the south bank and told to

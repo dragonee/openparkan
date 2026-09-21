@@ -26,7 +26,7 @@ has been checked.
 | | M04 *Unstable Equilibrium* | 30% | Playable |
 | **C02** *The Alari Gorge* | M01 *The Iron Monster* | — | Untested |
 | | M02 *Ballen's Crossing* | — | Untested |
-| | M03 *The Lost Key* | — | Untested |
+| | M03 *The Lost Key* | 30% | Playable |
 | | M04 *The Last Bastion* | — | Untested |
 | **C03** *The Flame of Logy* | M01 *The Silver Eye* | — | Untested |
 | | M02 *The Convoy* | — | Untested |
@@ -43,7 +43,7 @@ them from the install.
 
 ## Milestones
 
-Milestones **M0** to **M17** are in, each with the stand-ins listed below.
+Milestones **M0** to **M18** are in, each with the stand-ins listed below.
 **M0** to **M2**:
 
 - the workspace;
@@ -1025,6 +1025,92 @@ out of the ground.
   150 m streak from the bank and a 1.93 m flicker down the deck. It had been the flicker from
   everywhere.
 
+**M18.** The enemy plans: it builds warbots and sends them to take the buildings you hold.
+
+- **A clan's SuperAI keeps a problem list, and its takt walks it four times** (docs/15, "The
+  planner: when a `_Start` runs, and when a `_Continue`"). The engine ran each clan's
+  `Problems0` and answered ten of the 73 function slots; `fn2`, the raise, answered 0, so no
+  `PBM_*` handler had ever run and the whole of the AI's planning was dead — across 13 scripts,
+  every capture, every base defence, every build. `parkan-sim/src/planner.rs` is that list
+  now: a problem's weight, its life counter and drain, its three parameters, the units
+  attached to it and the groups opened inside it, and the four passes one takt makes — the
+  drain, the `_Continue` pass over every `ST_SOLVING` problem, `Problems<n>`, and the `_Start`
+  pass from the heaviest weight down. Thirty-six more function slots answer it, the picks and
+  the groups among them: `fn14`'s nearest capturer ranks by distance over each unit's live top
+  speed, and `TAKE_BY_HITS` gathers battle units nearest the target, free ones before those on
+  lighter problems. On C02 M03, *The Lost Key*, `c2m3e`'s first takt raises `PBM_ROBOT_NEEDED`,
+  `PBM_N_OPTIMAL_TRANSPORT` and its three `PBM_PLACE_PROTECT`s, and its warbots go on patrol
+  about the places the script names instead of standing where the mission put them.
+- **A build order reaches a factory of any clan** (docs/36, "Production"). `PBM_ROBOT_NEEDED_Start`
+  finds the clan's `BUILDING_PLANT` and hands it `ORDER_BUILDING_CONSTRUCT` with the robot type
+  it wants as the parameter and a `SELECT_*` as its `TARGET_BY_NAME` target. Only the player's
+  factory screen could start a build; the order now starts one for whichever clan owns the
+  plant, out of that clan's own design store — `UNITS\UNITS\AI\`'s 77 designs, priced and
+  rated against its research tree, ranked by the `SELECT_*` and drawn over the spread function
+  69 sets from `fDifficulty`. On C02 M03 the enemy's Large Factory turns out its first *LSW-X
+  Warrior* 60 s in, the free bot's minute, two more by 80 s, and then stands idle with its
+  clan's four minds all held — which is the game's own rule, not a stall.
+- **A clan answers for the building it has just lost** (docs/27, "Teleport out", for the event
+  dispatcher's two tables). A building's own SuperAI runs the handler one past
+  `Fort_Task_Complete` — `Fort_Captured` in all 58 scripts — with the building's logical id in
+  `dCurrentSender`. On C02 M03 the hero takes the enemy's Generator at 1.3 s; the enemy raises
+  `PBM_BUILDING_INF_CAPTURE` at 0.7 plus the 0.04 function 66 says a generator is worth, sends
+  its nearest capturer at 7.5 s, and has the Generator back at 58 s.
+- **Every object is priced** (docs/15, "What a strength is"). Nothing called `set_strength`, so
+  a place counted its defenders one apiece. Each object now carries the two strengths the game
+  caches apart — `(guns + 0.8) × hit points × 1e-5` over the life its nodes have left, which is
+  what a place is held against you by, and over the life they could have, which is what a group
+  it joins is worth — with its size class and its live top speed beside them, which is what
+  `fn14` and the capture's size limit read.
+- **The AI's bots are paid for, and it picks by guns rather than by armour.** Two things
+  made the enemy's force unkillable, and both were the engine's. The design store priced every
+  **large** design at **0 ore and 0 power**, because the price summed only the parts a clan
+  had researched and the AI's store — unlike the player's factory panel — is gated by no
+  research at all: neither the store's fill (`ai.dll:0x10010c30`) nor `M_Task_Construct::Start`
+  (`Behavior.dll:0x100299a0`) makes a technology query. A part's two build figures are its own,
+  so they are summed whatever the clan has researched, and a *AI_LS_21* now costs 639 ore and
+  344 power instead of nothing. And `SELECT_BEST_COMBAT` was read wrong: the six arms of the
+  jump table at `0x10010bbc` are read one at a time now (docs/15, "What each `SELECT_*`
+  scores"), and mode 5 calls **the strength formula** on the design's hit points and guns,
+  while it is mode 2, `SELECT_BEST_ARMOR`, that ranks by hit points. Over the 59 warrior
+  designs in `UNITS\UNITS\AI\` that inverts the answer: by hit points the top five are all
+  large, headed by the 93,008-point *AI_LS_10*; by strength the top three are the size-2
+  `23_swlk1`, `wswlk12` and `wswlk13` at 228.6 against its 207.2. On C02 M03 the enemy turned
+  out three large warriors in twenty seconds for nothing; it now turns out three **small**
+  *SSW-X Warriors* at 20, 48 and 78 s, each paid for out of its one Small Mine. `SELECT_SMALLEST`
+  is the weakest by that same strength, not the least chassis, and the candidate list matches
+  the order's Type **exactly** rather than by mask.
+- **The difficulty setting reaches the AI** (docs/15, "`fDifficulty` is the game level").
+  `varset.var` declares `fDifficulty` 0.5 and says the engine writes it; the engine never did,
+  so every clan planned at medium whatever the player had chosen. `ai.dll:0x10005d00` is the
+  only code that names the variable: it takes the game level, keeps it at the SuperAI's
+  `+0x384` and writes a six-float table — **0 → 0.0, 1 → 0.5, 2 → 1.0** — which is
+  `Iron_3D.ini`'s `[CS] GAME_LEVEL`. It is the game's own balance knob, and on C02 M03 it
+  moves three things at once. The design draw's spread is `6 − 4 × fDifficulty`: an easy game
+  draws from the top **seven** of the ranking, a medium one from the top five and a hard one
+  from the top three. The whole `PBM_BASE_DEFENCE` block sits behind `if fDifficulty > f0`, so
+  an easy game raises **none at all**. And `dPlaceProtectHits` runs 100, 80, 60 and the timer
+  on the enemy's first capture plan 420, 340 and 260 s.
+- **The factory-size gate on the design pick is dead code** (*read*). `0x10006820` walks the
+  clan's list for every `BUILDING_PLANT`, asks each property `0x201` and keeps the largest —
+  and `or eax, 0xffffffff` at `0x10010af5` then overwrites the answer before the comparison
+  that would have used it, so the test reads a size class against `0xffffffff` and always
+  passes. The pick applies no size limit and neither does the engine; a design too big for the
+  factory is refused when the build starts, as the game refuses it.
+- **What is still in the way on C02 M03**: the timed `PBM_BUILDING_CAPTURE` fires at 340 s —
+  `420 − 160 × fDifficulty` seconds off the clan's clock — and function 35 picks the player's
+  Large Factory, the least defended of the highest rank it can see. The capturer takes the
+  order and never arrives, and the crossing is not why: from where the mission places it there
+  is a 31-leg route over the Alari gorge's bridge, the crossing the walker already takes
+  warbots over on C02 M01. It is the patrol that loses it. `Problems0` raises `PBM_PLACE_PROTECT` about three
+  places, and one of them, (265, 1540), is **not on walkable ground at all** — 0 of 400 points
+  sampled within its 150 m radius are usable, its centre included — so the patrol's 350 tries
+  all fail and it takes the last point tried, the stand-in the table below carries from M14.
+  By the time the capture is raised its nearest capturer is already standing off the areal map
+  at (1341, 997); from there the route is one escape leg, walked straight into the gorge wall,
+  and the machine stands at 0 m/s for the rest of the mission. Reaching the player's base on
+  this mission waits on that, not on the planner.
+
 This directory also holds what the rest will follow:
 
 - **`docs/`** is the source of truth. Every behaviour the engine implements is
@@ -1273,6 +1359,13 @@ a row here. A row leaves this table when research closes it.
 | M14 | The call for help to the clan's warriors within 400, and the random source of the clan takt's 0–999 ms jitter | the call is not modelled: a hit pulls in its victim alone. The attitude a hit lowers **is** modelled, on the read figures; the jitter uses a 32-bit xorshift | [31](../docs/31-packages.md#a-hit-pulls-a-unit-in--read), [25](../docs/25-sensors.md#clan-relations-the-files-words-straight-through--read-and-measured) |
 | M14 | The behaviour's radar module: its two timers, and the hostile and friendly lists it keeps from its machine's radar | the machine's own radar scan stands in for the module, read afresh each takt; the fire control and the engagement pick from it alone, so a unit with no radar picks no target of its own, while a search still looks over the clan's areal map, which the engine keeps whole | [25](../docs/25-sensors.md#what-the-ai-does-with-it--read) |
 | M14 | How a unit's place comes to be on a building's map object, and which of its vertices the global path starts or ends at | a unit standing on a bridge's faces takes the bridge's nearest hall-way vertex; a goal over a bridge is refused, as the areal under it is not walkable | [24](../docs/24-motion.md#not-established) |
+| M18 | What the engine below a SuperAI does with a problem's **action record** (`+0x34`), which function 27 files: `varset.var` names the five *"what to do with expression"*, *"When building capture"*, *"When all units in group killed"* and *"When all units in group nothing to do"*, and nothing else ends a problem a handler left `ST_SOLVING` — `PBM_ROBOT_NEEDED_Start` files `ACTION_NOTHING_DOING` on the factory it ordered and its `_Continue` has no nodes | an action that comes true retires its problem, tested at the head of each clan takt: a target no id answers any more for `ACTION_DESTROY`, a unit running no order for `ACTION_NOTHING_DOING`, the clan owning the building for `ACTION_CAPTURE_BUILDING`, and every unit of the group for the two group actions. Without it a clan builds one warbot and never another | [15](../docs/15-behaviour.md#what-the-functions-do) |
+| M18 | What `fn8(ST_SOLVED)` leaves behind: the drain's retire zeroes the record and frees the slot, and the state setter is read only as far as releasing the problem's units | a solved problem is retired as the drain retires one, and an unsolved one keeps its slot for the next `_Start` pass. All nine `ORDER_BUILDING_CONSTRUCT` sites mark their problem solved when the factory refused the build and leave the next want to raise it afresh, which the raise's duplicate test would block for as long as the record stood | [23](../docs/23-economy.md#the-bot-limit-is-the-clans-mind-count--read-and-measured) |
+| M18 | What the repeated `_Start` pass excludes, so that it walks down the weights instead of offering the same problem for ever: a handler that returns without setting a state — `PBM_ROBOT_NEEDED_Start` does, when the clan has no factory — would have it picked again every round | a problem already run this takt is not offered again, which is what "one takt drains the list from the heaviest down" describes; the pass gives up after 64 rounds | [15](../docs/15-behaviour.md#the-planner-when-a-_start-runs-and-when-a-_continue--read-and-measured) |
+| M18 | Which two authored gun figures the strength's `sum(a ÷ b × rounds)` divides (`Behavior.dll:0x1001ccb0`'s `+0x0c` and `+0x28`), and so what scale a strength is on | the rounds a gun has left over its interval in seconds, the two figures the game's own refresh fills the row with, and a design in the AI's store priced the same way off its guns' magazines. The pair has to be a **rate**: unarmed, every object in the install prices between 0.06 and 0.53, and the scripts keep a strength in a `DWORD`, so every comparison one reaches — `fn38(clan) > 0`, which gates the whole capture plan, the `*Hits` variables' authored 10 to 500, the `TAKE_BY_HITS` amounts — would read 0 and no clan would plan at all. It also decides what `SELECT_BEST_COMBAT` builds, since that arm is the same formula | [15](../docs/15-behaviour.md#what-a-strength-is--read-and-measured) |
+| M18 | The one float `SELECT_BEST_RANGE` scores, the design record's `+0x11c`, which the store's own fill never writes; the other five arms are read | it scores every design 0, so the ranking keeps the store's order. No shipped raise passes `SELECT_BEST_RANGE`: the corpus's 108 are 65 `SELECT_BEST_COMBAT`, 42 `SELECT_FASTEST` and one `SELECT_SMALLEST` | [15](../docs/15-behaviour.md#what-each-select_-scores--read) |
+| M18 | What a strength written into a `DWORD` looks like: the result slot is four bytes and a `DWORD` destination takes them as they stand, so either the handler leaves a whole number or the script reads a float's bit pattern | the strength truncated, since every `fn44`, `fn38` and `fn35` call site assigns to a `DWORD` and then compares it against a small authored number; bit patterns would make `dTemp3 < dPlaceProtectHits` false wherever anything at all stands there | [15](../docs/15-behaviour.md#what-the-functions-do) |
+| M18 | The second half of function 11's limit test, a per-type counter the brain keeps at `+0x3e0`..`+0x3f8`; and what functions 37 and 67 measure over, neither taking a radius | the `dMax*` variable alone, so a type no `dMax*` bounds — `ROBOT_BATTLEUNIT`, which is every robot the scripts build — is never at its limit; 37 and 67 measure over the clan's base radius | [15](../docs/15-behaviour.md#what-the-functions-do) |
 | M17 | Whether anything switches a bouncing item off: the two class-29 records carry switch word 9, and bit 8 is read to hold the progress at an end and swap the low bits, so both towers would raise their gun mast over five seconds and stow it over the next five, for ever. Nothing found switches it: the factory files every class in the timed list, `CBuilding` looks only for classes 12 and 13, and neither record names a section-5 group | an item whose word bounces is started as one that opens and stops, so a tower's mast comes up once and stays up, as the game has it | [28](../docs/28-chassis.md#every-component-is-stepped-not-only-a-device--read-and-measured) |
 | M17 | Whether a building's collision solid follows the nodes its own items turn: a mine's rotors, the Main Teleport's rings and the energy bridge's hub never stop | the solid is rebuilt for a door's channels, as before, and not for a running item's, which would rebuild it every tick on every one of them | [28](../docs/28-chassis.md#every-component-is-stepped-not-only-a-device--read-and-measured) |
 | M16 | What a contact point's own up pass tests against: it compares with a triple the pass builds from control `+0x2ec`, `+0x2fc` and `+0x30c`, which is not read | the body sphere's r₂, the one bound the pass is read to use; the agent sphere's r had a wheel grab the floor 2.9 m above it and hoist the machine back up a factory's ramp | [24](../docs/24-motion.md#not-established) |

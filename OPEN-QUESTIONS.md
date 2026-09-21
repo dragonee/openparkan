@@ -1267,21 +1267,69 @@ bookkeeping errors.
   hold — so no shipped mine is ever bounded by its lode and the fix is fidelity, not behaviour. Control:
   6 of the 95 other buildings in those missions also stand within 250 of a lode. Fixed, with the final
   dig now banked on the ending takt ([23-economy](docs/23-economy.md)).
-- [ ] **Nothing raises or runs an AI problem, so no clan ever builds a warbot or sends one to take a
-  building.** Raised 2026-09-20 from play on C02 M03, *The Lost Key*, where the enemy sits still while
-  the recording has it turning out small flyers and walking them onto whatever the player holds. The
-  script side is already read: `c2m3e`'s `PBM_BUILDING_INF_CAPTURE_Start` asks `fn14` for the nearest
-  capturer, orders it `ORDER_ROBOT_CAPTURE` at the building, and where there is none raises
-  `PBM_ROBOT_NEEDED`, whose handler finds a `BUILDING_PLANT` and gives it
-  `ORDER_BUILDING_CONSTRUCT` — all nine such sites read and counted above. What the engine has is
-  `Problems0` and the ten functions the campaign's messages, objectives, timed orders and targets need
-  (15, 19, 30, 31, 32, 34, 52, 59, 60, 71); `fn2` (raise), `fn6`, `fn7`, `fn8` (problem state), `fn11`,
-  `fn14`, `fn25`, `fn27`, `fn28`, `fn29` (the raise's own parameters) and `fn50` all answer 0, and the
-  problem list itself is not modelled. The whole of `PBM_BUILDING_INF_CAPTURE`, `PBM_BUILDING_PROTECT`,
-  `PBM_PLACE_PROTECT`, `PBM_BASE_DEFENCE`, `PBM_ATTACK_UNIT` and `PBM_N_OPTIMAL_TRANSPORT` rides on
-  that, across 13 scripts. It is a milestone of its own, not a fix
+- [x] ~~**Nothing raises or runs an AI problem, so no clan ever builds a warbot or sends one to take a
+  building.**~~ — closed 2026-09-21 as **M18**, the milestone it was called. `parkan-sim/src/planner.rs`
+  is the problem list a SuperAI keeps — weight, life counter and drain, three parameters, attached
+  units, groups and action records — and each clan's takt now walks it four times as the disassembly
+  has it: the drain, the `_Continue` pass over every `ST_SOLVING` problem, `Problems<n>`, then the
+  `_Start` pass from the heaviest weight down. Thirty-six more function slots answer it, `fn2`, `fn6`,
+  `fn7`, `fn8`, `fn11`, `fn12`, `fn13`, `fn14`, `fn24`, `fn25`, `fn27`, `fn28`, `fn29`, `fn35`–`fn38`,
+  `fn43`–`fn51`, `fn61`–`fn70` and `fn72` among them, and a raise resolves its `_Start`/`_Continue`
+  pair by the **name** of its code's variable and is abandoned when either is missing. An
+  `ORDER_BUILDING_CONSTRUCT` now reaches whichever clan owns the plant, out of that clan's own design
+  store (`UNITS\UNITS\AI\`, 77 designs ranked by the order's `SELECT_*` over function 69's spread),
+  and a building's own SuperAI runs `Fort_Captured` for what it has just lost. *Measured* on C02 M03:
+  the enemy's Large Factory turns out its first *LSW-X Warrior* at 60 s and two more by 80 s, then
+  stands idle with its clan's four minds held; the hero takes its Generator at 1.3 s and it answers
+  with `PBM_BUILDING_INF_CAPTURE` at weight 0.74, a capture order at 7.5 s and the Generator back at
+  58 s. Three checks in `engine/crates/parkan-world/tests/install/campaign.rs`
   ([15-behaviour](docs/15-behaviour.md#what-the-functions-do),
   [34-progression](docs/34-progression.md#what-the-scripts-ask--read-and-measured-1)).
+- [x] ~~**What the design store scores, and what writes `fDifficulty`.**~~ — closed 2026-09-21 from
+  play on C02 M03, where the enemy turned out nothing but the largest warbots in the store, for
+  nothing. Three things came out of the binary. The **six arms** of the `SELECT_*` jump table
+  (`ai.dll:0x10010bbc`) are read one at a time: `SELECT_BEST_WEAPON` scores the record's guns,
+  `SELECT_BEST_ARMOR` its hit points, `SELECT_BEST_RANGE` a float the store's own fill never
+  writes, `SELECT_FASTEST` its top speed, and **`SELECT_BEST_COMBAT` and `SELECT_SMALLEST` both
+  call the strength formula** — so "best combat" is guns over armour and "smallest" is the
+  weakest by it, and this page's earlier "ranks by hit points" was wrong. *Measured* over the 59
+  warrior designs: by hit points the top five are all large chassis; by strength the top three
+  are the size-2 `23_swlk1` class at 228.6 against `AI_LS_10`'s 207.2. **`fDifficulty` is the
+  game level** — `ai.dll:0x10005d00` writes a six-float table indexed by it, 0 → 0.0, 1 → 0.5,
+  2 → 1.0, from a `CreateSuperAI` argument, keeping the level at the SuperAI's `+0x384`; the
+  engine had left the variable at `varset.var`'s declared 0.5, so the player's difficulty
+  setting reached no clan. And the **factory-size gate on the pick is dead code**: `0x10006820`
+  works out the clan's biggest plant and `or eax, 0xffffffff` at `0x10010af5` throws the answer
+  away before the comparison. A fourth thing was the engine's alone: it priced a design by the
+  parts the clan had *researched*, and the AI's store is gated by no research, so every large
+  design cost 0 ore and 0 power. Fixed; the enemy now builds three small *SSW-X Warriors* it
+  pays for ([15-behaviour](docs/15-behaviour.md#what-each-select_-scores--read)).
+- [ ] **What the engine below a SuperAI does with a problem's action record** (`+0x34`, function 27).
+  Raised 2026-09-21 by M18. `varset.var` names the five *"what to do with expression"*, *"When
+  building capture"*, *"When all units in group killed"* and *"When all units in group nothing to
+  do"*, and nothing else ends a problem a handler left `ST_SOLVING`: `PBM_ROBOT_NEEDED_Start` files
+  `ACTION_NOTHING_DOING` on the factory it ordered and its `_Continue` has no nodes, so without them a
+  clan builds one warbot and never another. The engine retires a problem whose action has come true,
+  tested at the head of each clan takt. What the game actually does with the record — retire, re-raise,
+  or something else — and where it is tested, is the question
+  ([15-behaviour](docs/15-behaviour.md#what-the-functions-do)).
+- [ ] **What `fn8(ST_SOLVED)` leaves behind, and what the repeated `_Start` pass excludes.** Raised
+  2026-09-21 by M18. The state setter is read only as far as releasing the problem's units, but a
+  solved record that keeps its slot would be matched by the raise's duplicate test and block the next
+  want for as long as it stood — which [23-economy](docs/23-economy.md) says does not happen. And the
+  pass is read to run again whenever a handler leaves its problem neither solved nor solving, which
+  `PBM_ROBOT_NEEDED_Start` does when the clan has no factory: as read, that is an endless loop. The
+  engine retires a solved problem and does not offer a problem twice in one takt
+  ([15-behaviour](docs/15-behaviour.md#the-planner-when-a-_start-runs-and-when-a-_continue--read-and-measured)).
+- [ ] **A `PBM_PLACE_PROTECT` place that is not on walkable ground strands the clan's warbots.**
+  Raised 2026-09-21 from play on C02 M03. `c2m3e`'s `Problems0` names three places; (265, 1540) has
+  **0 of 400** points sampled within its 150 m radius usable, its centre included, so the patrol's 350
+  tries all fail and it takes the last point tried ([24-motion](docs/24-motion.md#not-established)'s
+  stand-in). The clan's nearest capturer was standing off the areal map at (1341, 997) by the time the
+  timed `PBM_BUILDING_CAPTURE` fired; from there the route is one escape leg, walked straight into the
+  gorge wall, and it stands at 0 m/s for the rest of the mission — while from where the mission places
+  it there is a 31-leg route over the bridge to the player's factory. What the game does with a patrol
+  place off its own areal map, and what its walker does once stranded, are both unread.
 
 ## Mission progression
 

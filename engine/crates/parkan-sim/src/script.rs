@@ -127,11 +127,20 @@ impl Var {
 pub struct Args<'a> {
     operands: &'a [i32],
     vars: &'a mut [Var],
+    names: &'a [String],
 }
 
 impl Args<'_> {
     pub fn len(&self) -> usize {
         self.operands.len()
+    }
+
+    /// The name of the variable operand `i` is. Function 2 reads it: a raise looks its
+    /// handler pair up by the name of the variable its first operand names
+    /// (`ai.dll:0x1000f6d0`), not by the code's value.
+    pub fn name(&self, i: usize) -> Option<&str> {
+        let at = usize::try_from(*self.operands.get(i)?).ok()?;
+        self.names.get(at).map(String::as_str)
     }
 
     pub fn is_empty(&self) -> bool {
@@ -644,7 +653,10 @@ impl Interpreter {
     /// A call, a copy or a formula (`0x100122b5`).
     fn statement(&mut self, n: &Node, host: &mut dyn Host) {
         if n.calls() {
-            let result = host.call(n.function(), &mut Args { operands: &n.operands, vars: &mut self.vars });
+            let result = host.call(
+                n.function(),
+                &mut Args { operands: &n.operands, vars: &mut self.vars, names: &self.names },
+            );
             // A float destination takes the result slot's bits as a float, any other
             // type takes it as a DWORD (`0x100122ea`).
             if let Some(v) = self.var_mut(n.destination()) {

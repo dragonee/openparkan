@@ -150,6 +150,10 @@ pub struct Rating {
     /// Defence and offence before `[TEMP]`'s normalisation (177, 178).
     pub defence: f32,
     pub offence: f32,
+    /// The gun total a strength is multiplied by, `IGameObject` variable `0x204`'s `+4`
+    /// (docs/15, "What a strength is"), which the AI's design store reads off a real object
+    /// built from the scheme. See [`Designer::rate`] for the stand-in behind it.
+    pub guns: f32,
     /// The fitted radar's range (property 0x50), 0 with none.
     pub sensor_range: f32,
 }
@@ -714,12 +718,24 @@ impl Designer {
                 offence += round.damage * 1000.0 / interval.max(1.0);
             }
         }
+        // STAND-IN: docs/15-behaviour.md#what-a-strength-is--read-and-measured -- the gun
+        // total is `sum(a ÷ b × rounds)` over two authored figures that are not read; the
+        // rounds a gun holds over its interval in seconds, as the play prices a live one.
+        let guns: f32 = a
+            .of_type(control::GUN_TYPE)
+            .map(|g| {
+                let held = g.values[parkan_sim::guns::MAGAZINE];
+                let held = if held < 0.0 { 1.0 } else { held };
+                held * 1000.0 / g.values[GUN_INTERVAL].max(1.0)
+            })
+            .sum();
         Some(Rating {
             mass,
             spare,
             speed,
             defence: a.defence(),
             offence,
+            guns,
             sensor_range: a
                 .of_type(control::RADAR_TYPE)
                 .next()
@@ -798,16 +814,25 @@ impl Designer {
 
     /// What building the design costs: ore, energy, and whether every part is researched
     /// (`Behavior.dll:0x10029810`). The factory divides the ore by its efficiency.
+    ///
+    /// A part's two build figures are its own — `objects.dlb`'s costs, mirrored into every
+    /// clan's `.trf` — so they are summed whatever the clan has researched, and the research
+    /// state only says whether the design may be *offered*. For the player that is the same
+    /// sum either way, because the panel never offers an unresearched part; for the AI's
+    /// design store it is the difference between a build that is paid for and one that is
+    /// free. The store is not research-gated: neither its fill (`ai.dll:0x10010c30`) nor
+    /// `M_Task_Construct::Start` (`Behavior.dll:0x100299a0`) makes a technology query.
     pub fn price(&self, design: &Node) -> (f32, f32, bool) {
         let (mut ore, mut energy, mut ok) = (0.0, 0.0, true);
         for node in design.walk() {
             match self.catalogue.item(&node.part) {
-                Some(i) if i.in_tree() && i.researched() => {
+                Some(i) => {
                     let (e, o) = i.build_cost();
                     energy += e;
                     ore += o;
+                    ok &= i.in_tree() && i.researched();
                 }
-                _ => ok = false,
+                None => ok = false,
             }
         }
         (ore, energy, ok)

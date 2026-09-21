@@ -22,6 +22,7 @@ pub mod machine;
 pub mod motion;
 pub mod orders;
 pub mod path;
+pub mod planner;
 pub mod power;
 pub mod progression;
 pub mod relations;

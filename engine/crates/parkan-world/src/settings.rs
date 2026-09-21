@@ -35,3 +35,9 @@ pub fn level_ratio(game: &Path) -> f32 {
     };
     value(game, "LEVEL_RATIO", key).and_then(|v| v.parse().ok()).unwrap_or(default)
 }
+
+/// `[CS] GAME_LEVEL`: 0 easy, 1 medium, 2 hard. The value is the *index* the SuperAI is
+/// built with, which is what picks `fDifficulty` ([`crate::progress::Progression::load`]).
+pub fn game_level(game: &Path) -> usize {
+    value(game, "CS", "GAME_LEVEL").and_then(|v| v.parse::<usize>().ok()).unwrap_or(1)
+}

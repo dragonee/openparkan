@@ -320,6 +320,9 @@ pub struct Play {
     pub selected: Vec<usize>,
     /// The plants, and what each builds.
     pub factories: Vec<Factory>,
+    /// Each clan's AI design store, loaded the first time its planner orders a build
+    /// (docs/15, "Function 69 sets how sloppy the AI's design pick is").
+    pub stores: HashMap<i64, crate::factory::Store>,
     /// The difficulty's level ratio a unit's hit points take (docs/26).
     pub ratio: f32,
     /// How many units the play has made.
@@ -946,6 +949,7 @@ impl Play {
             modes: vec![Mode::OnFoot],
             selected: Vec::new(),
             factories,
+            stores: HashMap::new(),
             ratio,
             spawned: 0,
             added: Vec::new(),
@@ -2543,7 +2547,16 @@ impl Play {
         if owner != Some(taker) {
             self.units[t].clan = Some(taker);
             if let Some(p) = self.progression.as_mut() {
-                p.progress.captured(self.units[t].logical_id, taker);
+                let id = self.units[t].logical_id;
+                p.progress.captured(id, taker);
+                // The old clan's SuperAI runs `Fort_Captured` for what it has just lost
+                // (docs/27, "Teleport out", for the dispatcher): `c2m3e` answers by raising
+                // `PBM_BUILDING_INF_CAPTURE` to take it back.
+                if let Some(old) = owner {
+                    let notices = p.fort_captured(old, id);
+                    let says: Vec<Say> = notices.iter().flat_map(|n| p.say(n)).collect();
+                    self.says.extend(says);
+                }
             }
             let old = owner.and_then(|c| self.clan(c));
             let word = owner.and_then(|c| self.word(c, taker));
@@ -2609,14 +2622,11 @@ impl Play {
             })
             .count();
         let hero = usize::from(clan == self.player_clan && !self.hero.dead());
-        let building = if clan == self.player_clan {
-            self.factories
-                .iter()
-                .filter(|f| self.units[f.target].clan == Some(clan) && f.build.is_some())
-                .count()
-        } else {
-            0
-        };
+        let building = self
+            .factories
+            .iter()
+            .filter(|f| self.units[f.target].clan == Some(clan) && f.build.is_some())
+            .count();
         minds.saturating_sub(robots + hero + building)
     }
 
@@ -3371,6 +3381,13 @@ impl Play {
         let Some(p) = self.progression.as_mut() else { return };
         for o in std::mem::take(&mut p.orders) {
             let Some(t) = self.units.iter().position(|u| u.logical_id == o.id) else { continue };
+            // A build order goes to the factory building, not to a machine's task stack.
+            if o.order.code == orders::CONSTRUCT {
+                if let orders::Target::Select(mode) = o.order.target {
+                    self.ai_build(t, o.order.parameter as u32, mode);
+                }
+                continue;
+            }
             let robot = self.robots.iter_mut().chain(self.emplacements.iter_mut()).find(|(rt, _)| *rt == t);
             if let Some((_, robot)) = robot
                 && robot.behaviour.insert_order(&o.order, o.insert)
@@ -3378,6 +3395,34 @@ impl Play {
                 robot.order = Some(o.order);
             }
         }
+    }
+
+    /// A clan's `ORDER_BUILDING_CONSTRUCT` at the factory that is target `t` (docs/36,
+    /// "Production"): its own design store picks a design of the robot type the order's
+    /// parameter names, ranked by the `SELECT_*` its target carries and drawn over function
+    /// 69's spread, and the factory starts it. The store is loaded on the first such order,
+    /// priced against that clan's own research tree.
+    fn ai_build(&mut self, t: usize, type_word: u32, mode: u32) -> bool {
+        let Some(f) = self.factories.iter().position(|f| f.target == t) else { return false };
+        let Some(clan) = self.units[t].clan else { return false };
+        if !self.factories[f].idle() {
+            return false;
+        }
+        if !self.stores.contains_key(&clan) {
+            let grade = usize::from(self.factories[f].size);
+            let Some(catalogue) = self.research.catalogue(clan) else { return false };
+            let game = self.assembly.game.clone();
+            let store =
+                crate::factory::Store::load(&game, &mut self.assembly, catalogue, grade).unwrap_or_default();
+            self.stores.insert(clan, store);
+        }
+        let draw = self.progression.as_mut().map_or(0, |p| p.draw(clan));
+        let Some(project) = self.stores.get(&clan).and_then(|s| s.pick(type_word, mode, draw)).cloned()
+        else {
+            return false;
+        };
+        let free = self.free_minds(clan);
+        self.factories[f].start_project(project, false, free)
     }
 
     /// One robot's behaviour takt (docs/31): its task's walk handed to the walker, which
@@ -3571,11 +3616,78 @@ impl Play {
         }
     }
 
+    /// What the clan areal map caches for every object it holds, refreshed as the game
+    /// refreshes a contact record (`ArealMap.dll:0x10006e40`, docs/15, "What a strength is"):
+    /// the strength on the life its nodes have left and the one on the life they could have,
+    /// its size class, its live top speed and the order it is running.
+    ///
+    /// STAND-IN: docs/15-behaviour.md#what-a-strength-is--read-and-measured -- the gun total
+    /// is `MBehaviour`'s own, `sum(a ÷ b × rounds)` over each gun's rounds left and two
+    /// authored figures at the row's `+0x0c` and `+0x28` that are **not read**. The engine
+    /// divides the rounds left by the gun's interval in seconds, the two figures the game's
+    /// own refresh fills the row with. That the pair is a *rate* is what the scale demands,
+    /// not a guess about which fields: unarmed, every object in the install prices between
+    /// 0.06 and 0.53, and the scripts keep a strength in a `DWORD` — so every comparison one
+    /// reaches (`fn38(clan) > 0` gating the whole capture plan, `dTemp3 < dPlaceProtectHits`
+    /// over the authored 10 to 500, the `TAKE_BY_HITS` amounts of 25) would read 0 and the
+    /// clan would never plan at all. With the rate in, an armed warbot prices in the tens,
+    /// which is the range those numbers are written for
+    /// (docs/15, "What a `TAKE_BY_HITS` amount is worth").
+    fn refresh_contacts(&mut self) {
+        let mut contacts: Vec<(i32, parkan_sim::progression::Contact)> = Vec::new();
+        for (t, unit) in self.units.iter().enumerate() {
+            if unit.logical_id < 0 {
+                continue;
+            }
+            let (left, full) = self.battle.combat.targets.get(t).map_or((0.0, 0.0), |x| {
+                x.parts
+                    .iter()
+                    .filter_map(|p| p.life.as_ref())
+                    .fold((0.0, 0.0), |(l, f), life| (l + life.total(), f + life.full()))
+            });
+            let robot = self.robots.iter().chain(&self.emplacements).find(|(rt, _)| *rt == t);
+            let factory = self.factories.iter().find(|f| f.target == t);
+            let guns: f32 = robot.map_or(0.0, |(_, r)| {
+                r.guns
+                    .iter()
+                    .filter(|g| !g.broken && g.interval_ms > 0.0)
+                    // An unlimited magazine (−1) never runs down; it counts one round's rate.
+                    .map(|g| {
+                        let held = if g.magazine < 0 { 1.0 } else { g.rounds.max(0) as f32 };
+                        held * 1000.0 / g.interval_ms
+                    })
+                    .sum()
+            });
+            contacts.push((
+                unit.logical_id,
+                parkan_sim::progression::Contact {
+                    strength: parkan_sim::progression::strength(guns, left),
+                    full: parkan_sim::progression::strength(guns, full),
+                    size_class: robot.map_or(0, |(_, r)| r.size_class),
+                    speed: robot.map_or(0.0, |(_, r)| r.walker.limits.top_speed[1]),
+                    order: robot
+                        .and_then(|(_, r)| r.order.map(|o| o.code))
+                        .or_else(|| factory.filter(|f| !f.idle()).map(|_| orders::CONSTRUCT)),
+                },
+            ));
+        }
+        let clans: Vec<i64> = (0..self.clans.len() as i64).collect();
+        let free: Vec<usize> = clans.iter().map(|&c| self.free_minds(c)).collect();
+        let Some(p) = self.progression.as_mut() else { return };
+        for (id, contact) in contacts {
+            p.progress.refresh(id, contact);
+        }
+        for (clan, free) in clans.into_iter().zip(free) {
+            p.set_free_minds(clan, free);
+        }
+    }
+
     /// The progression's takts and handler, and what they say.
     fn progress(&mut self) {
         if self.progression.is_none() {
             return;
         }
+        self.refresh_contacts();
         let mut at: HashMap<i32, Vec3> = self
             .units
             .iter()

@@ -10,6 +10,8 @@ use std::collections::BTreeMap;
 use glam::Vec3;
 use parkan_formats::mission::Route;
 
+use crate::planner::Candidate;
+
 /// `ai.dll:0x10001b80`: once the clock reaches the next-run time the `Mission` handler
 /// runs, and the next-run time is set 2000 ms on.
 pub const MISSION_PERIOD_MS: f64 = 2000.0;
@@ -139,6 +141,30 @@ pub fn strength(guns: f32, hit_points: f32) -> f32 {
 /// [`Progress::set_strength`]: one object, which is what this map used to count.
 pub const UNPRICED: f32 = 1.0;
 
+/// What the clan areal map refreshes on a contact record each time it fills one
+/// (`ArealMap.dll:0x10006e40`): the two strengths, the size class and the live top speed. The
+/// order is not the game's — the planner's function 50 asks the unit itself — and rides here
+/// because this is the engine's one picture of a clan's units.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Contact {
+    /// Its strength on what its nodes have **left**, which is what a place is held by.
+    pub strength: f32,
+    /// Its strength at **full**, which is what a group it joins is worth.
+    pub full: f32,
+    /// `IGameObject` property `0x201`.
+    pub size_class: u8,
+    /// `IControl` property 145.
+    pub speed: f32,
+    /// The order it is running, which function 50 looks for.
+    pub order: Option<i32>,
+}
+
+impl Default for Contact {
+    fn default() -> Self {
+        Self { strength: UNPRICED, full: UNPRICED, size_class: 0, speed: 0.0, order: None }
+    }
+}
+
 /// A unit with a logical id: its clan, its `Type` word, and its position reports.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Unit {
@@ -146,8 +172,8 @@ pub struct Unit {
     pub clan: i64,
     pub type_word: u32,
     pub alive: bool,
-    /// What it is worth to [`Progress::strength_near`].
-    pub strength: f32,
+    /// What the areal map last cached for it.
+    pub contact: Contact,
     /// Where it last reported, and when its takt next runs, ms.
     reported: [f32; 2],
     next_takt_ms: f64,
@@ -162,8 +188,7 @@ pub struct Building {
     pub type_word: u32,
     pub alive: bool,
     pub at: [f32; 2],
-    /// What it is worth to [`Progress::strength_near`].
-    pub strength: f32,
+    pub contact: Contact,
 }
 
 /// A clan's SuperAI takt, slot 3 (`ai.dll:0x10001780`): when it next runs, and the seconds
@@ -283,21 +308,33 @@ impl Progress {
             clan,
             type_word,
             alive: true,
-            strength: UNPRICED,
+            contact: Contact::default(),
             reported: [at.x, at.y],
             next_takt_ms: 0.0,
         });
     }
 
-    /// Price an object for [`Progress::strength_near`], which is what the game's areal map
-    /// caches for every contact it refreshes (`ArealMap.dll:0x10006fe2`). Until a caller
-    /// does, an object counts [`UNPRICED`].
-    pub fn set_strength(&mut self, id: i32, strength: f32) {
+    /// Refresh what the areal map caches for the object with logical id `id`
+    /// (`ArealMap.dll:0x10006fe2`). Until a caller does, an object counts [`UNPRICED`] and
+    /// stands at size class 0 and speed 0.
+    pub fn refresh(&mut self, id: i32, contact: Contact) {
         for u in self.units.iter_mut().filter(|u| u.id == id) {
-            u.strength = strength;
+            u.contact = contact;
         }
         for b in self.buildings.iter_mut().filter(|b| b.id == id) {
-            b.strength = strength;
+            b.contact = contact;
+        }
+    }
+
+    /// Price an object alone, leaving the rest of its contact as it stands.
+    pub fn set_strength(&mut self, id: i32, strength: f32) {
+        for u in self.units.iter_mut().filter(|u| u.id == id) {
+            u.contact.strength = strength;
+            u.contact.full = strength;
+        }
+        for b in self.buildings.iter_mut().filter(|b| b.id == id) {
+            b.contact.strength = strength;
+            b.contact.full = strength;
         }
     }
 
@@ -362,7 +399,7 @@ impl Progress {
             type_word,
             alive: true,
             at: [at.x, at.y],
-            strength: UNPRICED,
+            contact: Contact::default(),
         });
     }
 
@@ -384,6 +421,43 @@ impl Progress {
         units.chain(buildings)
     }
 
+    /// Every object alive with its contact record: what a clan's picks and groups read.
+    pub fn contacts(&self) -> impl Iterator<Item = Candidate> + '_ {
+        let unit = |u: &Unit| Candidate {
+            id: u.id,
+            clan: u.clan,
+            type_word: u.type_word,
+            at: u.reported,
+            full: u.contact.full,
+            size_class: u.contact.size_class,
+            speed: u.contact.speed,
+            order: u.contact.order,
+        };
+        let building = |b: &Building| Candidate {
+            id: b.id,
+            clan: b.clan,
+            type_word: b.type_word,
+            at: b.at,
+            full: b.contact.full,
+            size_class: b.contact.size_class,
+            speed: b.contact.speed,
+            order: b.contact.order,
+        };
+        let units = self.units.iter().filter(|u| u.alive).map(unit);
+        units.chain(self.buildings.iter().filter(|b| b.alive).map(building))
+    }
+
+    /// Clan `clan`'s own objects, units and buildings, which is the list functions 13, 14, 25
+    /// and 38 pick from — the SuperAI's own (`+0x8c`).
+    pub fn own(&self, clan: i64) -> Vec<Candidate> {
+        self.contacts().filter(|c| c.clan == clan).collect()
+    }
+
+    /// The object with logical id `id`, alive.
+    pub fn contact(&self, id: i32) -> Option<Candidate> {
+        self.contacts().find(|c| c.id == id)
+    }
+
     /// The strength standing within `radius` of (x, y): `ai.dll:0x10006130` sums it over the
     /// objects the areal map holds inside that circle, and asked for no clan in particular it
     /// counts the enemy's alone — how strongly a place is held against the clan asking.
@@ -400,12 +474,12 @@ impl Progress {
             .units
             .iter()
             .filter(|u| u.alive && hostile(u.clan) && near(u.reported))
-            .map(|u| u.strength);
+            .map(|u| u.contact.strength);
         let buildings = self
             .buildings
             .iter()
             .filter(|b| b.alive && hostile(b.clan) && near(b.at))
-            .map(|b| b.strength);
+            .map(|b| b.contact.strength);
         units.chain(buildings).sum()
     }
 

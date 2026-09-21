@@ -11,6 +11,7 @@ use parkan_formats::hallway::{self, HallWay, PLACE_CREATION, PLACE_CREATION_OLD}
 use parkan_formats::mission::{self, Mission, Value};
 use parkan_formats::{gamedir, objects};
 use parkan_sim::construct::{self, Construct};
+use parkan_sim::planner;
 
 use crate::assembly::Assembly;
 use crate::designs::{Designer, Node};
@@ -143,6 +144,13 @@ impl Factory {
     /// free mind, or for a chassis bigger than the factory.
     pub fn start(&mut self, batch: bool, free_minds: usize) -> bool {
         let Some(project) = self.shown().cloned() else { return false };
+        self.start_project(project, batch, free_minds)
+    }
+
+    /// Start production of `project`, which is what a build order naming its own design does:
+    /// the player's panel names the shown one, and a clan's AI names one its design store
+    /// picked, without touching the factory's recent projects (docs/36, "Production").
+    pub fn start_project(&mut self, project: Project, batch: bool, free_minds: usize) -> bool {
         if !self.idle() || free_minds == 0 || !construct::builds(self.size, project.chassis_size) {
             return false;
         }
@@ -263,6 +271,137 @@ pub fn prebuild(play: &mut crate::play::Play, game: &Path, mission_dir: &Path) -
         loaded += 1;
     }
     Ok(loaded)
+}
+
+/// The AI's design store: the directory function 43 loads into the SuperAI's `+0x40c`
+/// (`ai.dll:0x1000d561`).
+pub const AI_DIR: &str = "units\\units\\ai\\";
+
+/// One design in the store, with the three floats of its 0x124-byte record that a
+/// `SELECT_*` ranks by (`ai.dll:0x10010c30`): property 54 at `+0x110`, the guns figure at
+/// `+0x114` and the live top speed at `+0x118`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Design {
+    pub project: Project,
+    pub hit_points: f32,
+    pub guns: f32,
+    pub speed: f32,
+}
+
+/// A clan's design store: every `.dat` in `UNITS\UNITS\AI\`, priced and rated against that
+/// clan's research tree. See `docs/15-behaviour.md`, "Function 69 sets how sloppy the AI's
+/// design pick is".
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Store {
+    pub designs: Vec<Design>,
+}
+
+impl Store {
+    /// Load the store for a clan whose tree is `catalogue`, the factory's size setting the
+    /// designer's grade.
+    pub fn load(
+        game: &Path,
+        assembly: &mut Assembly,
+        catalogue: crate::designs::Catalogue,
+        grade: usize,
+    ) -> Result<Store> {
+        let strings = crate::resources::game_strings(game).unwrap_or_default();
+        let mut designer = Designer::new(game, catalogue, grade);
+        let dir = gamedir::resolve(game, AI_DIR).context("no UNITS\\UNITS\\AI")?;
+        let mut names: Vec<String> = std::fs::read_dir(&dir)?
+            .filter_map(|e| e.ok().map(|e| e.file_name().to_string_lossy().into_owned()))
+            .filter(|n| n.to_ascii_lowercase().ends_with(".dat"))
+            .collect();
+        names.sort();
+        let mut designs = Vec::new();
+        for name in names {
+            let path = format!("{AI_DIR}{name}");
+            let Some(project) = design_project(&mut designer, assembly, &path, &strings) else {
+                continue;
+            };
+            let rating = gamedir::resolve(game, &path)
+                .and_then(|file| std::fs::read(file).ok())
+                .and_then(|data| objects::parse_unit(&data, &path).ok())
+                .and_then(|unit| Node::from_unit(&unit))
+                .and_then(|design| designer.rate(assembly, &design));
+            designs.push(Design {
+                hit_points: design_hit_points(assembly, &project.path),
+                guns: rating.as_ref().map_or(0.0, |r| r.guns),
+                speed: rating.as_ref().map_or(0.0, |r| r.speed),
+                project,
+            });
+        }
+        Ok(Store { designs })
+    }
+
+    /// The design a build order picks (`ai.dll:0x100107c0`, *read*). Every design of the
+    /// wanted robot type is scored by `mode`, the scores sorted largest first, and the one at
+    /// `draw` taken rather than the best — `draw` being `(rand() + timeGetTime()) % (spread +
+    /// 1)`, whose spread function 69 sets from `fDifficulty`. A draw at or past the count
+    /// falls back to 0, and `SELECT_SMALLEST` skips the draw and takes the **last** of the
+    /// ranking, the weakest.
+    ///
+    /// The six arms of the jump table at `0x10010bbc` are read one at a time, in `mode − 1`
+    /// order: `SELECT_BEST_WEAPON` copies the record's `+0x114`, its guns; `SELECT_BEST_ARMOR`
+    /// `+0x110`, property 54's hit points; `SELECT_BEST_RANGE` `+0x11c`, which the store's own
+    /// fill never writes; `SELECT_FASTEST` `+0x118`, property 145's top speed; and
+    /// `SELECT_BEST_COMBAT` and `SELECT_SMALLEST` both call the **strength formula**
+    /// (`0x1000fc70`) on `+0x110` and `+0x114` — so "best combat" is guns over armour, not
+    /// armour, and "smallest" is the weakest by that same figure rather than the least chassis.
+    ///
+    /// The candidate list is every design whose `+0x108` Type **equals** the order's — not a
+    /// mask — that does not carry `CLASS_BUILDING`.
+    ///
+    /// STAND-IN: docs/15-behaviour.md#function-69-sets-how-sloppy-the-ais-design-pick-is--read-and-measured
+    /// -- `SELECT_BEST_RANGE`'s float is one nothing fills, so it scores every design 0 and the
+    /// ranking keeps the store's order; no shipped raise passes it. The game also works out the
+    /// clan's largest factory (`0x10006820`, every `BUILDING_PLANT` on its list, property
+    /// `0x201`, the maximum) and then **throws the answer away** — `or eax, 0xffffffff`
+    /// clobbers it at `0x10010af5` before the size comparison that would have used it — so the
+    /// pick applies no size limit, and neither does this. A design too big for the factory is
+    /// refused when the build starts ("Robot SizedType not match"), as it is here.
+    pub fn pick(&self, type_word: u32, mode: u32, draw: usize) -> Option<&Project> {
+        let strength = |d: &Design| parkan_sim::progression::strength(d.guns, d.hit_points);
+        let score = |d: &Design| match mode {
+            planner::SELECT_BEST_WEAPON => d.guns,
+            planner::SELECT_BEST_ARMOR => d.hit_points,
+            planner::SELECT_BEST_RANGE => 0.0,
+            planner::SELECT_FASTEST => d.speed,
+            _ => strength(d),
+        };
+        let mut ranked: Vec<&Design> = self
+            .designs
+            .iter()
+            .filter(|d| {
+                d.project.type_word == type_word
+                    && d.project.type_word & parkan_sim::behaviour::BUILDING_BIT == 0
+            })
+            .collect();
+        ranked.sort_by(|a, b| score(b).total_cmp(&score(a)));
+        let at = if mode == planner::SELECT_SMALLEST {
+            ranked.len().checked_sub(1)?
+        } else if draw < ranked.len() {
+            draw
+        } else {
+            0
+        };
+        ranked.get(at).map(|d| &d.project)
+    }
+}
+
+/// A design's hit points at full, property 54: its parts' `.ndp` durabilities summed, which
+/// is what the control system accumulates as it builds the object (docs/15, "What a strength
+/// is").
+pub fn design_hit_points(assembly: &mut Assembly, path: &str) -> f32 {
+    let parts = assembly.parts(mission::KIND_UNIT, path);
+    let mut total = 0.0;
+    for part in parts {
+        let Some(loaded) = assembly.mesh(&part.reference) else { continue };
+        let mesh = loaded.mesh.clone();
+        let (life, _) = crate::battle::part_damage(assembly, &part, &mesh, 1.0, 1.0, false);
+        total += life.map_or(0.0, |l| l.full());
+    }
+    total
 }
 
 /// A vertex's point in the world, through its joint node's pose (`ArealMap.dll:0x1000a760`).

@@ -1489,11 +1489,7 @@ mod tests {
         let graph = Graph::new(map);
         // A deck over the wall: an exit each side and a middle vertex whose flags decide.
         let deck = |middle: u32, size: u8| Way {
-            points: vec![
-                Vec3::new(15.0, 25.0, 0.0),
-                Vec3::new(25.0, 25.0, 5.0),
-                Vec3::new(35.0, 25.0, 0.0),
-            ],
+            points: vec![Vec3::new(15.0, 25.0, 0.0), Vec3::new(25.0, 25.0, 5.0), Vec3::new(35.0, 25.0, 0.0)],
             flags: vec![VERTEX_ANY_SIZE | VERTEX_EXIT, middle, VERTEX_ANY_SIZE | VERTEX_EXIT],
             links: vec![(0, 1), (1, 2)],
             size,
@@ -1617,8 +1613,15 @@ mod tests {
         let mut graph = Graph::new(squares(3, 1, &[]));
         graph.carve(&[rectangle([13.0, -5.0], [17.0, 15.0])]);
         sound(&graph);
-        let route =
-            graph.route(Vec3::new(5.0, 5.0, 0.0), Vec3::new(25.0, 5.0, 0.0), &[], None, 2.0, 2, &mut fixed(0.0));
+        let route = graph.route(
+            Vec3::new(5.0, 5.0, 0.0),
+            Vec3::new(25.0, 5.0, 0.0),
+            &[],
+            None,
+            2.0,
+            2,
+            &mut fixed(0.0),
+        );
         assert_eq!(route, Err(Refusal::NoWay));
     }
 
@@ -1638,7 +1641,8 @@ mod tests {
         assert!(last.truncate().distance(Vec2::new(20.0, 25.0)) < 1e-3, "2 in from the stone's edge: {last}");
 
         let inside = Vec3::new(24.0, 25.0, 0.0);
-        let legs = graph.route(inside, Vec3::new(5.0, 25.0, 0.0), &[], None, 2.0, 2, &mut fixed(0.0)).unwrap();
+        let legs =
+            graph.route(inside, Vec3::new(5.0, 25.0, 0.0), &[], None, 2.0, 2, &mut fixed(0.0)).unwrap();
         assert_eq!(legs.last(), Some(&Vec3::new(5.0, 25.0, 0.0)));
     }
 
