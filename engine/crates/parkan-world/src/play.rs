@@ -2600,12 +2600,10 @@ impl Play {
 
     /// Clan `clan`'s minds not held: its mission's count less every live robot of the clan
     /// (the hero among them) and every build its factories are running (docs/23, "The bot
-    /// limit is the clan's mind count").
-    ///
-    /// STAND-IN: docs/34-progression.md#mission-04-teleport-end-to-end--derived --
-    /// which of Mission 04's hero, helicopter and HQ holds no mind is not established: the
-    /// recording's factory shows one free of three once all three are the player's, while
-    /// Mission 02's shows the hero holding one. A unit the hero's Enter took holds none.
+    /// limit is the clan's mind count"). Every robot a mission places takes one as it is
+    /// made (`iron3d.dll:0x100774d1`, `ArealMap.dll:0x100152ba`), the hero too, and a unit the
+    /// hero's Enter took holds none: `Capture` on a unit takes no mind
+    /// (`Behavior.dll:0x10009051`), so Mission 04's HQ is the one of its three that holds none.
     pub fn free_minds(&self, clan: i64) -> usize {
         let minds =
             usize::try_from(clan).ok().and_then(|c| self.clans.get(c)).map_or(0, |c| c.minds as usize);

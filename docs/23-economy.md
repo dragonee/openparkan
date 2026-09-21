@@ -472,9 +472,42 @@ CPUs" in the game's own interface (`iron3d.dll` string 3067).
   reserved (`Behavior.dll:0x1002a348`, and `0x1002a0bb` for a free bot); with
   none free the factory logs "No Free mind... cannot start constructing" and
   does not start. When the build completes the reservation is dropped and the
-  new bot claims an entry by its id (`0x1001e0e0`, "Attached to Brain"). A bot
-  captured or placed by the mission takes one too, and with none free that is
-  a "Behaviour panic".
+  new bot claims an entry by its id (`0x1001e0e0`, "Attached to Brain"): the
+  factory makes it with create flag 8 (`0x1002a9f4`), and the creator claims a
+  mind for any scheme whose Type has no top bit, with that flag (`0x1001d459`–
+  `0x1001d46a`).
+- **Every robot a mission places holds one** — *read*, and *measured*.
+  `iron3d.dll`'s mission loader (`0x100a3ea0`) sorts the objects by kind, and
+  places the units' list (kind 1, `0x100a3f9a`) at `0x100a458c` through
+  `0x10077480`. That hands `ArealMap.dll`'s `CreateObjectFromScheme` create
+  flag 8 unless the game is the auto-demo (`+0xe5`, `0x100774c7`–`0x100774d1`).
+  The export carries the factory's creator code: for a non-building with flag 8
+  it takes the clan's first free entry (`ArealMap.dll:0x100152a9`–`0x10015307`)
+  and writes the new object's id into it ("Attached to Brain",
+  `0x10015f0e`–`0x10015f24`). **With none free the unit is not made at all**
+  (`0x100152f6` → `0x10015590` returns 0). Buildings go through `0x10033cb0`,
+  whose flags are 1 and 4, never 8. *Measured*: all 296 `UNITS\UNITS` objects
+  in the install's missions are kind 1, the 37 heroes among them, and no other
+  object is. **So the hero holds a mind**, and Mission 02's Plr, 2 minds and the
+  hero alone, starts with one free
+  ([36-factory.md](36-factory.md#mission-02--measured-derived-and-seen)).
+- **A unit the hero's Enter captures holds none** — *read*. The Enter case calls
+  the behaviour's slot 39, `Capture` (`iron3d.dll:0x1007202a`), which for a unit
+  changes its clan, SuperAI and areal map and writes no mind
+  (`Behavior.dll:0x10009051`–`0x100090a0`). So of Mission 04's three — the hero
+  and `tut4_f1` placed, the HQ taken by Enter — the HQ is the one that holds
+  none, and 3 minds leave the recording's one free
+  ([34-progression.md](34-progression.md#mission-04-teleport-end-to-end--derived)).
+- **Who else writes an id into a mind** — *read*. A search of every fetch of a
+  mind entry (SuperAI slot 17, and `ai.dll`'s own element accessor `0x10006e40`)
+  in `Behavior.dll`, `ArealMap.dll`, `ai.dll` and `iron3d.dll` finds one more:
+  `MBehaviour::ReloadSuperAI` (`Behavior.dll:0x10008c70`), when a network mirror
+  becomes a behaviour again. With none free that is the "Behaviour panic"
+  (`0x1005e0d8`: *"SuperAI have no free brains of clan %d (Switch from Mirror to
+  Behaviour)"*). The other writes store 0, a reservation, or −1, a free entry,
+  and the save loader restores each entry as saved
+  (`iron3d.dll:0x100a3156`). The search finds the factory's own claim
+  (`0x1001e0e0`) and reservation (`0x1002a348`), the two known before it.
 - **What frees one.** A bot destroyed or deleted, or captured by another clan
   (`ai.dll:0x10003e40`, `0x10006530`), or a build that is aborted
   (`0x10029910`).
@@ -540,7 +573,8 @@ and its factories stop until one is lost. Buildings take no mind.
 
 *Measured:* across all 101 shipped clans no clan is placed with more robots
 than its minds, two sit exactly at the limit, and counting every owned object
-instead, 18 would exceed it.
+instead, 18 would exceed it. A robot placed past the count would not be made
+(*derived*, from the placement's claim above).
 
 ## Construction — *read*
 
@@ -1001,7 +1035,12 @@ construction slows research.
   robot again ([The bot
   limit](#the-bot-limit-is-the-clans-mind-count--read-and-measured)).
 - **Which of Mission 03's units hold a mind, and what the factory's "Available
-  CPUs" counts** as a build runs.
+  CPUs" counts** as a build runs. ~~Which hold one~~ — **read**: all three
+  placed robots, the hero among them
+  ([above](#the-bot-limit-is-the-clans-mind-count--read-and-measured)), so 4 of
+  the 7 are free before any build, as seen. Still open: the 4 from 221.5 s, when
+  the finished bot should hold the mind its build reserved, and the five
+  warbots built on four free minds.
   - The player clan has 7 minds and starts with the hero, a builder and a
     transport.
   - *Seen*, the figure reads:

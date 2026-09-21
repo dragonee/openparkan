@@ -1997,6 +1997,26 @@ def check_missions(check, game: Path) -> None:
           f"{owned_over}.  The two top clans of Multi.01..04 get equal minds: "
           f"{multi}{'; ' + ', '.join(robots_over[:3]) if robots_over else ''}")
 
+    # The mission loader places its kind-1 list through the routine that hands
+    # CreateObjectFromScheme create flag 8 (iron3d.dll:0x100a458c, 0x100774d1),
+    # and flag 8 on a non-building takes a mind (ArealMap.dll:0x100152ba).  So
+    # every placed robot holds a mind only if the robots are that list.
+    robot_kinds: Counter[int] = Counter()
+    heroes = 0
+    other_units = 0
+    for m in parsed:
+        for o in m.objects:
+            path = o.path.replace("\\", "/").upper()
+            if path.startswith("UNITS/UNITS/"):
+                robot_kinds[o.kind] += 1
+                heroes += "/HERO/" in path
+            elif o.kind == mission.KIND_UNIT:
+                other_units += 1
+    check("data.tma: every placed robot is a kind-1 object, the list the loader gives a mind",
+          set(robot_kinds) == {mission.KIND_UNIT} and other_units == 0 and heroes > 0,
+          f"{sum(robot_kinds.values())} UNITS\\UNITS objects by kind {dict(robot_kinds)}, "
+          f"{heroes} of them heroes; {other_units} kind-1 objects are anything else")
+
     maps = {d.name for d in gamedir.maps(game)}
     resolved = sum(1 for m in parsed if m.map_name in maps)
     check("data.tma: the map it names exists", resolved == len(parsed),
