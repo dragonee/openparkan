@@ -1270,6 +1270,43 @@ with legs, wheels or tracks falls under gravity 10, and every flyer holds its
 height. A mode-0 or mode-2 machine falls exactly when its state has contact
 points.
 
+#### A contact's up pass must not reach as far as r — *measured*
+
+The lift is the largest rise over the flag-1 contacts, **whatever its height**,
+and a contact's own search takes the face above it before the one below when
+that face is within its bound. Give that bound the agent sphere's r and a
+machine nosing over the lip of a ramp is hoisted back up it: its leading
+contacts find the ramp below, its trailing ones still stand under the floor
+they have just left, and the **max** takes the floor.
+
+*Measured* on C02 Mission 03, an SWW-X Warrior (chassis `R_L_03`, r 3.215,
+r₂ 2.592) the player drives into the Large Factory, one metre past its door:
+
+| contact z | its ground | rise |
+|---:|---:|---:|
+| 46.43 | 49.34 | **+2.91** |
+| 46.43 | 49.11 | +2.68 |
+| 46.43 | 43.63 | −2.80 |
+| 46.43 | 43.63 | −2.80 |
+
+The body sphere's own search finds the ramp at 42.93, 4.5 below it. The lift
+takes +2.91, the ground contact carries the machine back up into the structure
+over the ramp, and the collision pass — whose segment test puts a move that
+runs against a face back at its start — undoes the whole move. The next tick
+does the same. At its full 17.9 m/s the machine does not move a millimetre
+again.
+
+At r₂ the two rises of +2.91 and +2.68 both exceed the bound, those contacts
+fall through to the face below, and the machine drives down to the pod. r₂ is
+the **smaller** on 122 of the 148 unit models the campaign places.
+
+*Measured*, the cost: over 18 captures on that mission, every small chassis
+against every enemy building, **15** are taken with the bound at r and **14**
+with it at r₂ — the Large Factory 5 s faster for a wheeled bot and 15 s faster
+for a walker, and the Small Bunker lost for a walker, which stalls 34 m short
+of its pod with no lift over 0.5 and no segment stop anywhere near it, so by
+something other than this.
+
 ### A contact point sits on one node and dies with another — *measured*
 
 The contact names a control point, and the point's first triple carries **two**
@@ -1472,6 +1509,33 @@ of them with a world normal z above 0.173648:
   11.52 where they meet, near y 683.
 - **Without the deck there is no crossing.** The only ground between the banks
   is the water at −1.73 over a bed that falls to −28.7.
+
+#### The cap where two halves meet — *measured*, and a stand-in
+
+Every bridge is placed this way. Across all 29 missions there are **9 bridge
+pairs**, and on all nine the second half stands π from the first, straight on
+along the span, and exactly **twice the deck's length** away — so the two decks
+**abut**, to within a unit (`placement: a bridge's two halves meet`).
+
+That means each half's far end stands square in the way of anything crossing.
+All four `fortif.rlb` bridge meshes carry a cap there: **six** level-0 faces at
+the deck's own far end, every one of them facing the model's +y. Three of the
+four flag those six faces **4**, the bit a round passes and the collision's own
+segment query passes too. The fourth, `fr_e_brige` — C02 Mission 04's *Enh
+Bridge BS-52/30* — flags them **`0x20`**, which is the bit its additive
+`B_A_BRIGE` material carries throughout the mesh: its deck is flagged `34`,
+floor and energy at once. A round passes both, the round query's triangle mask
+being `0x24` ([07-objects.md](07-objects.md#the-flags-word)).
+
+**STAND-IN.** The read of the collision's own filters gives them a triangle
+mask of **4** — `0x1001dbad` for the segment and `0x1001dbce` for the push-out,
+[below](#collision-between-objects--read) — and nothing that drops `0x20`. Taken
+as read, the energy bridge's cap is a wall: the hero walks 183.8 m of the 185.5
+to the join and stops dead, half way over the gorge, while Mission 01's
+`m_bridge` lets it straight through. The engine passes `0x20` here as it passes
+4, so that all four bridges cross. What the game does instead — a batch flag the
+mesh's batch word does not carry, or a filter this page has not found — is not
+established.
 
 ### Collision between objects — *read*
 
@@ -3005,6 +3069,16 @@ patrol runs past it.
   (`0x10003d80`), and who reads `Movement_FlyHeight`.
 - Whether the walker's clear (`0x1003c540`) also empties the points the Wizard
   already holds. `ClearWizardPath` is logged at `0x10040e3b`.
+- **What lets a mover past a face flagged `0x20`.** The collision's own two
+  filters take a triangle mask of 4 (`0x1001dbad`, `0x1001dbce`), and a round's
+  takes `0x24`. The shipped data needs `0x20` passed: `fr_e_brige` flags its
+  join cap with it where the other three bridges flag theirs 4, and its halves
+  abut like theirs, so as read the energy bridge cannot be crossed
+  ([The cap where two halves meet](#the-cap-where-two-halves-meet--measured-and-a-stand-in)).
+  The batch word is the obvious other candidate — the query excludes batches
+  flagged 8, and the energy batches carry `0x100` and no 8 — so either a third
+  filter or a flag set on the loaded batch is doing it. The engine passes
+  `0x20` as a stand-in.
 
 - ~~How interface `0x25` slot 3 turns an object's level-0 triangles into a
   push, and what slot 2 does with its 0.5~~ — **read**: the push accumulates
@@ -3050,7 +3124,9 @@ patrol runs past it.
   to 7.5, and what the **contact points'** own up pass tests against — the body
   sphere's is r₂, but each contact's compares with a triple the pass builds from
   control `+0x2ec`, `+0x2fc` and `+0x30c` (`0x1001aba7`, `0x1001ae12`), which is
-  not read.
+  not read. **What a contact's bound may not be is r**, the agent sphere's
+  ([below](#a-contacts-up-pass-must-not-reach-as-far-as-r--measured)); the
+  engine takes r₂ until the triple is read.
 - ~~Whether `PlaceObjectOnWorldFace`'s reparenting sends a collision object its
   message 21, so that a machine on a building's deck leaves the world's
   collision manager for the building's; and so whether a bridge's own faces

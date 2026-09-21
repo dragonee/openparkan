@@ -2480,19 +2480,28 @@ impl Play {
         }
         let mut moved = Vec::new();
         let mut fired = Vec::new();
-        for b in &mut self.buildings {
+        let Play { buildings, emplacements, battle, .. } = self;
+        for b in buildings.iter_mut() {
             let standing: Vec<Standing> =
                 children.iter().filter(|(s, _)| *s == b.target).map(|(_, c)| *c).collect();
-            let Some(part) =
-                self.battle.combat.targets.get_mut(b.target).and_then(|t| t.parts.get_mut(b.part))
-            else {
-                continue;
-            };
+            let Some(target) = battle.combat.targets.get_mut(b.target) else { continue };
+            let Some(part) = target.parts.get(b.part) else { continue };
             let phases: Vec<_> = b.doors.iter().map(|d| d.phase).collect();
-            let (changed, fire) = b.tick(now, part, &standing);
-            if changed {
-                b.pose(part);
+            let (changed, turned, fire) = b.tick(now, part, &standing);
+            if changed || turned {
+                // An emplacement's turret poses itself and everything hanging on it each
+                // tick, aimed, and runs before this ([`tick_emplacements`]), so a building
+                // leaves those where they are rather than put them back on their socket.
+                let robot = emplacements.iter().find(|(t, _)| *t == b.target).map(|(_, r)| r);
+                b.pose(&mut target.parts, |p| robot.is_some_and(|r| carried_by_turret(r, p)));
             }
+            // A running item's own channels only pose the part. STAND-IN:
+            // docs/28-chassis.md#every-component-is-stepped-not-only-a-device--read-and-measured
+            // -- a mine's rotors, the Main Teleport's rings and the energy bridge's hub turn
+            // for ever, so rebuilding the collision solid for them would rebuild it every
+            // tick, on every one of them, for good. Whether the game's own collision mesh
+            // follows an animated node is not read; a door's, which it plainly does, still
+            // does here.
             if changed || b.doors.iter().map(|d| d.phase).ne(phases) {
                 moved.push(b.target);
             }
@@ -3316,6 +3325,9 @@ impl Play {
             let target = &self.battle.combat.targets[*t];
             robot
                 .check_devices(|p, n| node_alive(target.parts.get(p).and_then(|part| part.life.as_ref()), n));
+            // A tower's mast is a chassis item like a warbot's rotors, so its turret, guns and
+            // radar ride it: `chassis_pose` takes a node's frame from the items that drive it.
+            robot.turn_devices(|p, n| node_alive(target.parts.get(p).and_then(|part| part.life.as_ref()), n));
             let shots = robot.takt(dt_ms);
             if !shots.is_empty() {
                 fired.push((e, shots));

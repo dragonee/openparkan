@@ -432,3 +432,262 @@ fn mission_01s_relations_drift_within_their_bands_and_only_a_hit_moves_one() {
         "the scripts read the same word"
     );
 }
+
+/// C02 Mission 04's gorge is crossed on `e_bridge`, the *Enh Bridge BS-52/30*, placed as two
+/// halves π apart whose 185.5 m decks meet in the middle — the shape docs/24 measured on
+/// Mission 01's `m_bridge` ("Standing on a bridge"). Each half carries a flat end cap at the
+/// join, and on this one alone that cap is flagged `0x20`, the bit its additive `B_A_BRIGE`
+/// material carries, where the other three bridges flag theirs 4. Both are see-through to a
+/// round, and the collision passes both here, so the hero walks the whole span.
+#[test]
+#[ignore = "needs the game install"]
+fn c02_m04s_energy_bridge_halves_meet_and_the_hero_walks_over_the_join() {
+    use parkan_formats::mission;
+
+    let game = gamedir::find(None).expect("a Parkan install: set PARKAN_DIR");
+    let dir = gamedir::resolve(&game, gamedir::C02_MISSION_04).unwrap();
+    let m = mission::parse(&std::fs::read(dir.join("data.tma")).unwrap(), "Mission.04").unwrap();
+    let bridges: Vec<&mission::Object> =
+        m.objects.iter().filter(|o| o.path.to_ascii_lowercase().ends_with("e_bridge.dat")).collect();
+    assert_eq!(bridges.len(), 2, "the mission places two halves");
+    let (near, far) = (bridges[0], bridges[1]);
+    let turn = (far.rotation - near.rotation - std::f32::consts::PI).abs();
+    assert!(turn < 1e-5, "the halves stand pi apart: {turn}");
+    // Model +y is the span; the two origins lie along it, 371.0 apart, so each deck is 185.5
+    // long and they meet exactly.
+    let along = glam::Vec2::new(-near.rotation.sin(), near.rotation.cos());
+    let delta = glam::Vec2::new(far.position[0] - near.position[0], far.position[1] - near.position[1]);
+    assert!(delta.perp_dot(along).abs() < 0.01, "the second half is straight on: {delta:?}");
+    let span = delta.dot(along);
+    assert!((span - 371.02).abs() < 0.05, "371 m between the origins: {span}");
+
+    let mut play = campaign_play(gamedir::C02_MISSION_04);
+    let start = glam::Vec2::new(near.position[0], near.position[1]) + along * 3.0;
+    assert!(play.stand_below(start.x, start.y, 170.0, near.rotation), "the hero stands on the deck");
+    let on_deck = play.hero.walker.body.position.z;
+    play.hero.key("SCAN_W", true);
+    let (mut farthest, mut over) = (0.0f32, None);
+    for tick in 0..(60 * 40) {
+        play.update_input();
+        play.tick(1000.0 / 60.0, [0.0; 2]);
+        let at = play.hero.walker.body.position;
+        let walked = (at.truncate() - glam::Vec2::new(near.position[0], near.position[1])).dot(along);
+        farthest = farthest.max(walked);
+        if over.is_none() && walked > span / 2.0 + 5.0 {
+            over = Some((tick, at.z, play.hero.walker.ground.is_some_and(|g| g.solid.is_some())));
+        }
+    }
+    let (tick, z, on_building) = over.unwrap_or_else(|| {
+        panic!("it stopped {:.1} m along, short of the join at {:.1}", farthest, span / 2.0)
+    });
+    assert!(on_building, "past the join it stands on the far half's deck, not on the ground");
+    assert!(z > on_deck, "the deck climbs from the bank: {z} against {on_deck}");
+    assert!(farthest > span - 10.0, "and on to the far bank: {farthest:.1} of {span:.1}");
+    eprintln!("over the join {:.1} s in, {farthest:.1} m along", tick as f32 / 60.0);
+}
+
+/// The same bridge's deck is five `f_brige_ray` sprites, each hung on a `RayD`/`RayW`/`RayH`
+/// triple of control points whose direction lengths are the ray's depth, width and height
+/// (docs/07, "CTPT — control points"). Those three directions are the frame's three axes, and
+/// a sprite is drawn **through** that frame (docs/11, "A sprite is drawn through its frame"),
+/// so a deck ray is a 150 m streak down the span and 1.93 m across seen from the bank, and a
+/// 1.93 m flicker seen down the deck. The three deck rays hang on nodes 2, 3 and 4 of the
+/// mesh, three spokes 120° apart on a circle of radius 20 about node 1, and the controller's
+/// one channel turns node 1 a whole turn every ten seconds, so they sweep around the bridge's
+/// own axis (docs/28, "What a device's value turns").
+#[test]
+#[ignore = "needs the game install"]
+fn c02_m04s_bridge_rays_run_the_span_and_sweep_around_the_decks_axis() {
+    use parkan_formats::mission;
+
+    let game = gamedir::find(None).expect("a Parkan install: set PARKAN_DIR");
+    let dir = gamedir::resolve(&game, gamedir::C02_MISSION_04).unwrap();
+    let m = mission::parse(&std::fs::read(dir.join("data.tma")).unwrap(), "Mission.04").unwrap();
+    let near = m.objects.iter().find(|o| o.path.to_ascii_lowercase().ends_with("e_bridge.dat")).unwrap();
+    let span = glam::Vec3::new(-near.rotation.sin(), near.rotation.cos(), 0.0);
+
+    let mut play = campaign_play(gamedir::C02_MISSION_04);
+    // Straight off the effect instances: a scene's own draw needs the texture store's looks,
+    // which a headless play does not build.
+    let rays = |play: &parkan_world::play::Play| {
+        let mut drawn = Vec::new();
+        for (_, instance) in &play.fx.instances {
+            instance.sprites(play.hero.time_ms, true, &mut drawn);
+        }
+        drawn.retain(|s| s.material.eq_ignore_ascii_case("b_a_brige"));
+        drawn
+    };
+    let first = rays(&play);
+    assert_eq!(first.len(), 10, "five rays on each of the two halves");
+    let mut deck = 0;
+    for s in &first {
+        let axes = s.frame.expect("each ray hangs on three distinct points");
+        assert!((s.width - 1.932).abs() < 0.01 || (s.width - 0.6).abs() < 0.01, "width {}", s.width);
+        // The first axis is the depth point's, which runs the deck's 150 m or a tower's 147.
+        let depth = axes[0].length();
+        assert!((depth - 150.0).abs() < 0.01 || (depth - 147.0).abs() < 0.01, "depth {depth}");
+        if (depth - 150.0).abs() < 0.01 {
+            deck += 1;
+            let along = axes[0].normalize().dot(span).abs();
+            assert!(along > 0.999, "a deck ray lies along the span: {along}");
+        }
+    }
+    assert_eq!(deck, 6, "three deck rays on each half");
+
+    // A third of a turn on, each spoke stands where the next one did, 120° round a circle of
+    // radius 20 — a chord of 34.6 m.
+    let at = |rays: &[parkan_sim::effects::Sprite]| -> Vec<glam::Vec3> {
+        rays.iter()
+            .filter(|s| s.frame.is_some_and(|a| (a[0].length() - 150.0).abs() < 0.01))
+            .map(|s| s.centre)
+            .collect()
+    };
+    let before = at(&first);
+    while play.hero.time_ms < 10_000.0 / 3.0 {
+        play.update_input();
+        play.tick(1000.0 / 60.0, [0.0; 2]);
+    }
+    let after = at(&rays(&play));
+    let moved = before.iter().zip(&after).map(|(a, b)| a.distance(*b)).fold(f32::MAX, f32::min);
+    assert!((moved - 34.64).abs() < 1.0, "a spoke carries its ray 120° round: {moved}");
+    for b in &after {
+        assert!(before.iter().any(|a| a.distance(*b) < 1.0), "onto the next spoke's place: {b}");
+    }
+    eprintln!("the deck's three rays sweep {moved:.1} m a third of a turn");
+}
+
+/// C02 Mission 03's Large Factory, taken by a wheeled warbot the player drives himself.
+///
+/// The ground contact's lift is the largest rise over the flag-1 contacts, whatever its height
+/// (docs/24, "Holding the body on the ground"). A wheel's own up pass had reached as far as the
+/// agent sphere's r, so on the first ramp down past the factory's door the two rear wheels kept
+/// finding the floor they had just left, 2.9 m above themselves, while the front two found the
+/// ramp below: the lift took the larger and hoisted the machine back up the ramp, into the
+/// structure over it, and the collision pass then put the whole move back where it started —
+/// every tick, for good. The bound is the body sphere's r2 now.
+#[test]
+#[ignore = "needs the game install"]
+fn c02_m03s_wheeled_warbot_drives_down_the_factorys_first_ramp_to_its_pod() {
+    use parkan_formats::mission;
+
+    let game = gamedir::find(None).expect("a Parkan install: set PARKAN_DIR");
+    let dir = gamedir::resolve(&game, gamedir::C02_MISSION_03).unwrap();
+    let m = mission::parse(&std::fs::read(dir.join("data.tma")).unwrap(), "Mission.03").unwrap();
+    let mut play = campaign_play(gamedir::C02_MISSION_03);
+    let plant = object_target(&play, &m, "lplant01.dat");
+    let bunker = object_target(&play, &m, "sbunk02.dat");
+
+    // An SWW-X Warrior, the shipped wheeled design: chassis R_L_03 and two guns.
+    let path = "UNITS\\UNITS\\PREBLD\\tut3_p2.dat".to_owned();
+    let data = parkan_formats::gamedir::resolve(&play.assembly.game, &path)
+        .and_then(|p| std::fs::read(p).ok())
+        .expect("tut3_p2.dat");
+    let project = parkan_world::factory::Project {
+        path,
+        name: String::new(),
+        type_word: u32::from_le_bytes(data[4..8].try_into().unwrap()),
+        chassis_size: 2,
+        ore: 0.0,
+        power: 0.0,
+        lines: Vec::new(),
+        sphere: None,
+    };
+    let origin = play.battle.combat.targets[plant].parts[0].nodes[0].translation;
+    let origin = glam::Vec3::new(origin[0] as f32, origin[1] as f32, origin[2] as f32);
+    let spot = origin + glam::Vec3::new(70.0, 70.0, 0.0);
+    let z = play.ground.below(spot.x, spot.y, 1.0e5).map_or(spot.z, |h| h.point.z);
+    let clan = play.player_clan;
+    let bot = play.spawn(&project, clan, spot.with_z(z + 1.0), 0.0).expect("a wheeled warbot");
+    play.tick(1000.0 / 60.0, [0.0; 2]);
+
+    // The way in the capture order would take, driven by hand instead of by the AI.
+    let pod = play
+        .capture_places()
+        .into_iter()
+        .find(|p| p.id == play.units[plant].logical_id)
+        .and_then(|p| p.pod)
+        .expect("the factory has a pod");
+    let from = play.robots.iter().find(|(t, _)| *t == bot).unwrap().1.walker.body.position;
+    let mut way = play.way_in(plant, from, pod).expect("a way in");
+    way.push(pod);
+    let ramp = way.windows(2).position(|w| w[0].z - w[1].z > 4.0).expect("a ramp down on the way in");
+
+    play.enter_command(bunker);
+    assert!(play.telepresence(bot, 0), "the player takes the warbot over");
+    play.key("SCAN_W", true);
+    let (mut next, mut furthest) = (0, 0);
+    for tick in 0..(120 * 60) {
+        let (_, r) = play.robots.iter_mut().find(|(t, _)| *t == bot).unwrap();
+        let at = r.walker.body.position;
+        while next < way.len() && way[next].truncate().distance(at.truncate()) < 4.0 {
+            next += 1;
+            furthest = furthest.max(next);
+        }
+        if next == way.len() {
+            eprintln!("on the pod {} s in, {:.1} m below the door", tick / 60, way[ramp].z - at.z);
+            assert!(at.z < way[ramp].z - 4.0, "and it is down the ramp: {at}");
+            return;
+        }
+        let to = way[next].truncate() - at.truncate();
+        r.walker.body.yaw = (-to.x).atan2(to.y);
+        play.update_input();
+        play.tick(1000.0 / 60.0, [0.0; 2]);
+    }
+    let at = play.robots.iter().find(|(t, _)| *t == bot).unwrap().1.walker.body.position;
+    panic!(
+        "it never reached the pod: stopped at {at} on leg {furthest} of {}, the ramp down being leg {}",
+        way.len(),
+        ramp + 1
+    );
+}
+
+/// A tower's gun mast stands in the ground until its class-29 item raises it.
+///
+/// Nothing files that item: `CBuilding` looks for doors and control pods and no other class
+/// (`Terrain.dll:0x100583a2`), while the component factory puts **every** class it builds in
+/// the controller's timed list (`Control.dll:0x1002d70a`), which the time driver steps. Left
+/// unstepped, the Small Tower's `o07` node stays at the rest pose its mesh's frame 0 gives
+/// it, 10.4 m below where frame 4 puts it — and the turret, guns, radar and deflector that
+/// hang on nodes of that mast stay buried with it.
+#[test]
+#[ignore = "needs the game install"]
+fn c02_m04s_tower_raises_its_gun_mast_out_of_the_ground_and_leaves_it_up() {
+    use parkan_formats::mission;
+
+    let game = gamedir::find(None).expect("a Parkan install: set PARKAN_DIR");
+    let dir = gamedir::resolve(&game, gamedir::C02_MISSION_04).unwrap();
+    let m = mission::parse(&std::fs::read(dir.join("data.tma")).unwrap(), "Mission.04").unwrap();
+    let mut play = campaign_play(gamedir::C02_MISSION_04);
+    let tower = object_target(&play, &m, "mtow01.dat");
+
+    let building = play.buildings.iter().find(|b| b.target == tower).expect("the tower is a building");
+    assert_eq!(building.running.len(), 1, "one item runs by itself: the mast");
+    assert_eq!(
+        building.running[0].channels.iter().map(|c| c.node).collect::<Vec<_>>(),
+        vec![1, 2, 3, 13],
+        "the arm's three nodes and the mast"
+    );
+
+    // The mast (node 13) and everything standing on it: the turret is part 1.
+    let z = |play: &parkan_world::play::Play, part: usize, node: usize| {
+        play.battle.combat.targets[tower].parts[part].nodes[node].translation[2] as f32
+    };
+    let (mast, turret) = (z(&play, 0, 13), z(&play, 1, 0));
+    while play.hero.time_ms < 6000.0 {
+        play.update_input();
+        play.tick(1000.0 / 60.0, [0.0; 2]);
+    }
+    let up = z(&play, 0, 13) - mast;
+    assert!((up - 10.37).abs() < 0.1, "frame 0 to frame 4 lifts the mast 10.4 m: {up}");
+    let carried = z(&play, 1, 0) - turret;
+    assert!((carried - up).abs() < 0.1, "and the turret rides it: {carried}");
+
+    // It holds there: the word bounces as read, and `buildings::started` stops it at the top.
+    let held = z(&play, 0, 13);
+    while play.hero.time_ms < 20_000.0 {
+        play.update_input();
+        play.tick(1000.0 / 60.0, [0.0; 2]);
+    }
+    assert!((z(&play, 0, 13) - held).abs() < 0.2, "the mast stays up: {}", z(&play, 0, 13));
+    eprintln!("the mast rises {up:.2} m and holds");
+}

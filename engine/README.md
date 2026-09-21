@@ -43,7 +43,7 @@ them from the install.
 
 ## Milestones
 
-Milestones **M0** to **M15** are in, each with the stand-ins listed below.
+Milestones **M0** to **M17** are in, each with the stand-ins listed below.
 **M0** to **M2**:
 
 - the workspace;
@@ -958,6 +958,66 @@ More feedback on the first chapter: armour, docks, turrets, batteries and repair
   (`0x1000fc70`) is read as a formula but not as numbers, so a candidate is scored by how many
   enemy objects stand within the radius, which orders them but does not weigh them.
 
+**M16.** *The Last Bastion*'s energy bridge, crossed and lit as the recording has it; and a
+warbot the player drives gets down a factory's ramps.
+
+- **A sprite is as wide as its frame's width axis, not as long as its depth** (docs/11, "A
+  control-point frame's axes are depth, width and height"). An action-4 effect hangs on three
+  control points and takes their directions as its frame's axes, lengths and all; 47 triples
+  in the install name those lengths `_d`, `_w` and `_h`, and 43 of the 51 records built on one
+  list them in that order. A type-3, 4 or 9 sprite spans the **second and third** of them —
+  the first is the axis its position channel travels — so it can be a rectangle rather than a
+  square. It had been sized by the first. On C02 M04, *The Last Bastion*, the two `e_bridge`
+  halves hang five `f_brige_ray` each on `RayD/RayW/RayH` triples of 150 × 1.93 × 0.41 m: ten
+  sprites 1.9 m across the deck, which had been ten of 150 m, columns of white over half the
+  sky from anywhere in the gorge. **M17 supersedes this**: all three axes go into the quad.
+- **A contact point's up pass reaches r₂, not r** (docs/24, "A contact's up pass must not
+  reach as far as r"). The ground contact's lift is the largest rise over a machine's flag-1
+  contacts, whatever its height, and each contact takes the face above it before the one below
+  when that face is inside its bound. With the bound at the agent sphere's r, a machine nosing
+  over the lip of a ramp was hoisted back up it: on C02 M03, *The Lost Key*, an SWW-X Warrior a
+  metre past the Large Factory's door had its two leading wheels on the ramp 2.8 m below and its
+  two trailing ones still under the floor they had just left, 2.9 m above, and the max took the
+  floor — into the structure over the ramp, where the collision's segment test put the whole
+  move back at its start, every tick, at a standing 17.9 m/s. It now drives down to the pod in
+  14 s. r₂ is the smaller on 122 of the 148 unit models the campaign places; over 18 captures on
+  that mission the AI takes 14 buildings where it took 15, the factory 5 and 15 seconds faster,
+  and the Small Bunker is lost for a walker — which stalls there by something else, with no lift
+  and no segment stop near it. What a contact's bound really is stays unread.
+- **A face flagged `0x20` lets a mover through, as one flagged 4 does** (docs/24, "The cap
+  where two halves meet"). All nine bridge pairs the campaign places stand π apart with their
+  decks abutting, so each half's far end — six faces facing the span — is in the way of
+  anything crossing. Three of the four bridge meshes flag that cap 4; `fr_e_brige` flags it
+  `0x20`, the bit its additive `B_A_BRIGE` material carries throughout, and a round passes
+  both. The hero had walked 183.8 m of the 185.5 to the join and stopped there, half way over
+  the gorge; it now crosses to the far bank. What the game passes it with is not established —
+  the collision's own triangle mask is 4 — so this is a stand-in.
+
+**M17.** The bridge's rays sweep its span as the recording has them, and a tower's gun comes
+out of the ground.
+
+- **Every component is stepped, not only a device** (docs/28, "Every component is stepped,
+  not only a device"). The component factory files each class it builds in the controller's
+  timed list, whatever the class is, and the driver serves the list whole, so a class its
+  owner never files still turns the channels it names. *Measured*: twelve classes name
+  channels and two of them are steered by nothing else — class 26 on nine records and class
+  29 on two. They are the three mines' rotors, the Main Teleport's twenty-eight rings,
+  `fr_e_brige`'s hub and the Small and Large Towers' gun masts, and none of them moved. A
+  building now runs them, and an emplacement runs them as chassis devices so its turret,
+  guns, radar and deflector ride the mast they stand on: on C02 M04 the Small Tower's cannon
+  rises 10.4 m out of its dome over five seconds instead of sitting buried in it, and *The
+  Last Bastion*'s bridge turns its hub a whole revolution every ten seconds, carrying three
+  spokes 120° apart at 20 m from the deck's axis.
+- **A sprite is drawn through its frame** (docs/11, "A sprite is drawn through its frame").
+  Action 4 builds a *matrix* — the three points' directions as its rows, their centroid as
+  the fourth — and the draw scales its columns by the size channel and combines it with the
+  basis mode 0 builds from the eye, which reaches it in that frame's own space. So a sprite
+  faces the camera inside the frame and comes back out stretched by it. A frame whose axes
+  are one length, which is every light and screen in the game, draws the square its size
+  channel asks for; the bridge's ray, on a frame 150 m along the span and 1.93 across, is a
+  150 m streak from the bank and a 1.93 m flicker down the deck. It had been the flicker from
+  everywhere.
+
 This directory also holds what the rest will follow:
 
 - **`docs/`** is the source of truth. Every behaviour the engine implements is
@@ -1206,6 +1266,10 @@ a row here. A row leaves this table when research closes it.
 | M14 | The call for help to the clan's warriors within 400, and the random source of the clan takt's 0–999 ms jitter | the call is not modelled: a hit pulls in its victim alone. The attitude a hit lowers **is** modelled, on the read figures; the jitter uses a 32-bit xorshift | [31](../docs/31-packages.md#a-hit-pulls-a-unit-in--read), [25](../docs/25-sensors.md#clan-relations-the-files-words-straight-through--read-and-measured) |
 | M14 | The behaviour's radar module: its two timers, and the hostile and friendly lists it keeps from its machine's radar | the machine's own radar scan stands in for the module, read afresh each takt; the fire control and the engagement pick from it alone, so a unit with no radar picks no target of its own, while a search still looks over the clan's areal map, which the engine keeps whole | [25](../docs/25-sensors.md#what-the-ai-does-with-it--read) |
 | M14 | How a unit's place comes to be on a building's map object, and which of its vertices the global path starts or ends at | a unit standing on a bridge's faces takes the bridge's nearest hall-way vertex; a goal over a bridge is refused, as the areal under it is not walkable | [24](../docs/24-motion.md#not-established) |
+| M17 | Whether anything switches a bouncing item off: the two class-29 records carry switch word 9, and bit 8 is read to hold the progress at an end and swap the low bits, so both towers would raise their gun mast over five seconds and stow it over the next five, for ever. Nothing found switches it: the factory files every class in the timed list, `CBuilding` looks only for classes 12 and 13, and neither record names a section-5 group | an item whose word bounces is started as one that opens and stops, so a tower's mast comes up once and stays up, as the game has it | [28](../docs/28-chassis.md#every-component-is-stepped-not-only-a-device--read-and-measured) |
+| M17 | Whether a building's collision solid follows the nodes its own items turn: a mine's rotors, the Main Teleport's rings and the energy bridge's hub never stop | the solid is rebuilt for a door's channels, as before, and not for a running item's, which would rebuild it every tick on every one of them | [28](../docs/28-chassis.md#every-component-is-stepped-not-only-a-device--read-and-measured) |
+| M16 | What a contact point's own up pass tests against: it compares with a triple the pass builds from control `+0x2ec`, `+0x2fc` and `+0x30c`, which is not read | the body sphere's r₂, the one bound the pass is read to use; the agent sphere's r had a wheel grab the floor 2.9 m above it and hoist the machine back up a factory's ramp | [24](../docs/24-motion.md#not-established) |
+| M15 | What lets a mover past a face flagged `0x20`: the collision's two filters take a triangle mask of 4 where a round's takes `0x24`, and the energy bridge's join cap carries `0x20` where the other three bridges' carry 4 | the collision passes `0x20` as it passes 4, so all four bridges can be crossed | [24](../docs/24-motion.md#not-established) |
 | M14 | Which hall ways the world search holds: the game relinks every building's at load and again whenever a tree or a stone moves (`MHallWay` slot 11, from `OnAddStatic` and `OnRemoveStatic` alone) | only a live bridge's hall way joins the search; a way through any other building is left out | [24](../docs/24-motion.md#who-relinks-a-hall-way--read) |
 | M14 | How a walker goes to the point it finds off a non-walkable areal; what slot 14's `0x20000000`, which doubles the square, is | straight; the square never doubles | [24](../docs/24-motion.md#the-global-path--read-and-measured) |
 | M14 | The walker's random source, `rand()`, which scales each link's cost | a 32-bit xorshift the play keeps | [24](../docs/24-motion.md#the-global-path--read-and-measured) |

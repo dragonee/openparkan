@@ -57,11 +57,11 @@ pub fn dome(centre: Vec3, axes: [Vec3; 3], segments: u8, rings: u8) -> Vec<([Vec
     out
 }
 
-/// The corners of a sprite seen from `eye`: a square of side `width` facing the eye,
+/// The corners of a sprite seen from `eye`: `width` across the eye and `height` up it,
 /// or, when `along` is not zero, `along` long and `width` wide, turned about its
 /// length toward the eye. Drawn in order, the texture's u runs across a stretched quad and
 /// v along it; [`lengthwise`] turns them round.
-pub fn billboard(centre: Vec3, along: Vec3, width: f32, eye: Vec3) -> [Vec3; 4] {
+pub fn billboard(centre: Vec3, along: Vec3, width: f32, height: f32, eye: Vec3) -> [Vec3; 4] {
     let view = (centre - eye).normalize_or(Vec3::Y);
     let (half_long, side) = if along.length_squared() > 1e-12 {
         let side = along.cross(view).normalize_or(Vec3::X) * (width / 2.0);
@@ -69,13 +69,44 @@ pub fn billboard(centre: Vec3, along: Vec3, width: f32, eye: Vec3) -> [Vec3; 4] 
     } else {
         let right = view.cross(Vec3::Z).normalize_or(Vec3::X);
         let up = right.cross(view);
-        (up * (width / 2.0), right * (width / 2.0))
+        (up * (height / 2.0), right * (width / 2.0))
     };
     [
         centre - half_long - side,
         centre - half_long + side,
         centre + half_long + side,
         centre + half_long - side,
+    ]
+}
+
+/// The corners of a sprite drawn **through its frame**: the camera-facing unit square built
+/// in the frame's own space and carried back out through it, so the frame's axis lengths are
+/// the quad's.
+///
+/// The frame a sprite hangs on is a matrix -- three control points' direction vectors as its
+/// rows and their centroid as its fourth (`Control.dll:0x10002d8d`) -- and the draw combines
+/// it, scaled per axis by the emitter's size channel (`Effect.dll:0x1000d0c0`), with the basis
+/// mode 0 builds from the eye (`0x100093f4`). The eye reaches the draw already in the frame's
+/// own space, as the sprite's position does, so the square faces the camera there and comes
+/// out stretched by the frame: `fr_e_brige`'s rays, on a frame 150 m along the span and 1.93
+/// across, are a 150 m streak seen from the bank and a 1.93 m flicker seen down the deck.
+///
+/// Up is the frame's third axis, as it is the model's z in the draw (`0x1000948d` builds the
+/// side vector as (−d.y, d.x, 0) of the local view).
+pub fn framed(centre: Vec3, axes: [Vec3; 3], eye: Vec3) -> [Vec3; 4] {
+    let basis = glam::Mat3::from_cols(axes[0], axes[1], axes[2]);
+    let inverse = basis.inverse();
+    if !inverse.is_finite() {
+        return billboard(centre, Vec3::ZERO, axes[1].length(), axes[2].length(), eye);
+    }
+    let view = (inverse * (centre - eye)).normalize_or(Vec3::Y);
+    let side = view.cross(Vec3::Z).normalize_or(Vec3::X);
+    let (half_long, half_side) = (basis * (side.cross(view) / 2.0), basis * (side / 2.0));
+    [
+        centre - half_long - half_side,
+        centre - half_long + half_side,
+        centre + half_long + half_side,
+        centre + half_long - half_side,
     ]
 }
 
@@ -351,15 +382,32 @@ mod tests {
 
     #[test]
     fn a_square_faces_the_eye_and_a_streak_turns_about_its_length() {
-        let c = billboard(Vec3::ZERO, Vec3::ZERO, 2.0, Vec3::new(0.0, -10.0, 0.0));
+        let c = billboard(Vec3::ZERO, Vec3::ZERO, 2.0, 2.0, Vec3::new(0.0, -10.0, 0.0));
         for p in c {
             assert!(p.y.abs() < 1e-6 && (p.x.abs() - 1.0).abs() < 1e-6 && (p.z.abs() - 1.0).abs() < 1e-6);
         }
-        let s = billboard(Vec3::ZERO, Vec3::new(4.0, 0.0, 0.0), 1.0, Vec3::new(0.0, 0.0, 10.0));
+        let s = billboard(Vec3::ZERO, Vec3::new(4.0, 0.0, 0.0), 1.0, 1.0, Vec3::new(0.0, 0.0, 10.0));
         assert!((s[2] - s[1]).length() - 4.0 < 1e-5);
         assert!(s.iter().all(|p| p.z.abs() < 1e-6), "a streak seen from above lies flat");
         // Lengthwise, u (corner 0 to 1) runs along the streak's 4 and v (1 to 2) across its 1.
         let l = lengthwise(s);
         assert!(((l[1] - l[0]).length() - 4.0).abs() < 1e-5 && ((l[2] - l[1]).length() - 1.0).abs() < 1e-5);
+    }
+
+    #[test]
+    fn a_quad_in_a_frame_is_as_long_as_the_axis_it_is_seen_across_and_as_short_as_the_one_seen_along() {
+        // `fr_e_brige`'s ray: 150 m along the span (model +y here), 1.932 across, 0.414 high.
+        let axes = [Vec3::new(0.0, 150.0, 0.0), Vec3::new(1.932, 0.0, 0.0), Vec3::new(0.0, 0.0, -0.414)];
+        let side = framed(Vec3::ZERO, axes, Vec3::new(60.0, 0.0, 0.0));
+        let (across, up) = ((side[1] - side[0]).length(), (side[2] - side[1]).length());
+        assert!((across - 150.0).abs() < 1e-3, "seen across the span it runs its whole length: {across}");
+        assert!((up - 0.414).abs() < 1e-3, "and stands its height: {up}");
+        let along = framed(Vec3::ZERO, axes, Vec3::new(0.0, -300.0, 0.0));
+        let (a, b) = ((along[1] - along[0]).length(), (along[2] - along[1]).length());
+        assert!((a - 1.932).abs() < 1e-3 && (b - 0.414).abs() < 1e-3, "down the span: {a} by {b}");
+        // Three directions in a plane give no basis to turn through, and the quad falls back
+        // to one across the eye.
+        let flat = [Vec3::X, Vec3::X * 2.0, Vec3::X * 3.0];
+        assert_eq!(framed(Vec3::ZERO, flat, Vec3::new(0.0, -10.0, 0.0)).len(), 4);
     }
 }

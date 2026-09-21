@@ -3,6 +3,12 @@
 //! it nearby, and fires its capture when a unit stands in the first computer's zone until
 //! it has opened. See `docs/24-motion.md`, "Walking into a building", and
 //! `docs/27-ownership.md`, "Capture".
+//!
+//! Every other component that names channels is an item too, and nothing files those: the
+//! controller's own time driver steps them from the switch word the record carries
+//! (`docs/28-chassis.md`, "Every component is stepped, not only a device"). That is what
+//! turns a mine's rotors, the Main Teleport's rings, the energy bridge's hub and, once, a
+//! tower's mast.
 
 use glam::Vec3;
 use parkan_formats::control::Controller;
@@ -14,6 +20,8 @@ use parkan_sim::device::{Item, Motion};
 use crate::assembly::Assembly;
 
 /// The item classes `CBuilding` files as doors and as computers (`Terrain.dll:0x100580b0`).
+/// Those two are the only classes it looks for; every other component the controller holds
+/// is left to the time driver, which steps whatever names a channel.
 pub const DOOR_TYPE: i32 = 12;
 pub const COMPUTER_TYPE: i32 = 13;
 /// An open door nothing holds closes this long after it opened (`CBuilding::SendMsg`,
@@ -85,6 +93,10 @@ pub struct Building {
     pub scale: f32,
     pub doors: Vec<Door>,
     pub pod: Option<Pod>,
+    /// Every other component that names channels, stepped from the switch word its record
+    /// carries: the nine class-26 and two class-29 records the install ships
+    /// ([`running_items`]).
+    pub running: Vec<Item>,
     /// The pod's zone: its node's sphere at rest, as placed.
     pub zone: Option<(Vec3, f32)>,
     /// The controller's channels, which the items name.
@@ -96,6 +108,11 @@ pub struct Building {
 pub struct Fired {
     pub target: usize,
     pub child: Child,
+}
+
+/// How many of a part's nodes both its mesh and its pose list hold.
+fn mesh_nodes(part: &Part) -> usize {
+    part.mesh.nodes.len().min(part.nodes.len())
 }
 
 /// A controller's items of `class`, switched off at their start.
@@ -115,6 +132,47 @@ fn items(controller: &Controller, class: i32) -> Vec<Item> {
             item.state = 0;
             item
         })
+        .collect()
+}
+
+/// An item as it starts, with the one switch word in the install this does not play as read.
+///
+/// STAND-IN: docs/28-chassis.md#every-component-is-stepped-not-only-a-device--read-and-measured
+/// -- an item whose word **bounces** is started as one that opens and stops. The word 9 is
+/// *read* from the record's `+0x18` (`0x10021d86`) and bit 8 is *read* to hold the progress at
+/// an end and swap the low bits (`0x10020ae4`), so as the file stands both towers raise their
+/// gun mast over five seconds and stow it over the next five, for ever. Nothing found switches
+/// the word off: the component factory files every class in the controller's timed list
+/// (`Control.dll:0x1002d70a`), `CBuilding` looks for classes 12 and 13 and no other
+/// (`Terrain.dll:0x100583a2`), and neither record names a section-5 group at `+0x10` or
+/// `+0x14`. *Measured*: the two class-29 records are the only ones of the install's 1066 whose
+/// word bounces. In the game a tower's mast comes up as it is built and stays up.
+pub fn started(mut item: Item) -> Item {
+    if item.state & parkan_sim::device::BOUNCE != 0 {
+        item.switch(item.state & parkan_sim::device::CLOSING == 0);
+    }
+    item
+}
+
+/// The controller's items that run by themselves: every component that names a channel and
+/// is neither a door nor a control pod, in the switch word its own record gives it
+/// (`Control.dll:0x10021d86`, else the constructor's 5).
+///
+/// The component factory (`0x1002d4b0`) files **every** class it builds in the controller's
+/// timed list, and the time driver (`0x1002d260`) runs each one's update, so a class the
+/// owner never looks at still steps its channels. *Measured*: across the 1066 component
+/// records the install ships, the classes that name channels and that nothing else here
+/// drives are **26** -- nine records, the three mines' rotors, the Main Teleport's twenty-eight
+/// rings and `fr_e_brige`'s hub -- and **29**, two records, the Small and Large Towers' masts.
+/// Class 26 is a plain base item (case 11 of the factory) and class 29 falls to its default
+/// case, which is the base item too.
+pub fn running_items(controller: &Controller) -> Vec<Item> {
+    controller
+        .components
+        .iter()
+        .enumerate()
+        .filter(|(_, c)| !matches!(c.type_id, DOOR_TYPE | COMPUTER_TYPE) && !c.entries.is_empty())
+        .map(|(i, c)| started(Item::new(i, c, &controller.channels)))
         .collect()
 }
 
@@ -164,7 +222,8 @@ impl Building {
                 fired: false,
                 closed_ms: f64::NEG_INFINITY,
             });
-            if doors.is_empty() && pod.is_none() {
+            let running = running_items(&controller);
+            if doors.is_empty() && pod.is_none() && running.is_empty() {
                 continue;
             }
             let half = f64::from(placed.rotation) / 2.0;
@@ -179,6 +238,7 @@ impl Building {
                 scale: placed.placed_scale(),
                 doors,
                 pod,
+                running,
                 zone: None,
                 controller,
             });
@@ -186,28 +246,73 @@ impl Building {
         None
     }
 
-    /// The frame node `node` plays from the doors' and the pod's channels, if one drives it.
+    /// The frame node `node` plays from the items' channels, if one drives it.
     fn frame(&self, node: usize) -> Option<f64> {
         let door = self.doors.iter().map(|d| &d.item);
         door.chain(self.pod.iter().map(|p| &p.item))
+            .chain(&self.running)
             .flat_map(|item| item.channels.iter().zip(&item.now))
             .find(|(c, _)| c.node == node as i32)
             .map(|(c, &v)| f64::from(c.frame(v)))
     }
 
-    /// Pose `part`'s nodes where the doors and the pod have their channels now, as the
-    /// placement poses a building at rest ([`crate::battle::Battle::load`]).
-    pub fn pose(&self, part: &mut Part) {
-        let mesh = part.mesh.clone();
-        for n in 0..mesh.nodes.len().min(part.nodes.len()) {
+    /// Pose the building's own part where its items have their channels now, as the placement
+    /// poses a building at rest ([`crate::battle::Battle::load`]), and carry every part that
+    /// hangs on one of its nodes along with it.
+    pub fn pose(&self, parts: &mut [Part], posed_elsewhere: impl Fn(usize) -> bool) {
+        let Some(own) = parts.get(self.part) else { return };
+        let (mesh, count) = (own.mesh.clone(), mesh_nodes(own));
+        for n in 0..count {
             let world = mesh.world_pose_by(n, |k| match self.frame(k) {
                 Some(frame) => mesh.pose_at(k, frame),
                 None => mesh.local_pose(k),
             });
             let mut local = self.mount.compose(&world);
             local.translation = local.translation.map(|v| v * f64::from(self.scale));
-            part.nodes[n] = self.place.compose(&local);
+            parts[self.part].nodes[n] = self.place.compose(&local);
         }
+        self.carry(parts, &posed_elsewhere);
+    }
+
+    /// Repose every part that hangs on a node this building plays, and everything hanging on
+    /// those in turn: a tower's turret, its guns, its radar and its deflector all stand on
+    /// nodes of the mast its class-29 item raises, and a part left where the assembly mounted
+    /// it stays behind in the ground.
+    ///
+    /// A hosted part's nodes are its host's socket, less the part's own root pose, times the
+    /// node's place in its mesh -- the chain [`crate::robot::Robot::part_pose`] walks for a
+    /// warbot's turret and guns.
+    fn carry(&self, parts: &mut [Part], posed_elsewhere: &impl Fn(usize) -> bool) {
+        for p in 0..parts.len() {
+            let Some((host, socket)) = parts[p].host else { continue };
+            if host >= p || posed_elsewhere(p) || (host != self.part && !self.carried(parts, host)) {
+                continue;
+            }
+            let Some(&mount) = parts[host].nodes.get(socket) else { continue };
+            let mesh = parts[p].mesh.clone();
+            let root = mesh.root_pose().invert();
+            let scale = f64::from(parts[p].scale);
+            for n in 0..mesh_nodes(&parts[p]) {
+                let mut own = root.compose(&mesh.world_pose(n));
+                own.translation = own.translation.map(|v| v * scale);
+                parts[p].nodes[n] = mount.compose(&own);
+            }
+        }
+    }
+
+    /// Whether part `p` hangs, through however many hosts, on the building's own part.
+    fn carried(&self, parts: &[Part], p: usize) -> bool {
+        let mut at = p;
+        for _ in 0..parts.len() {
+            match parts[at].host {
+                Some((host, _)) if host < at => at = host,
+                _ => return at == self.part,
+            }
+            if at == self.part {
+                return true;
+            }
+        }
+        false
     }
 
     /// Whether node `node` is a door's that is open, whose faces let units through
@@ -273,8 +378,14 @@ impl Building {
     /// a door's part is measured against (`Terrain.dll:0x1005a27f`) is not read: the door
     /// node's level-0 slot sphere stands in for it. Holds are worked out afresh from every
     /// child each tick rather than on each child's move.
-    pub fn tick(&mut self, now_ms: f64, part: &Part, children: &[Standing]) -> (bool, Option<Fired>) {
+    /// Returns whether the doors' or the pod's channels moved, whether a running item's did,
+    /// and a pod that fired.
+    pub fn tick(&mut self, now_ms: f64, part: &Part, children: &[Standing]) -> (bool, bool, Option<Fired>) {
         let before: Vec<f32> = self.channel_values();
+        let before_running: Vec<f32> = self.running_values();
+        for item in &mut self.running {
+            item.tick(now_ms, &Motion::default(), true);
+        }
         for d in &mut self.doors {
             d.held = children.iter().any(|c| {
                 d.nodes
@@ -304,7 +415,7 @@ impl Building {
             }
         }
         let fired = self.tick_pod(now_ms, part, children);
-        (self.channel_values() != before, fired)
+        (self.channel_values() != before, self.running_values() != before_running, fired)
     }
 
     fn tick_pod(&mut self, now_ms: f64, part: &Part, children: &[Standing]) -> Option<Fired> {
@@ -367,6 +478,10 @@ impl Building {
     fn channel_values(&self) -> Vec<f32> {
         let doors = self.doors.iter().flat_map(|d| d.item.now.iter().copied());
         doors.chain(self.pod.iter().flat_map(|p| p.item.now.iter().copied())).collect()
+    }
+
+    fn running_values(&self) -> Vec<f32> {
+        self.running.iter().flat_map(|i| i.now.iter().copied()).collect()
     }
 
     /// The controller the items belong to.

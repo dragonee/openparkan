@@ -633,7 +633,7 @@ pub fn sync(
         .sprites(eye)
         .into_iter()
         .flat_map(|(look, s)| {
-            use parkan_render::sprites::{Quad, billboard, dome, lengthwise};
+            use parkan_render::sprites::{Quad, billboard, dome, framed, lengthwise};
             if let Some(d) = s.dome {
                 return dome(s.centre, d.axes, d.segments, d.rings)
                     .into_iter()
@@ -646,7 +646,10 @@ pub fn sync(
                     })
                     .collect::<Vec<_>>();
             }
-            let corners = billboard(s.centre, s.along, s.width, eye);
+            let corners = match s.frame {
+                Some(axes) => framed(s.centre, axes, eye),
+                None => billboard(s.centre, s.along, s.width, s.height, eye),
+            };
             vec![Quad {
                 look,
                 corners: if s.lengthwise { lengthwise(corners) } else { corners },

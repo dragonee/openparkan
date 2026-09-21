@@ -497,6 +497,80 @@ its name: (0.5, 1, 1) on 134 blocks, (1.5, 1.5, 0.5) on
 its low end almost to the end of the window, which is what `B_Sphere_Sign` and
 `B_Sphere_Start` open with.
 
+### A control-point frame's axes are depth, width and height — *measured*
+
+An action-4 effect hangs on **three** control points, and the frame it makes takes
+their centroid as its origin and **their direction vectors as its three axes**
+([13-control.md](13-control.md#a-buildings-load-group--read-and-measured)). Those
+vectors carry their own lengths — a `.cpt` direction's length is a magnitude, not a
+unit ([07-objects.md](07-objects.md#ctpt--control-points)) — so the frame is a box,
+and which axis is which decides how big what hangs in it is drawn.
+
+The points say so themselves. **47** triples across the install are named `*_d`,
+`*_w` and `*_h` — `rech_d/w/h` on every recharge bay, `Smoke_d/w/h` on every
+chimney, `Mineglow_d/w/h` on the three mines, `Tele_d/w/h` on the Main Teleport,
+`RayD_n`/`RayW_n`/`RayH_n` on the energy bridge — and on **45** of the 47 the three
+directions lie on three distinct model axes. **43 of the 51** action-4 records built
+on such a triple name it in **d, w, h** order; the eight that do not are the four
+factories' and the ruin's chimney plumes, which name it w, h, d and are type-8
+streams, whose frame the draw only turns.
+
+So **the frame's first axis is depth and its second and third are width and
+height**. The first is the axis its position channel travels — which is the same
+layout a bolt's size channel has, `(1, +24, +24)` with the 1 along the beam
+([below](#bolts-streams-and-fades--read-and-measured)) — and all three go into the
+quad, because a sprite is drawn **through** the frame
+([below](#a-sprite-is-drawn-through-its-frame--read)).
+
+`fr_e_brige`, the *Enh Bridge BS-52/30*, is the clearest case: its five `f_brige_ray`
+sprites sit on triples of (0, 150, 0), (1.932, 0, 0) and (0, 0, −0.414), so a ray is
+1.93 across and 0.41 high seen down the deck and a 150 m streak seen across it —
+three of them along the span and one up each tower. Sized by the first axis in every
+direction instead they come out 150 m square, and two of them fill half the sky.
+
+### A sprite is drawn through its frame — *read*
+
+The frame is not three numbers the draw picks a size from: **it is a matrix**, and the
+quad is a camera-facing unit square in its space rather than on the screen.
+
+**Action 4 builds it as a matrix.** The handler (`Control.dll:0x10002d8d`) copies the
+identity out of `0x10041cd0` and writes each of the three points' directions into a
+row of it, `0x10003780` taking the row index in `edx` — 0, 1, 2 — and then the
+centroid into row 3. That matrix goes to the effect (slot 0xa, `0x10002e06`), and the
+instance keeps it at `+0xa4`. The three other branches of that handler are for
+degenerate triples: the same direction on all three points (`0x10002c42`), on two of
+them, or two directions parallel (`0x10003620`), each of which builds an orientation
+from the one direction it has (`0x10004070`) instead, since the matrix would not
+invert. *Measured* over the install's action-4 records: **189** name three distinct
+points, and of those exactly **one** has its directions in a plane — `r_h_01`'s
+`aim_fire_S`, whose `Smoke_X` and `Smoke_Z` are both (1, 0, 0). **690** name the same
+point three times, every sign, lamp and console screen among them, and **none** names
+two. So the matrix branch is the rule for a real triple and the degenerate branches
+cover the rest.
+
+**The draw is handed it.** The manager's emitter loop (`Effect.dll:0x100080e9`) builds
+a context on its stack and passes it to every emitter's update: the instance's matrix
+lands at `+8` (`rep movsd` from `+0xa4` at `0x10008050`) and the eye at `+0x48`. A
+type-3 sprite's update (`0x10010805`) hands those two to the particle's draw
+(vtable slot 0, `0x100093d0`), the matrix as its second argument and the eye as its
+first.
+
+**And the draw multiplies both together.** The draw switches on the particle's sprite
+mode at `+0xc` — 0 faces the camera, 1 is a bolt's, 2 orients by the direction channel,
+3 is a burst's (`0x100093ed`, four cases). Mode 0 makes a basis from the eye: the view
+`eye − position` normalised, a side vector `(−d.y, d.x, 0)` square to it, and their
+cross for up (`0x100093f4`–`0x1000950e`). Then, whichever mode ran, the tail
+(`0x10009871`) takes the **instance matrix**, sets its translation to the particle's
+position, scales its three columns by the size channel (`0x1000d0c0`) and combines it
+with the mode's basis into the particle's own `+0x14`.
+
+So a mode-0 sprite faces the camera **in the frame's own space** — the position channel
+is in that space, and so is the eye the context carries — and comes back out stretched
+by the frame. A frame whose axes are all one length draws the square the size channel
+asks for, whichever way it is seen, which is every light and screen in the game. A
+frame 150 m along one axis and 1.93 across another draws a 150 m streak from the side
+and a 1.93 m flicker end-on, which is the energy bridge's ray.
+
 ### The generator — *read*, and *measured*
 
 Every random number `Effect.dll` draws comes from one routine, `0x10002220`, and it
@@ -1321,6 +1395,19 @@ Read one slot either way, none of the seven name witnesses agrees.
   ([How a sound is heard](#how-a-sound-is-heard--read-and-measured)).
 - **What silences the hero's breath** in its own view.
 - **How Direct3D Sound pans** a sound about the listener.
+- **What the eye the sprite draw is handed has been transformed by.** The emitter
+  loop's context carries the instance's matrix at `+8` and a point at `+0x48`
+  (`0x10008050`, `0x100080aa`), and the draw takes that point for the eye
+  (`0x100093fc`). A sprite's position channel is in the frame's own space, so the
+  eye must be too, and `[0x1001e0bc]` slot `0x68` — called with the matrix in `ecx`
+  and the point in `edx` just before (`0x100080da`) — is where it would be put
+  there; that slot is in the maths interface, outside this module, and is not read.
+- **Which of the four sprite modes anything but 0, 1 and 3 uses.** Mode 2, which
+  orients a sprite by its direction channel (`0x1000d110` at `0x1000986c`), is
+  reached by nothing found: a bolt's sprites take mode 1 (`0x10002932`), a type-7
+  burst takes 3 when its block's `+4` is 1 and 0 otherwise (`0x100019d0`), and a
+  type-3, 4 or 9 sprite's own `+0xc` is never written, so it keeps whatever the
+  particle was constructed with.
 
 - **The rest of each emitter's floats.** The window, the phase, the sprite's
   moving and growing triples, the light, the bolt's segments, the stream's

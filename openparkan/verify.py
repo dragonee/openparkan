@@ -1774,6 +1774,148 @@ def check_arealmap(check, game: Path) -> None:
     check("fortif.rlb: each bridge half's hall way has three or five exits and one flag-4 vertex",
           len(shapes) == 4 and all(e in (3, 5) and j == 1 for e, j in shapes.values()), f"{shapes}")
 
+    # The cap each half carries where the two meet.  docs/24, "Standing on a
+    # bridge": the halves abut, so that cap stands in the way of anything
+    # crossing, and every bridge flags it a bit the collision passes -- 4 on
+    # three of them and 0x20, the energy bridge's own material bit, on the
+    # fourth.
+    fortif = NResArchive.open(game / "fortif.rlb")
+    caps = {}
+    for e in fortif:
+        if e.tag != "MESH" or not e.name.lower().endswith("_brige.msh"):
+            continue
+        model = objmesh.parse(fortif.read(e), e.name)
+        placed = model.posed_positions()
+        faces = [(f, [placed[i] for i in model.triangles[f]])
+                 for node in model.nodes
+                 for slot in (model.slots[i] for i in node.slots_for_lod(0) if i < len(model.slots))
+                 for f in range(slot.first_triangle, slot.first_triangle + slot.triangle_count)]
+        far = max(max(v[1] for v in p) for _, p in faces)
+        cap = [f for f, p in faces if min(v[1] for v in p) > far - 0.01]
+        flags = {model.face_flags[f] for f in cap}
+        square = all(abs(model.face_normal[f][1] - 1.0) < 1e-3 for f in cap)
+        caps[e.name.lower()] = (round(far, 2), len(cap), sorted(flags), square)
+    passed = {objmesh.ROUND_SKIPS_FACE & ~0x20, 0x20}  # 4 and 0x20
+    check("fortif.rlb: each bridge half's end cap is six faces a round passes",
+          len(caps) == 4
+          and all(n == 6 and square and len(fl) == 1 and fl[0] in passed
+                  for _, n, fl, square in caps.values())
+          and {fl[0] for _, _, fl, _ in caps.values()} == passed,
+          f"{caps} -- deck length, faces, their flag and whether all face +y; "
+          f"three bridges flag the cap 4 and fr_e_brige flags it 0x20, the bit "
+          f"its additive B_A_BRIGE material carries, and a round passes both "
+          f"(ROUND_SKIPS_FACE 0x24)")
+
+    # Which components name section-2 channels, and so step them.  The factory
+    # (Control.dll:0x1002d4b0) files every class it builds in the controller's
+    # timed list, and the driver (0x1002d260) runs each one's update, so a class
+    # the owner never looks at still turns what it names.  CBuilding files only
+    # classes 12 and 13 (Terrain.dll:0x100583a2) and a robot's own device list
+    # is classes 3 and 8, which leaves two classes nobody else steers.
+    driven: Counter[int] = Counter()
+    bounces: dict[str, list[int]] = {}
+    spokes = {}
+    for name in ("static.rlb", "intsys.rlb", "turrets.rlb", "guns.rlb", "parts.rlb",
+                 "weapon.rlb", "animals.rlb", "bases.rlb", "fortif.rlb", "system.rlb",
+                 "objects.rlb"):
+        try:
+            ar = NResArchive.open(game / name)
+        except (OSError, NotAnNResArchive):
+            continue
+        for e in ar:
+            if not e.name.lower().endswith(".ctl"):
+                continue
+            try:
+                ctrl = control.parse(ar.read(e))
+            except (ValueError, struct.error):
+                continue
+            for k in ctrl.components:
+                if k.entries:
+                    driven[k.type_id] += 1
+                if k.entries and k.state is not None and k.state & 0xC == 8:
+                    bounces.setdefault(e.name.lower(), []).append(k.type_id)
+    unsteered = {c: n for c, n in driven.items() if c in (26, 29)}
+    check("CTL: two component classes name channels and nothing else steers them",
+          unsteered == {26: 9, 29: 2},
+          f"of the classes that name channels, {sorted(driven)} in all, "
+          f"{unsteered} are neither a robot's device (3, 8) nor a building's door or "
+          f"pod (12, 13): the mines', the Main Teleport's and the energy bridge's "
+          f"turning parts, and the two towers' gun masts")
+    check("CTL: only the two towers' masts carry a switch word that bounces",
+          bounces == {"fr_b_tower.ctl": [29], "fr_m_tower.ctl": [29]},
+          f"{bounces} -- word 9, open and bouncing (Control.dll:0x10020ae4), against "
+          f"the constructor's 5 every other channel-driving record keeps")
+
+    # An action-4 effect's frame is a matrix of the three points' directions
+    # (Control.dll:0x10002d8d), so a triple of three distinct, non-planar points
+    # gives a basis the draw turns a sprite through; anything else falls to one of
+    # the handler's three degenerate branches.
+    triples = Counter()
+    planar = []
+    for name in ("static.rlb", "intsys.rlb", "turrets.rlb", "guns.rlb", "parts.rlb",
+                 "weapon.rlb", "animals.rlb", "bases.rlb", "fortif.rlb", "system.rlb",
+                 "objects.rlb"):
+        try:
+            ar = NResArchive.open(game / name)
+        except (OSError, NotAnNResArchive):
+            continue
+        members = {e.name.lower(): e for e in ar}
+        for key, e in members.items():
+            if not key.endswith(".ctl") or key[:-4] + ".cpt" not in members:
+                continue
+            try:
+                ctrl = control.parse(ar.read(e))
+                pts = objmesh.parse_control_points(
+                    ar.read(members[key[:-4] + ".cpt"]), key[:-4] + ".cpt")
+            except (ValueError, struct.error):
+                continue
+            for r in control.run_group(ctrl.group(control.ENTRY_LOAD),
+                                       [False] * control.CONDITIONS):
+                if r.action != control.ACT_EFFECT_POINTS:
+                    continue
+                idx = r.args[:3]
+                if any(not 0 <= i < len(pts) for i in idx):
+                    continue
+                triples[len(set(idx))] += 1
+                if len(set(idx)) != 3:
+                    continue
+                d = [pts[i].direction for i in idx]
+                cross = (d[0][1] * d[1][2] - d[0][2] * d[1][1],
+                         d[0][2] * d[1][0] - d[0][0] * d[1][2],
+                         d[0][0] * d[1][1] - d[0][1] * d[1][0])
+                det = sum(cross[j] * d[2][j] for j in range(3))
+                norm = math.dist((0, 0, 0), d[0]) * math.dist((0, 0, 0), d[1]) \
+                    * math.dist((0, 0, 0), d[2])
+                if norm == 0 or abs(det) <= norm * 1e-3:
+                    planar.append((key, r.resource.member, [pts[i].name for i in idx]))
+    check("CTL: an action-4 triple is three distinct points or one named three times",
+          dict(triples) == {3: 189, 1: 690} and len(planar) == 1,
+          f"{dict(triples)} records by how many distinct points they name, and "
+          f"{len(planar)} of the three-point ones has its directions in a plane: "
+          f"{planar} -- so the handler's matrix branch is the rule for a real triple "
+          f"and its three degenerate branches cover the rest")
+
+    # The energy bridge's three deck rays hang on three nodes of the hub the
+    # class-26 item turns, 120 degrees apart on a circle about it.
+    mesh_e = objmesh.parse(fortif.read_name("fr_e_brige.msh"), "fr_e_brige.msh")
+    ctrl_e = control.parse(fortif.read_name("fr_e_brige.ctl"))
+    pts_e = objmesh.parse_control_points(fortif.read_name("fr_e_brige.cpt"), "fr_e_brige.cpt")
+    hub = ctrl_e.channels[ctrl_e.components[-1].entries[0]].node
+    rays = [r.args[:3] for r in control.run_group(ctrl_e.group(control.ENTRY_LOAD),
+                                                  [False] * control.CONDITIONS)
+            if r.action == control.ACT_EFFECT_POINTS and r.resource.member == "f_brige_ray"]
+    on_hub = [idx for idx in rays if mesh_e.nodes[pts_e[idx[0]].nodes[0]].parent == hub]
+    arms = [mesh_e.world_pose(pts_e[idx[0]].nodes[0])[0] for idx in on_hub]
+    centre = [sum(a[i] for a in arms) / len(arms) for i in range(3)] if arms else [0.0] * 3
+    radii = sorted(round(math.dist(a, centre), 2) for a in arms)
+    check("fortif.rlb: the energy bridge's three deck rays ride three spokes of its hub",
+          len(rays) == 5 and len(on_hub) == 3 and len(set(radii)) == 1
+          and abs(radii[0] - 20.0) < 0.1
+          and ctrl_e.channels[ctrl_e.components[-1].entries[0]].span > 6.0,
+          f"node {hub} turns {ctrl_e.channels[0].span:.2f} rad at "
+          f"{ctrl_e.channels[0].rate} a second, and the three rays sit on its children "
+          f"at radius {radii}; the other two run up the towers on node 0")
+
 
 def check_missions(check, game: Path) -> None:
     """The mission format is validated by whether it closes, and by whether
@@ -2289,6 +2431,92 @@ def check_objects(check, game: Path) -> None:
           f"a scalar in a vector slot -- and {frame_unit}/{frame_named} of the "
           f"frame and aim points are unit length.  The first triple is exactly "
           f"zero on {zeroed}/{seen}")
+
+    # Three points named *_d, *_w and *_h describe one frame -- the depth,
+    # width and height of whatever hangs on it -- and an action-4 effect
+    # record names them in that order, so the frame's first axis is the depth
+    # the effect travels and its second and third are what a sprite spans.
+    # docs/11, "A control-point frame's axes are depth, width and height".
+    def _dwh(name: str) -> tuple[str, str] | None:
+        m = re.match(r"^(.*)_([dwh])$", name, re.I)
+        if m:
+            return m.group(1).lower(), m.group(2).lower()
+        m = re.match(r"^(.*?)([DWH])(_\d+)$", name)
+        return (m.group(1).lower() + m.group(3), m.group(2).lower()) if m else None
+
+    triples = distinct_axes = 0
+    for name in ARCHIVES:
+        ar = NResArchive.open(game / name)
+        for e in ar:
+            if e.tag != "CTPT":
+                continue
+            try:
+                pts = objmesh.parse_control_points(ar.read(e), e.name)
+            except (ValueError, struct.error):
+                continue
+            groups: dict[str, dict[str, objmesh.ControlPoint]] = defaultdict(dict)
+            for p in pts:
+                if (k := _dwh(p.name)) is not None:
+                    groups[k[0]][k[1]] = p
+            for g in groups.values():
+                if set(g) != {"d", "w", "h"}:
+                    continue
+                triples += 1
+                axes = {max(range(3), key=lambda i: abs(g[k].direction[i])) for k in "dwh"}
+                distinct_axes += len(axes) == 3
+    check("CTPT: a _d/_w/_h triple is one frame's depth, width and height",
+          triples == 47 and distinct_axes >= 45,
+          f"{triples} such triples across the install, {distinct_axes} of them "
+          f"with their three directions on three distinct model axes -- "
+          f"fr_e_brige's RayD/RayW/RayH_1 at 150 x 1.93 x 0.41 m among them")
+
+    opened: dict[str, NResArchive | None] = {}
+
+    def _archive(name: str) -> NResArchive | None:
+        key = name.lower()
+        if key not in opened:
+            try:
+                opened[key] = NResArchive.open(game / name)
+            except (OSError, NotAnNResArchive):
+                opened[key] = None
+        return opened[key]
+
+    frames = ordered = 0
+    odd: Counter[str] = Counter()
+    done: set[tuple[str, str]] = set()
+    for record in lib.records.values():
+        ctl, cpt = record.slot_with_suffix("ctl"), record.slot_with_suffix("cpt")
+        if not ctl or not cpt or (ctl.library.lower(), ctl.member.lower()) in done:
+            continue
+        done.add((ctl.library.lower(), ctl.member.lower()))
+        ar_ctl, ar_cpt = _archive(ctl.library), _archive(cpt.library)
+        if ar_ctl is None or ar_cpt is None:
+            continue
+        try:
+            ctrl = control.parse(ar_ctl.read_name(ctl.member))
+            pts = objmesh.parse_control_points(ar_cpt.read_name(cpt.member), cpt.member)
+        except (KeyError, ValueError, struct.error):
+            continue
+        for r in control.run_group(ctrl.group(control.ENTRY_LOAD), [False] * control.CONDITIONS):
+            if r.action != control.ACT_EFFECT_POINTS:
+                continue
+            idx = r.args[:3]
+            if len(set(idx)) == 1 or any(not 0 <= i < len(pts) for i in idx):
+                continue
+            named = [_dwh(pts[i].name) for i in idx]
+            if any(n is None for n in named) or len({n[0] for n in named}) != 1:
+                continue
+            frames += 1
+            order = "".join(n[1] for n in named)
+            ordered += order == "dwh"
+            if order != "dwh":
+                odd[pts[idx[0]].name.rsplit("_", 1)[0]] += 1
+    check("CTL: an action-4 frame on such a triple names it depth, width, height",
+          frames >= 51 and ordered >= 43,
+          f"{ordered}/{frames} three-point load-group frames whose points are a "
+          f"_d/_w/_h triple list them d, w, h; the {frames - ordered} that do not "
+          f"are the chimney plumes {dict(odd)}, which name them w, h, d and are "
+          f"type-8 streams, whose frame the draw only turns")
 
     # A point's two node slots: the control system places it by the first
     # (Control.dll:0x1000b22a); the ground contact lets a contact point live

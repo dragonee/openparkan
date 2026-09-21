@@ -10,8 +10,8 @@ use std::rc::Rc;
 use anyhow::{Context, Result};
 use glam::{Quat, Vec3};
 use parkan_formats::control::{
-    self, CAMERA_TYPE, CHANNEL_UNDRIVEN, Channel, Component, Controller, ENGINE_TYPE, GUN_TYPE, RADAR_PERIOD,
-    RADAR_RANGE, RADAR_TYPE, SIMPLE_TYPE, TRIPLE_TOP_SPEED, TURRET_TYPE,
+    self, CAMERA_TYPE, CHANNEL_UNDRIVEN, Channel, Component, Controller, EFFICIENCY_TYPE, ENGINE_TYPE,
+    GUN_TYPE, MAST_TYPE, RADAR_PERIOD, RADAR_RANGE, RADAR_TYPE, SIMPLE_TYPE, TRIPLE_TOP_SPEED, TURRET_TYPE,
 };
 use parkan_formats::cpt::{self, ControlPoint};
 use parkan_formats::mesh::NO_SLOT;
@@ -258,14 +258,20 @@ pub struct Robot {
     pub zoom: crate::camera::Zoom,
 }
 
-/// A controller's items that drive channels: its generic devices and its radars.
+/// A controller's items that drive channels and that nothing else steers: its generic
+/// devices and its radars, and — on a building that carries guns — the efficiency and mast
+/// classes a warbot never holds ([`crate::buildings::running_items`], which steps the same
+/// records for a building with no guns at all).
 pub fn devices(controller: &Controller) -> Vec<Item> {
     controller
         .components
         .iter()
         .enumerate()
-        .filter(|(_, k)| matches!(k.type_id, SIMPLE_TYPE | RADAR_TYPE) && !k.entries.is_empty())
-        .map(|(i, k)| Item::new(i, k, &controller.channels))
+        .filter(|(_, k)| {
+            matches!(k.type_id, SIMPLE_TYPE | RADAR_TYPE | EFFICIENCY_TYPE | MAST_TYPE)
+                && !k.entries.is_empty()
+        })
+        .map(|(i, k)| crate::buildings::started(Item::new(i, k, &controller.channels)))
         .collect()
 }
 

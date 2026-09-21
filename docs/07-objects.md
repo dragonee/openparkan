@@ -881,7 +881,10 @@ The collision push-out drops faces flagged 2 unless the mover's collision flags
 carry 8, and its door test takes 16 — *read*,
 `Control.dll:0x1001dbce`, `AniMesh.dll:0x1000dbba`
 ([24-motion.md](24-motion.md#collision-between-objects--read)). So a floor does
-not push a walker standing on it.
+not push a walker standing on it. The collision's triangle mask is 4 where a
+round's is `0x24`, and the shipped bridges need `0x20` passed there too, which
+is a stand-in and not a read
+([24-motion.md](24-motion.md#the-cap-where-two-halves-meet--measured-and-a-stand-in)).
 
 **Flag 2 is a walkable surface, and a chosen one** (*measured*). All 6166 faces
 lie in a **level-0** slot — 4562 in the first variant's, 1480 in the second's,
@@ -1606,6 +1609,15 @@ nine floats are.
 
 The reading is `(zero, position, vector)`, and the first triple is **exactly
 zero on 3432 of the 3599** points.
+
+**A `_d`/`_w`/`_h` triple is one frame's three axes** (*measured*). 47 triples
+across the install share a stem and end in `_d`, `_w` and `_h` — `rech_`,
+`Smoke_`, `Mineglow_`, `Tele_`, and the energy bridge's `RayD_n`/`RayW_n`/`RayH_n`
+— and on 45 of them the three directions lie on three distinct model axes. An
+action-4 effect names them in that order on 43 of the 51 records that build a
+frame from one, so a frame's first axis is the **depth** whatever hangs in it
+travels and its second and third are its **width** and **height**
+([11-effects.md](11-effects.md#a-control-point-frames-axes-are-depth-width-and-height--measured)).
 
 **Where it is not zero, it is not floats.** Its second slot is an **int32: the
 node the point sits on** — a node of the same-stem mesh on 2984 of the 2985

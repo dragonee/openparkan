@@ -150,6 +150,15 @@ pub const BATTERY_TYPE: i32 = 19;
 pub const BATTERY_CAPACITY: usize = 0;
 /// The deflector, which decides how much of each shield sector stops (docs/26-damage.md).
 pub const DEFLECTOR_TYPE: i32 = 21;
+/// A building's efficiency (docs/23-economy.md). Nine of its thirty-one records also name
+/// channels -- the three mines' rotors, the Main Teleport's rings and the energy bridge's
+/// hub -- and it is built as the plain base item, so those turn like a generic device's
+/// (docs/28-chassis.md, "What a device's value turns").
+pub const EFFICIENCY_TYPE: i32 = 26;
+/// The class only the Small and Large Towers carry, one record each, naming the channels
+/// that raise the gun mast out of the ground. It falls to the component factory's default
+/// case, which is the plain base item too (`Control.dll:0x1002d6ec`).
+pub const MAST_TYPE: i32 = 29;
 pub const MOUNT_UPRIGHT: u32 = 0x0400_0000;
 /// A turret's flag that makes its unit an HQ, which `IsHQ` asks (`iron3d.dll:0x10076f50`,
 /// docs/30-turrets.md, "An HQ unit in play").

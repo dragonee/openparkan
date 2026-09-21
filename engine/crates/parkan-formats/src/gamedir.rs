@@ -22,6 +22,8 @@ pub const C02_MISSION_01: &str = "MISSIONS/CAMPAIGN/CAMPAIGN.02/Mission.01";
 pub const C02_MISSION_02: &str = "MISSIONS/CAMPAIGN/CAMPAIGN.02/Mission.02";
 /// The second chapter's *The Lost Key*.
 pub const C02_MISSION_03: &str = "MISSIONS/CAMPAIGN/CAMPAIGN.02/Mission.03";
+/// The second chapter's *The Last Bastion*, whose gorge is spanned by two energy bridges.
+pub const C02_MISSION_04: &str = "MISSIONS/CAMPAIGN/CAMPAIGN.02/Mission.04";
 /// The third chapter's first mission.
 pub const C03_MISSION_01: &str = "MISSIONS/CAMPAIGN/CAMPAIGN.03/Mission.01";
 /// The third chapter's *The Convoy*.

@@ -31,6 +31,9 @@ pub const FX_TARGET_POINT: u32 = 0x1000;
 pub struct Frame {
     pub origin: Vec3,
     pub axes: [Vec3; 3],
+    /// Built from three control points, so the axes are those points' own direction vectors
+    /// and the frame is the matrix the draw turns a sprite through ([`Frame::basis`]).
+    pub points: bool,
 }
 
 impl Frame {
@@ -40,14 +43,31 @@ impl Frame {
         let helper = if x.z.abs() < 0.9 { Vec3::Z } else { Vec3::Y };
         let y = helper.cross(x).normalize();
         let z = x.cross(y);
-        Self { origin, axes: [x * size, y * size, z * size] }
+        Self { origin, axes: [x * size, y * size, z * size], points: false }
     }
 
-    /// The frame three control points give (action 4, `0x10002a8d`): their centroid,
-    /// and their vectors as the axes.
+    /// The frame three control points give (action 4, `Control.dll:0x10002d8d`): their
+    /// centroid, and their vectors as the axes. The handler builds the identity and writes
+    /// each direction into a row of it, the centroid into the fourth, and hands that matrix
+    /// to the effect -- so the frame *is* a matrix, and the axes' own lengths are in it.
     pub fn from_points(points: [(Vec3, Vec3); 3]) -> Self {
         let origin = (points[0].0 + points[1].0 + points[2].0) / 3.0;
-        Self { origin, axes: [points[0].1, points[1].1, points[2].1] }
+        Self { origin, axes: [points[0].1, points[1].1, points[2].1], points: true }
+    }
+
+    /// The frame as a basis a sprite is drawn through, where it is one: three control-point
+    /// directions that are not all in a plane.
+    ///
+    /// Where they are -- which is every frame the handler's other three branches build, and
+    /// every one of the 690 load-group records that names the same point three times -- the
+    /// matrix cannot be inverted and the draw's camera-facing basis stands alone
+    /// ([`Frame::from_points`] keeps the repeated direction in all three axes there).
+    /// *Measured*: 189 records name three distinct points and exactly one of those, the
+    /// hero chassis's `aim_fire_S`, has its directions in a plane.
+    pub fn basis(&self) -> Option<[Vec3; 3]> {
+        let [x, y, z] = self.axes;
+        let scale = x.length() * y.length() * z.length();
+        (self.points && x.cross(y).dot(z).abs() > scale * 1e-3).then_some(self.axes)
     }
 
     pub fn point(&self, local: Vec3) -> Vec3 {
@@ -55,9 +75,15 @@ impl Frame {
     }
 
     /// The same frame with its axes a unit long: it turns what it places without sizing it.
+    /// It is no basis to draw through either — a stream's particle is sized by its own
+    /// channel and by nothing else ([`Instance::stream`]).
     pub fn turned(&self) -> Self {
         let fallback = [Vec3::X, Vec3::Y, Vec3::Z];
-        Self { origin: self.origin, axes: std::array::from_fn(|i| self.axes[i].normalize_or(fallback[i])) }
+        Self {
+            origin: self.origin,
+            axes: std::array::from_fn(|i| self.axes[i].normalize_or(fallback[i])),
+            points: false,
+        }
     }
 }
 
@@ -97,9 +123,14 @@ pub struct Cue {
 pub struct Sprite {
     pub material: String,
     pub centre: Vec3,
-    /// The quad's long side, as a vector; a square faces the camera when this is zero.
+    /// The quad's long side, as a vector; a camera-facing rectangle when this is zero.
     pub along: Vec3,
+    /// Across the quad: its cross-section where `along` is set, and across the camera where
+    /// it faces one.
     pub width: f32,
+    /// Up the camera, for a quad that faces one; `along` gives the long side of one that does
+    /// not, and this is its width over again.
+    pub height: f32,
     /// The fade value the emitter hands the renderer; 0 is not drawn. It stands in for the
     /// material's ambient alpha, so it scales the texture's alpha (docs/11, "Bolts, streams
     /// and fades").
@@ -121,6 +152,11 @@ pub struct Sprite {
     pub phase: f32,
     /// Drawn as a hemisphere about `centre` instead of a quad: a type-9 emitter's shape.
     pub dome: Option<Dome>,
+    /// The frame to turn the quad through, each axis as long as the sprite is that way:
+    /// a camera-facing unit square in this basis rather than on the screen, so a frame
+    /// whose axes differ draws a long streak along its first when seen across it and a small
+    /// one end-on ([`Frame::basis`], docs/11, "A sprite is drawn through its frame").
+    pub frame: Option<[Vec3; 3]>,
 }
 
 /// A type-9 emitter's hemisphere (`Terrain.dll:0x100273b0`): a unit dome with its pole on the
@@ -479,7 +515,7 @@ impl Instance {
             while next <= seconds && emitted < ring {
                 let share =
                     if seconds > then { ((next - then) / (seconds - then)).clamp(0.0, 1.0) } else { 1.0 };
-                let frame = Frame { origin: from.lerp(origin, share), axes: self.frame.axes };
+                let frame = Frame { origin: from.lerp(origin, share), ..self.frame };
                 let drawn = self.rng.unit();
                 stream.ring.push_back(Particle { born: next, frame, life: ring as f32 * interval, drawn });
                 if stream.ring.len() > ring as usize {
@@ -628,8 +664,19 @@ impl Instance {
     }
 
     /// A quad at `local` in `frame`, `size` along its axes, both times the instance's
-    /// scale: stretched along the frame's first axis when the first two sizes differ,
-    /// and otherwise a square facing the camera.
+    /// scale: stretched along the frame's first axis when the first two sizes differ, and
+    /// otherwise a rectangle facing the camera.
+    ///
+    /// **The frame's three axes are depth, width and height, in that order**, so a sprite
+    /// spans the second and the third and never the first. The size channel's x lies along
+    /// the frame's first axis, which is the axis the position channel travels, and its y and
+    /// z are the cross-section (docs/11, "Bolts, streams and fades": a bolt's size channel is
+    /// laid out (1, +24, +24), the 1 along the beam). The axes carry their own lengths
+    /// ([`Frame::from_points`]), so on a control-point frame the quad comes out the size the
+    /// `_w` and `_h` points give it: *measured*, the 47 `_d`/`_w`/`_h` triples the install
+    /// ships, `fr_e_brige`'s `RayD/RayW/RayH_1` among them at 150 × 1.93 × 0.41 m
+    /// ([07](../../../docs/07-objects.md#ctpt--control-points)). Sizing it by the first axis
+    /// instead had the energy bridge's five rays as 150 m squares of white over half the sky.
     #[allow(clippy::too_many_arguments)]
     fn quad(
         &self,
@@ -641,23 +688,22 @@ impl Instance {
         age_ms: f32,
         phase: f32,
     ) -> Sprite {
-        let (x, y) = (frame.axes[0], frame.axes[1]);
+        let [x, y, z] = frame.axes;
         let stretched = (size.x - size.y).abs() > f32::EPSILON;
+        let width = size.y * self.scale * y.length();
         Sprite {
             material: e.resource.member.clone(),
             centre: frame.point(local * self.scale),
             along: if stretched { x * size.x * self.scale } else { Vec3::ZERO },
-            width: if stretched {
-                size.y * self.scale * y.length()
-            } else {
-                size.x * self.scale * x.length()
-            },
+            width,
+            height: if stretched { width } else { size.z * self.scale * z.length() },
             alpha,
             overlay: false,
             lengthwise: false,
             age_ms,
             phase,
             dome: None,
+            frame: frame.basis().map(|a| std::array::from_fn(|i| a[i] * size.to_array()[i] * self.scale)),
         }
     }
 
@@ -721,12 +767,14 @@ impl Instance {
                 centre: self.start_point + line * ((k as f32 + 0.5) / n as f32),
                 along: line / n as f32,
                 width: (e.f(24) + (e.f(28) - e.f(24)) * p) * self.scale,
+                height: (e.f(24) + (e.f(28) - e.f(24)) * p) * self.scale,
                 alpha,
                 overlay: false,
                 lengthwise: true,
                 age_ms,
                 phase,
                 dome: None,
+                frame: None,
             });
         }
     }
@@ -889,7 +937,7 @@ mod tests {
 
     #[test]
     fn a_muzzle_flash_runs_with_its_point_value_and_only_inside_its_window() {
-        let frame = Frame { origin: Vec3::ZERO, axes: [Vec3::Y, Vec3::Z, Vec3::NEG_X] };
+        let frame = Frame { origin: Vec3::ZERO, axes: [Vec3::Y, Vec3::Z, Vec3::NEG_X], points: false };
         let mut fx = Instance::new(effect(TIME_POINT, 0.0, 0, vec![flash()]), frame, 1.0, 0.0, None, 1);
         let mut out = Vec::new();
         fx.sprites(0.0, true, &mut out);
@@ -905,6 +953,72 @@ mod tests {
         fx.value = 0.7;
         fx.sprites(20.0, true, &mut out);
         assert!(out.is_empty());
+    }
+
+    /// `f_brige_ray`, the effect C02 Mission 04's energy bridge hangs five of on its deck:
+    /// a type-3 sprite on the three control points `RayD_1`, `RayW_1` and `RayH_1`, which
+    /// share a position and carry (0, 150, 0), (1.932, 0, 0) and (0, 0, -0.414) as their
+    /// directions -- the span's depth, the ray's width and its height.
+    #[test]
+    fn a_sprite_on_a_control_point_frame_is_its_width_and_height_across_and_travels_its_depth() {
+        // The shipped block fades 0 → 1 across its window; here it is opaque throughout, so
+        // the sprite draws at both ends of it.
+        let ray =
+            block(3, 200, &[(32, 0.0), (36, 1.0), (20, 1.0), (24, 1.0), (28, 1.0), (40, 0.5)], "b_a_brige");
+        let ray = [52, 56, 60, 100, 104, 108, 112, 116, 120]
+            .into_iter()
+            .fold(ray, |e, at| with_word(e, at, 1.0f32.to_bits()));
+        let at = Vec3::new(0.0, 0.0, 10.0);
+        let frame = Frame::from_points([
+            (at, Vec3::new(0.0, 150.0, 0.0)),
+            (at, Vec3::new(1.932, 0.0, 0.0)),
+            (at, Vec3::new(0.0, 0.0, -0.414)),
+        ]);
+        // The shared `effect` helper carries a header scale of 0.1; the bridge's is 1.
+        let mut whole = effect(TIME_MANUAL, 0.0, 0, vec![ray]);
+        Rc::get_mut(&mut whole).unwrap().header.scale = [1.0; 3];
+        let mut fx = Instance::new(whole, frame, 1.0, 0.0, None, 1);
+        let mut out = Vec::new();
+        fx.value = 0.0;
+        fx.sprites(0.0, true, &mut out);
+        let s = &out[0];
+        assert!((s.width - 1.932).abs() < 1e-4, "the width point's length across: {}", s.width);
+        assert!((s.height - 0.414).abs() < 1e-4, "the height point's length up: {}", s.height);
+        assert_eq!(s.along, Vec3::ZERO, "it faces the camera");
+        // The three points are not in a plane, so the quad is turned through the frame and
+        // carries all three of its axes: 150 m along the span and 1.93 across.
+        let axes = s.frame.expect("a frame of three control points is a basis");
+        assert_eq!(
+            axes,
+            [Vec3::new(0.0, 150.0, 0.0), Vec3::new(1.932, 0.0, 0.0), Vec3::new(0.0, 0.0, -0.414)]
+        );
+        // It starts half way along the 150 m span and runs to the far end over the window.
+        assert!((s.centre - Vec3::new(0.0, 75.0, 10.0)).length() < 1e-3, "{:?}", s.centre);
+        out.clear();
+        fx.value = 1.0 - 1e-6;
+        fx.sprites(0.0, true, &mut out);
+        assert!((out[0].centre.y - 150.0).abs() < 1e-2, "{:?}", out[0].centre);
+    }
+
+    #[test]
+    fn a_frame_of_one_point_named_three_times_is_no_basis_and_its_sprite_faces_the_camera() {
+        // The load groups name the same point three times on 460-odd records -- every sign,
+        // lamp and console screen -- and the handler builds an orientation from the one
+        // direction there instead of a matrix of three.
+        let glow = block(3, 200, &[(32, 0.0), (36, 1.0), (20, 1.0), (24, 1.0), (28, 1.0)], "G");
+        let glow =
+            [100, 104, 108, 112, 116, 120].into_iter().fold(glow, |e, at| with_word(e, at, 1.0f32.to_bits()));
+        let point = (Vec3::new(1.0, 2.0, 3.0), Vec3::new(0.0, -0.349, -0.937));
+        let frame = Frame::from_points([point; 3]);
+        assert_eq!(frame.basis(), None);
+        let mut whole = effect(TIME_MANUAL, 0.0, 0, vec![glow]);
+        Rc::get_mut(&mut whole).unwrap().header.scale = [1.0; 3];
+        let fx = Instance::new(whole, frame, 1.0, 0.0, None, 1);
+        let mut out = Vec::new();
+        fx.sprites(0.0, true, &mut out);
+        assert_eq!(out[0].frame, None);
+        assert_eq!(out[0].along, Vec3::ZERO);
+        assert!((out[0].centre - point.0).length() < 1e-6);
     }
 
     #[test]

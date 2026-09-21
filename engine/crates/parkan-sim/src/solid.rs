@@ -18,6 +18,10 @@ pub const WALK_MARGIN: f32 = 0.5;
 pub const COLLISION_SKIPS_FACE: u16 = 0x4;
 /// A triangle flagged 2 is a floor, which the push-out passes for a mover without flag 8.
 pub const FLOOR_FACE: u16 = 0x2;
+/// A triangle flagged `0x20` is see-through -- a building's console glass and the energy
+/// bridge's additive `B_A_BRIGE` ([07](../../../docs/07-objects.md#the-flags-word)) -- and
+/// lets a mover through as one flagged 4 does. See [`passes`].
+pub const SEE_THROUGH_FACE: u16 = 0x20;
 /// A push is held to this many radii (`AniMesh.dll:0x1000df50`, `0x10020970`).
 pub const PUSH_RADII: f32 = 4.0;
 /// A push below this squared length is no contact (`Control.dll:0x1001e05f`).
@@ -298,8 +302,17 @@ pub const HIDDEN_EDGE: f32 = 1e-5;
 /// STAND-IN: docs/24-motion.md#not-established -- who sets a collision object's flags is
 /// not read: no mover carries 8, so every floor lets a mover by, as a recording shows the
 /// hero walking the Large Factory's ramps and stairs.
+///
+/// STAND-IN: docs/24-motion.md#standing-on-a-bridge--read-and-measured -- a triangle flagged
+/// `0x20` passes here too, which the read of the collision's filters does not give (their
+/// triangle mask is 4, `0x1001dbad`, `0x1001dbce`): the round query's is `0x24` and takes both.
+/// The shipped data asks for it. **All four** bridges in `fortif.rlb` are placed as two halves
+/// π apart whose decks meet, so the end cap each half carries at the join stands in the way of
+/// anything crossing; three of them flag that cap **4** and the fourth, `fr_e_brige`, flags it
+/// **`0x20`**, the bit its energy material carries throughout. Without this the hero crosses
+/// C00 Mission 01's `m_bridge` and stops dead in the middle of C02 Mission 04's.
 fn passes(face: &SolidFace, _obstacle: &Solid) -> bool {
-    face.triangle_flags & (COLLISION_SKIPS_FACE | FLOOR_FACE) != 0
+    face.triangle_flags & (COLLISION_SKIPS_FACE | FLOOR_FACE | SEE_THROUGH_FACE) != 0
 }
 
 /// Whether a straight move from `start` to `end` runs into a shut face of `obstacle` — a wall
@@ -508,6 +521,13 @@ mod tests {
         let mut leaves = wall.clone();
         leaves.faces.iter_mut().for_each(|f| f.triangle_flags = COLLISION_SKIPS_FACE);
         assert_eq!(push(Vec3::new(-3.0, 0.0, 0.0), Vec3::new(1.0, 0.0, 0.0), 2.0, &leaves), Vec3::ZERO);
+        // And so does a see-through face: the end cap the energy bridge carries where its two
+        // halves meet is flagged 0x20 where the other three bridges flag theirs 4.
+        let mut glass = wall.clone();
+        glass.faces.iter_mut().for_each(|f| f.triangle_flags = SEE_THROUGH_FACE);
+        assert_eq!(push(Vec3::new(-3.0, 0.0, 0.0), Vec3::new(1.0, 0.0, 0.0), 2.0, &glass), Vec3::ZERO);
+        assert!(!blocked(Vec3::new(-3.0, 0.0, 0.0), Vec3::new(1.0, 0.0, 0.0), &glass));
+        assert!(blocked(Vec3::new(-3.0, 0.0, 0.0), Vec3::new(1.0, 0.0, 0.0), &wall), "a wall still stops");
     }
 
     fn face(a: Vec3, b: Vec3, c: Vec3, triangle_flags: u16) -> SolidFace {

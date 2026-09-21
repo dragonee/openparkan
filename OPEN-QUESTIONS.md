@@ -780,6 +780,77 @@ bookkeeping errors.
   moves, since the engine feeds only bridges' hall ways into the search and all 37 of their vertices
   carry `0x10000000` — which is itself the result that the stand-in was right *for what the engine
   models* ([24-motion](docs/24-motion.md)).
+- [x] ~~**A warbot the player drives himself blocks on the first ramp down past a factory's
+  door.**~~ — raised and closed 2026-09-20 from play on C02 M03, *The Lost Key*. It is the
+  **ground contact's lift**, not the collision, though the collision is what freezes it. The lift
+  is the largest rise over the flag-1 contacts, whatever its height, and each contact searched
+  with the **agent sphere's r** as its up-pass bound. An SWW-X Warrior a metre past the Large
+  Factory's door, nose over the ramp: its two front wheels found the ramp 2.8 m below, its two
+  rear wheels found the floor they had just left 2.9 m **above**, and the max hoisted the whole
+  machine 2.9 m back up the ramp into the structure over it — where the collision's segment
+  test ran the move against a face and put it back at its start. Every tick, for good, at speed
+  17.9 m/s. The bound is **r2**, the body sphere's, now: what a contact's own up pass tests
+  against is read to be a triple built from control `+0x2ec`, `+0x2fc` and `+0x30c`
+  (`0x1001aba7`, `0x1001ae12`) and is **still not read**, so r2 is a stand-in like r was — but r2
+  is the one bound the pass *is* read to use, and it is the smaller on 122 of the 148 unit models
+  the campaign places. *Measured* over 18 AI captures on C02 M03, every small chassis against
+  every enemy building: 15 taken before, 14 after, the Large Factory 5 s faster for a wheeled bot
+  and 15 s for a walker, and one lost — below ([24-motion](docs/24-motion.md#holding-the-body-on-the-ground--read-and-measured)).
+- [ ] **C02 M03's Small Bunker (`l_bunk1`) cannot be captured by anything on wheels, and since
+  the contact bound changed not by a walker either.** Raised 2026-09-20. A flyer takes it in 18 s;
+  a wheeled bot holds outside at the top of the ramp to its door in either configuration, and a
+  walker took it in 20 s with the up-pass bound at r and stalls 34 m short of the pod with it at
+  r2. The walker's stall is **not** the same mechanism — no lift over 0.5 and no segment stop at
+  the spot, so it is the AI's own legs rather than the contact — and the wheeled one is: there the
+  push-out keeps the ramp face the bot stands on, because the filter drops only the floors flagged
+  2 and docs/07 measures **1802 faces** of the first variant's level-0 slots pointing within 10°
+  of up and carrying no flag at all. Two questions in one building, and both want the whole
+  inside-a-building pass looked at rather than another bound guessed
+  ([24-motion](docs/24-motion.md#collision-between-objects--read),
+  [07-objects](docs/07-objects.md#the-flags-word)).
+- [ ] **What lets a mover past a face flagged `0x20`.** Raised 2026-09-20 from play on C02 M04,
+  *The Last Bastion*. The collision's own two filters take a triangle mask of **4**
+  (`Control.dll:0x1001dbad` for the segment, `0x1001dbce` for the push-out) where a round's takes
+  `0x24`; nothing read drops `0x20`. The shipped data needs it dropped. *Measured*: all **9** bridge
+  pairs the 29 missions place stand π apart with their decks abutting, so each half's join cap — six
+  level-0 faces at the deck's far end, all facing the span — is square in the way; three of the four
+  `fortif.rlb` bridge meshes flag that cap **4** and `fr_e_brige` flags it **`0x20`**, the bit its
+  additive `B_A_BRIGE` material carries throughout. Taken as read the hero walks 183.8 m of the 185.5
+  to the join and stops. The **batch word** is the obvious other candidate — the query excludes
+  batches flagged 8, and the energy batches carry `0x100` and no 8 — so either a third filter or a
+  flag set on the loaded batch does it. The engine passes `0x20` as a stand-in
+  ([24-motion](docs/24-motion.md#the-cap-where-two-halves-meet--measured-and-a-stand-in)).
+- [ ] **What stops a tower's gun mast at the top.** Raised 2026-09-21 from play on C02 M04,
+  *The Last Bastion*. Both `fortif.rlb` tower controllers carry a **class-29** component whose
+  channels raise the mast out of the ground — `fr_m_tower`'s node 13 by 10.4 m over mesh frames
+  1 to 4, `fr_b_tower`'s node 12 by 19.4 m over 0 to 3 — and each sets its switch word at
+  `+0x18` to **9**, open and *bouncing*. Bit 8 is read to hold the progress at the end and swap
+  the low bits (`Control.dll:0x10020ae4`), so as the file stands a tower raises its mast over
+  five seconds and stows it over the next five, for ever. *Measured*: those two are the only
+  records of the install's 1066 whose word bounces; the other 28 that set the word at all set 0
+  (class 25) or 33 (the hero's arms). Nothing found switches it off — the component factory
+  files every class in the controller's timed list (`0x1002d70a`), `CBuilding` looks for classes
+  12 and 13 and no other (`Terrain.dll:0x100583a2`), and neither record names a section-5 group
+  at `+0x10` or `+0x14`, which is what an item runs on its first step and its first skip. In the
+  game the mast comes up as the tower is built and stays up, so the engine starts a bouncing
+  item as one that opens and stops. What is left to find is the switch: the likely places are
+  the fire control that owns a tower's turret and whatever handles a building finishing
+  construction ([28-chassis](docs/28-chassis.md#every-component-is-stepped-not-only-a-device--read-and-measured)).
+- [ ] **Whether a building's collision mesh follows the nodes its own items turn.** Raised
+  2026-09-21 alongside the above. Nine class-26 records turn nodes that never stop — the three
+  mines' rotors, the Main Teleport's twenty-eight rings, `fr_e_brige`'s hub — and the engine
+  poses them every tick but rebuilds the collision solid only for a door's channels, since
+  rebuilding it for a hub turning for ever would rebuild it every tick on every one of them.
+  Whether the game's own `IGeometry` follows an animated node, and at what cost, is not read
+  ([28-chassis](docs/28-chassis.md#every-component-is-stepped-not-only-a-device--read-and-measured)).
+- [ ] **What the eye the sprite draw is handed has been transformed by.** Raised 2026-09-21.
+  The emitter loop's context carries the instance's own matrix at `+8` and a point at `+0x48`
+  (`Effect.dll:0x10008050`, `0x100080aa`), and the draw takes that point for the eye
+  (`0x100093fc`). The sprite's position channel is in the frame's space, so the eye must be
+  too, and `[0x1001e0bc]` slot `0x68` — called just before with the matrix in `ecx` and the
+  point in `edx` (`0x100080da`) — is where it would be put there. That slot lives in the maths
+  interface, outside `Effect.dll`, and is not read; the engine assumes the transform
+  ([11-effects](docs/11-effects.md#a-sprite-is-drawn-through-its-frame--read)).
 
 ## Turrets, weapons and camera
 
@@ -1196,6 +1267,21 @@ bookkeeping errors.
   hold — so no shipped mine is ever bounded by its lode and the fix is fidelity, not behaviour. Control:
   6 of the 95 other buildings in those missions also stand within 250 of a lode. Fixed, with the final
   dig now banked on the ending takt ([23-economy](docs/23-economy.md)).
+- [ ] **Nothing raises or runs an AI problem, so no clan ever builds a warbot or sends one to take a
+  building.** Raised 2026-09-20 from play on C02 M03, *The Lost Key*, where the enemy sits still while
+  the recording has it turning out small flyers and walking them onto whatever the player holds. The
+  script side is already read: `c2m3e`'s `PBM_BUILDING_INF_CAPTURE_Start` asks `fn14` for the nearest
+  capturer, orders it `ORDER_ROBOT_CAPTURE` at the building, and where there is none raises
+  `PBM_ROBOT_NEEDED`, whose handler finds a `BUILDING_PLANT` and gives it
+  `ORDER_BUILDING_CONSTRUCT` — all nine such sites read and counted above. What the engine has is
+  `Problems0` and the ten functions the campaign's messages, objectives, timed orders and targets need
+  (15, 19, 30, 31, 32, 34, 52, 59, 60, 71); `fn2` (raise), `fn6`, `fn7`, `fn8` (problem state), `fn11`,
+  `fn14`, `fn25`, `fn27`, `fn28`, `fn29` (the raise's own parameters) and `fn50` all answer 0, and the
+  problem list itself is not modelled. The whole of `PBM_BUILDING_INF_CAPTURE`, `PBM_BUILDING_PROTECT`,
+  `PBM_PLACE_PROTECT`, `PBM_BASE_DEFENCE`, `PBM_ATTACK_UNIT` and `PBM_N_OPTIMAL_TRANSPORT` rides on
+  that, across 13 scripts. It is a milestone of its own, not a fix
+  ([15-behaviour](docs/15-behaviour.md#what-the-functions-do),
+  [34-progression](docs/34-progression.md#what-the-scripts-ask--read-and-measured-1)).
 
 ## Mission progression
 

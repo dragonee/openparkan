@@ -185,7 +185,10 @@ time, starts the next step at the old step's end, and runs the **update**
 - **The word.** The constructor sets it to **5** (`0x10020832`) and the parser
   replaces it with the record's `+0x18` unless that is −1 (`0x10021d86`).
   *Measured*: all 72 class-3 records and all 76 radar records hold −1, so
-  every one runs in 5.
+  every one runs in 5. Across the install's 1066 components only 30 set the
+  word at all: the 24 class-25 records set 0, the hero turret's four class-24
+  arms set 33, and **the two towers' class-29 masts set 9**, open and
+  bouncing ([below](#every-component-is-stepped-not-only-a-device--read-and-measured)).
 - **Byte 0 clear.** The progress moves by **0.45 × rate** (`0x1003c488`) while
   the word's low bits are 1, back by it while they are 2 (`0x10020a28`). Then
   the word's bits `0xc` pick what an end does: **4 wraps** the progress once
@@ -230,6 +233,28 @@ moves at |rate| × the channel's rate a second, linearly within each step. A
 wrapping value a step moves by more than a half would play backwards, since a
 step goes the short way round; that needs a rate above 1.11, which no constant
 device has.
+
+### Every component is stepped, not only a device — *read*, and *measured*
+
+The class a component carries decides what it *is*, not whether it steps. The
+component factory (`Control.dll:0x1002d4b0`) switches on the class through a byte
+table at `0x1002d864` into fourteen cases, and **every case ends at `0x1002d70a`,
+which appends the component to the controller's timed list** at `+0x5bc`. The time
+driver walks that list whole. Four of the fourteen cases build the plain base item
+and keep its update: class 3 and class 12, 13, 28, 29 and the rest through the
+default case (`0x1002d6ec`), class 8 the radar (`0x1002d5b8`), class 5 the engine
+(`0x1002d6ae`) and class 26 (`0x1002d63f`); their four vtables — `0x1003c448`,
+`0x1003c800`, `0x1003cdf8` and `0x1003ce38` — are the only ones in the module that
+carry `0x10020900` in slot 11.
+
+So a class its owner never looks at still turns what it names. *Measured*: twelve
+classes name section-2 channels across the install, and two of them are steered by
+nobody — **class 26**, a building's efficiency, on nine records, and **class 29** on
+two. Class 26's nine are the three mines' rotors, the Main Teleport's twenty-eight
+rings and `fr_e_brige`'s hub; class 29's two are the Small and Large Towers' gun
+masts. `CBuilding` files classes 12 and 13 and no other
+(`Terrain.dll:0x100583a2`), and a robot's own device list is classes 3 and 8, so a
+reader who files components the way their owners do steps neither.
 
 **When the picture moves between steps** — *read*, and not established.
 Channels are played at the start of each step (`0x1002d29e`), where the phase

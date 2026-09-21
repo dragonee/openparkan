@@ -557,7 +557,7 @@ The actions (*read*; counts *measured* across the 2925 records):
 | 0 | 202 | **stop the body**: its command, velocity, spin and step velocity go to zero (`0x10014400`); first in every round group |
 | 1, 2 | 80, 30 | property `0x200` / `0x201` on the object |
 | 3 | 217 | **an effect** by name on **node** v4, id v7 (`0x10002972`): v4 is rebased by the part's first node through `AniMesh` slot 14, as action 14's is (`0x100029bb`) |
-| 4 | 1203 | **an effect** by name on three control points v4..v6, at their centroid, id v7 (`0x10002a8d`) |
+| 4 | 1203 | **an effect** by name on three control points v4..v6, at their centroid, id v7 (`0x10002a8d`); the three directions become the rows of the matrix the effect hangs on ([11-effects.md](11-effects.md#a-sprite-is-drawn-through-its-frame--read)) |
 | 5 | 72 | **an effect** by name in the world at the sphere `+0x38` gives — a building's construction sphere — scaled by its radius, id v7 (`0x10002e0e`); `fortif.rlb` only |
 | 7 | 0 | node v4 takes its whole life as damage (`0x10003087`) |
 | 8 | 22 | delete effect v4 (`0x10002fd4`) |
@@ -783,6 +783,13 @@ system's items for its doors and pods
 a `fortif.rlb` controller's load group are created as the building is placed.
 They hang on the building's own control points and nodes, as the hero's
 turret's hang on its (*derived*, [29-weapons.md](29-weapons.md)).
+
+**And it steps its components like any controller too.** `CBuilding` picks classes
+12 and 13 out of the list, but the component factory has already filed every one of
+them in the controller's timed list, which the time driver serves whatever the owner
+is ([28-chassis.md](28-chassis.md#every-component-is-stepped-not-only-a-device--read-and-measured)).
+That is what turns a mine's rotors, the Main Teleport's rings and the energy
+bridge's hub, and what raises a tower's gun mast out of the ground.
 
 *Measured*: 28 of the 30 `fortif.rlb` controllers have a load group. Their
 most common effects are:
