@@ -1814,7 +1814,6 @@ def check_arealmap(check, game: Path) -> None:
     # is classes 3 and 8, which leaves two classes nobody else steers.
     driven: Counter[int] = Counter()
     bounces: dict[str, list[int]] = {}
-    spokes = {}
     for name in ("static.rlb", "intsys.rlb", "turrets.rlb", "guns.rlb", "parts.rlb",
                  "weapon.rlb", "animals.rlb", "bases.rlb", "fortif.rlb", "system.rlb",
                  "objects.rlb"):
@@ -9198,7 +9197,8 @@ def check_batch_word_and_collision_flags(check, game: Path) -> None:
                 si = node.slot_index[0]
                 if si != objmesh.NO_SLOT and si < len(model.slots):
                     s = model.slots[si]
-                    level0.update((b, n) for b in range(s.first_batch, s.first_batch + s.batch_count))
+                    level0.update((b, n) for b in
+                                  range(s.first_batch, s.first_batch + s.batch_count))
             for i in range(stream.element_count):
                 f = struct.unpack_from("<10H", raw, i * objmesh.BATCH_SIZE)
                 word, node = f[0] | f[1] << 16, f[3]
@@ -9266,7 +9266,8 @@ def check_batch_word_and_collision_flags(check, game: Path) -> None:
                 n = c.channels[e].node
                 s = model.slots[model.nodes[n].slot_index[0]]
                 pose = model.world_pose(n)
-                cs = [objmesh.apply(pose, tuple((s.aabb_min, s.aabb_max)[p][i] for i, p in enumerate(pk)))
+                cs = [objmesh.apply(pose, tuple((s.aabb_min, s.aabb_max)[p][i]
+                                                for i, p in enumerate(pk)))
                       for pk in pick]
                 e7 = [cs[7][i] - cs[0][i] for i in range(3)]
                 ends = ((5, 7), (0, 2)) if e7[2] >= e7[0] and e7[2] >= e7[1] else (
