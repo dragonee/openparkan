@@ -1008,6 +1008,20 @@ impl Play {
         }
     }
 
+    /// Whether target `t` is drawn node by node -- each node at its own pose and its own damage
+    /// stage -- rather than as one model built whole at its placement.
+    ///
+    /// A target that takes damage is (docs/26, "What a damaged node, a destroyed part and a
+    /// dead unit draw"), and so is a building whose own items play its nodes. The second is
+    /// what the energy bridge needs: it takes no damage, and drawn whole its three turning
+    /// arms stand still while the rays hung on them sweep round without them. *Measured*: of
+    /// the buildings the 29 missions place, the ones this brings in and life does not are the
+    /// two bridge halves, the generators, the small Main Teleport and a ruin.
+    pub fn drawn_by_node(&self, t: usize) -> bool {
+        self.battle.combat.targets.get(t).is_some_and(|x| x.parts.iter().any(|p| p.life.is_some()))
+            || self.buildings.iter().any(|b| b.target == t && b.plays_nodes())
+    }
+
     /// A building's load-group effects follow the nodes they hang on, and an effect on a door's
     /// node reads the door's channel value, as time modes 4, 16 and 17 read a node's animation
     /// value (docs/11, "Effect time t").

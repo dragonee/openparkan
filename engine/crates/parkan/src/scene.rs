@@ -711,9 +711,8 @@ pub struct OwnView {
 pub fn own_view(objects: &mut Objects, store: &mut TextureStore, play: &Play) -> Result<OwnView> {
     // Every whole model drawn node by node leaves first: removing one shifts the instances
     // after it, so no node's instance may be counted before the last removal.
-    let noded: Vec<usize> = (0..play.battle.combat.targets.len())
-        .filter(|&t| play.battle.combat.targets[t].parts.iter().any(|p| p.life.is_some()))
-        .collect();
+    let noded: Vec<usize> =
+        (0..play.battle.combat.targets.len()).filter(|&t| play.drawn_by_node(t)).collect();
     let leaving: Vec<usize> =
         std::iter::once(play.hero.object).chain(noded.iter().map(|&t| play.battle.objects[t])).collect();
     for object in leaving {

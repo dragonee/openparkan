@@ -1008,6 +1008,13 @@ out of the ground.
   rises 10.4 m out of its dome over five seconds instead of sitting buried in it, and *The
   Last Bastion*'s bridge turns its hub a whole revolution every ten seconds, carrying three
   spokes 120° apart at 20 m from the deck's axis.
+- **A building whose items play its nodes is drawn node by node.** The scene drew a target
+  that way only where it takes damage, each node at its own pose and its own stage, and
+  anything else as one model built whole at its placement. The energy bridge takes no damage,
+  so its three arms stood still on screen while the rays hung on their own control points
+  swept round without them. *Measured*: the buildings this brings in and life does not are
+  the two bridge halves, the generators, the small Main Teleport and a ruin — every one a
+  building with doors, a pod or a running item and no damage table.
 - **A sprite is drawn through its frame** (docs/11, "A sprite is drawn through its frame").
   Action 4 builds a *matrix* — the three points' directions as its rows, their centroid as
   the fourth — and the draw scales its columns by the size channel and combines it with the

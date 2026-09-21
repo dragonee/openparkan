@@ -789,7 +789,11 @@ turret's hang on its (*derived*, [29-weapons.md](29-weapons.md)).
 them in the controller's timed list, which the time driver serves whatever the owner
 is ([28-chassis.md](28-chassis.md#every-component-is-stepped-not-only-a-device--read-and-measured)).
 That is what turns a mine's rotors, the Main Teleport's rings and the energy
-bridge's hub, and what raises a tower's gun mast out of the ground.
+bridge's hub, and what raises a tower's gun mast out of the ground. A reader has
+to draw such a building **node by node** to show it: a building with no damage
+table — the bridges, the generators, the small Main Teleport and the ruins — has
+no other reason to be drawn that way, and drawn whole its played nodes stand
+still while the effects hung on their control points move.
 
 *Measured*: 28 of the 30 `fortif.rlb` controllers have a load group. Their
 most common effects are:

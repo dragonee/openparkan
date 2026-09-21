@@ -542,6 +542,22 @@ fn c02_m04s_bridge_rays_run_the_span_and_sweep_around_the_decks_axis() {
             .map(|s| s.centre)
             .collect()
     };
+    // The arms carrying them turn with them, and the scene has to draw the bridge node by
+    // node to show it: the part takes no damage, so without [`Building::plays_nodes`] it is
+    // drawn as one model at its placement and the rays sweep round arms that stand still.
+    let target = object_target(&play, &m, "e_bridge.dat");
+    assert!(
+        play.battle.combat.targets[target].parts.iter().all(|p| p.life.is_none()),
+        "a bridge half takes no damage, so nothing else makes the scene draw it node by node"
+    );
+    let half = play.buildings.iter().find(|b| b.target == target).expect("the half is a building");
+    assert!(half.plays_nodes(), "and its items play its nodes");
+    assert!(play.drawn_by_node(target), "so the scene draws it node by node");
+    let arms = |play: &parkan_world::play::Play, t: usize| -> Vec<f64> {
+        (2..5).map(|n| play.battle.combat.targets[t].parts[0].nodes[n].translation[2]).collect()
+    };
+    let arms_at_rest = arms(&play, target);
+
     let before = at(&first);
     while play.hero.time_ms < 10_000.0 / 3.0 {
         play.update_input();
@@ -553,7 +569,9 @@ fn c02_m04s_bridge_rays_run_the_span_and_sweep_around_the_decks_axis() {
     for b in &after {
         assert!(before.iter().any(|a| a.distance(*b) < 1.0), "onto the next spoke's place: {b}");
     }
-    eprintln!("the deck's three rays sweep {moved:.1} m a third of a turn");
+    let swung = arms(&play, target).iter().zip(&arms_at_rest).map(|(a, b)| (a - b).abs()).fold(0.0, f64::max);
+    assert!(swung > 20.0, "the arms swing with them: {swung:.1} m");
+    eprintln!("the deck's three rays sweep {moved:.1} m a third of a turn, their arms {swung:.1} m");
 }
 
 /// C02 Mission 03's Large Factory, taken by a wheeled warbot the player drives himself.

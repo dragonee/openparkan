@@ -315,6 +315,16 @@ impl Building {
         false
     }
 
+    /// Whether any of its items plays a node of its mesh, so the part has to be drawn node
+    /// by node rather than as one model at rest: the energy bridge takes no damage, and
+    /// without this its three turning arms stand still while the rays hung on them sweep.
+    pub fn plays_nodes(&self) -> bool {
+        let door = self.doors.iter().map(|d| &d.item);
+        door.chain(self.pod.iter().map(|p| &p.item))
+            .chain(&self.running)
+            .any(|item| !item.channels.is_empty())
+    }
+
     /// Whether node `node` is a door's that is open, whose faces let units through
     /// (`IBuilding` slot 17, `AniMesh.dll:0x1000dd13`).
     pub fn open_door_node(&self, node: usize) -> bool {
