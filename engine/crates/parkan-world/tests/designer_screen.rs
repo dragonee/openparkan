@@ -288,6 +288,13 @@ fn save_keeps_the_design_under_the_typed_name_and_load_fits_it_again() {
         play.factories.iter().position(|f| f.logic_id == 0x8000_0001_u32 as i32).expect("the Large Factory");
     let t = play.factories[f].target;
     let mut screen = Screen::default();
+    // The game's `units/` is only read; save writes to the player's own folder (the engine's
+    // departure, docs/37, "The buttons").
+    let scratch = std::env::temp_dir().join(format!("openparkan-designer-{}", std::process::id()));
+    let (units, saves) = (scratch.join("units"), scratch.join("saves"));
+    std::fs::create_dir_all(&units).unwrap();
+    screen.units = Some(units.clone());
+    screen.saves = Some(saves.clone());
     screen.open(&mut play, t, &strings).unwrap();
     // Save is dim with no project; with one it opens the field, empty and typing.
     click(&mut play, &mut screen, [285.0, 460.0], &strings);
@@ -329,6 +336,18 @@ fn save_keeps_the_design_under_the_typed_name_and_load_fits_it_again() {
     screen.escape();
     assert!(screen.is_open() && screen.session.as_ref().unwrap().field.is_none());
     assert_eq!(screen.saved.len(), 3);
+    // Every save is a file in the saves' folder, and none in `units/`.
+    let files = |dir: &std::path::Path| {
+        let mut names: Vec<String> = std::fs::read_dir(dir)
+            .map(|d| d.flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect())
+            .unwrap_or_default();
+        names.sort();
+        names
+    };
+    assert_eq!(files(&saves), ["Second.dat", "Tester.dat", "my_temp_unit.dat"]);
+    assert!(files(&units).is_empty(), "nothing written into units/");
+    // Kept only in memory, the list still finds them in the folder.
+    screen.saved.clear();
     // Clear, then load: two rows, the designer's own name left out, in name order.
     click(&mut play, &mut screen, [240.0, 460.0], &strings);
     assert!(screen.session.as_ref().unwrap().design.is_none());
@@ -353,4 +372,5 @@ fn save_keeps_the_design_under_the_typed_name_and_load_fits_it_again() {
     assert!(screen.takes_input(&play));
     play.progression.as_mut().unwrap().progress.outcome = Some(true);
     assert!(!screen.takes_input(&play));
+    std::fs::remove_dir_all(&scratch).unwrap();
 }

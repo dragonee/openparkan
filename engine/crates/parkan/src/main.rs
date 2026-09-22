@@ -6,7 +6,7 @@
 //! parkan [--game DIR] [--mission MISSIONS/…] [--fly]
 //!        [--screenshot OUT.png] [--size WxH] [--top-down] [--look X,Y,Z,TX,TY,TZ]
 //!        [--headless] [--ticks N] [--hold SCAN_W,SCAN_A] [--press N] [--release N] [--mouse DX,DY] [--trace] [--sway]
-//!        [--capture-idle] [--stretch-hud] [--outcome won|lost] [--text "…"] [--face NAME,DISTANCE] [--at X,Y,YAW[,Z]] [--pod NAME] [--drive PATH] [--hq] [--take NAME] [--designer] [--design PART,…]
+//!        [--capture-idle] [--stretch-hud] [--save-to-game] [--outcome won|lost] [--text "…"] [--face NAME,DISTANCE] [--at X,Y,YAW[,Z]] [--pod NAME] [--drive PATH] [--hq] [--take NAME] [--designer] [--design PART,…]
 //!        [--skip-briefing] [--briefing-at SECONDS] [--objectives] [--map]
 //! ```
 //!
@@ -37,7 +37,9 @@
 //! none, as the game's capture does, so it engages a hostile within 500 on its own.
 //! The cockpit's HUD keeps the game's 640 × 480 layout round on a wide window, its corners
 //! on the window's; `--stretch-hud` stretches it across as the game's does. F2 hides the
-//! message box or shows it again.
+//! message box or shows it again. The warbot designer saves a design to the player's own
+//! folder (`openparkan/units` in `~/Library/Application Support` on macOS); `--save-to-game`
+//! writes it into the game's `units/`, as the game does.
 //!
 //! `--text` draws a string in the game font near the top of a `--screenshot`,
 //! `--outcome won|lost` draws a screenshot's mission as won or lost, and `--face NAME,DISTANCE`
@@ -103,6 +105,8 @@ struct Args {
     fire_below: bool,
     /// `--stretch-hud`: the HUD's layout stretches to the window, as the game's does.
     stretch_hud: bool,
+    /// `--save-to-game`: the warbot designer saves into the game's `units/`, as the game does.
+    save_to_game: bool,
     /// `--outcome won|lost`: a screenshot's mission is taken to have that outcome.
     outcome: Option<bool>,
     /// `--text`: a string a screenshot draws in the game font.
@@ -179,6 +183,7 @@ fn args() -> Result<Args> {
         capture_idle: false,
         fire_below: false,
         stretch_hud: false,
+        save_to_game: false,
         outcome: None,
         text: None,
         face: None,
@@ -223,6 +228,7 @@ fn args() -> Result<Args> {
             "--capture-idle" => out.capture_idle = true,
             "--fire-below" => out.fire_below = true,
             "--stretch-hud" => out.stretch_hud = true,
+            "--save-to-game" => out.save_to_game = true,
             "--outcome" => out.outcome = Some(value()? == "won"),
             "--text" => out.text = Some(value()?),
             "--skip-briefing" => out.skip_briefing = true,
@@ -666,7 +672,7 @@ fn screenshot(loaded: &scene::Loaded, game: &Path, args: &Args, out: &Path) -> R
         if let Some(b) = &briefing {
             scene::draw_briefing(&mut renderer, &gpu.device, &gpu.queue, b, hud_space(width, height, args));
         }
-        match scene::hud(&mut renderer, &gpu.device, &gpu.queue, game, &loaded.dir, p, args.stretch_hud) {
+        match scene::hud(&mut renderer, &gpu.device, &gpu.queue, game, &loaded.dir, p, args) {
             Ok(mut hud) => {
                 if args.objectives {
                     hud.cockpit.objectives.open_at_start();
@@ -694,8 +700,8 @@ fn screenshot(loaded: &scene::Loaded, game: &Path, args: &Args, out: &Path) -> R
                         p.modes.push(parkan_world::play::Mode::Factory(t));
                     }
                     let cockpit = &mut hud.cockpit;
-                    // A screenshot's saves stay in memory, out of the install's `units/`.
-                    cockpit.designer.units = None;
+                    // A screenshot's saves stay in memory, out of every folder.
+                    cockpit.designer.saves = None;
                     match cockpit.designer.open(p, t, &cockpit.strings) {
                         Ok(()) => {
                             for part in &args.design {
@@ -941,7 +947,7 @@ impl App {
                 &self.game,
                 &self.loaded.dir,
                 p,
-                self.args.stretch_hud,
+                &self.args,
             ) {
                 Ok(mut hud) => {
                     // A mission started fresh opens its objectives screen (`0x1005e117`).
@@ -967,10 +973,9 @@ impl App {
             let (d, q) = (&r.gpu.device, &r.gpu.queue);
             r.renderer.set_world(d, q, &world.store.textures, Some(&world.terrain), Some(&world.objects));
             r.renderer.set_sprite_looks(d, &scene::sprite_looks(&play));
-            self.hud =
-                scene::hud(&mut r.renderer, d, q, &self.game, &self.loaded.dir, &play, self.args.stretch_hud)
-                    .map_err(|e| eprintln!("no cockpit HUD: {e:#}"))
-                    .ok();
+            self.hud = scene::hud(&mut r.renderer, d, q, &self.game, &self.loaded.dir, &play, &self.args)
+                .map_err(|e| eprintln!("no cockpit HUD: {e:#}"))
+                .ok();
             if let Some(hud) = self.hud.as_mut() {
                 hud.cockpit.objectives.open_at_start();
             }

@@ -382,6 +382,23 @@ pub struct Hud {
     pub preview_keys: Vec<parkan_world::cockpit::designer::PreviewKey>,
 }
 
+/// The folder the warbot designer saves to: `openparkan/units` in the player's own data
+/// folder -- `~/Library/Application Support` on macOS, `%APPDATA%` on Windows, and
+/// `$XDG_DATA_HOME` or `~/.local/share` elsewhere.
+pub fn design_saves() -> Option<PathBuf> {
+    let home = || std::env::var_os("HOME").map(PathBuf::from);
+    let data = if cfg!(target_os = "macos") {
+        home().map(|h| h.join("Library/Application Support"))
+    } else if cfg!(windows) {
+        std::env::var_os("APPDATA").map(PathBuf::from)
+    } else {
+        std::env::var_os("XDG_DATA_HOME")
+            .map(PathBuf::from)
+            .or_else(|| home().map(|h| h.join(".local/share")))
+    };
+    Some(data?.join("openparkan").join("units"))
+}
+
 /// The cockpit for `play` in `mission_dir`: the interface's pages and the mission's minimap
 /// into `renderer`, `GAME_FONT` and `MENU_FONT` into their slots.
 pub fn hud(
@@ -391,7 +408,7 @@ pub fn hud(
     game: &Path,
     mission_dir: &Path,
     play: &Play,
-    stretch: bool,
+    args: &crate::Args,
 ) -> Result<Hud> {
     use parkan_world::text::GameFont;
     let mut pages = parkan_world::hud::Pages::open(game)?;
@@ -402,14 +419,16 @@ pub fn hud(
     renderer.set_font_slot(device, queue, HUD_TEXT_SLOT, GameFont::ui(game, "GAME_FONT")?);
     renderer.set_font_slot(device, queue, HUD_MENU_SLOT, GameFont::ui(game, "MENU_FONT")?);
     let mut cockpit = parkan_world::cockpit::Cockpit::open(game, &pages, play)?;
-    // The designer saves to and loads from the game's `units/` (docs/37, "The buttons").
-    cockpit.designer.units =
-        Some(parkan_formats::gamedir::resolve(game, "UNITS").unwrap_or_else(|| game.join("units")));
+    // The designer loads from the game's `units/` (docs/37, "The buttons") and saves to the
+    // player's own folder, or with `--save-to-game` to `units/` as the game does.
+    let units = parkan_formats::gamedir::resolve(game, "UNITS").unwrap_or_else(|| game.join("units"));
+    cockpit.designer.saves = if args.save_to_game { Some(units.clone()) } else { design_saves() };
+    cockpit.designer.units = Some(units);
     Ok(Hud {
         cockpit,
         font: GameFont::ui(game, "GAME_FONT")?,
         menu: GameFont::ui(game, "MENU_FONT")?,
-        stretch,
+        stretch: args.stretch_hud,
         preview_store: None,
         preview_keys: Vec::new(),
     })

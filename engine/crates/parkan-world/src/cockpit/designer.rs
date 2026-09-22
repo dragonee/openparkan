@@ -495,9 +495,15 @@ pub struct Screen {
     pub accepted: usize,
     /// How many sessions have opened, for their previews' paths.
     pub opened: usize,
-    /// Where save writes `<name>.dat` and load lists from: the game's `units/`, as the game
-    /// has it. With none the designs saved are only kept here, as they always also are.
+    /// The game's `units/`, whose designs load lists (docs/37, "The buttons").
     pub units: Option<std::path::PathBuf>,
+    /// Where save writes `<name>.dat`, which load lists too. With none the designs saved are
+    /// only kept here, as they always also are.
+    ///
+    /// DEPARTURE: docs/37-designer.md#the-buttons--read-and-seen -- the game writes a design
+    /// into its own `units/`, which an install need not let the player write; the engine
+    /// writes it to a folder of the player's own, and `--save-to-game` to `units/`.
+    pub saves: Option<std::path::PathBuf>,
     /// The designs saved while the engine runs, by name.
     pub saved: Vec<(String, Vec<u8>)>,
 }
@@ -1805,21 +1811,22 @@ impl Screen {
         self.keep(outcome);
     }
 
-    /// A design saved, kept by name, and written to the game's `units/` when there is one.
+    /// A design saved, kept by name, and written to the saves' folder when there is one. A
+    /// name the field took with a path separator in it is kept here only.
     fn keep(&mut self, outcome: Outcome) {
         let Outcome::Save { name, bytes } = outcome else { return };
-        if let Some(dir) = &self.units
-            && let Err(e) = std::fs::create_dir_all(dir)
-                .and_then(|_| std::fs::write(dir.join(format!("{name}.dat")), &bytes))
-        {
-            eprintln!("cannot save units/{name}.dat: {e}");
+        if let Some(dir) = self.saves.as_ref().filter(|_| !name.contains(['/', '\\'])) {
+            let path = dir.join(format!("{name}.dat"));
+            if let Err(e) = std::fs::create_dir_all(dir).and_then(|_| std::fs::write(&path, &bytes)) {
+                eprintln!("cannot save {}: {e}", path.display());
+            }
         }
         self.saved.retain(|(n, _)| !n.eq_ignore_ascii_case(&name));
         self.saved.push((name, bytes));
     }
 
-    /// The saved designs by name: the `.dat` files in `units/` that read as designs, and the
-    /// ones kept here, in name order.
+    /// The saved designs by name: the `.dat` files in `units/` and then in the saves' folder
+    /// that read as designs, and the ones kept here, in name order.
     pub fn saved_designs(&self) -> Vec<(String, objects::Unit)> {
         let mut out: Vec<(String, objects::Unit)> = Vec::new();
         let mut add = |name: String, bytes: &[u8]| {
@@ -1828,7 +1835,8 @@ impl Screen {
                 out.push((name, unit));
             }
         };
-        if let Some(entries) = self.units.as_ref().and_then(|d| std::fs::read_dir(d).ok()) {
+        let dirs = [&self.units, &self.saves];
+        for entries in dirs.into_iter().flatten().filter_map(|d| std::fs::read_dir(d).ok()) {
             for entry in entries.flatten() {
                 let path = entry.path();
                 let Some(name) = path

@@ -1191,9 +1191,12 @@ chassis turns the panels to Turrets and a turret to Weapons; on the tabs they
 stay on, a fit steps the destination to the next slot, so the guns, the armour,
 the systems and the clips fill one after the other.
 Save opens the name field: type a name and press Enter, or click the field, and
-the design is written to the game's `units/<name>.dat`; Esc drops the field.
-Load lists the saved designs the factory can build, four rows at a time, and a
-click on one fits its parts again. Once the mission is won or lost the designer
+the design is written to `<name>.dat` in the player's own folder
+(`~/Library/Application Support/openparkan/units` on macOS, `%APPDATA%\openparkan\units`
+on Windows, `~/.local/share/openparkan/units` elsewhere), never into the install;
+`--save-to-game` writes it to the game's `units/`, as the game does. Esc drops the field.
+Load lists the saved designs the factory can build, from the game's `units/` and the
+player's folder, four rows at a time, and a click on one fits its parts again. Once the mission is won or lost the designer
 takes neither the mouse nor Esc.
 `--designer` draws a screenshot with the designer open on the first factory,
 and `--design PART,…` fits those parts to it in turn; `accept`, `save` and
@@ -1471,3 +1474,4 @@ has a row here, and a switch that restores the game's behaviour.
 | A building's guns fire on whatever its fire control traces, however far below its turret the target stands, so a bunker's lobbed flames reach a unit at its door or inside it | a building's guns hold their fire on a target lower than its turret's pitch channel lets its sight look — −15° on the Small Bunker's, about 40 m out from it — while its turret keeps tracing it | `--fire-below` | [29](../docs/29-weapons.md#how-the-ai-fires--read) |
 | A capture changes only the unit's clan, SuperAI and areal map, and gives it no order, so a captured bot engages a hostile within 500 on its own | a captured bot is given Standby, and holds until the player orders it | `--capture-idle` | [27](../docs/27-ownership.md#a-neutral-unit-is-taken-by-the-hero--read-and-measured) |
 | The HUD's 640 × 480 layout and the outcome panel scale by the screen's width over 640 across and its height over 480 down, so on a wide screen they stretch | the layout scales by the height alone and each element keeps its pin to the screen's edges: the panels in the bottom corners, the weapons at the top right, the radar at the bottom middle, the reticle and the wingman menu's rows in the middle; the warbot designer keeps its shape centred, over a black ground across the window | `--stretch-hud` | [35](../docs/35-hud.md#how-the-radar-draws--read) |
+| Save writes a design into the game's own `units/<name>.dat` | save writes `<name>.dat` to `openparkan/units` in the player's own data folder, as an install need not be writable; load lists that folder as well as `units/` | `--save-to-game` | [37](../docs/37-designer.md#the-buttons--read-and-seen) |
