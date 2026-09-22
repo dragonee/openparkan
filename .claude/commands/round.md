@@ -36,7 +36,24 @@ Two constraints on the grouping:
   round sometimes answers a question and never ticks the file. Grep the docs and
   `git log` for the subject before spending an agent on it.
 
-## 2. Launch the agents
+## 2. Check the engine first
+
+Work lands between rounds — fixes, milestones, a session chasing a bug — and it
+can do a question's work without ever touching the queue. Before a question goes
+to an agent, look at how the engine implements it now: `codegraph explore
+"<the question's subject>"` from the repo root, the code it points at, and the
+subject's row in `engine/README.md`.
+
+- **Researched already.** The code cites a read for it — the addresses, or a
+  doc section marked *read* or *measured* — and no `STAND-IN` marks it. Mark
+  the question completed in the queue (`- [x] ~~…~~ — closed <date>: already in
+  the engine`, with the code's citation and the commit that brought it, found by
+  `git log -S`), research it no further, and pick another question in its place.
+- **A stand-in.** The code marks it `// STAND-IN: docs/NN#section`, or its row
+  still sits in the stand-ins table: the engine is guessing. Research it further
+  — it goes to an agent, with the stand-in's current wording in the brief.
+
+## 3. Launch the agents
 
 Launch all four **in a single message**, each with `subagent_type:
 "general-purpose"` and `isolation: "worktree"`, so they research in parallel on
@@ -113,7 +130,7 @@ findings, the stand-in's current wording, the doc's own "next place to look").
 > the numbers and addresses), whether the engine was right or wrong and what
 > changed, and which docs moved.
 
-## 3. Land each branch as it finishes
+## 4. Land each branch as it finishes
 
 Do not wait for all four. As each agent reports:
 
@@ -128,7 +145,7 @@ Rebasing in completion order keeps each conflict small. Agents that touched the
 same table (`engine/README.md`, `openparkan/verify.py`) usually merge textually;
 resolve by keeping both rows.
 
-## 4. Verify the combined tree
+## 5. Verify the combined tree
 
 Once all four are in, run the whole thing — the agents each verified their own
 branch, not the merge:
@@ -141,7 +158,7 @@ cd engine && cargo test --workspace
 cd engine && cargo test --workspace -- --ignored   # install-backed, ~2.5 min
 ```
 
-## 5. Write up the queue
+## 6. Write up the queue
 
 `OPEN-QUESTIONS.md` is the coordinator's alone. For each question in the batch,
 replace the `- [ ]` line with a `- [x] ~~struck~~ — closed <date>:` entry
