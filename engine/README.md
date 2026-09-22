@@ -1145,6 +1145,15 @@ cargo run --release -p parkan -- --mission MISSIONS/Single.01  # another mission
 `--game DIR` or `PARKAN_DIR` points at the install when it is not beside this
 repository.
 
+The engine never writes into the install, which need not be writable. What the game
+writes there — saved designs today, saved games and settings when they come — goes to the
+player's own folder, `openparkan` in `~/Library/Application Support` on macOS, in
+`%APPDATA%` on Windows and in `$XDG_DATA_HOME` or `~/.local/share` elsewhere, or wherever
+`PARKAN_USER_DIR` names. Inside it a file keeps the path the game gives it in the install,
+so a design is `units/<name>.dat` in both. Code that writes a file asks
+`parkan_formats::userdir::resolve` for its place with the install path it would read the
+game's own at.
+
 In the cockpit the hero's own `hero.tbl` drives it. W and S walk, A and D
 strafe, Q walks straight on and off without a key held (the engine's own key;
 any strafe or a walk back ends it), the mouse turns the hull and tilts the
@@ -1191,10 +1200,8 @@ chassis turns the panels to Turrets and a turret to Weapons; on the tabs they
 stay on, a fit steps the destination to the next slot, so the guns, the armour,
 the systems and the clips fill one after the other.
 Save opens the name field: type a name and press Enter, or click the field, and
-the design is written to `<name>.dat` in the player's own folder
-(`~/Library/Application Support/openparkan/units` on macOS, `%APPDATA%\openparkan\units`
-on Windows, `~/.local/share/openparkan/units` elsewhere), never into the install;
-`--save-to-game` writes it to the game's `units/`, as the game does. Esc drops the field.
+the design is written to `units/<name>.dat` in the player's own folder (above), never into
+the install; `--save-to-game` writes it to the game's `units/`, as the game does. Esc drops the field.
 Load lists the saved designs the factory can build, from the game's `units/` and the
 player's folder, four rows at a time, and a click on one fits its parts again. Once the mission is won or lost the designer
 takes neither the mouse nor Esc.

@@ -382,23 +382,6 @@ pub struct Hud {
     pub preview_keys: Vec<parkan_world::cockpit::designer::PreviewKey>,
 }
 
-/// The folder the warbot designer saves to: `openparkan/units` in the player's own data
-/// folder -- `~/Library/Application Support` on macOS, `%APPDATA%` on Windows, and
-/// `$XDG_DATA_HOME` or `~/.local/share` elsewhere.
-pub fn design_saves() -> Option<PathBuf> {
-    let home = || std::env::var_os("HOME").map(PathBuf::from);
-    let data = if cfg!(target_os = "macos") {
-        home().map(|h| h.join("Library/Application Support"))
-    } else if cfg!(windows) {
-        std::env::var_os("APPDATA").map(PathBuf::from)
-    } else {
-        std::env::var_os("XDG_DATA_HOME")
-            .map(PathBuf::from)
-            .or_else(|| home().map(|h| h.join(".local/share")))
-    };
-    Some(data?.join("openparkan").join("units"))
-}
-
 /// The cockpit for `play` in `mission_dir`: the interface's pages and the mission's minimap
 /// into `renderer`, `GAME_FONT` and `MENU_FONT` into their slots.
 pub fn hud(
@@ -421,8 +404,11 @@ pub fn hud(
     let mut cockpit = parkan_world::cockpit::Cockpit::open(game, &pages, play)?;
     // The designer loads from the game's `units/` (docs/37, "The buttons") and saves to the
     // player's own folder, or with `--save-to-game` to `units/` as the game does.
-    let units = parkan_formats::gamedir::resolve(game, "UNITS").unwrap_or_else(|| game.join("units"));
-    cockpit.designer.saves = if args.save_to_game { Some(units.clone()) } else { design_saves() };
+    use parkan_formats::userdir;
+    let units =
+        parkan_formats::gamedir::resolve(game, userdir::UNITS).unwrap_or_else(|| game.join(userdir::UNITS));
+    cockpit.designer.saves =
+        if args.save_to_game { Some(units.clone()) } else { userdir::resolve(userdir::UNITS) };
     cockpit.designer.units = Some(units);
     Ok(Hud {
         cockpit,

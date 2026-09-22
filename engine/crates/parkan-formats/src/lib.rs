@@ -31,6 +31,7 @@ pub mod rsli;
 pub mod scr;
 pub mod sky;
 pub mod texm;
+pub mod userdir;
 pub mod wea;
 
 pub use cursor::FormatError;
