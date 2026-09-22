@@ -13024,6 +13024,130 @@ def check_target_marks(check, game: Path) -> None:
           f"0x10077d80 draws it left of a unit and mirrored right, tinted by the rule")
 
 
+#: The strings ``iron3d.dll:0x100338d0`` names a building with, by Type: one id, or the
+#: first of a run indexed by the size class from 2 (docs/35, "Name and status").
+BUILDING_NAMES = {
+    0x80000004: (6031, 3), 0x80000008: (6036, 3), 0x80000002: (6041, 0),
+    0x80000400: (6046, 4), 0x80000010: (6051, 3), 0x80000040: (6056, 0),
+    0x80002000: (6061, 4), 0x80001000: (6066, 4), 0x80000200: (6071, 2),
+    0x80100000: (6077, 0), 0x80200000: (6083, 0), 0x80010000: (6086, 0),
+    0x80020000: (6092, 0), 0x80040000: (6098, 0),
+}
+BUILDING_UNKNOWN = 6205
+
+
+def building_name_id(type_word: int, size: int) -> int:
+    """The string id a building of ``type_word`` and size class ``size`` is named by."""
+    first, sizes = BUILDING_NAMES.get(type_word, (BUILDING_UNKNOWN, 0))
+    if first == BUILDING_UNKNOWN or sizes == 0:
+        return first
+    return first + size - 2 if 2 <= size < 2 + sizes else BUILDING_UNKNOWN
+
+
+def check_pick_marker_names(check, game: Path) -> None:
+    """The world pick's classes and nearest rule, a unit marker's layout, a building's name."""
+    iron_path, world_path = game / "iron3d.dll", game / "World3D.dll"
+    if not iron_path.exists() or not world_path.exists():
+        return
+    image = iron_path.read_bytes()
+    iron, world = _image_at(image), _image_at(world_path.read_bytes())
+
+    def f32(va: int) -> float:
+        return struct.unpack("<f", iron(va, 4))[0]
+
+    def u32(va: int) -> int:
+        return struct.unpack("<I", iron(va, 4))[0]
+
+    # The pick: class 3 at 0.7 of the radius, then class 4 at 1.0, one nearest distance
+    # (FLT_MAX) shared, class 4's answer kept when it has one; the world files an object
+    # under its own class (slot 11), the id's nibble docs/29 reads as 3 building, 4 unit.
+    pick = (iron(0x1003614B, 5) == bytes.fromhex("683333333f")
+            and iron(0x10036156, 5) == bytes.fromhex("b903000000")
+            and iron(0x1003615B, 8) == bytes.fromhex("c7442420ffff7f7f")
+            and iron(0x10036171, 5) == bytes.fromhex("680000803f")
+            and iron(0x1003617E, 5) == bytes.fromhex("b904000000")
+            and iron(0x10036188, 6) == bytes.fromhex("85c075028bc6")
+            and world(0x1000562A, 3) == bytes.fromhex("ff502c")
+            and world(0x10005636, 3) == bytes.fromhex("83e50f"))
+    check("iron3d.dll: the ray picks buildings at 0.7 r, then units at r, nearest wins",
+          pick,
+          "0x100360f0 walks class 3 with 0.7 and class 4 with 1.0 through 0x100361a0, one "
+          "shared nearest distance from FLT_MAX; World3D.dll:0x1000562a files an object by "
+          "its slot 11, and class 3 is LoadBuilding's, class 4 a robot's")
+
+    # The unit marker: the gap 44 x the record's slot 5, 2/d x 30 held at least 0.3; the
+    # bar frame page9 (0, 0) 27 x 16 tinted blue; eight 32 x 32 signs along y 224 of
+    # `icons`, clan i taking sign i; the class icons at x 24, 48, 72.
+    slot5 = u32(0x100E64D0 + 5 * 4)
+    figure = (slot5 == 0x10075650 and f32(0x100E5C9C) == 44.0 and f32(0x100E5C0C) == 2.0
+              and f32(0x100E5C78) == 30.0 and abs(f32(0x100E64E8) - 0.3) < 1e-6)
+    frame = (iron(0x100434E1, 18) == bytes.fromhex("556800008041680000d84155556800008043")
+             and iron(0x10077FE1, 5) == bytes.fromhex("68ff0000ff"))
+    # Each cut pushes (0, h 32, w 32, y 224, x, 256) with 0 as `push ebx`, 0x10065230.
+    cuts = iron(0x10065230, 0x200)
+    head = b"\x53\x68" + struct.pack("<f", 32.0) + b"\x68" + struct.pack("<f", 32.0) \
+        + b"\x68" + struct.pack("<f", 224.0)
+    tail = b"\x68" + struct.pack("<f", 256.0)
+    sign_x = [x for x in range(0, 256, 32)
+              if head + (b"\x53" if x == 0 else b"\x68" + struct.pack("<f", float(x))) + tail
+              in cuts]
+    signs = sign_x == [32 * i for i in range(8)]
+    own = iron(0x100A2420, 2) == b"\x89\x01"
+    clans = max((len(mission.load(d / "data.tma").clans) for d in gamedir.missions(game)),
+                default=0)
+    ui = NResArchive.open(game / "ui" / "ui.lib")
+    icons = next((e for e in ui if e.name.lower() == "icons.tex"), None)
+    inked = []
+    if icons is not None:
+        tex = texm.decode(ui.read(icons))
+        for i in range(8):
+            inked.append(sum(tex.rgba[((224 + y) * tex.width + 32 * i + x) * 4 + 3] > 128
+                             for y in range(32) for x in range(32)))
+    check("iron3d.dll: a unit marker's gap, bar frame, clan sign and class icon",
+          figure and frame and signs and own and 0 < clans <= 8 and len(inked) == 8
+          and min(inked) > 100,
+          f"the unit record's slot 5 is {slot5:#x}: 2/d x 30, at least 0.3, and the gap 44 x "
+          f"it; page9's frame (0, 0) 27 x 16 tinted 0xff0000ff; signs at y 224, x {sign_x}, "
+          f"clan i sign i in a single-player game; the most clans a mission has is {clans}; "
+          f"opaque pixels in each sign cell {inked}")
+
+    # A building's name: the building record's slot 1 calls 0x100338d0, which answers the
+    # string for the behaviour's Type (slot 14) and size class (0x201).
+    ids = set()
+    at = 0x100338D0
+    while at < 0x10033C79:
+        if iron(at, 1) == b"\xbe":
+            v = struct.unpack("<I", iron(at + 1, 4))[0]
+            if 6000 <= v < 6300:
+                ids.add(v)
+        at += 1
+    want = {BUILDING_UNKNOWN}
+    for first, sizes in BUILDING_NAMES.values():
+        want |= {first} if sizes == 0 else set(range(first, first + sizes))
+    strings = resources.strings(image)
+    routine = (u32(0x100E5C4C + 4) == 0x10033720 and iron(0x10033744, 5) == b"\xe8\x87\x01\x00\x00"
+               and ids == want and all(i in strings for i in want))
+    names: Counter[str] = Counter()
+    for d in gamedir.missions(game):
+        for o in mission.load(d / "data.tma").objects:
+            if o.kind != mission.KIND_BUILDING:
+                continue
+            leaf = o.path.replace("\\", "/").split("/")[-1].lower()
+            found = next((p for p in game.glob("UNITS/BUILDS/*/*") if p.name.lower() == leaf), None)
+            if found is None:
+                names["(no file)"] += 1
+                continue
+            root = objects.load_unit(found).components[0].ref.member.lower()
+            size = profiles.BUILDING_SIZE.get(root[3:4], 0)
+            names[strings.get(building_name_id((o.type_id or 0) & 0xFFFFFFFF, size), "?")] += 1
+    total = sum(names.values())
+    check("iron3d.dll: a building is named by its Type and its size class",
+          routine and total == 167 and not names["Unknown"] and not names["(no file)"],
+          f"0x100338d0 (the building record's slot 1) answers {len(ids)} ids "
+          f"{min(ids, default=0)}-{max(ids, default=0)}; the {total} buildings the missions "
+          f"place: {dict(sorted(names.items()))}")
+
+
 #: The target panel's named sprites in ``ui/hq.cfg``: page, x, y, width, height.
 TARGET_PANEL_SPRITES = {
     "targeter_back": ("ui_menu3", 0, 82, 150, 174),
@@ -24739,6 +24863,7 @@ def run(game: Path) -> int:
         check_designs,
         check_units, check_loading, check_search, check_construction,
         check_controls, check_player_input, check_strafe, check_focus, check_selection,
+        check_pick_marker_names,
         check_turret_channels,
         check_behaviour, check_research, check_descriptions, check_saves,
         check_vocabulary, check_resources, check_briefing, check_briefing_screen,

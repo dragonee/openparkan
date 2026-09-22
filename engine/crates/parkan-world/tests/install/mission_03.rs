@@ -381,3 +381,70 @@ fn mission_03_is_won_by_the_generator_the_bunker_a_mine_four_warbots_and_the_pat
     let robots = play.own_units_within(parkan_world::selection::BATTLE_UNITS).len();
     assert_eq!(outcome, Some(true), "objectives {done:?}, {robots} battle units");
 }
+
+/// Every building every shipped mission places is named as `iron3d.dll:0x100338d0` names it,
+/// by its Type and its root record's size letter, and none of the 167 is *"Unknown"*
+/// (docs/35, "Name and status"): Mission 03's Small Generator, Small Warehouse, Large Factory
+/// and Small Bunker among them, and the 19 bridges, 3 ruins, 5 main teleports and 4 enhanced
+/// institutes the engine left unnamed or misnamed before.
+#[test]
+#[ignore = "needs the game install"]
+fn every_placed_building_is_named_by_its_type_and_size() {
+    use parkan_formats::gamedir;
+    use parkan_formats::mission::{self, KIND_BUILDING, Value};
+    use parkan_world::assembly::Assembly;
+    use parkan_world::selection::{building_name_id, building_size};
+    use std::collections::BTreeMap;
+
+    let game = gamedir::find(None).expect("a Parkan install: set PARKAN_DIR");
+    let strings = parkan_world::resources::game_strings(&game).unwrap();
+    let assembly = Assembly::new(&game).unwrap();
+    let root = game.join("MISSIONS");
+    let with_data = |d: &std::path::Path| d.is_dir() && d.join("data.tma").exists();
+    let mut dirs: Vec<_> = std::fs::read_dir(&root).unwrap().map(|e| e.unwrap().path()).filter(|d| with_data(d)).collect();
+    for campaign in std::fs::read_dir(root.join("CAMPAIGN")).unwrap().map(|e| e.unwrap().path()) {
+        if campaign.is_dir() {
+            dirs.extend(std::fs::read_dir(&campaign).unwrap().map(|e| e.unwrap().path()).filter(|d| with_data(d)));
+        }
+    }
+    let mut names: BTreeMap<String, usize> = BTreeMap::new();
+    for dir in &dirs {
+        let m = mission::parse(&std::fs::read(dir.join("data.tma")).unwrap(), &dir.display().to_string()).unwrap();
+        for o in m.objects.iter().filter(|o| o.kind == KIND_BUILDING) {
+            let type_word = match o.property("Type").map(|p| p.value) {
+                Some(Value::Int(v)) => v as u32,
+                Some(Value::Float(v)) => v as i64 as u32,
+                None => 0,
+            };
+            let size = assembly.records(&o.path).first().map_or(0, |r| building_size(r));
+            let name = strings.get(&building_name_id(type_word, size)).cloned().unwrap_or_default();
+            *names.entry(name).or_default() += 1;
+        }
+    }
+    let expected: BTreeMap<String, usize> = [
+        ("Small Generator", 47),
+        ("Small Mine", 5),
+        ("Medium Mine", 5),
+        ("Large Mine", 5),
+        ("Small Warehouse", 4),
+        ("Small Factory", 10),
+        ("Medium Factory", 2),
+        ("Large Factory", 16),
+        ("Small Outpost", 6),
+        ("Small Res. Center", 4),
+        ("Medium Res. Center", 1),
+        ("Enhanced Res. Center", 4),
+        ("Teleport", 5),
+        ("Bridge", 19),
+        ("Ruins", 3),
+        ("Small Bunker", 19),
+        ("Medium Bunker", 5),
+        ("Large Bunker", 1),
+        ("Light Tower", 6),
+    ]
+    .into_iter()
+    .map(|(n, c)| (n.to_owned(), c))
+    .collect();
+    assert_eq!(dirs.len(), 29, "{dirs:?}");
+    assert_eq!(names, expected);
+}

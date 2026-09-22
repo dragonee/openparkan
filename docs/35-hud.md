@@ -980,6 +980,40 @@ That gives (*measured*, against what the recording prints):
 - *seen*: **MFW-1**, **TFW-2** (the Ntrl clan's two, in file order), **TSW-1**,
   **SSW-1**.
 
+**A building is named by its Type and its size class** (*read*). The building
+record's slot 1 (`0x10033720`, vtable `0x100e5c4c`) calls `0x100338d0` and hands
+the string to the behaviour as its name (interface `0x10` slot 42). The routine
+asks the behaviour for its Type (slot 14) and for variable `0x201`, the size
+class (slot 26), which a building takes from the fourth letter of its root
+record's member name: `l` 2, `m` 3, `b` 4, `e` 5
+([38-designs.md](38-designs.md#the-catalogue--read-and-measured)). Then:
+
+| Type | size 2 | 3 | 4 | 5 |
+|---|---|---|---|---|
+| `BUILDING_MINE` `0x80000004` | 6031 *Small Mine* | 6032 *Medium* | 6033 *Large* | — |
+| `BUILDING_STORAGE` `0x80000008` | 6036 *Small Warehouse* | 6037 | 6038 | — |
+| `BUILDING_INSTITUTE` `0x80000400` | 6046 *Small Res. Center* | 6047 | 6048 | 6049 *Enhanced Res. Center* |
+| `BUILDING_PLANT` `0x80000010` | 6051 *Small Factory* | 6052 | 6053 *Large Factory* | — |
+| `BUILDING_RUINE` `0x80002000` | 6061 *Ruins* | 6062 | 6063 | 6064 |
+| `BUILDING_BRIDGE` `0x80001000` | 6066 *Bridge* | 6067 | 6068 | 6069 |
+| `BUILDING_MAINTELEPORT` `0x80000200` | 6071 *Teleport* | 6072 | — | — |
+
+and by Type alone: the generator 6041 *Small Generator*, the outpost
+(`0x80000040`) 6056 *Small Outpost*, the towers 6077 *Light Tower* and 6083
+*Heavy Tower*, the bunkers 6086, 6092 and 6098 *Small*, *Medium* and *Large
+Bunker*. A size the table has no string for (—), or any other Type, is 6205
+*Unknown*. The ruins', the bridges' and the teleports' strings read the same at
+every size.
+
+*Measured* over the 29 shipped missions: all **167 of 167** placed buildings get
+a string, none *Unknown* — 47 Small Generators, 5 each of the three mines, 4
+Small Warehouses, 10, 2 and 16 Small, Medium and Large Factories, 6 Small
+Outposts, 4, 1 and 4 Small, Medium and Enhanced Res. Centers, 5 Teleports, 19
+Bridges, 3 Ruins, 19, 5 and 1 Small, Medium and Large Bunkers, and 6 Light
+Towers. The engine's earlier rule, by the letter between the first two
+underscores with anything but `m` and `b` taken as small, named the 4 `fr_e_inst`
+Small and left the 19 bridges, 3 ruins and 5 teleports unnamed: 31 of the 167.
+
 **Line two, at y 469**, is left empty for the hero (Type, record `+0x2c`) and
 for a building (its object's slot 11 answering 3). Otherwise:
 - **A unit of the player's clan** (record `+0x24`) gets `"[status]"` in the same
@@ -1070,6 +1104,10 @@ hit, and prints *"SSW-1 Warrior"* above a falling distance.
 - What interface `0x20`'s sphere is, beside interface `0x18`'s bounding sphere.
 - Which caller hands the name its class word, and who writes the panel level at
   `AniMesh.dll:0x100225e8`.
+- ~~The routine that names a building (strings 6031–6098).~~ **Read**:
+  `0x100338d0`, from the building record's slot 1, by the behaviour's Type and
+  its size class `0x201`; all 167 placed buildings get a string
+  ([Name and status](#name-and-status--read-and-seen)).
 - ~~The component value `0x400` in the *"Dangerous!"* test.~~ **Read**: the
   life left in the device's node over its maximum, `IDeviceManager` slot 6's
   case `0x1002bc3c`
@@ -1095,9 +1133,10 @@ mission loads (`0x1008ce90`, called at `0x1005e0f1`):
 | `+0x10` | `0x1006a210` | 0x594 | **the objectives screen** |
 | `+0x14` | `0x10072f90` | 0x264 | **the satellite map** ([below](#the-satellite-map)) |
 | `+0x1c` | `0x100672c0` | 0x290 | the help screen, titled `Help:` |
+| `+0x20` | `0x10065230` | 0x460 | the eight clans' signs, 32 × 32 cells of `icons` along y 224, which the unit marker draws ([25-sensors.md](25-sensors.md#the-unit-markers-layout--read-and-measured)) |
 | `+0x24` | a byte of its own | 1 | the pause byte Esc clears first ([34-progression.md](34-progression.md#after-the-outcome--read-and-measured)) |
 
-The other fields (`+0x08`, `+0x0c`, `+0x18`, `+0x20`) were not read.
+The other fields (`+0x08`, `+0x0c`, `+0x18`) were not read.
 
 **Its draw** (`0x1008d200`) runs in the interface pass while the mission is
 being played ([34-progression.md](34-progression.md#after-the-outcome--read-and-measured)).

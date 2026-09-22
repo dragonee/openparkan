@@ -324,40 +324,12 @@ impl Play {
         }
     }
 
-    /// A building's name.
-    ///
-    /// STAND-IN: docs/35-hud.md#name-and-status--read-and-seen -- the routine that names a
-    /// building is not read: `iron3d.dll`'s strings 6031–6098 by its Type, a bunker's size by
-    /// its Type and any other's by the size letter of its root record (`fr_l_` small, `fr_m_`
-    /// medium, `fr_b_` large), as the recording names the Small Generator, Small Warehouse,
-    /// Large Factory and Small Bunker.
+    /// A building's name: [`building_name_id`] for its Type and its size class, the size
+    /// from its root record's fourth letter ([`building_size`]).
     pub fn building_name(&self, t: usize, strings: &std::collections::BTreeMap<u32, String>) -> String {
-        let unit = &self.units[t];
-        let size = self
-            .assembly
-            .records(self.commander.paths.get(t).map_or("", String::as_str))
-            .first()
-            .and_then(|r| r.to_ascii_lowercase().split('_').nth(1).map(str::to_owned))
-            .map_or(0, |letter| match letter.as_str() {
-                "m" => 1,
-                "b" => 2,
-                _ => 0,
-            });
-        let id = match unit.type_word {
-            0x8000_0004 => 6031 + size,
-            0x8000_0008 => 6036 + size,
-            0x8000_0002 => 6041,
-            0x8000_0400 => 6046 + size,
-            0x8000_0010 => 6051 + size,
-            0x8000_0040 => 6056,
-            0x8010_0000 => 6077,
-            0x8020_0000 => 6083,
-            0x8001_0000 => 6086,
-            0x8002_0000 => 6092,
-            0x8004_0000 => 6098,
-            _ => return String::new(),
-        };
-        strings.get(&id).cloned().unwrap_or_default()
+        let root = self.assembly.records(self.commander.paths.get(t).map_or("", String::as_str));
+        let size = root.first().map_or(0, |r| building_size(r));
+        strings.get(&building_name_id(self.units[t].type_word, size)).cloned().unwrap_or_default()
     }
 
     /// Each lode's plume, `effects.rlb`'s `env_mineral` on the ground under it, shows while no
@@ -390,5 +362,72 @@ impl Play {
             Mode::Command(t) => Some(t),
             _ => None,
         }
+    }
+}
+
+/// A building's size class from its root record's member name: the fourth letter, `l` 2,
+/// `m` 3, `b` 4, `e` 5, any other 0 (`Behavior.dll:0x1000cee0`, docs/38, "The grade is the
+/// factory's size").
+pub fn building_size(root: &str) -> u32 {
+    match root.as_bytes().get(3).map(u8::to_ascii_lowercase) {
+        Some(b'l') => 2,
+        Some(b'm') => 3,
+        Some(b'b') => 4,
+        Some(b'e') => 5,
+        _ => 0,
+    }
+}
+
+/// The string naming a building of `type_word` and size class `size` (`iron3d.dll:0x100338d0`,
+/// which the building record's slot 1, `0x10033720`, hands to the behaviour as its name;
+/// docs/35, "Name and status"). A size the Type has no string for, or a Type not listed, is
+/// 6205 *"Unknown"*.
+pub fn building_name_id(type_word: u32, size: u32) -> u32 {
+    const UNKNOWN: u32 = 6205;
+    // `sizes` strings from `first` up, for size classes 2 onward.
+    let sized = |first: u32, sizes: u32| if (2..2 + sizes).contains(&size) { first + size - 2 } else { UNKNOWN };
+    match type_word {
+        0x8000_0004 => sized(6031, 3),
+        0x8000_0008 => sized(6036, 3),
+        0x8000_0002 => 6041,
+        0x8000_0400 => sized(6046, 4),
+        0x8000_0010 => sized(6051, 3),
+        0x8000_0040 => 6056,
+        0x8000_2000 => sized(6061, 4),
+        0x8000_1000 => sized(6066, 4),
+        0x8000_0200 => sized(6071, 2),
+        0x8010_0000 => 6077,
+        0x8020_0000 => 6083,
+        0x8001_0000 => 6086,
+        0x8002_0000 => 6092,
+        0x8004_0000 => 6098,
+        _ => UNKNOWN,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_building_is_named_by_its_type_and_its_roots_size_letter() {
+        assert_eq!(["fr_l_mine", "fr_M_mine", "fr_b_mine", "fr_e_inst", "fr_x_gener", "fr"].map(building_size), [
+            2, 3, 4, 5, 0, 0
+        ]);
+        // A mine, a warehouse and a factory come in three sizes, an institute in four, the
+        // generator and the outpost in one whatever the letter.
+        assert_eq!([2, 3, 4, 5].map(|s| building_name_id(0x8000_0004, s)), [6031, 6032, 6033, 6205]);
+        assert_eq!([2, 5].map(|s| building_name_id(0x8000_0400, s)), [6046, 6049]);
+        assert_eq!([0, 4].map(|s| building_name_id(0x8000_0002, s)), [6041, 6041]);
+        // The main teleport in two sizes, the ruin and the bridge in four each.
+        assert_eq!([2, 3, 4].map(|s| building_name_id(0x8000_0200, s)), [6071, 6072, 6205]);
+        assert_eq!([2, 5].map(|s| building_name_id(0x8000_2000, s)), [6061, 6064]);
+        assert_eq!([2, 5].map(|s| building_name_id(0x8000_1000, s)), [6066, 6069]);
+        // Bunkers and towers by Type alone, and anything else Unknown.
+        assert_eq!(
+            [0x8001_0000, 0x8002_0000, 0x8004_0000, 0x8010_0000, 0x8020_0000, 0x8000_0001]
+                .map(|t| building_name_id(t, 4)),
+            [6086, 6092, 6098, 6077, 6083, 6205]
+        );
     }
 }
