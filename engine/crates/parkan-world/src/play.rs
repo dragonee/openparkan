@@ -1618,9 +1618,19 @@ impl Play {
         self.update_targets();
         self.refresh_present();
         self.tick_robots(dt_ms, mouse);
-        // STAND-IN: docs/40-command-mode.md#not-established -- nothing read pops mode 3 when its HQ is
-        // lost: the view rolls back to the HQ's cockpit, which the lost bot then puts the hero
-        // out of, as below.
+        // The game frame tests the bot the hero boarded every frame, and once the component
+        // test refuses it -- gone, or its turret's body shot to nothing though the bot flies on
+        // -- rolls the stack back to mode 0 (`0x1005eab3`–`0x1005eacf`, docs/39, "When the
+        // driven bot is lost"), through any command view or telepresence standing on it: the
+        // hero is put out beside the bot, untested.
+        if let Some(t) = self.aboard()
+            && !self.component_sound(t)
+        {
+            self.roll_back_to_foot();
+        }
+        // STAND-IN: docs/40-command-mode.md#not-established -- nothing read pops mode 3 when an
+        // HQ the hero did not board, one reached from a bunker's view, is lost: the view rolls
+        // back to the view below it.
         if let Mode::HqCommand(h) = self.mode()
             && !self.battle.combat.targets.get(h).is_some_and(|x| x.alive)
         {
@@ -2003,6 +2013,27 @@ impl Play {
     /// Whether the hero is out of the world: aboard a bot, or driving one from afar.
     pub fn hero_away(&self) -> bool {
         self.driving.is_some() || self.aboard().is_some()
+    }
+
+    /// Where the hero's own behaviour reports it to the routes (docs/39, "What becomes of the
+    /// hero"). On foot, or driving a unit from a bunker's view, it is where the hero stands.
+    /// Aboard, it is the place the game frame gives the hero's object every frame
+    /// (`iron3d.dll:0x1005ead6`–`0x1005eb39`): the boarded bot's world matrix with its y lowered
+    /// by the bot record's `+0x94`, its node sphere's radius, whatever command view or
+    /// telepresence stands on the bot.
+    pub fn hero_place(&self) -> Vec3 {
+        match self.aboard().and_then(|t| self.robots.iter().find(|(rt, _)| *rt == t)) {
+            Some((_, bot)) => bot.walker.body.position - Vec3::new(0.0, bot.bound.1, 0.0),
+            None => self.hero.walker.body.position,
+        }
+    }
+
+    /// Whether unit `t` passes the component test (`iron3d.dll:0x10076d30`, docs/39,
+    /// "Boarding"): it is still there, and its first class-1 component's node, a fitted
+    /// turret's body, has life left.
+    fn component_sound(&self, t: usize) -> bool {
+        let Some((_, robot)) = self.robots.iter().find(|(rt, _)| *rt == t) else { return false };
+        self.battle.combat.targets.get(t).is_some_and(|x| x.alive && turret_alive(robot, x))
     }
 
     /// The view's own unit (`+0xaec`): the one the player drives, else the one the hero rides
@@ -2450,8 +2481,7 @@ impl Play {
         let at = robot.walker.body.position;
         let r = robot.bound.1 + self.hero.bound.1;
         let flyer = robot.flyer;
-        let alive = self.battle.combat.targets.get(t).is_some_and(|x| x.alive);
-        let place = if alive {
+        let place = if self.component_sound(t) {
             (0..LEAVE_PLACES).find_map(|i| {
                 let a = i as f32 * std::f32::consts::FRAC_PI_4;
                 let p = at + Vec3::new(a.cos(), a.sin(), 0.0) * r;
@@ -2464,7 +2494,8 @@ impl Play {
                 Some(p)
             })
         } else {
-            // A bot that is broken or gone puts the hero at (x − 1, y − 1), untested (`0x100634ad`).
+            // A bot the component test refuses -- gone, or its turret's body at no life -- puts
+            // the hero at (x − 1, y − 1), untested (`0x100634ad`).
             Some(at - Vec3::new(1.0, 1.0, 0.0))
         };
         let Some(place) = place else {
@@ -3748,9 +3779,9 @@ impl Play {
             .zip(&self.battle.combat.targets)
             .map(|(u, t)| (u.logical_id, t.position))
             .collect();
-        // A recording shows the hero's route reported where the bot it rides goes (docs/34,
-        // "Mission 02").
-        at.insert(self.hero_id, self.driven().walker.body.position);
+        // Aboard, the hero is reported from where the game frame puts its object: the boarded
+        // bot's place less its node sphere's radius in y (docs/39, "What becomes of the hero").
+        at.insert(self.hero_id, self.hero_place());
         let now = self.hero.time_ms;
         let Some(p) = self.progression.as_mut() else { return };
         let notices = p.tick(now, |id| at.get(&id).copied());

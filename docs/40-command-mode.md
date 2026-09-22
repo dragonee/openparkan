@@ -634,8 +634,17 @@ So **the map and the page do peel back one Esc at a time before 735 leaves.**
   lost unit is the driven one and the front is mode 1, 2, 5 or 7. Its case
   table at `0x1007563c` gives modes 3, 4 and 6 nothing (*measured*).
 - The takt's lost-building flag (`0x10062950`) reads only a record's building.
-- So nothing read pops mode 3 when the HQ dies, and the camera's `+0x44` and
-  the driven unit still name it. What the game does then was not followed.
+- **The game frame does, for an HQ the hero boarded** (*read*). Every frame it
+  tests the `CState`'s `+0x28`, the bot boarded from foot, with the component
+  test, and once that refuses — the HQ gone, or its turret's body shot to
+  nothing — rolls the stack back to mode 0 (`iron3d.dll:0x1005eab3`–`0x1005eacf`,
+  [39-boarding.md](39-boarding.md#when-the-driven-bot-is-lost--read)): 3 → 1,
+  then 1 → 0, which puts the hero at (x − 1, y − 1) beside a broken HQ,
+  untested (*derived*). That is Mission 04's way in, Enter aboard the HQ.
+- An HQ whose view was reached otherwise — from a bunker's view (4 → 3), or by
+  Enter in telepresence begun there — is not the `CState`'s `+0x28`, and
+  nothing read pops mode 3 when it dies: the camera's `+0x44` and the driven
+  unit still name it. What the game does then was not followed.
 
 ### Against the recording — *seen*
 
@@ -691,9 +700,11 @@ frame that is about 75 frames a second to reach 61 m, or about 48 to reach
    selected and taken at auto-driver level 0, the view is its cockpit, and held
    keys are dropped. A further Esc leaves the HQ as it would any bot.
 7. **The hero button** goes to mode 0 through mode 1.
-8. **An HQ lost in mode 3** is not handled by anything read. Rolling back to
-   mode 1, and on to the hero put down at (x − 1, y − 1), is the nearest thing
-   the game does for other modes (*guess*).
+8. **An HQ the hero boarded, lost in mode 3** or its turret's body shot off,
+   rolls the stack back to mode 0 through mode 1, and the hero is put down at
+   (x − 1, y − 1) beside it. An HQ reached from a bunker's view is not handled
+   by anything read; rolling back to the view below is the nearest thing
+   (*guess*).
 
 ## Selecting and ordering in the world
 
@@ -793,8 +804,12 @@ mode.
     and fits that recording nearly as well.
   - The multi-part branch of the bound (`AniMesh.dll:0x10009d0f`) takes the
     half-diagonal of a box (*seen*, *read* in part).
-- **What happens when an HQ is lost in its own mode 3**: nothing read rolls the
-  stack back.
+- ~~**What happens when an HQ is lost in its own mode 3**: nothing read rolls the
+  stack back.~~ **Read** for an HQ the hero boarded: the game frame's test of
+  the boarded bot rolls the stack back to mode 0 once the HQ is gone or its
+  turret's body is shot off (`iron3d.dll:0x1005eacf`,
+  [When the HQ is lost in mode 3](#leaving)). Still open for an HQ whose
+  view was reached from a bunker's: nothing read rolls the stack back.
 - Why *LWC-1 Comm. Center* reads *[no order]* in its cockpit at 160 s, after
   *[standing]* in its command view at 94 s: whether taking a unit at level 0
   clears its order, or the player ordered it again unseen.

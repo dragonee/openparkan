@@ -165,16 +165,50 @@ object starts at **0** in single play (`0x10074dcf`: 2 only in parameter mode
 3), so the player gets its movement, turret and guns, the wizard goes to the
 player's mode, and `+0xa2` is set.
 
-**What becomes of the hero** (*derived*):
-- detached from the world's object tree, it is no longer reached by the frame's
-  broadcasts: not drawn, not ticked, and not met by the queries that walk the
-  tree (the hit test's segment query, the ground search);
-- it keeps its position and matrix until it is put out;
-- its behaviour takt does not run, which would leave it reporting no route
-  while aboard. **A recording contradicts that** (*seen*): on Mission 02 route
-  4's message plays while the hero flies the warbot over the lake, 500 m from
-  where it boarded ([34-progression.md](34-progression.md#seen-in-a-recording)).
-  So the route is reported where the bot goes, by a path not read.
+**What becomes of the hero**:
+- detached from the world's object tree, it is not met by what walks the tree:
+  the hit test's segment query and the ground search, and the draw (*derived*);
+- **it is still ticked** (*read*). The game takt does not walk the tree.
+  `World3D.dll`'s queue takt (slot 4, `0x10006bf0`), run once a calculation
+  (`stdCalculateGame`, `0x10013a69`), sends message 6 with 1 to every object
+  in the queue's registry (`0x10006c49`–`0x10006c85`) — the table
+  `GetIGObject` looks an id up in (slot 11, `0x10007860`: from `0x101554a8`,
+  `0xc7f8c` bytes a player) — whether it hangs in the tree or not. The agent
+  hands it to its behaviour (`+0x17c`) first, then to its wizard, its
+  collision object and its control system (`+0x178`, `+0x170`, `+0x158`;
+  `AniMesh.dll:0x100013e0`–`0x1000141f`). So the hero's behaviour keeps its
+  object takt, and its route report with it
+  ([34-progression.md](34-progression.md#who-stands-in-a-route--read));
+- **its object rides with the bot** (*read*). Every frame the game runs (the
+  pause byte `+0xe8` and the state word at 3 skip it, `0x1005ea7f`,
+  `0x1005ea8d`), after the calculation (`0x1005ea69`) and the unit records'
+  update (`0x1005eaae`), the game frame (`0x1005e680`) reads the `CState`'s
+  `+0x28`, the bot boarded: set
+  by this handler (`0x10063880`), cleared by leaving (`0x100639cb`) and after
+  the stack is rolled back to mode 0 at `0x100628d9`, and zeroed by the
+  constructor (`0x100622a3`).
+  A bot the component test passes (`0x10076d30`, `0x1005eabf`) has its kind-2
+  world matrix read (`IGameObject` slot 8), its element 7, the y, lowered by
+  the bot record's `+0x94` — its node sphere's radius, 11.84 on the L-2f — and
+  the result given to the hero's object as its world matrix (slot 7 with kind
+  2, `0x1005ead6`–`0x1005eb39`). A parentless object hands back from slot 8
+  what slot 7 last wrote (`AniMesh.dll:0x10002470`). A bot the test refuses
+  rolls the stack back instead ([below](#when-the-driven-bot-is-lost--read));
+- **so its route follows the bot** (*read*, and *seen*). The report reads
+  elements 3, 7 and 11 of that matrix (`Behavior.dll:0x10014f90`), in a takt
+  that reaches the behaviour before the hero's own control system, and the frame
+  writes the matrix again after every calculation: every report reads the
+  frame's place, **the bot's x, its y less its node sphere's radius, and its
+  z**. As for any unit, the report goes out once that place has moved 5 by
+  |dx| + |dy|, or crossed into another navigation areal, on a takt 2 to 5 s
+  apart. That is the recording's: on Mission 02 route 4's message plays while
+  the hero flies the warbot over the lake, 500 m from where it boarded
+  ([34-progression.md](34-progression.md#seen-in-a-recording)), and route
+  messages asked again show "already in history" in flight, 268–286 s. The
+  11.84 m does not show in the recording, which does not give the bot's place
+  at 312 s. On openparkan's engine, which now reports the hero from that
+  place, route 4's south edge takes the hero only once the bot is 11.84 m
+  past it, and its north-east edge while the bot is still 11.84 m short;
 - **it leaves the collision manager** (*read*). `CGameObject::DetachChild`
   (`AniMesh.dll:0x10017680`, and the copy the landscape's `IGameObject` slot 5
   runs, `Terrain.dll:0x1008a8a0`; both name themselves in a panic string) tells
@@ -193,13 +227,8 @@ player's mode, and `+0xa2` is set.
   whose kind is not 10, a tree or a stone (`0x1001f68e`). What it lists of a
   unit are the tactical areals, the routes, which only the unit's behaviour
   report changes
-  ([34-progression.md](34-progression.md#who-stands-in-a-route--read)). That
-  report reads the object's position from its kind-2 world matrix, elements 3,
-  7 and 11 (`Behavior.dll:0x10014f90`, `IGameObject` slot 8), and a detached
-  object keeps that matrix as it was: slot 8 composes it afresh only under a
-  parent (`AniMesh.dll:0x10002470`). So the hero's own report would keep it on
-  the routes about the place it boarded, and how the recording's route 4 comes
-  to hold it is still not read.
+  ([34-progression.md](34-progression.md#who-stands-in-a-route--read)), from
+  the place above.
 
 ## Driving — *read*, and *measured*
 
@@ -360,6 +389,32 @@ hero comes out looking at the bot (*seen*, 331.8 s), from the first place, due
 order, and one left standing on a building's grounds is given an escape. The
 recording's bot hovers where it was left, "LFW-2 Warrior (no order)" (*seen*).
 
+**On the other machines** (*read*). `0x3f1` and `0x3f2` go out through the
+queue's slot 28 (`World3D.dll:0x10006260`), which refuses the sender's own
+player number (`0x10006274`) and takes another's, or −1 for all: it builds a
+network packet of type 9, a game message, with the code and the hero's id, and
+hands it to the network (`0x10007690`, `0x10007774` for all). Nothing on that
+path puts it in the sender's own queue. The receiving queue acts on it in its
+slot 8 (`0x10006460`), the consumer its takt runs over every record posted or
+received (`0x10006d4f`). A type-9 code above `0x3ee` is dispatched by
+subtraction, so neither code appears in it as a constant (`0x1000695d`:
+`0x3ef`, then 2 more, then 1 more):
+
+- **`0x3f1`** (`0x100069c5`) looks the id up (slot 11, `GetIGObject`) and, if
+  that object has a parent (`IGameObject` slot 3), has the parent detach it
+  (slot 5);
+- **`0x3f2`** (`0x10006974`) looks the id up and, if the object has no parent,
+  attaches it under the queue's root (slot 12, the first object of kind 1) with
+  slot 4 and −1.
+
+So the other machines take the hero out of their tree and put it back as the
+boarding machine does: the pair mirrors the detach and the re-attach. The same
+chain answers `0x3ee` (`0x10008d50`), `0x3ef` (a flag at `0x107951ec`), 6 (a
+flag at `0x107951e8`), `0x3ec` and `0x3ed` (the game's message callback with 11
+and 12), which is what the immediate sweep that found no compare could not
+see. A single-player game sends neither: both sends sit behind the game's
+`+0xe4`.
+
 ## When the driven bot is lost — *read*
 
 When a unit record goes (`0x100751a0`) and it is the driven unit:
@@ -370,6 +425,19 @@ When a unit record goes (`0x100751a0`) and it is the driven unit:
   (`0x100755a9`, table `0x1007563c`), and not in 3, 4 or 6. From mode 1 that
   is leaving, and a gone bot puts the hero at (bot x − 1, bot y − 1), 8 m above
   the highest surface there (*derived*).
+
+**The frame puts the hero out of a broken bot** (*read*). The game frame
+tests the bot the hero boarded, the `CState`'s `+0x28`, every frame with the
+component test (`0x1005eab3`–`0x1005eac6`,
+[Boarding](#boarding--read)), and once it refuses — the bot gone, its
+owner word `0xfffe`, or **its turret's body at no life, though the bot itself
+flies on** — rolls the stack back to mode 0 (`0x10062ce0` with 0,
+`0x1005eacf`: the rollback `0x10062ff0` over and over while more than one
+record is left and the front is not mode 0). Whatever stands on the bot — its
+HQ view, mode 3, or telepresence from there — is rolled back first, and from
+mode 1 the bot the test refuses puts the hero at (bot x − 1, bot y − 1),
+untested (*derived*). So **a turret shot off throws the hero out** of a bot it
+could not board again.
 
 ## The other writers of `+0xa2` — *read*
 
@@ -444,8 +512,10 @@ would read 9.
    a turret whose body — the node its class-1 component names, node 1 on every
    turret part — has life left, less than 20 m away in x and y. No landing,
    speed or order test.
-3. **On boarding:** take the hero out of the world (not drawn, simulated,
-   struck, collided with or listed; position frozen); select the bot and play
+3. **On boarding:** take the hero out of the world (not drawn, struck,
+   collided with or listed), but keep its behaviour's takt, and every frame put
+   its place at the bot's with the y less the bot's node-sphere radius: the
+   routes take it from there; select the bot and play
    `VOICE_SELECTED_B`; give the player the bot at auto-driver level 0 (the bot's
    AI off); make it the driven unit for the eye, the cockpit (fifth slots) and
    the whole HUD; drop every held key; in the training campaign, if the bot
@@ -463,8 +533,9 @@ would read 9.
    Then put the hero back in the world, hand it to the player, hand the bot
    back to its AI (with an escape if it stands on a building), deselect it,
    drop held keys, cut back.
-6. **If the driven bot dies,** leave at once, the hero at (bot x − 1, bot y − 1),
-   8 m above the surface, untested.
+6. **If the driven bot dies, or the boarded bot's turret body is shot to
+   nothing,** leave at once, through any command view standing on it, the hero
+   at (bot x − 1, bot y − 1), 8 m above the surface, untested.
 
 ## Not established
 
@@ -472,7 +543,11 @@ would read 9.
   ([40-command-mode.md](40-command-mode.md#telepresence-mode-2--read)). When
   their unit is lost, mode 2 rolls back like mode 1 (the removal's table
   `0x1007563c`); what modes 3, 4 and 6 then do is not read — nothing in that
-  path pops them.
+  path pops them. ~~Mode 3 over an HQ the hero boarded~~ — **read**: the game
+  frame's test of the boarded bot rolls the stack back to mode 0 once the HQ
+  is gone or its turret's body is shot off (`0x1005eacf`,
+  [When the driven bot is lost](#when-the-driven-bot-is-lost--read)). Mode 3
+  reached from a bunker's view, and modes 4 and 6, are still not read.
 - Whether the interface's own key-down handlers ever take Esc before the
   bindings do. This recording is consistent with leaving by Esc but does not
   show the key; Mission 04's shows Esc closing the satellite map and the
@@ -491,18 +566,28 @@ would read 9.
   lists.~~ **Read** for both: its collision object leaves its manager on the
   detach and joins the world's on the re-attach, and the areal map's attach hook
   passes over everything but trees and stones
-  ([What becomes of the hero](#boarding--read)). Still open: how the hero's route
-  follows the bot, when its own report would hold the world matrix it boarded
-  with.
+  ([What becomes of the hero](#boarding--read)). ~~Still open: how the hero's
+  route follows the bot, when its own report would hold the world matrix it
+  boarded with.~~ **Read**: the game frame gives the hero's object the boarded
+  bot's world matrix every frame, its y lowered by the bot's node-sphere
+  radius (`0x1005ead6`–`0x1005eb39`), and the game takt reaches the detached
+  hero's behaviour through the queue's registry, not the tree
+  (`World3D.dll:0x10006c6f`), so the report reads that place
+  ([What becomes of the hero](#boarding--read)).
 - ~~Why the recording's bot came to the hero between 236 and 249 s: an order the
   player gave, or its own behaviour after production.~~ **Neither**: the hero
   walks to it (*seen*). The bot hovers off the factory's end, where the escape
   the factory gives every new bot left it at 234.5 s
   ([Against the recording](#against-the-recording--seen)).
 - The wingman line's own layout (`0x1009d970`).
-- What game messages `0x3f1` and `0x3f2` do on other machines. **What they
-  carry is read**: the hero's object id (its record's `+0x28`, `IGameObject`
-  slot 9 as the record is bound, `0x1007e51c`), posted to −1 on `World3D.dll`'s
+- ~~What game messages `0x3f1` and `0x3f2` do on other machines.~~ **Read**:
+  the receiving queue's consumer (slot 8, `World3D.dll:0x10006460`) dispatches a
+  game message's code above `0x3ee` by subtraction (`0x1000695d`); `0x3f1`
+  detaches the object with that id from its parent (`0x100069c5`), `0x3f2`
+  attaches a parentless one under the queue's root (`0x10006974`)
+  ([On the other machines](#leaving--read)). **What they carry is read**: the
+  hero's object id (its record's `+0x28`, `IGameObject` slot 9 as the record
+  is bound, `0x1007e51c`), posted to −1 on `World3D.dll`'s
   queue (`GetQueue`, slot 28) — `0x3f1` as the hero is detached (`0x10063817`),
   `0x3f2` as it is put back (`0x10063949`; and `0x10060474`, where a case of the
   game's message callback attaches a player's parentless object under the
@@ -510,8 +595,7 @@ would read 9.
   posts `0x3f2` itself when `SetStateForGameObjects` finds a player's hero (Type
   `0x1020000`) with no parent and attaches it to the queue's root
   (`0x10005de5`–`0x10005e2a`), so the pair says which hero left the world and
-  came back. The receiving side is not found: a sweep of `iron3d.dll`,
-  `World3D.dll`, `Net.dll` and `Behavior.dll` for either code as an immediate
-  finds those four sends and `Net.dll`'s dialog control ids (`0x10001ed4`), and
-  no compare. The game's own message callback takes codes 0 to 14 alone
-  (`iron3d.dll:0x1005fabb`). A dispatch through a table would escape the sweep.
+  came back. An earlier sweep of `iron3d.dll`, `World3D.dll`, `Net.dll` and
+  `Behavior.dll` for either code as an immediate found those four sends and
+  `Net.dll`'s dialog control ids (`0x10001ed4`), and no compare: the consumer
+  never holds either code as a constant.

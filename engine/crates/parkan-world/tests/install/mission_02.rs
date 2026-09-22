@@ -224,3 +224,104 @@ fn mission_02s_medusas_migrate_over_their_clans_one_pasture() {
         assert_eq!(play.robots[r].1.fire_target, None, "a grazing medusa aims at nothing");
     }
 }
+
+/// Mission 02's L-2f, the design the recording builds, spawned beside the hero at its start and
+/// boarded; and the mission.
+fn boarded_warbot() -> (parkan_world::play::Play, parkan_formats::mission::Mission, usize) {
+    use parkan_world::factory::Project;
+
+    let (mut play, m) = mission_02_play();
+    let project = Project {
+        path: "UNITS\\bld_unit_-2147483647.dat".to_owned(),
+        name: "LFW-2 Warrior".into(),
+        type_word: 0x0100_8000,
+        chassis_size: 4,
+        ore: 0.0,
+        power: 0.0,
+        lines: Vec::new(),
+        sphere: None,
+    };
+    let hero_at = play.hero.walker.body.position;
+    let t = play
+        .spawn(&project, play.player_clan, hero_at + glam::Vec3::new(8.0, 0.0, 1.0), 0.0)
+        .expect("the L-2f");
+    for _ in 0..30 {
+        play.tick(1000.0 / 60.0, [0.0; 2]);
+    }
+    assert!(play.board(t));
+    (play, m, t)
+}
+
+/// Hold the boarded bot at `at` for `seconds` of play.
+fn hover(play: &mut parkan_world::play::Play, t: usize, at: glam::Vec3, seconds: f32) {
+    for _ in 0..(seconds * 60.0) as usize {
+        let bot = &mut play.robots.iter_mut().find(|(rt, _)| *rt == t).unwrap().1;
+        bot.walker.body.position = at;
+        bot.walker.body.velocity = [0.0; 3];
+        play.tick(1000.0 / 60.0, [0.0; 2]);
+    }
+}
+
+/// Aboard, the hero's behaviour still reports it to the routes, from where the game frame puts
+/// its object every frame: the boarded bot's place, its y lowered by the bot's node sphere's
+/// radius, 11.84 on the L-2f (`iron3d.dll:0x1005ead6`–`0x1005eb39`, docs/39, "What becomes of
+/// the hero"). So route 4 takes the hero only once the bot is 11.84 past its south edge, and
+/// already while the bot is 11.84 short of its north-east one: T02_H05, message 14, plays over
+/// the second and not the first.
+#[test]
+#[ignore = "needs the game install"]
+fn mission_02s_boarded_hero_is_reported_to_the_routes_from_its_bots_place_less_its_node_sphere_in_y() {
+    use glam::Vec3;
+    use parkan_sim::progression::contains;
+
+    let (mut play, m, t) = boarded_warbot();
+    let r = play.robots.iter().find(|(rt, _)| *rt == t).unwrap().1.bound.1;
+    assert!((r - 11.84).abs() < 0.01, "the L-2f's node sphere: {r}");
+    let route = |id: u32| &m.routes.iter().find(|x| x.id == id).unwrap().points;
+    let in_any = |p: Vec3| m.routes.iter().any(|x| contains(&x.points, p.x, p.y));
+    let south = Vec3::new(1170.0, 695.0, 170.0);
+    let north = Vec3::new(1200.0, 1103.0, 170.0);
+    let lowered = |p: Vec3| p - Vec3::new(0.0, r, 0.0);
+    assert!(contains(route(4), south.x, south.y) && !in_any(lowered(south)));
+    assert!(!in_any(north) && contains(route(4), lowered(north).x, lowered(north).y));
+    // Over the lake west of route 4, in no route: the script's latch is let go.
+    let west = Vec3::new(900.0, 700.0, 170.0);
+    assert!(!in_any(west) && !in_any(lowered(west)));
+    hover(&mut play, t, west, 12.0);
+    let bot = play.robots.iter().find(|(rt, _)| *rt == t).unwrap().1.walker.body.position;
+    assert_eq!(play.hero_place(), lowered(bot));
+    let played = |play: &parkan_world::play::Play| {
+        play.progression.as_ref().unwrap().progress.played.get(&14).copied()
+    };
+    assert_ne!(played(&play), Some(true));
+    // The bot inside the south edge, the hero reported outside it: nothing.
+    hover(&mut play, t, south, 12.0);
+    assert_ne!(played(&play), Some(true), "the bot is in route 4, the hero's place is not");
+    // The bot outside the north-east edge, the hero reported inside it: T02_H05.
+    hover(&mut play, t, north, 12.0);
+    assert_eq!(played(&play), Some(true), "the hero's place is in route 4");
+}
+
+/// The game frame tests the bot the hero boarded every frame, and once the component test
+/// refuses it rolls the stack back to mode 0 (`iron3d.dll:0x1005eab3`–`0x1005eacf`, docs/39,
+/// "When the driven bot is lost"): with its turret's body shot off, the L-2f flies on, but
+/// the hero is put out at (x − 1, y − 1) beside it, the untested place of a broken bot.
+#[test]
+#[ignore = "needs the game install"]
+fn mission_02s_hero_is_put_out_of_its_warbot_once_the_turrets_body_is_shot_off() {
+    use parkan_world::play::Mode;
+
+    let (mut play, _, t) = boarded_warbot();
+    assert_eq!(play.mode(), Mode::Driving(t));
+    play.tick(1000.0 / 60.0, [0.0; 2]);
+    assert_eq!(play.mode(), Mode::Driving(t), "a sound bot keeps the hero aboard");
+    let (part, node) = play.robots.iter().find(|(rt, _)| *rt == t).unwrap().1.turret_life().unwrap();
+    let life = play.battle.combat.targets[t].parts[part].life.as_mut().unwrap();
+    life.hit(node, f32::MAX / 4.0);
+    let bot = play.robots.iter().find(|(rt, _)| *rt == t).unwrap().1.walker.body.position;
+    play.tick(1000.0 / 60.0, [0.0; 2]);
+    assert!(play.battle.combat.targets[t].alive, "the bot itself lives");
+    assert_eq!(play.mode(), Mode::OnFoot);
+    let out = play.hero.walker.body.position;
+    assert!((out.truncate() - (bot.truncate() - glam::Vec2::ONE)).length() < 0.05, "{out} beside {bot}");
+}
