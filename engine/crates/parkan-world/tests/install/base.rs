@@ -739,6 +739,11 @@ fn in_command_mode_a_click_selects_the_builder_sends_it_and_build_mine_places_a_
     assert!(ghost.valid && ghost.path.to_ascii_lowercase().ends_with("smine01.dat"), "{ghost:?}");
     assert!(play.turn_ghost(true));
     assert!((play.commander.ghost.as_ref().unwrap().yaw - 0.05).abs() < 1e-6);
+    // `.` held: the key-down and each repeat after it turn it again (docs/32, "Turning it").
+    for _ in 0..4 {
+        assert!(play.command_key(parkan_formats::controls::CMD_JAMES_BASE_ROTRIGHT, true));
+    }
+    assert!((play.commander.ghost.as_ref().unwrap().yaw + 0.15).abs() < 1e-6);
     assert!(play.commit_placement());
     assert_eq!(play.commander.pick_mode, PickMode::Free);
     let robot = &play.robots.iter().find(|(t, _)| *t == builder).unwrap().1;

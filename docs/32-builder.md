@@ -302,8 +302,27 @@ and gone at 195.0 s, as the mine appears beside it (below).
 `0x100725dc`, the float at `0x100e50a4`), but only while the view state word
 (`+0x710`) is 2 and the pick mode is 4 or 6
 ([40-command-mode.md](40-command-mode.md) reads the same, at `0x100725b2`).
-Whether a held key repeats the turn is not established. Seen from above, a
-positive yaw turns the model anticlockwise.
+Seen from above, a positive yaw turns the model anticlockwise.
+
+**A held key goes on turning it** (*read*). The case keeps no state of its
+own: each time the handler meets 741 or 742 it adds or takes 0.05. And nothing
+on a key-down's way to the handler asks whether the key was already down, the
+bit Windows sets in a repeated `WM_KEYDOWN`'s `lParam` (bit 30):
+- the window routine (`iron3d.dll:0x100a0e30`) offers `0x100` to the listener
+  chain and, when no listener takes it, hands message, `wParam` and `lParam`
+  to `0x10071c10`. The game view's own key-down listener (`0x10070db0`)
+  switches on virtual keys `0x13`–`0x91` only (`0x10070dcb`–`0x10070dd5`), so
+  comma (`0xBC`) and period (`0xBE`) pass it;
+- `0x10071c10` turns the message into a scan code through `World3D.dll`'s
+  `WinMsg2ScanCode` (`0x10011330`), which for `0x100` and `0x101` is `lParam`'s
+  bits 16–24 and nothing else (`0x100113f8`–`0x10011409`), looks the code up in
+  `addition.man`'s group (`0x1003afe0`, a plain search of its 12-byte rows, no
+  state), and sends every message but a key-up to the handler.
+
+So the system's key repeat turns the model a step a repeat, as long as the key
+is held: at Windows' default repeat, 0.05 about 30 times a second after the
+first half second. Whether another listener of the chain takes comma or period
+first in state 2 is not followed.
 
 ### The click, and cancelling
 

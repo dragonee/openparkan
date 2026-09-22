@@ -290,7 +290,10 @@ not take ([39-boarding.md](39-boarding.md)) goes to `0x10071c10`, which looks
 its key up in **group 3**, `addition.man` (`0x10071c5a`): a key-up (`0x101`,
 `0x105`, `0x202`, `0x205`, or `0x484`–`0x4a3`) goes to the release handler
 `0x10072740`, anything else to the command handler `0x10071cd0`. It does
-nothing during a briefing or while `+0xe5` is set.
+nothing during a briefing or while `+0xe5` is set. Nothing on the way asks
+whether the key was already down, so a key-down the system repeats while the
+key is held reaches the handler as the first did
+([32-builder.md](32-builder.md#turning-it)).
 
 *Measured*: **`ui_hq.man`'s eight rows are all in `addition.man`** (31 rows):
 the six camera moves and `CMD_JAMES_BASE_ROTLEFT` / `_ROTRIGHT` on comma and

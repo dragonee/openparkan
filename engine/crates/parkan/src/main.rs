@@ -1009,6 +1009,24 @@ impl App {
         Ok(())
     }
 
+    /// A key the system repeats while it is held. The game takes a repeat as the key going down
+    /// again: nothing on a key-down's way from the window to the command handler asks the key's
+    /// previous state (`iron3d.dll:0x100a0e30`, `0x10071c10`, `World3D.dll:0x10011330`), so a
+    /// held `,` or `.` goes on turning the building being placed (docs/32, "Turning it"). The
+    /// handler would take any command's repeat; here the two turns alone take one.
+    fn repeat(&mut self, scan: &'static str) {
+        use parkan_formats::controls::{CMD_JAMES_BASE_ROTLEFT, CMD_JAMES_BASE_ROTRIGHT, command_for};
+        if self.briefing.is_some() {
+            return;
+        }
+        let Some(play) = self.play.as_mut() else { return };
+        if let Some(command) = command_for(&self.bindings, scan, |m| self.scans.contains(m))
+            && matches!(command, CMD_JAMES_BASE_ROTLEFT | CMD_JAMES_BASE_ROTRIGHT)
+        {
+            play.command_key(command, true);
+        }
+    }
+
     /// A key or button went down or up: the hero's table takes it, and a press runs the
     /// game's command its chord binds (`ui_other.man`).
     fn scan(&mut self, scan: &'static str, pressed: bool) {
@@ -1753,10 +1771,10 @@ impl ApplicationHandler for App {
                 }
                 let pressed = event.state == ElementState::Pressed;
                 if self.play.is_some() {
-                    if let Some(scan) = scene::scan_name(code)
-                        && !event.repeat
-                    {
-                        self.scan(scan, pressed);
+                    match scene::scan_name(code) {
+                        Some(scan) if !event.repeat => self.scan(scan, pressed),
+                        Some(scan) if pressed => self.repeat(scan),
+                        _ => {}
                     }
                 } else if pressed {
                     self.held.insert(code);
