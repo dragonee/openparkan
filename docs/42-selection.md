@@ -117,7 +117,7 @@ one, `0x1007dd30` clears the list, and `0x1007ddf0` answers the current one
 state, so neither Shift nor Ctrl adds to a selection (*read*, as a search of
 both).
 
-**Digits select no group in command mode.** The character handler's cases for
+**Digits select no group in command mode.** The key-down handler's cases for
 1–9 act only in view states 1 and 3, the wingman selector's
 (`0x100710fa`; [31-packages.md](31-packages.md#the-wingman-menu-from-first-person--read-and-measured)).
 

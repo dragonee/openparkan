@@ -6469,7 +6469,7 @@ def check_efficiency(check, game: Path) -> None:
                     "MINE": "prof_mine.var"}
     held = profiles.load(game) if (game / profiles.ARCHIVE).exists() else {}
     alone = []
-    for name, parsed in sorted(buildings.items()):
+    for _name, parsed in sorted(buildings.items()):
         parts = parsed.components
         if not any(p.type_id == control.EFFICIENCY_TYPE for p in parts):
             continue

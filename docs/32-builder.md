@@ -323,7 +323,7 @@ deletes the model, sets the cursor kind to 1, ends the pick mode and shows strin
 [35-hud.md](35-hud.md#the-message-box--read-and-measured)). It is called:
 - by **the right button going down** (listener slot 10, `0x100716b0`), outside
   the first-person views and a building's screen;
-- by **Esc** in the character handler (`0x10070ed1`), while the cursor is the
+- by **Esc** in the key-down handler (`0x10070ed1`), while the cursor is the
   model, after the objectives screen and the like have had it;
 - by **`CMD_ROLLBACK_STATE`** (735, bound to Esc) while the cursor is the model,
   before it rolls the view mode back (`0x10062ff7`).

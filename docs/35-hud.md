@@ -1250,7 +1250,7 @@ paused (the screens object's `+0x24`).
 - **Opening** leaves `+0x590` as it was, so a screen opened with F12 stays up
   until it is closed (*derived*).
 
-**Esc** (the character handler, `0x10070e85`) closes the screen when it is up
+**Esc** (the key-down handler, `0x10070e85`) closes the screen when it is up
 and the `CState` mode is not 7. The earlier uses of Esc come first
 ([34-progression.md](34-progression.md#after-the-outcome--read-and-measured)):
 lifting a pause, leaving after an outcome, the help screen, a briefing.

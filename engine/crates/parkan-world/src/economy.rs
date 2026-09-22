@@ -224,6 +224,10 @@ impl Economy {
     /// over its slot"), so a building's `i_pws_f_*` parts, 8 held and 500 a second each, stand
     /// in its root's 5 to 10 held and 13 to 25 a second (docs/23, "A power shortage lowers
     /// efficiency").
+    ///
+    /// STAND-IN: docs/23-economy.md#a-power-shortage-lowers-efficiency-once-the-batteries-run-down--read-and-measured
+    /// -- that a building's parts are attached as a robot's are is inferred: the part loop
+    /// (`Behavior.dll:0x1001cd40`) was not followed for a building.
     pub fn join_building(&mut self, assembly: &mut Assembly, t: usize, type_word: u32, path: &str, now: f64) {
         if self.site(t).is_some() {
             return;

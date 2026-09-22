@@ -299,7 +299,7 @@ How Esc gets there: a window message the interface's handlers do not take goes
 to the key bindings (`0x100a0fe7` → `0x10071c10`), which turn a key-down into
 its command (`0x10071ca1`). The game loop translates every message
 (`TranslateMessage`, `0x1005e748`), so an Esc also queues a character for the
-game view's character handler, whose Esc on foot opens the game menu
+game view's key-down handler, whose Esc on foot opens the game menu
 ([34-progression.md](34-progression.md#after-the-outcome--read-and-measured)).
 Leaving ends in `stdClearKeyboard`, which removes that pending character
 (*derived*); none is seen in the recording.

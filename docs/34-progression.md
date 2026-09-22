@@ -1193,7 +1193,7 @@ panel switches on the word for a title and up to four lines:
   - That these are two corners is *derived* from the box being symmetric.
   - In state 3 the box is the whole screen, (0, 0) to (640, 480).
 
-**Leaving.** The game view's character handler (`0x10070db0`) takes Esc, `0x1b`:
+**Leaving.** The game view's key-down handler (`0x10070db0`) takes Esc, `0x1b`:
 
 - **A pause is lifted first.** If the interface's pause byte is set,
   `0x1008d850` clears it, and `0x1005f620` clears the game's `+0xe8` and calls

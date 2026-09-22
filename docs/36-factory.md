@@ -375,7 +375,7 @@ night sight is off after the designer** (*derived*).
 writers in `iron3d.dll`: the game's constructor (`0x1005c512`) and the setter
 `0x1005f620`, which alone calls `World3D`'s `PauseGameTime` and
 `ResumeGameTime`. The setter's five calls are the interface's pause and resume
-(`0x1008d830`, `0x1008d850`), which the character handler's code `0x13`
+(`0x1008d830`, `0x1008d850`), which the key-down handler's code `0x13`
 toggles while playing (`0x10071094`–`0x100710e9`) and Esc lifts
 (`0x10070df2`); the help screen opening and closing
 (`0x10067895`, `0x10067935`) and a widget's show slot, which pauses while it
@@ -425,7 +425,7 @@ after its occupant has left and 5 s have passed
 ([27-ownership.md](27-ownership.md#capture--read)), so standing on does not
 reopen the screen (*derived*).
 
-**Esc in the character handler** (`0x10070db0`) does not close the screen itself.
+**Esc in the key-down handler** (`0x10070db0`) does not close the screen itself.
 In the view's state 1 it goes on, in turn, to:
 - the objectives screen;
 - hiding a shown message box (729);

@@ -158,8 +158,8 @@ As it opens and closes, the selector calls the view's `+0x50` object, slot 8
 and slot 7 (not followed). **These do not show or hide the lines**: the panel
 draws a line for every wingman whatever the state (below).
 
-**Keys** (`0x10070db0`, *read*; the case table *measured*). A character handler
-switches on the character through a 127-byte index at `0x10071168`. `'1'`–`'9'`
+**Keys** (`0x10070db0`, *read*; the case table *measured*). The key-down handler
+([40-command-mode.md](40-command-mode.md#input--read-and-measured)) switches on the virtual-key code through a 127-byte index at `0x10071168`. `'1'`–`'9'`
 share one case (`0x100710fa`). In view states 1 and 3 that case goes to the
 selector:
 
@@ -169,7 +169,9 @@ selector:
 - Either way the key is taken. In state 0 a digit falls through to the rest of
   the handler.
 
-Escape (`0x1b`) goes elsewhere: only the tilde, or an order, closes the menu.
+Escape (`0x1b`) closes the menu too: its case sends 740 while the menu is up
+and the top mode is not 7 (`0x10070f3f`–`0x10070f86`), as the tilde or an
+order does. An earlier reading here had only the tilde and an order close it.
 
 **The list the panel draws** (`0x100431a0`, `0x100432f0`, *read*). The panel is
 one of the cockpit's widgets and draws every frame unless the top `CState` mode
