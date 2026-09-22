@@ -569,7 +569,7 @@ The actions (*read*; counts *measured* across the 2925 records):
 | 17 | 69 | **kill it**: invulnerability off, then `ILifeSystem` slot 7, so its node 0 explodes (`0x100033d0`) |
 | 18, 19 | 42, 196 | switch effect v4 on / off |
 | 20 | 60 | **place the building**: on an agent of kind 3, the object's parent's `ITerrain` (interface 5) slot 3, `CLandscape::PlaceBuilding` (`0x1000352e`, `Terrain.dll:0x1000df10`); `fortif.rlb` only, in every building's construction states |
-| 21 | 60 | kill every unit in the construction sphere ([32-builder.md](32-builder.md)) |
+| 21 | 60 | kill every object of classes 2, 4 and 10 — units, trees and stones — in the construction sphere that is not invulnerable ([32-builder.md](32-builder.md#the-construction-sphere--read-and-measured)) |
 | 27 | 58 | **explode node v4** with the named `.exp` (`0x100030ce`) |
 
 Only actions 3, 4 and 5 name an effect in `effects.rlb`, and 27 an `.exp` in
