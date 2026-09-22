@@ -716,8 +716,11 @@ first two take the rule's colour.
     clans' units get a marker~~ — **read**: the clan's units' radar contacts,
     rebuilt on each pass of the run loop
     ([35-hud.md](35-hud.md#the-panel-in-the-cockpit--read-and-seen)).
-- What the unit record's `+0x94` and `+0x98` are: the right button's margin
-  and its ray's start.
+- What the unit record's `+0x98` is: the right button's ray's start.
+  ~~Its `+0x94`, the margin~~ — **read**: the radius the sphere interface
+  `0x20` slot 3 answers as the record is bound, the unit's node sphere
+  (`0x1007e5f2`–`0x1007e60e`), 11.84 on the L-2f; leaving and the game frame
+  read it too ([39-boarding.md](39-boarding.md#leaving--read)).
 - What the player's map and radar display show. `IArealMap`'s side of the
   radar report is answered ([above](#what-the-ai-does-with-it--read)), but
   `iron3d.dll`'s drawing was not read. One negative, as a search:

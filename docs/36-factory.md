@@ -666,24 +666,19 @@ when there are none (*derived*).
   ([The cursor in mode 5](#the-cursor-in-mode-5--read)). Whether it is the
   system's cursor or the software strip is the display's slot 12, which
   [42-selection.md](42-selection.md#not-established) has not read.
-- The heading the escape leaves the new bot with, and whether a flyer climbs on
-  its way out. *Narrowed.*
-  - The escape sets no heading of its own. The bot is made facing +x and ends
-    facing as its walk leaves it: the walker's last point and the stop after
-    it, through the Wizard's heading curve (`Wizard.dll:0x10003d80`), which
-    [24-motion.md](24-motion.md#not-established) has not read.
-  - The climb is the height a flyer's walk points are given, which
-    [24-motion.md](24-motion.md#how-the-ai-drives-a-machine--read-and-measured)
-    and [31-packages.md](31-packages.md#not-established) leave open. One
-    candidate is now ruled out. `Movement_FlyHeight` and
-    `Movement_FlyNearLandHeight` are bound into a profile at `+0xa8` and
-    `+0xac` (`Behavior.dll:0x1001681e`, `0x10016836`). One routine reads them,
-    setting a point's z to the ground under it plus one or the other
-    (`0x100153a0`), and **nothing calls it**. A raw scan of `Behavior.dll`
-    finds no `call` or `jmp` to it and no stored copy of its address, where the
-    same scan finds the seven calls of the ground routine it uses
-    (`0x100146b0`). Of the module's float reads at a `+0xa8` or `+0xac`, the
-    profile's are that routine's two.
+- ~~The heading the escape leaves the new bot with, and whether a flyer climbs on
+  its way out.~~ — **read** on 2026-09-22. The escape sets no heading of its
+  own: the bot is made facing +x and ends facing along the Wizard's heading
+  curve, a Hermite cubic from the hull's forward axis to the point's heading
+  (`Wizard.dll:0x10003d80`,
+  [24-motion.md](24-motion.md#the-heading-curve--read)). A flyer climbs: the
+  walker cuts its leg into a point every 20 across the ground and stands each
+  15 over the ground under it, or 100 over a building's, a tree's or a stone's
+  top (`Behavior.dll:0x10040f20`, `0x100146b0`,
+  [24-motion.md](24-motion.md#a-flyers-walk-points--read-and-measured)), so
+  Mission 02's escape point over the Large Factory's hall stands 115 m over its
+  roof. `Movement_FlyHeight` and `Movement_FlyNearLandHeight` reach no point:
+  their one reader (`0x100153a0`) is called by nothing.
 - ~~What commander pages 1–4 and 6–8 show from first person; only page 5 is read
   here~~ — **read**: from first person only pages 4 and 5 are ever up. Mode 5
   reaches no other page: the column works only in modes 3 and 4 and the page

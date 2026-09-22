@@ -605,7 +605,10 @@ Three things follow from it.
    once destroyed, `ERROR` for an id with no object.
 2. **Count what the missions count.** A bot the factory builds joins `Plr`,
    and a dead medusa leaves `Anml`.
-3. **Report the hero's route from the bot** while it rides one.
+3. **Report the hero's route from the bot** while it rides one: from the bot's
+   place with its y lowered by the bot's node-sphere radius, 11.84 on the L-2f,
+   where the game frame puts the hero's object every frame
+   ([39-boarding.md](39-boarding.md#boarding--read)).
 4. **Let the medusas graze and defend** as above, from `Anml`'s two zones.
 5. **Ask for message 100** the first time the player takes over a flyer, in a
    training mission (game mode 4 is a mission of campaign 0, *read*:

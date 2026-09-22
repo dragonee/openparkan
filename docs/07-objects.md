@@ -1152,10 +1152,13 @@ Not established: ~~where a batch word's 8 and `0x100` come from (the same
 unwritten word the push-out reads, [24-motion.md](24-motion.md#not-established))~~
 — the push-out's word is **read** to be the batch record's own first dword
 ([Materials are per batch](#materials-are-per-batch-not-per-face)), which
-carries 8 on 633 batches and `0x100` on 2953; whether the word `CShade`'s mesh
-draw tests at `0x1004552a` is that same dword is not traced here, and if it
-is, the 2953 batches carrying either — every one of the 633 carries `0x100`
-as well, and 1430 more are two-sided `0x102` ones — are filed see-through;
+carries 8 on 633 batches and `0x100` on 2953; ~~whether the word `CShade`'s mesh
+draw tests is that same dword~~ — **read**: the draw asks the mesh's slot 3 for
+the batch record and takes its first dword (`0x1004501e`–`0x1004502d`), whose 8
+sends the batch to the portal fade
+([24-motion.md](24-motion.md#a-building-is-drawn-cell-by-cell-through-its-portals--read)),
+so the 2953 batches carrying either — every one of the 633 carries `0x100`
+as well, and 1430 more are two-sided `0x102` ones — are the ones tested;
 which sort type each of the queue's layers is created with (`CreatePrimLayer`,
 `0x10031760`, takes 0 to 5, and type 3 is `CCamDistSortLayerVB`, whose render is
 `0x1003e1d0`), and so whether a layer's items are drawn in distance order.
