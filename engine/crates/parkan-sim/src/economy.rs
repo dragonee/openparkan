@@ -42,7 +42,7 @@ impl Default for ModuleRand {
 
 impl ModuleRand {
     /// The next draw, 0..32767: the state times 214013 plus 2531011, bits 16 to 30.
-    pub fn next(&mut self) -> u32 {
+    pub fn draw(&mut self) -> u32 {
         self.0 = self.0.wrapping_mul(214_013).wrapping_add(2_531_011);
         (self.0 >> 16) & 0x7fff
     }
@@ -51,7 +51,7 @@ impl ModuleRand {
     /// 256. The distribution step's timer takes one unit of it on its three (`0x10019e1b`), so
     /// 0..63 ms.
     pub fn timer_share_ms(&mut self, units: u32) -> f64 {
-        f64::from(((self.next() & 0xff) * (units << 6)) >> 8)
+        f64::from(((self.draw() & 0xff) * (units << 6)) >> 8)
     }
 }
 
@@ -212,7 +212,7 @@ mod tests {
     fn the_steps_rand_is_the_c_librarys_from_1_and_its_share_is_0_to_63_ms() {
         let mut r = super::ModuleRand::default();
         // The C library's first three draws from its unseeded state.
-        assert_eq!([r.next(), r.next(), r.next()], [41, 18467, 6334]);
+        assert_eq!([r.draw(), r.draw(), r.draw()], [41, 18467, 6334]);
         let mut r = super::ModuleRand::default();
         let shares: Vec<f64> = (0..1000).map(|_| r.timer_share_ms(1)).collect();
         assert!(shares.iter().all(|&s| (0.0..64.0).contains(&s)));

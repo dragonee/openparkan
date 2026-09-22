@@ -249,10 +249,6 @@ pub struct Instance {
     updated: Option<(f32, Vec3)>,
 }
 
-fn lerp3(lo: [f32; 3], hi: [f32; 3], s: f32) -> Vec3 {
-    Vec3::from_array(lo).lerp(Vec3::from_array(hi), s)
-}
-
 /// A lerp whose parameter is given per axis, which is how a particle's channels move
 /// (`Effect.dll:0x1000d390`, `0x1000d450`).
 fn lerp3_axis(lo: [f32; 3], hi: [f32; 3], s: Vec3) -> Vec3 {

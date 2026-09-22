@@ -103,10 +103,17 @@ pub fn draw(cockpit: &Cockpit, ink: &mut Ink, play: &Play, view_proj: Mat4, hove
         if let Some(&page) = cockpit.pages.get("page9") {
             ink.painter.sprite_to(Blend::Alpha, page, [bx, by, bw, bh], [left, top, bw, bh], colour);
             // The right one mirrored.
-            ink.painter.sprite_to(Blend::Alpha, page, [bx, by, bw, bh], [c[0] + g + bw, top, -bw, bh], colour);
+            ink.painter.sprite_to(
+                Blend::Alpha,
+                page,
+                [bx, by, bw, bh],
+                [c[0] + g + bw, top, -bw, bh],
+                colour,
+            );
         }
         let clan = unit.clan.and_then(|k| usize::try_from(k).ok().map(|i| (i, play.clans.get(i))));
-        let signed = clan.is_some_and(|(_, c)| c.is_some_and(|c| c.kind != CLAN_NATURE && c.kind != CLAN_NEUTRAL));
+        let signed =
+            clan.is_some_and(|(_, c)| c.is_some_and(|c| c.kind != CLAN_NATURE && c.kind != CLAN_NEUTRAL));
         if signed && let Some(&page) = cockpit.pages.get(super::map::ICONS) {
             let index = clan.map_or(0, |(i, _)| i) as f32;
             let sign = [SIGN_CELL * index, SIGN_ROW, SIGN_CELL, SIGN_CELL];
@@ -153,6 +160,9 @@ mod tests {
 
     #[test]
     fn a_transport_shows_the_crates_a_builder_the_crane_and_the_rest_the_swords() {
-        assert_eq!([0x0100_2000, 0x0100_4000, 0x0100_8000, 0x0101_0000].map(class_icon), [48.0, 72.0, 24.0, 24.0]);
+        assert_eq!(
+            [0x0100_2000, 0x0100_4000, 0x0100_8000, 0x0101_0000].map(class_icon),
+            [48.0, 72.0, 24.0, 24.0]
+        );
     }
 }

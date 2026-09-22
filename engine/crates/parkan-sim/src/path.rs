@@ -710,6 +710,7 @@ impl Graph {
     /// `Behavior.dll:0x10039337`), nor how one inside a footprint leaves it ("Leave Obstacle",
     /// `0x1003e81d`): a goal inside one is moved to the nearest ground outside it, `clearance`
     /// on where that is walkable, and a unit inside one sets out from the nearest piece.
+    #[allow(clippy::too_many_arguments)]
     pub fn route(
         &self,
         from: Vec3,

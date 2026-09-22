@@ -973,7 +973,8 @@ fn a_strike_on_mission_01s_bridge_plays_the_machine_surface_a_strike_on_a_unit_d
 
 #[test]
 #[ignore = "needs the game install"]
-fn god_mode_makes_the_hero_two_and_a_half_times_as_fast_ten_times_as_tough_and_its_rounds_ten_times_as_strong() {
+fn god_mode_makes_the_hero_two_and_a_half_times_as_fast_ten_times_as_tough_and_its_rounds_ten_times_as_strong()
+ {
     use parkan_formats::mission;
     use parkan_world::play::{GOD_DAMAGE, GOD_LIFE, GOD_SPEED, Play};
 

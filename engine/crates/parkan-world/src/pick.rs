@@ -306,7 +306,12 @@ impl Play {
                 && (kind == KIND_UNIT || kind == KIND_BUILDING)
                 && self.units[t].logical_id != self.hero_id
                 && !self.deleted.get(t).copied().unwrap_or(false);
-            pickable.then_some(Sphere { index: t, centre: target.centre, radius: target.radius, building: kind == KIND_BUILDING })
+            pickable.then_some(Sphere {
+                index: t,
+                centre: target.centre,
+                radius: target.radius,
+                building: kind == KIND_BUILDING,
+            })
         });
         (point, nearest_on_ray(eye, direction, length, spheres))
     }

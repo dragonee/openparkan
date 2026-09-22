@@ -401,15 +401,19 @@ fn every_placed_building_is_named_by_its_type_and_size() {
     let assembly = Assembly::new(&game).unwrap();
     let root = game.join("MISSIONS");
     let with_data = |d: &std::path::Path| d.is_dir() && d.join("data.tma").exists();
-    let mut dirs: Vec<_> = std::fs::read_dir(&root).unwrap().map(|e| e.unwrap().path()).filter(|d| with_data(d)).collect();
+    let mut dirs: Vec<_> =
+        std::fs::read_dir(&root).unwrap().map(|e| e.unwrap().path()).filter(|d| with_data(d)).collect();
     for campaign in std::fs::read_dir(root.join("CAMPAIGN")).unwrap().map(|e| e.unwrap().path()) {
         if campaign.is_dir() {
-            dirs.extend(std::fs::read_dir(&campaign).unwrap().map(|e| e.unwrap().path()).filter(|d| with_data(d)));
+            dirs.extend(
+                std::fs::read_dir(&campaign).unwrap().map(|e| e.unwrap().path()).filter(|d| with_data(d)),
+            );
         }
     }
     let mut names: BTreeMap<String, usize> = BTreeMap::new();
     for dir in &dirs {
-        let m = mission::parse(&std::fs::read(dir.join("data.tma")).unwrap(), &dir.display().to_string()).unwrap();
+        let m = mission::parse(&std::fs::read(dir.join("data.tma")).unwrap(), &dir.display().to_string())
+            .unwrap();
         for o in m.objects.iter().filter(|o| o.kind == KIND_BUILDING) {
             let type_word = match o.property("Type").map(|p| p.value) {
                 Some(Value::Int(v)) => v as u32,

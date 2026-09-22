@@ -143,11 +143,7 @@ impl Relations {
                 pair.attitude += pair.up;
                 pair.up = 0.0;
             }
-            if pair.attitude < 0.0 {
-                pair.attitude = 0.0;
-            } else if pair.attitude > 1.0 {
-                pair.attitude = 1.0;
-            }
+            pair.attitude = pair.attitude.clamp(0.0, 1.0);
             pair.word = band(pair.attitude);
             drift(&mut pair);
             self.pairs[us][them] = pair;

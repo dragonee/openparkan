@@ -406,7 +406,8 @@ pub fn building_size(root: &str) -> u32 {
 pub fn building_name_id(type_word: u32, size: u32) -> u32 {
     const UNKNOWN: u32 = 6205;
     // `sizes` strings from `first` up, for size classes 2 onward.
-    let sized = |first: u32, sizes: u32| if (2..2 + sizes).contains(&size) { first + size - 2 } else { UNKNOWN };
+    let sized =
+        |first: u32, sizes: u32| if (2..2 + sizes).contains(&size) { first + size - 2 } else { UNKNOWN };
     match type_word {
         0x8000_0004 => sized(6031, 3),
         0x8000_0008 => sized(6036, 3),
@@ -432,9 +433,10 @@ mod tests {
 
     #[test]
     fn a_building_is_named_by_its_type_and_its_roots_size_letter() {
-        assert_eq!(["fr_l_mine", "fr_M_mine", "fr_b_mine", "fr_e_inst", "fr_x_gener", "fr"].map(building_size), [
-            2, 3, 4, 5, 0, 0
-        ]);
+        assert_eq!(
+            ["fr_l_mine", "fr_M_mine", "fr_b_mine", "fr_e_inst", "fr_x_gener", "fr"].map(building_size),
+            [2, 3, 4, 5, 0, 0]
+        );
         // A mine, a warehouse and a factory come in three sizes, an institute in four, the
         // generator and the outpost in one whatever the letter.
         assert_eq!([2, 3, 4, 5].map(|s| building_name_id(0x8000_0004, s)), [6031, 6032, 6033, 6205]);
