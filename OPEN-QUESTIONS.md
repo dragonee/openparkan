@@ -350,6 +350,52 @@ gate, the portal settings' writes and reads, the 15 and the 100 in `Behavior.dll
 brake gate's class bit and the batch record's first dword. The merged tree passed every
 check at once, `ruff` included: 387 tests, 981 of 981 checks, and 139 install tests.
 
+A ninth round, on **2026-09-22**, took **twelve of Mission 03's thirty open lines**, all
+[M12] stand-ins or the recording's, in four areas — the construction sphere and the site
+test, command mode and the commander, the pick and what the cockpit marks and names, and
+the economy. **All twelve closed**; six new lines hold what the answers left, among them a
+consequence of the site test's own fix: Mission 04 has no Small Research Center site at all,
+which no play depends on because the mission captures its centre. A thirteenth line, the
+bunker roof's `PLACE`, narrowed on the pick's read.
+
+Four results are **negatives carrying their controls**: nothing in `Control.dll` calls an
+effect's slot `0x1c`, against 22 calls at 13 slots the same sweep finds through the
+controller's manager; no placed object carries logical id 0, which is what lets the takt's
+sweep free a reservation, against 401 carrying −1; property `0x208` is none of the 15
+names the 864 objects carry, so it is a word, not data; and on Mission 03 the site test's
+path refuses no storage site the exit test does not, against the posing putting Tut_2's
+exit 67 where docs/24 has it. **The engine was wrong on all twelve and changed on all
+twelve**: the pick, the markers and the building names; the site test, the sphere's codes,
+frame and kill, and its effects' time; Esc's order, telepresence's levels and the Upgrade
+row; a build's mind, a building's batteries and the timers' random sources, and the ore a
+place moves by itself.
+
+**This round corrects six premises.** [42-selection](docs/42-selection.md) and the engine
+had the pick's shares the wrong way round — it is a *building* taken at 0.7 of its radius
+and a unit at all of it — and the nearest centre is nearest the eye, not along the ray. The
+engine held a factory build's mind for the whole build; it lasts until the clan's next takt,
+which is the recording's return to 4 at 221.5 s. [23-economy](docs/23-economy.md)'s
+building batteries, the root's 19.5 to 20 held and 50 to 52 a second, are on 53 of 76
+assemblies the fitted `i_pws_f_*` parts' 16 to 32 and 1,000 to 2,000 — resting on an
+*inferred* step, which the engine now marks and a new line holds. The engine named buildings
+by the size letter of their path, wrong on 31 of 167. [31-packages](docs/31-packages.md)
+had Esc leave the wingman menu open; it closes it (`0x10070f81`, 740), and the handler six
+docs called the *character* handler takes key-downs. And [13-control](docs/13-control.md)'s
+action 21 killed *every unit*; it takes classes 2, 4 and 10, trees and stones among them,
+and spares the invulnerable. One derivation was **confirmed rather than corrected**: the
+Upgrade row's demand that the next level be researched whole, derived from the recording, is
+now read.
+
+**Which way this round's checks ran**: every coordinator spot-check confirmed — the pick's
+0.7 and 1.0 on classes 3 and 4, the kill mask's `1 << k` table, the Upgrade row's five
+refused Types and `BUILDING_MAINTELEPORT`, `Behavior.dll`'s `rand()` constants and the Esc
+case's 740. One labelling gap was the coordinator's to close: the economy branch dropped the
+batteries stand-in with the root-only one while its basis is inferred, and it is restored in
+`47bd99e` with the cross-doc corrections. Three branches conflicted only in the engine's
+stand-in table, each resolved by keeping the newer row. The merged tree passed every check:
+387 tests, 986 of 986 checks, 490 engine tests and 148 install tests, `ruff` after one
+renamed loop variable.
+
 ## Sky and rendering
 
 [10-sky](docs/10-sky.md#not-resolved), [02-texm](docs/02-texm.md),
@@ -1715,7 +1761,7 @@ Added on 2026-09-15 against `950af7e`, after M12 made the mission winnable end t
 
 **Where the engine is weaker than the game**
 
-- [ ] [M12] The construction sphere's look. Its three effects' records give time mode 0, a value set from outside (slot `0x1c`), and what sets it is not read: they loop on their durations and take the sphere's radius as their size, and the dome only partly shows.
+- [x] ~~[M12] The construction sphere's look: its effects' time mode 0 and slot `0x1c`~~ — closed 2026-09-22: mode 0 is only an idle instance's resting mode, which action 10's start mode replaces (`Control.dll:0x10002f9d`); nothing in `Control.dll` calls slot `0x1c` (control: the same sweep finds 22 calls at 13 slots through the controller's manager, the start at `0x10002fad` among them), and all 133 blocks of the four sphere effects open above t = 0, so an idle one shows nothing. The dome showed partly because the engine laid it on its side, half under the ground, and looped it; it now stands up and runs in the mode its code starts, checked against the recording's frames at 203–237 s ([11-effects](docs/11-effects.md), [32-builder](docs/32-builder.md#the-construction-sphere--read-and-measured)).
 - [ ] [M12] The commander's satellite map (`0x10073830`): its title bar and exit icon beyond their place, and the `+0x230` rectangle the column's click tests first. (Its marks by type are read and drawn since M13.)
 - [ ] The warbot designer's save name field and load list: not built, and how they work is not established.
 - [x] ~~A Mission 03 transport walks about 33 m/s where docs/23 gives 24~~ — closed in M13: the live limits now come from the unit's engine and load, and it walks 23.98. The recording's round being 13 s longer than two full-speed walks is still open.
@@ -1724,45 +1770,54 @@ Added on 2026-09-15 against `950af7e`, after M12 made the mission winnable end t
 
 **Command mode and the panel**
 
-- [ ] [M12] Whether the character handler sees Esc before its binding leaves command mode (the engine peels the map and the page back first).
+- [x] ~~[M12] Whether the character handler sees Esc before its binding leaves command mode~~ — closed 2026-09-22: the window routine (`iron3d.dll:0x100a0e30`) hands a key-down to the listener chain before the bindings in every view state but 0, and the game's listener's slot 0, `0x10070db0`, is the **key-down** handler (`WM_CHAR` goes to slot 2). Esc peels one thing a press — objectives, placement, a message box, the wingman menu, the game menu, then in state 2 the map and the page — and only then does 735 leave. The engine peeled placement, map and page in command mode only; it now follows the whole order in every view ([40-command-mode](docs/40-command-mode.md#input--read-and-measured)).
 - [ ] What view state 4 and the second camera at `+0x68` are for; cursors 7 and 8; the globals `0x1010bf7c`–`0x1010bf80`; the display's slot 12, which picks the system's cursor over the software one.
 - [ ] What interface `0x201` slot 9 with (`0x20`, 1) and message (6, 7, 0) do to a bunker left for another view or for telepresence.
-- [ ] [M12] What telepresence's auto-driver levels 1 and 2 hand to the AI. (What mode 2 does when its unit dies is read: the removal table rolls modes 1, 2, 5 and 7 back.)
+- [x] ~~[M12] What telepresence's auto-driver levels 1 and 2 hand to the AI~~ — closed 2026-09-22: the takeover (`0x10074ff0`) writes the unit's `Wizard.dll` words through slot 9. Level 1 hands the AI the walk alone (`+0x200`), and the turret, guns, shields, sensors and engines stay the player's; level 2 hands it `+0x200`, `+0x20c` and `+0x208`, sends mode 0 so the rest follow, and clears `+0xa2`. The engine had the player drive the unit whole at every level; it now runs the AI walk at 1 and 2 and the fight at 2, pinned on Mission 03 ([40-command-mode](docs/40-command-mode.md#telepresence-mode-2--read)). Left: [below](#mission-03-the-field-base).
 - [ ] [M12] A unit record's `+0x30` and property `0x207`, and a building's `+0x30`: they pick and tint the panel's icons.
 - [ ] [M12] What slot 7 of a unit's object does 0.6 s after *Explode!*; the chat overlay; the game menu's screen (mode 7); tooltips.
-- [ ] [M12] What `0x10034230` accepts for an Upgrade row, and what Type `0x80000200` is. (The engine: the upgrade task's own target test — a live building of the Type whose scheme has an entry above its own — and, *derived* from Mission 03's recording offering no Upgrade Warehouse over a Small Warehouse whose Medium is unresearched, that the entry above is researched whole.)
+- [x] ~~[M12] What `0x10034230` accepts for an Upgrade row, and what Type `0x80000200` is~~ — closed 2026-09-22: it refuses five Types (generator, hangar `0x80000040`, main teleport, bridge, ruin; `0x10034282`–`0x100342b5`), then asks property `0x20c` at 0, an owner word other than `0xfffe`, a level `0x209` below the scheme count less one, and **every part of the next level researched**, by the count a Build row uses (`0x1008b130`) — read now, where it was derived from the recording. The click sends each selected unit to its nearest accepted building; the engine sent all to the first. `0x80000200` is `BUILDING_MAINTELEPORT` (`varset.var` line 169) ([41-commander](docs/41-commander.md)).
 - [x] ~~The research panel's contents and controls (page 4)~~ — read and built in M13 ([41-commander](docs/41-commander.md)).
-- [ ] [M12] The routine that names a building (strings 6031–6098): the engine picks by Type and the root record's size letter.
+- [x] ~~[M12] The routine that names a building (strings 6031–6098)~~ — closed 2026-09-22: `iron3d.dll:0x100338d0`, from the building record's slot 1, by the behaviour's Type and its size class (variable `0x201`: the root record's fourth letter, l 2, m 3, b 4, e 5), with 6205 *Unknown* for the rest. 167 of 167 placed buildings across the 29 missions get a name, none *Unknown*; the engine's size-letter rule was wrong on 31 of them — the 4 enhanced institutes, and 19 bridges, 3 ruins and 5 teleports unnamed ([35-hud](docs/35-hud.md#name-and-status--read-and-seen)).
 
 **Selecting and ordering**
 
 - [x] ~~[M12] An areal's first flag word (`+0x20`), which decides where a walker may be sent~~ — read in M14: it marks a walkable areal, the only kind the areal map links, and the engine's walker now keeps to them ([24-motion](docs/24-motion.md#the-global-path--read-and-measured)).
-- [ ] Why the recording shows `PLACE`, not `GUARD`, over the bunker's roof at 190.5 s.
-- [ ] [M12] Which objects the world's classes 3 and 4 are, and the object pick's order and nearest-hit rule (`0x100361a0`).
+- [ ] Why the recording shows `PLACE`, not `GUARD`, over the bunker's roof at 190.5 s. **Narrowed** 2026-09-22, *inferred*: the pick takes a building only within 0.7 of its radius (read, below), so over a roof's outer part it finds nothing and a valid place shows `PLACE`. Left: the recording's cursor measured against the bunker's sphere.
+- [x] ~~[M12] Which objects the world's classes 3 and 4 are, and the object pick's order and nearest-hit rule (`0x100361a0`)~~ — closed 2026-09-22: class 3 is the buildings and class 4 the units (`World3D.dll` files each object under the class it answers, and builds it into its id, `0x1000562a`, `0x10005636`). `0x100360f0` walks class 3 at **0.7** of the radius and then class 4 at **1.0** (`0x1003614b`, `0x10036171`) — the engine and docs/42 had the shares the other way round — sharing one best distance; per object it passes one whose sphere holds the eye and keeps the centre strictly nearest **the eye** (`0x100363e3`), not nearest along the ray, a tie keeping the building. Engine fixed ([42-selection](docs/42-selection.md)). Left: [below](#mission-03-the-field-base).
 - [ ] Whether the band is filled or only outlined; double clicks; whether a group sent to one place spreads out.
 - [ ] The pending picks not traced: kind 2 (attack-target mode) and the orders kinds 2–5 give.
-- [ ] [M12] A unit marker's gap figure (the record's slot 5), its bar frame on page9, the clan's sign, and where its name, icon and bars stand.
+- [x] ~~[M12] A unit marker's gap figure (the record's slot 5), its bar frame on page9, the clan's sign, and where its name, icon and bars stand~~ — closed 2026-09-22: slot 5 (`0x10075650`) answers 60 over the camera's distance to the unit, never below 0.3, and the gap is 44 times it; the clan sign (`icons` y 224, cell by clan) and the class icon stand right of the right bracket, the page9 frame (0, 0, 27 × 16) under the left one holds a green life bar over an orange battery bar of the unit's real fill, and the name, own clan only, stands over the left bracket (`0x10077d80`); signs and name are drawn for no nature or neutral clan (`0x10077f46`). The engine's projected-radius gap, blue box and full battery bar are gone ([25-sensors](docs/25-sensors.md)).
 
 **Placing and building**
 
-- [ ] [M12] The site test's path search and its hall-way areal test (interface `0x303`, vertex bit 1). The basement's triangulation is [above](#walking-into-the-large-factory).
+- [x] ~~[M12] The site test's path search and its hall-way areal test (interface `0x303`, vertex bit 1)~~ — closed 2026-09-22: `0x303` is the hall way (`AniMesh.dll:0x100034fe`, `0x100018fc`), and the path is the walker's own search (`0x10020910`) from the builder to the sphere's centre, not flying and gated by the builder's size class; step 6 asks every exit to stand on an areal whose `+0x20` word is set (`0x1000bf65`). All 12 first buildings carry a hall way, 55 exits. On Mission 03 a storage passes at 189 of the 205 grid sites that passed without the two steps, all 16 refused for an exit off walkable ground (3 with no path besides; the path alone refuses none); control: the posing puts Tut_2's exit 67 where docs/24 has it. The engine passed every site; it runs both steps now ([32-builder](docs/32-builder.md#the-test-isplacementvalid--read)). One consequence is a line [below](#mission-03-the-field-base).
 - [ ] What the pick's query record (first word `0xa`) asks the world for, so which objects stop the cursor's ray.
 - [ ] What the game's `+0xe4` byte is, under which a site within 400 of one of the level's records turns red; whether holding `,` or `.` keeps turning the ghost.
 - [ ] What an unfinished building looks like before the dome.
-- [ ] [M12] Which state each sphere code opens, where an action-5 effect is placed, and which classes the sphere's kill takes.
+- [x] ~~[M12] Which state each sphere code opens, where an action-5 effect is placed, and which classes the sphere's kill takes~~ — closed 2026-09-22: played through the read planner on all 30 `fortif` controllers, code 1 starts the sign (mode 2), 2 the dome and the ray (mode 1) and stops the sign, 0 stops the ray and starts the dome in mode 3, 8 and 10 the dome in modes 1 and 3; 2, 8 and 10 kill every 250 ms from 0, 250 and 500 ms. A phase's code −1 is not sent, so a new building holds code 1 and its sign for 35 s, and an upgrade's first phase clears the area. Action 5's frame (`0x10002e0e`) stands on world z, the sphere's radius long, so the ray and dome stand up. The kill's mask is `0x414` — classes 2, 4 and 10 by the `1 << k` table at `Control.dll:0x1003b1a0` — through `ILifeSystem` slot 7, which spares the invulnerable: units, trees and stones fall, an upgrading builder stands. Engine wrong on all of it, fixed ([32-builder](docs/32-builder.md#the-construction-sphere--read-and-measured)). Left: [below](#mission-03-the-field-base).
 - [ ] Which call sends SuperAI event 2 for a building a builder puts up (the recording counts the mine at 196 s, and it stands at 236 s).
 
 **Economy**
 
-- [ ] The clan's minds in the recording: the figure reads 4 again from 221.5 s, when the finished bot should hold the mind its build reserved, and five warbots (SSW-4 to SSW-8) are built on four free minds. ~~The 4 before any build~~ — **read** 2026-09-21: every placed robot takes a mind as it is made, the hero, the builder and the transport among them, so 4 of the 7 are free ([23-economy](docs/23-economy.md#mission-03s-economy-tick-by-tick--derived)).
-- [ ] The direction of the ore a mine's and a storage's loading places move by themselves (`0x10019482`, `0x100195b8`), and unit property `0x208`.
-- [ ] [M12] Batteries and efficiency read from a building's root controller only; the economy timers' random source.
+- [x] ~~The clan's minds in the recording: 4 again from 221.5 s, and five warbots built on four free minds~~ — closed 2026-09-22: a build's reservation lasts only until the clan's next takt. The takt (`ai.dll:0x10001780`, every 7–8 s) ends by writing −1 into every mind entry naming no object (`0x100059e3` → `0x10006580`), and a reservation is 0, which no object's logical id is (`ArealMap.dll` bumps its counters before each use, `0x1002b305`; 0 of the 864 placed objects carry id 0); the sweep runs for the player's clan too (`iron3d.dll:0x100a2750`). A completion takes the clan's first free entry (`Behavior.dll:0x1002a7e5`), and one with none free makes no bot. Read every 0.5 s the panel gives 3 from 218 to 221 s and 4 from 221.5 s, and 5 then 3 at 260–261.5 s: five warbots, five minds, the builder gone at 237.1 s. The engine held a build's mind for the whole build; it sweeps at each takt now ([23-economy](docs/23-economy.md)). ~~The 4 before any build~~ — **read** 2026-09-21: every placed robot takes a mind as it is made, the hero, the builder and the transport among them, so 4 of the 7 are free.
+- [x] ~~The direction of the ore a mine's and a storage's loading places move by themselves (`0x10019482`, `0x100195b8`), and unit property `0x208`~~ — closed 2026-09-22: every move goes through `0x100155f0` (amount, giver, taker). A mine's loading place gives to a transport or builder (`0x10019580`); a storage's unloading place takes from a transport and gives to a builder (`0x100196cd`, `0x1001973e`), at the smaller of the giver's efficiency × `Transfer_Ore_OffBoard` and the taker's `Transfer_Ore_OnBoard` — 1 a second at a small mine, 5 at a large, and 0 from a transport, which has no class-26 part — shared `dt / n` among the place's occupants (`0x10019493`). `0x208` is `MBehaviour+0xa64`, written only by the constructor and message 7 (`0x10006266`): docs/13's word not simulated in single play, and not among the 15 property names the 864 objects carry. Now modelled; on Mission 03 a transport fills in 19.8 s rather than 20 ([23-economy](docs/23-economy.md)).
+- [x] ~~[M12] Batteries and efficiency read from a building's root controller only; the economy timers' random source~~ — closed 2026-09-22: the fill and capacity functions (`Control.dll:0x1002b42b`, `0x1002b4e9`) cover every class-19 slot, and a fitted part takes over its slot, so on 53 of 76 building assemblies the `i_pws_f_*` parts stand in the root's figures: 20/50 becomes 16 held and 1,000 a second, 19.5/51 24/1,500, 20/52 32/2,000; efficiency is unchanged on all 76 (control: the same walk without the parts gives back docs/23's 19.5–20 and 50–52). That a building attaches its parts as a robot does is *inferred* — a stand-in line below. The distribution step draws on `Behavior.dll`'s own unseeded `rand()` (`0x1004ce3c`, ×214013 + 2531011, starting at 1), the power tick's jitter on `Control.dll`'s shared 16-bit shift register, 250 ± 31.25 ms. Engine fixed for both ([23-economy](docs/23-economy.md)).
 
 **Mission 03's script and recording**
 
 - [ ] Why `T03_H03` and `T03_H02` never show in the recording.
 - [ ] Which of the generator's exits the recording's hero used (the south one is inferred), and whether a shot door opens sooner than an approach.
 - [ ] What component property `0x200` is (taken to be the door's node: all 56 door components' nodes match their channels').
+
+**Left by the ninth round** (2026-09-22)
+
+- [ ] [M12] Whether the hero has a parent object in command mode: the object pick passes over any object whose `IGameObject` slot 3 answers nothing, and the engine never picks the hero ([42-selection](docs/42-selection.md#not-established)).
+- [ ] [M12] The construction sphere's remainder: a code's groups run at the controller's next 250 ms step, where the engine runs them as the code is sent; its actions 1 and 2; what object class 2, in the kill's mask, is; and how the world query decides what lies inside the sphere ([32-builder](docs/32-builder.md#not-established)).
+- [ ] [M12] Telepresence's remainder: where a bot's auto-driver level is kept between takes; that a level 2 reached by the key leaves the camera the player's; the AI's repair decision and hit reaction at levels 1 and 2 ([40-command-mode](docs/40-command-mode.md#telepresence-mode-2--read)).
+- [ ] [M12] Whether a building's parts are attached as a robot's are: the part loop (`Behavior.dll:0x1001cd40`) is not followed for a building, and the engine's building batteries — 16 to 32 held and 1,000 to 2,000 a second on 53 of 76 assemblies — stand on it ([23-economy](docs/23-economy.md#a-power-shortage-lowers-efficiency-once-the-batteries-run-down--read-and-measured)).
+- [ ] [M12] The power tick's shift register's seed, taken from an `Ngi32.dll` import by ordinal (`Control.dll:0x1000dc34`), and the 65 other callers of `Behavior.dll`'s `rand()` between two distribution steps ([23-economy](docs/23-economy.md#not-established)).
+- [ ] With the site test's two steps, Mission 04 has **no** Small Research Center site: 0 of 7,225 20 m grid points at any of eight turns has all three exits, 80 m out, on walkable areals and a level basement besides. The mission captures its centre rather than builds one, so no play depends on it; whether the game refuses as widely, or the posing or areal test is off on that map, is not established ([32-builder](docs/32-builder.md#the-test-isplacementvalid--read)).
 
 ## Mission 04, *Teleport*
 
