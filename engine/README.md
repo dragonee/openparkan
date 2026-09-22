@@ -364,8 +364,9 @@ the own panel's unit while aboard.
   half-second ramp, PageUp and PageDown climb and sink at half that, and the cursor
   within 6 of a screen edge turns or tilts it at 1.5 rad/s; it coasts to a stop, its
   height is held 36 to 236 over what is below, and each of x and y within 200 of the
-  bunker. Z zooms. The world goes on meanwhile. Esc closes an open map, then turns the
-  page back, then leaves: the hero is taken back in the pod.
+  bunker. Z zooms. The world goes on meanwhile. Esc's key-down puts away, one press
+  each, the objectives screen, a placement, a message box on screen, an open map and a
+  page other than 0, and then leaves: the hero is taken back in the pod.
 - The commander panel draws in the cockpit HUD's place, as docs/41 reads it: the Ore
   and Energy rows, the icon column with its lock, its buttons enabled by what the clan
   holds, and the page a button opens. A unit page (battle units, transports, builders)
@@ -1357,7 +1358,6 @@ a row here. A row leaves this table when research closes it.
 | M11 | Which model the designer's destination preview keeps: a picked empty row leaves the last one up (`0x1004d0dd`), a tab turned on at an empty row drops it, and what the fits do to the previews (`+0x4dffc`) is not traced | each preview shows its selected row's part | [37](../docs/37-designer.md#the-rows--read-and-seen) |
 | M11 | A designer row's text colour: the game hands the font a gradient down the glyph, `0xffc8c8c8`, white, `0xffc8c8c8` on a selected row and `0xff323296`, white, `0xff9696fa` on the rest, which a text run here cannot take; so too a load row's and the idle name field's | one colour, the light grey `0xffc8c8c8` the recording reads; a load row and the idle field the gradient's middle | [37](../docs/37-designer.md#the-rows--read-and-seen) |
 | M11 | Which cell of its material an effect sprite samples, and when the material's track plays for a particle | the entry's cell, as a mesh batch takes it, from the key the track is on at the sprite's own age — a stream's particle counting from when it left, everything else from its instance's start; the masked colour lerp between two keys is not drawn | [07](../docs/07-objects.md#how-a-material-reaches-the-device--read-and-measured) |
-| M12 | Whether the character handler sees Esc before its binding leaves command mode: the path the key takes is not traced | an open satellite map closes first, then a page other than 0 turns to 0, then Esc leaves, as Mission 04's recording shows one Esc at a time | [40](../docs/40-command-mode.md#not-established) |
 | M14 | The builder's invulnerability (property 162) while it works, but against its building's kill | the builder is hurt as it always is; the sphere's kill passes it over | [32](../docs/32-builder.md#upgrading-a-building--read) |
 | M14 | How the point beside a building an upgrade walks to is drawn (`0x100338a0`) | a random one on the ring 20 out past the building's sphere, on walkable ground, as the attack draws its own | [32](../docs/32-builder.md#upgrading-a-building--read) |
 | M12 | A builder's beam's life, which the Build rows need intact | a live builder can build | [32](../docs/32-builder.md#building-a-building--read) |

@@ -313,9 +313,23 @@ the play dispatch (*read*).
 **The hero's own table does not move it**: it has been let go (step 5 above)
 (*derived*).
 
-**Esc** has a second reader. The interface's character handler (`0x10070db0`),
-one of the handlers a message meets before the bindings, answers it in this
-order, taking the key at the first that applies (from `0x10070dea`):
+**Esc** has a second reader, and it reads the key first (*read*). The window
+message routine (`0x100a0e30`) hands a message to the input listeners before
+the bindings, in every view state but 0 (the level's `+0x710`, `0x100a0e71`):
+a key-down, `0x100`, goes to the listener chain's slot 0 (`0x100a0eb8`), which
+asks each listener in turn and stops at the first to answer 1
+(`0x100709f0`); only when none does is the same message passed on to
+`0x10071c10` (`0x100a0fe5` → `0x100a0fe7`), whose lookup gives 735. The game's
+own listener (vtable `0x100e6490`, registered at `0x10070d5c`) has at slot 0
+the handler `0x10070db0`, which this page and its neighbours have called the
+character handler. **It is the key-down handler**: it takes two arguments,
+the key-down's `wParam` and `lParam` (`ret 8`), and switches on the virtual-key
+code, `0x13` (`VK_PAUSE`) to `0x91` through its index at `0x10071168`.
+`VK_ESCAPE` is `0x1b` and the digit keys are their characters, which is why the
+name fitted. The character itself, `WM_CHAR` (`0x102`), goes to slot 2,
+`0x100711f0`, a different handler. So in command mode the key-down handler
+answers Esc in this order, taking the key at the first that applies (from
+`0x10070dea`), and Esc leaves only when none applies:
 1. the pause; quitting with `+0xe5` set or once the mission is over
    ([34-progression.md](34-progression.md#after-the-outcome--read-and-measured));
    the help screen; the briefing;
@@ -328,12 +342,14 @@ order, taking the key at the first that applies (from `0x10070dea`):
 8. **in view state 2, a panel on a page other than 0 turns to page 0**
    (`0x1007104b`).
 
-Otherwise the key is not taken. If this handler sees Esc's key-down, Esc in
-command mode peels those back one at a time before 735 leaves; if it sees only
-the character that follows the key-down, 735 has already left. The code read
-does not say which. **Mission 04's recording shows the peeling** (*seen*): from
-an HQ's command view, one Esc a second closes the map, then the page, then
-leaves ([below](#leaving)).
+Otherwise the key is not taken (`0x10071088` answers 0) and the binding has it.
+Steps 2, 4, 5, 7 and 8 are skipped while the game menu, mode 7, is on the stack's
+front (the `0x10044190` tests). So **Esc in command mode peels those back one
+press at a time before 735 leaves** (*read*), and **Mission 04's recording shows
+the same** (*seen*): from an HQ's command view, one Esc a second closes the map,
+then the page, then leaves ([below](#leaving)). The objectives screen, a
+building being placed and a message box on screen come off first, in that
+order, in every view.
 
 ## Leaving — *read*
 
@@ -617,7 +633,7 @@ mode 1. **Mode 3 → 1** (`0x10063ad0`), in order:
 
 So **Esc returns to the HQ's cockpit**, with the player driving it, and a
 second Esc puts the hero down beside it (*derived*). Before either, Esc's
-character handler closes an open satellite map and turns a page to 0
+key-down handler closes an open satellite map and turns a page to 0, first
 ([Input](#input--read-and-measured)).
 
 *Seen*, 157–162 s, four cuts about a second apart:
@@ -762,9 +778,10 @@ mode.
    PageDown, Z, N, M, F12, F2, F1, F3; comma and dot turn a building being
    placed by 0.05 rad. Enter does nothing.
 7. **Esc** leaves (mode 4 → 0): take the hero back where it stands, clear the
-   selection, back to the cockpit, drop held keys. The character handler would
-   first close an open satellite map, then turn a page back to 0, one Esc each,
-   before the binding leaves: Mission 04's recording does so (*seen*).
+   selection, back to the cockpit, drop held keys. Its key-down first puts away,
+   one press each, an objectives screen, a building being placed, a message box
+   on screen, an open satellite map, then a page other than 0; only then does
+   the binding leave.
 8. **Telepresence**: a unit page's three buttons set the unit's auto-driver
    level 0, 1 or 2 and push mode 2 (take the unit, cockpit view). Esc returns to
    the command view, the camera where it was.
@@ -785,9 +802,11 @@ mode.
   open: the two attached positions (`+0x3c` 30 above, `+0x40` 90 above) that
   the move routine takes first.
 - ~~Whether the key-down binding 735 or the character handler's Esc comes
-  first~~ — the character handler, in effect: Mission 04's recording peels the
-  map and the page back one Esc at a time (*seen*); the path the key takes was
-  not traced.
+  first~~ — **read**: the handler, which is the game listener's key-down handler
+  (slot 0, `0x10070db0`), is asked first, and the key-down reaches the bindings
+  only when no listener takes it (`0x100a0eb8`, `0x100a0fe5`), in
+  [Input](#input--read-and-measured). Mission 04's recording peels the map and
+  the page back one Esc at a time (*seen*).
 - ~~What mode 2 does when its unit dies~~ — **read**: the unit record's removal
   rolls the stack back in modes 1, 2, 5 and 7 (`0x100755a9`, table
   `0x1007563c`), so telepresence ends with its unit, back to the command view.

@@ -52,6 +52,12 @@ impl MessageBox {
         self.hidden = !self.hidden;
     }
 
+    /// Whether a box is on screen at `now_ms`: made, not hidden and not yet 20 s old (the
+    /// shown byte `0x1010c080`, which the lifetime clears, `0x1007f532`).
+    pub fn on_screen(&self, now_ms: f64) -> bool {
+        !self.hidden && self.shown.as_ref().is_some_and(|s| now_ms - s.made_ms <= LIFETIME_MS)
+    }
+
     /// The text on screen and whom it is from, while a box lives.
     pub fn current(&self) -> Option<(Sender, &str)> {
         self.shown.as_ref().map(|s| (s.sender, s.text.as_str()))

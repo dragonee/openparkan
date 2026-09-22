@@ -5,6 +5,7 @@
 
 pub mod commander;
 pub mod designer;
+pub mod escape;
 pub mod factory;
 pub mod map;
 pub mod markers;

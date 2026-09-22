@@ -1674,38 +1674,38 @@ impl ApplicationHandler for App {
                     hud.cockpit.designer.escape();
                     return;
                 }
-                // Esc in command mode: the character handler's cases first (`0x10071027`,
-                // `0x1007104b`), an open satellite map closing, then a page turning to 0.
-                //
-                // STAND-IN: docs/40-command-mode.md#not-established -- whether the character
-                // handler sees Esc before its binding leaves command mode is not traced: the map
-                // and the page are peeled back first, as Mission 04's recording shows.
+                // Esc's key-down meets the game's listener before its binding (`0x100a0eb8`,
+                // `0x10070db0`): an objectives screen, a placement, a message box, and in the
+                // commander's view an open map and a page other than 0 are put away first, one
+                // a press, and only then does 735 roll the mode back.
                 if code == KeyCode::Escape
                     && event.state == ElementState::Pressed
                     && outcome.is_none()
-                    && let (Some(play), Some(hud)) = (self.play.as_ref(), self.hud.as_mut())
-                    && play.mode().commands()
+                    && let (Some(play), Some(hud)) = (self.play.as_mut(), self.hud.as_mut())
                 {
-                    // Esc puts a placement away too (`0x10070ed1`).
-                    if play.commander.ghost.is_some()
-                        || play
-                            .commander
-                            .pending
-                            .as_ref()
-                            .is_some_and(|p| matches!(p.kind, parkan_world::pick::PendingKind::Build(_)))
-                    {
-                        if let Some(play) = self.play.as_mut() {
-                            play.cancel_placement();
-                        }
-                        return;
-                    }
+                    use parkan_world::cockpit::escape::{Layer, Up, peel};
                     let cockpit = &mut hud.cockpit;
-                    if cockpit.map.open {
-                        cockpit.map.toggle();
-                        return;
-                    }
-                    if cockpit.commander.page != 0 {
-                        cockpit.commander.page = 0;
+                    let now = play.hero.time_ms;
+                    let up =
+                        Up {
+                            objectives: cockpit.objectives.up,
+                            placing: play.commander.ghost.is_some()
+                                || play.commander.pending.as_ref().is_some_and(|p| {
+                                    matches!(p.kind, parkan_world::pick::PendingKind::Build(_))
+                                }),
+                            message_box: cockpit.messages.on_screen(now),
+                            commander_view: play.mode().commands(),
+                            map: cockpit.map.open,
+                            page: cockpit.commander.page != 0,
+                        };
+                    if let Some(layer) = peel(up) {
+                        match layer {
+                            Layer::Objectives => cockpit.objectives.close(),
+                            Layer::Placement => play.cancel_placement(),
+                            Layer::MessageBox => cockpit.messages.pager(),
+                            Layer::Map => cockpit.map.toggle(),
+                            Layer::Page => cockpit.commander.page = 0,
+                        }
                         return;
                     }
                 }
@@ -1725,11 +1725,7 @@ impl ApplicationHandler for App {
                     // STAND-IN: docs/34-progression.md#after-the-outcome--read-and-measured -- the
                     // shell's menus are not built: leaving closes the window, and a win is not
                     // written to `MISSIONS/dispatcher.ini`.
-                    let objectives = self.hud.as_mut().map(|h| &mut h.cockpit.objectives).filter(|o| o.up);
-                    if let (Some(o), None) = (objectives, outcome) {
-                        // `0x10070e85`: Esc closes the objectives screen.
-                        o.close();
-                    } else if self.grabbed && outcome.is_none() {
+                    if self.grabbed && outcome.is_none() {
                         self.grab(false)
                     } else {
                         event_loop.exit()
