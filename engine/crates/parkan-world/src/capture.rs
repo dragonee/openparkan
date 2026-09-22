@@ -210,6 +210,14 @@ impl Play {
         inside
     }
 
+    /// Whether a unit whose origin is at `at` stands inside building `t`: within its outer ring
+    /// and under one of its floors. A unit on the roof is within the ring too, with nothing of
+    /// the building over it.
+    fn inside(&mut self, t: usize, at: Vec3) -> bool {
+        self.within_contour(t, at)
+            && self.ground.solids.get(t).is_some_and(|s| s.walk_face(at, true).is_some())
+    }
+
     /// Every live building's places for a capture search: whether it is finished, its pod and
     /// the contour vertices a flyer may land at, those on an areal whose first flag word is set
     /// (on a map with no areal map, those over ground above any water).
@@ -380,12 +388,13 @@ impl Play {
     }
 
     /// The legs of a walk for robot target `t` at `from` to `goal`: out of the building it
-    /// walked into first while it still stands inside that building's outer ring. Once outside,
-    /// the building is forgotten.
+    /// walked into first while it still stands inside that building. Once outside, or up on its
+    /// roof, the building is forgotten: the hall way runs under the roof, and from on top of it
+    /// the way's first vertex is a point the unit cannot get down to.
     pub fn legs_to(&mut self, t: usize, from: Vec3, goal: Vec3) -> Vec<Vec3> {
         let mut legs = Vec::new();
         if let Some(&b) = self.construction.ways.entered.get(&t) {
-            if self.battle.combat.targets.get(b).is_some_and(|x| x.alive) && self.within_contour(b, from) {
+            if self.battle.combat.targets.get(b).is_some_and(|x| x.alive) && self.inside(b, from) {
                 let flyer = self.flies(t);
                 legs = self.way_out(b, from, goal, flyer).unwrap_or_default();
             } else {

@@ -310,6 +310,85 @@ fn wingmen_follow_seek_and_destroy_stand_by_and_fail_a_refit_with_no_dock() {
     assert!(play.killed.contains(&play.battle.objects[e1]) && play.deleted[e1]);
 }
 
+/// Mission 02's warbot, built from the factory's screen, leaves by the front door and its
+/// escape takes it back over the shut door onto the roof above the hall. Follow me given
+/// there, from the forecourt, brings it down to the hero: the roof is not the inside of
+/// the building the bot was made in, and the way out through the hall is not its way.
+#[test]
+#[ignore = "needs the game install"]
+fn mission_02s_built_warbot_follows_the_hero_off_the_factory_roof_its_escape_took_it_onto() {
+    use parkan_sim::behaviour::Task;
+    use parkan_world::factory::Project;
+    use parkan_world::play::{Mode, Play, View};
+
+    let tick = |play: &mut Play, seconds: f32| {
+        for _ in 0..(seconds * 60.0) as usize {
+            play.update_input();
+            play.tick(1000.0 / 60.0, [0.0; 2]);
+        }
+    };
+    let (mut play, _) = mission_02_play();
+    let factory = play.buildings.iter().find(|b| b.doors.len() == 3).unwrap().target;
+    assert!(play.stand_on_pod(factory));
+    tick(&mut play, 6.0);
+    assert_eq!(play.mode(), Mode::Factory(factory));
+    let f = play.factories.iter().position(|f| f.target == factory).unwrap();
+    play.factories[f].accept(Project {
+        path: "UNITS\\bld_unit_-2147483647.dat".into(),
+        name: "LFW-X Warrior".into(),
+        type_word: 0x0100_8000,
+        chassis_size: 4,
+        ore: 411.0,
+        power: 226.5,
+        lines: Vec::new(),
+        sphere: None,
+    });
+    play.factory_click(factory, parkan_world::cockpit::factory::Click::Build);
+    play.factory_click(factory, parkan_world::cockpit::factory::Click::Exit);
+    // Out on the forecourt, watching the front door.
+    assert!(play.stand_at(395.8, 940.0, -std::f32::consts::FRAC_PI_2));
+    let robots = play.robots.len();
+    while play.robots.len() == robots {
+        tick(&mut play, 1.0 / 60.0);
+    }
+    let r = play.robots.len() - 1;
+
+    // Out of the front door, the escape turns back for its point inside the hall and is pushed
+    // up over the shut door onto the roof: the factory's faces 15 m and more over the hall
+    // floor's 154.05, with no floor of the factory above them.
+    let on_roof = |play: &Play| {
+        play.robots[r]
+            .1
+            .walker
+            .ground
+            .is_some_and(|h| h.solid.map(|s| s.0) == Some(factory) && h.point.z - 154.05 > 15.0)
+    };
+    let mut seconds = 0.0;
+    while !on_roof(&play) && seconds < 30.0 {
+        tick(&mut play, 1.0 / 60.0);
+        seconds += 1.0 / 60.0;
+    }
+    let at = play.robots[r].1.walker.body.position;
+    assert!(on_roof(&play), "the escape takes the bot onto the roof: at {at} after {seconds} s");
+    assert!(matches!(play.robots[r].1.behaviour.task(), Task::Leave { .. }), "still escaping");
+
+    let eye = play.hero.eye();
+    let view = View { eye: eye.position, look: eye.forward, view_proj: glam::Mat4::IDENTITY, shift: false };
+    play.command("CMD_JAMES_WINGMAN_MENU", &view);
+    assert!(play.wingman_digit(2));
+    assert!(matches!(play.robots[r].1.behaviour.task(), Task::Follow { .. }));
+    // It comes down off the roof to within the radius and its slack, 20 + 20, of the hero.
+    tick(&mut play, 20.0);
+    let hero = play.hero.walker.body.position;
+    let (at, on) =
+        (play.robots[r].1.walker.body.position, play.robots[r].1.walker.ground.and_then(|h| h.solid));
+    let off = at.truncate().distance(hero.truncate());
+    assert!(
+        off < 40.0 && on.is_none_or(|s| s.0 != factory),
+        "I wasn't able to make him follow me: the bot holds {off} m off at {at}, on {on:?}"
+    );
+}
+
 #[test]
 #[ignore = "needs the game install"]
 fn a_captured_bot_stands_by_until_ordered_and_with_no_order_engages_as_the_games_does() {
