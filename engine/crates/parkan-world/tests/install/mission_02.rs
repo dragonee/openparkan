@@ -184,9 +184,12 @@ fn mission_02s_hero_walks_in_by_the_factorys_west_door_down_to_its_pod_and_captu
 /// medusas"): with no order an animal migrates, asking for its clan's current pasture — one of
 /// `Anml`'s two zones, the same for both — and is sent to a point off its centre's +x, +y side.
 ///
-/// How far they get is the motion's, not the task's: the Wizard writes the medusa's live top
-/// speed, 13 m/s forward, and no moving anchor state of `a_a_l3.ctl` has a forward box past
-/// 10, so the machine holds its hover (docs/34, "The medusas").
+/// How far they get is the motion's, not the task's: the walk asks for the medusa's live top
+/// speed, 13 m/s forward, `Speed_MaximumFactor` being 1 for every behaviour, and an animal's
+/// walk points stand 45 to 95 m over the ground (`Behavior.dll:0x10040f20`), so the Wizard
+/// writes a climb of more than 5.5 m/s. No moving anchor state of `a_a_l3.ctl` takes a forward
+/// speed past 10 or a climb past 5.5, and with none to go to the planner keeps the one it is in
+/// (`Control.dll:0x1000531a`): the machine holds its hover (docs/34, "The medusas").
 #[test]
 #[ignore = "needs the game install"]
 fn mission_02s_medusas_migrate_over_their_clans_one_pasture() {
@@ -324,4 +327,110 @@ fn mission_02s_hero_is_put_out_of_its_warbot_once_the_turrets_body_is_shot_off()
     assert_eq!(play.mode(), Mode::OnFoot);
     let out = play.hero.walker.body.position;
     assert!((out.truncate() - (bot.truncate() - glam::Vec2::ONE)).length() < 0.05, "{out} beside {bot}");
+}
+
+/// The height a flyer's walk point is given (`Behavior.dll:0x10040f20`, docs/24, "A flyer's walk
+/// points"): the ground under it as the behaviour's ground routine answers it and a compiled 15.
+/// That routine looks straight down from above the world at buildings, trees and stones first,
+/// and over one answers its top face and 100 more (`0x100148a5`); over the landscape, the
+/// landscape. An animal's point stands 30 higher again, and up to 50 more at random.
+#[test]
+#[ignore = "needs the game install"]
+fn a_flyers_walk_point_stands_15_over_the_ground_and_100_more_over_a_building_an_animals_45_to_95() {
+    let (mut play, _) = mission_02_play();
+    let factory = play.buildings.iter().find(|b| b.doors.len() == 3).expect("the Large Factory").target;
+    // On the forecourt, clear of the factory: the landscape.
+    let (x, y) = (395.8, 940.0);
+    let land = play.ground.landscape_top(x, y).expect("the forecourt's ground");
+    assert_eq!(play.flight_ground(x, y), land);
+    assert_eq!(play.flight_height(x, y, false), land + 15.0);
+    // Over the hall, where Mission 02's escape once picked its point: the factory's top face
+    // there, 17 m and more over the hall floor's 154.05, and 100 more.
+    let (x, y) = (408.7, 868.5);
+    let roof = play.ground.solid_top(x, y, |i| i == factory).expect("the factory over the point");
+    assert!(roof - 154.05 > 15.0, "the roof, not the hall floor: {roof}");
+    assert_eq!(play.flight_ground(x, y), roof + 100.0);
+    assert_eq!(play.flight_height(x, y, false), roof + 115.0);
+    // An animal's, drawn for each point.
+    let heights: Vec<f32> = (0..200).map(|_| play.flight_height(395.8, 940.0, true) - land).collect();
+    assert!(heights.iter().all(|h| (45.0..=95.0).contains(h)), "{heights:?}");
+    let (lo, hi) = heights.iter().fold((f32::MAX, f32::MIN), |(lo, hi), &h| (lo.min(h), hi.max(h)));
+    assert!(lo < 50.0 && hi > 90.0, "spread over the 50: {lo} to {hi}");
+}
+
+/// Mission 02's warbot, built in the Large Factory, is given the escape, and in the engine its
+/// first point falls inside the factory's footprint. That point's height is the factory's roof
+/// and 115 more (docs/24, "A flyer's walk points"), so the bot leaves by the front door and
+/// climbs clear of the roof to it, where the stand-in's 15 over the hall floor had it pushed
+/// up over the shut door onto the roof. Hanging over the factory when the escape ends, it is
+/// given the escape again by the unit takt, and ends it on open ground to the east, 15 m up.
+#[test]
+#[ignore = "needs the game install"]
+fn mission_02s_built_warbots_escape_to_a_point_over_its_factory_takes_it_115_m_over_the_roof() {
+    use parkan_sim::behaviour::Task;
+    use parkan_world::factory::Project;
+
+    let (mut play, _) = mission_02_play();
+    let f = play.factories.iter().position(|f| f.logic_id == 0x8000_0001_u32 as i32).expect("the factory");
+    let factory = play.factories[f].target;
+    play.units[factory].clan = Some(play.player_clan);
+    play.factories[f].accept(Project {
+        path: "UNITS\\bld_unit_-2147483647.dat".into(),
+        name: "LFW-2 Warrior".into(),
+        type_word: 0x0100_8000,
+        chassis_size: 4,
+        ore: 411.0,
+        power: 226.5,
+        lines: Vec::new(),
+        sphere: None,
+    });
+    let free = play.free_minds(play.player_clan);
+    assert!(play.factories[f].start(true, free));
+    let robots = play.robots.len();
+    while play.robots.len() == robots {
+        play.tick(1000.0 / 60.0, [0.0; 2]);
+    }
+    let r = play.robots.len() - 1;
+    for _ in 0..10 {
+        if matches!(play.robots[r].1.behaviour.task(), Task::Leave { goal: Some(_) }) {
+            break;
+        }
+        play.tick(1000.0 / 60.0, [0.0; 2]);
+    }
+    let Task::Leave { goal: Some(goal) } = play.robots[r].1.behaviour.task() else {
+        panic!("{:?}", play.robots[r].1.behaviour.task())
+    };
+    let roof = play.ground.solid_top(goal.x, goal.y, |i| i == factory).expect("a point over the factory");
+
+    // The escape's first point reached: over the roof, 115 m up, and the escape ends there.
+    let mut highest = f32::MIN;
+    let mut ended = None;
+    for tick in 0..(30 * 60) {
+        play.tick(1000.0 / 60.0, [0.0; 2]);
+        highest = highest.max(play.robots[r].1.walker.body.position.z);
+        if !matches!(play.robots[r].1.behaviour.task(), Task::Leave { goal: Some(g) } if g == goal) {
+            ended = Some(tick);
+            break;
+        }
+    }
+    let at = play.robots[r].1.walker.body.position;
+    assert!(ended.is_some(), "the first escape ends: at {at}");
+    assert!(highest - roof > 100.0, "it rose {} m over the roof, to {highest}", highest - roof);
+    assert!(at.truncate().distance(goal.truncate()) < 5.0, "over its point: {at} to {goal}");
+
+    // Then off the factory: the takt's escape takes it out onto the landscape and it hangs 15 m
+    // over the ground where that escape ends.
+    let mut settled = None;
+    for tick in 0..(40 * 60) {
+        play.tick(1000.0 / 60.0, [0.0; 2]);
+        if play.robots[r].1.behaviour.task() == Task::Stop {
+            settled = Some(tick);
+            break;
+        }
+    }
+    let at = play.robots[r].1.walker.body.position;
+    assert!(settled.is_some(), "the escape off the factory ends: at {at}");
+    let land = play.ground.landscape_top(at.x, at.y).expect("off the factory, on the landscape");
+    assert!(play.ground.solid_top(at.x, at.y, |i| i == factory).is_none(), "clear of the factory: {at}");
+    assert!((at.z - land - 15.0).abs() < 3.0, "15 m over the ground: {} over {land}", at.z - land);
 }

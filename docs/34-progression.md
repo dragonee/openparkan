@@ -524,17 +524,32 @@ their territory.
 `a_a_l3.ctl` is a mode-2 controller of 216 states, every one driven by
 velocity, and 24 of them anchors
 ([24-motion.md](24-motion.md#section-1-is-the-animation-state-graph--read-and-measured)).
-Twelve anchors hover, with a velocity box of ±0.1 m/s. The twelve that move
-take a forward speed of 0.1 to 7 m/s or 5 to 10 m/s with a sideways and an
-upward part of −0.1 to 5.5, or the same boxes mirrored backwards, down and to
-the left. Its top speed forward is 13 m/s. The planner only moves to an anchor
-whose boxes hold the machine's velocity (`Control.dll:0x100051c0`), so a medusa
-asked for more than 10 m/s forward matches no moving anchor and keeps hovering.
-Asked for its full speed — `Speed_MaximumFactor` 1 — it would not fly; the
-`diff_slow` profile's 0.7 asks for 9.1 m/s, inside the 5-to-10 box
-([24-motion.md](24-motion.md#how-the-ai-asks-for-speed--read)). Which
-difficulty profile an animal's behaviour holds (`+0x8d4`) is not read; the
-recording shows the medusas flying.
+Twelve anchors hover, with a velocity box of ±0.1 m/s on every axis. The twelve
+that move take a forward speed of 0.1 to 7 m/s or 5 to 10 m/s with a sideways and
+an upward part of −0.1 to 5.5, or the same boxes mirrored backwards, down and to
+the left: a medusa can climb only going forward and sink only going back, at
+5.5 m/s or less. The planner only moves to an anchor whose boxes hold the
+machine's velocity (`Control.dll:0x100051c0`), and with none to go to it queues
+the path back to the anchor it is in (`0x1000531a`).
+
+**What it is asked for** (*read*). Its walk's speed is its full 13 m/s:
+`Speed_MaximumFactor` is 1 for every behaviour, the difficulty block's compiled
+default, since no `diff_*` profile is ever loaded
+([26-damage.md](26-damage.md#the-difficulty-block-every-behaviour-holds--read-and-measured)).
+And its walk points are not at the pasture centre's height: the walker gives an
+animal's each 45 to 95 m over the ground, drawn afresh
+([24-motion.md](24-motion.md#a-flyers-walk-points--read-and-measured)).
+
+**So a grazing medusa hovers** (*derived*, and *measured* on openparkan's
+engine, which drives it as read). Grazing 11 m over the ground, it is sent up to
+a point tens of metres higher at 13 m/s, and the Wizard writes a climb far past
+5.5 m/s — up to 120 m/s over a short leg. No moving anchor holds that, the hover
+stays, and the hover's box lets it drift at 0.1 m/s: over 40 s a medusa moves
+1.8 m across the ground and 1.7 m up. The recording (*seen*) shows the medusas
+flying high over the ground in their fight with the hero from about 195 s. Just
+before it, from 193 to 194.5 s, a dark domed shape hangs low over the valley
+floor ahead of the hero, under its sight; that it is a medusa grazing is not
+established.
 
 **Destroying both** empties `Anml`'s count, which completes the bonus
 objective with `T02_I04`. How a dead unit leaves the count is not read; the
@@ -1597,11 +1612,16 @@ sits 11.8 dB under its file: music and sounds come out alike, as the equal
   the migrate task gives it~~ — answered: the gate merges them into the attack's
   limit, whose start stamps its time; slot 9 ends the attack past that time or
   outside the circle, in three dimensions, and migrate beneath it starts again
-  ([31-packages.md](31-packages.md#a-hit-pulls-a-unit-in--read)). Still open:
+  ([31-packages.md](31-packages.md#a-hit-pulls-a-unit-in--read)). ~~Still open:
   how a flyer's migration point, which takes the pasture centre's height, meets
   its flying height; and which difficulty profile a medusa holds, whose
   `Speed_MaximumFactor` decides whether it is asked for less than the 10 m/s its
-  moving states allow ([The medusas](#the-medusas--read-and-measured)).
+  moving states allow~~ — **read**: the walker gives the point 45 to 95 m over
+  the ground, and no unit holds a difficulty profile, so the factor is 1 and the
+  medusa is asked for 13 m/s
+  ([The medusas](#the-medusas--read-and-measured)). Still open: what brings the
+  velocity the Wizard writes, a climb past 5.5 m/s, inside a moving state's box;
+  as read, a grazing medusa holds its hover.
 - What the behaviour does with the message 6 it sends itself for each tactical
   areal it is in.
 - ~~The ambient variations' schedule.~~ Answered: one every 10 + `rand()` % 10

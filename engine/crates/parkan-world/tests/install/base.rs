@@ -513,6 +513,11 @@ fn c03_m01s_builder_upgrades_the_captured_factory_to_the_medium_one_its_clan_has
     use parkan_world::cockpit::commander::Panel;
 
     let mut play = campaign_play(gamedir::C03_MISSION_01);
+    // This is a test of the upgrade, and the builder works 180 m from a building the enemy's
+    // planner sets a warbot to patrol at 150: where the patrol has brought it by the time the
+    // sphere starts turns on how every AI unit steers, and once it has shot the builder dead
+    // 42 s in. The progression goes, so no clan plans.
+    play.progression = None;
     let player = play.player_clan;
     // The neutral clan's Small Factory, bunker and builder, as capturing them would leave them.
     let of = |play: &parkan_world::play::Play, kind: u32, which: u32| {

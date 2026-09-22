@@ -367,6 +367,50 @@ does three things (`0x1000e980`, `0x1002ba30`):
 - is copied to every class-2 gun (`+0x180`), and a gun hands it to each round
   it fires (`0x1002a3fb`) — which scales **the round's damage** (below).
 
+### The difficulty block every behaviour holds — *read*, and *measured*
+
+`behpsp.res` carries five difficulty profiles, `diff_strong`, `diff_normal`,
+`diff_weak`, `diff_slow` and `diff_stupid`, of seven variables each. A
+behaviour keeps the block they would fill at `+0x8d4`, and **no unit is ever
+given one: every behaviour holds the block's compiled defaults.**
+
+- **The defaults** (`Behavior.dll:0x10019b90`, the block's constructor, run
+  from `MBehaviour`'s at `0x10003940` on `+0x694` + `0x240`):
+
+  | `+` | variable | default | strong | normal | weak | slow | stupid |
+  |---:|---|---:|---:|---:|---:|---:|---:|
+  | 0 | `Speed_MaximumFactor` | **1** | 1 | 1 | 1 | 0.7 | 1 |
+  | 4 | `Router_RandomError` | 0 | 0 | 0 | 0 | 0.5 | 1 |
+  | 8 | `Fire_MissAngle` | 0 | 0 | 0 | 0 | 0 | 0 |
+  | `0xc` | `Fire_FreqFactor` | 1 | 2 | 1 | 0.5 | 1 | 1 |
+  | `0x10` | `Decision_RepairOn` | **0.5** | 0.8 | 0.5 | 0.1 | 0.5 | 0.5 |
+  | `0x14` | `Decision_RepairOff` | **1** | 0.9 | 0.8 | 0.3 | 0.8 | 0.8 |
+  | `0x18` | `Decision_Dormancy` | 0 | 0 | 0 | 0 | 0 | 5 |
+
+  The profiles' columns are *measured* (`openparkan.profiles`). The defaults
+  match `diff_normal` on six of the seven, and not on `Decision_RepairOff`.
+- **The one loader** is `MBehaviour` slot 25 (`0x1000a1a0`, in the vtable at
+  `0x100592b4`), which opens a resource file, finds a member by name and binds it
+  into one of five blocks by its kind: 1 `+0x7c0`, 2 `+0x820` (the behaviour
+  profile), 3 `+0x8a0`, 4 `+0x694`, **5 `+0x8d4`** (`0x1000a2ed`–`0x1000a2fa`,
+  binder `0x10019bd0`). The block is read through `0x100146a0` alone — five
+  calls, the repair decision's two, the fire control's (`0x10023f9f`) and
+  `SetTarget`'s two — and a raw scan of `Behavior.dll` for the displacements
+  `+0x8d4` to `+0x8f0` finds only the binder's `lea` and that getter.
+- **Nothing names a `diff_*` member** (*measured*, as a search with a control).
+  A case-blind search of every string in the sixteen modules for `diff` finds
+  seven — `fDifficulty`, `Movement_StopDifference`, `TargetDifference` and four
+  log texts — and no profile's name; a byte search of every file in the install for
+  `diff_` finds `behpsp.res` alone, the archive that holds them. The control is
+  the same search for names that are loaded: `prof_war` is found in
+  `Behavior.dll`, which loads it by name through slot 25 with kind 2
+  (`0x10008ae5`), and `chas_fly` in `objects.rlb`, whose chassis records name it.
+  Only `diff_*.var` carries the seven variables (*measured*, all 32 members).
+
+So `diff_slow`'s 0.7 speed cap never applies
+([24-motion.md](24-motion.md#how-the-ai-asks-for-speed--read)), and the repair
+decision reads 0.5 and 1 ([below](#repair-a-units-own-repair-unit-switched-on-and-off--read-and-measured)).
+
 ## A hit, from the round to the node — *read*
 
 **The `.exp` is the damage.** Its first word, which
@@ -1004,10 +1048,12 @@ at full power and with the repair unit's own node intact:
 
 **What the AI does with the switch** — *read*. The earlier note that nothing
 reads `Decision_RepairOn`/`Off` was wrong.
-- **Where the thresholds live.** A behaviour keeps its difficulty profile at
+- **Where the thresholds live.** A behaviour keeps its difficulty block at
   `+0x8d4` (bound at `Behavior.dll:0x1000a2f4` by `0x10019bd0`, read through
   `0x100146a0`); `Decision_RepairOn` is its `+0x10`, `Decision_RepairOff` its
-  `+0x14`.
+  `+0x14`. **Every unit holds the block's defaults, 0.5 and 1**: no `diff_*`
+  profile is ever loaded
+  ([The difficulty block](#the-difficulty-block-every-behaviour-holds--read-and-measured)).
 - **The decision** (`0x10017c70`) reads the object's life fraction and battery
   charge, then:
   - **switches repair on** when the unit *needs service* — life under 0.5, or
@@ -1039,15 +1085,17 @@ reads `Decision_RepairOn`/`Off` was wrong.
     let go.
   - Clans of type 3 skip the takt altogether (`0x10005070`).
 
-| profile (*measured*) | `Decision_RepairOn` | `Decision_RepairOff` | a unit switches on below | and off above |
+| block | `Decision_RepairOn` | `Decision_RepairOff` | a unit switches on below | and off above |
 |---|---|---|---|---|
-| `diff_strong` | 0.8 | 0.9 | 80% | 90% |
-| `diff_normal`, `diff_slow`, `diff_stupid` | 0.5 | 0.8 | 50% | 80% |
-| `diff_weak` | 0.1 | 0.3 | 50% (needing service overrides) | 50% |
+| **every unit: the defaults** (*read*) | 0.5 | 1 | 50% | never, but for a flat battery |
+| `diff_strong`, never loaded (*measured*) | 0.8 | 0.9 | 80% | 90% |
+| `diff_normal`, `diff_slow`, `diff_stupid`, never loaded | 0.5 | 0.8 | 50% | 80% |
+| `diff_weak`, never loaded | 0.1 | 0.3 | 50% (needing service overrides) | 50% |
 
-The last two columns are *derived* from the rule above. A building needs
-service below 90%, so under every profile it repairs below 90% while its charge
-allows.
+The last two columns are *derived* from the rule above: no life is over 1, so a
+unit's repair system, once on, stays on until its charge falls under 10% or a
+task starts. A building needs service below 90%, so it repairs below 90% while
+its charge allows.
 
 **Nobody repairs anybody else** — *read*, as a search. Everything in the
 shipped code that raises a node's life:

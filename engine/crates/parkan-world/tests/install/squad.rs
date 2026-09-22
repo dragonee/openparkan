@@ -311,9 +311,10 @@ fn wingmen_follow_seek_and_destroy_stand_by_and_fail_a_refit_with_no_dock() {
 }
 
 /// Mission 02's warbot, built from the factory's screen, leaves by the front door and its
-/// escape takes it back over the shut door onto the roof above the hall. Follow me given
-/// there, from the forecourt, brings it down to the hero: the roof is not the inside of
-/// the building the bot was made in, and the way out through the hall is not its way.
+/// escape takes it back up over the factory: its point inside the hall's footprint stands 115 m
+/// over the roof (docs/24, "A flyer's walk points"). Follow me given there, from the forecourt,
+/// brings it down to the hero: over the roof is not the inside of the building the bot was made
+/// in, and the way out through the hall is not its way.
 #[test]
 #[ignore = "needs the game install"]
 fn mission_02s_built_warbot_follows_the_hero_off_the_factory_roof_its_escape_took_it_onto() {
@@ -353,9 +354,9 @@ fn mission_02s_built_warbot_follows_the_hero_off_the_factory_roof_its_escape_too
     }
     let r = play.robots.len() - 1;
 
-    // Out of the front door, the escape turns back for its point inside the hall and is pushed
-    // up over the shut door onto the roof: the factory's faces 15 m and more over the hall
-    // floor's 154.05, with no floor of the factory above them.
+    // Out of the front door, the escape turns back for its point over the hall and climbs over
+    // the roof: the factory's faces 15 m and more over the hall floor's 154.05 under it, with no
+    // floor of the factory above them.
     let on_roof = |play: &Play| {
         play.robots[r]
             .1
@@ -369,7 +370,7 @@ fn mission_02s_built_warbot_follows_the_hero_off_the_factory_roof_its_escape_too
         seconds += 1.0 / 60.0;
     }
     let at = play.robots[r].1.walker.body.position;
-    assert!(on_roof(&play), "the escape takes the bot onto the roof: at {at} after {seconds} s");
+    assert!(on_roof(&play), "the escape takes the bot over the roof: at {at} after {seconds} s");
     assert!(matches!(play.robots[r].1.behaviour.task(), Task::Leave { .. }), "still escaping");
 
     let eye = play.hero.eye();
@@ -725,8 +726,10 @@ fn a_refit_walks_mission_02s_warbot_to_the_outposts_dock_and_one_under_half_its_
     let t = play.spawn(&project, play.player_clan, spot.with_z(165.0), 0.0).expect("the L-2f");
     tick(&mut play, 1.0);
 
-    // Scratched to 0.7 of its life: it needs no service, so it stays where it is and switches
-    // its own repair system on (docs/26, "What the AI does with the switch").
+    // Scratched to 0.7 of its life: it needs no service, so it stays where it is, and 0.7 is
+    // over the 0.5 below which its repair system goes on -- `Decision_RepairOn` as the
+    // difficulty block's compiled default leaves it (docs/26, "What the AI does with the
+    // switch").
     let hurt = |play: &mut parkan_world::play::Play, share: f32| {
         let mut lives: Vec<&mut Life> =
             play.battle.combat.targets[t].parts.iter_mut().filter_map(|p| p.life.as_mut()).collect();
@@ -750,7 +753,7 @@ fn a_refit_walks_mission_02s_warbot_to_the_outposts_dock_and_one_under_half_its_
     tick(&mut play, 1.0);
     let (task, stood, repairing) = bot(&play);
     assert_eq!(task, Task::Stop, "0.7 of its life needs no service");
-    assert!(repairing, "a scratched warbot switches its own repair system on");
+    assert!(!repairing, "a scratched warbot leaves its own repair system off");
 
     // Told to refit, it makes for the Outpost's dock and stands in it until it is full.
     let order = Order { code: parkan_sim::orders::RELOAD, parameter: 0, target: Target::NotDefined };
@@ -851,7 +854,13 @@ fn a_small_warbots_refit_walks_it_into_mission_03s_bunker_to_the_dock_a_large_on
     let mut lives: Vec<&mut Life> =
         play.battle.combat.targets[t].parts.iter_mut().filter_map(|p| p.life.as_mut()).collect();
     let (left, full): (f32, f32) = lives.iter().fold((0.0, 0.0), |(l, f), x| (l + x.total(), f + x.full()));
-    share_loss(&mut lives, left - full * 0.6);
+    // Under half its life, so its own repair system runs on the way in, `Decision_RepairOn`
+    // being 0.5 (docs/26, "What the AI does with the switch"). The walk through the bunker's
+    // door is timed by the stand-in points of docs/31's hall-way walk, and at the pace a unit
+    // scratched to 0.6 keeps with its repair system off -- 4.31 m/s, where a running one mends
+    // it up past 4.7 -- it stops on the ramp 11 m short of the door, waits out its points and
+    // turns back to the exit, again and again.
+    share_loss(&mut lives, left - full * 0.45);
     let life = |play: &parkan_world::play::Play| {
         let (l, f): (f32, f32) = play.battle.combat.targets[t]
             .parts

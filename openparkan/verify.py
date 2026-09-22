@@ -22745,6 +22745,75 @@ def check_walker(check, game: Path) -> None:
           f"{seen}: root chassis, profile, controller mode, top speed x/y/z m/s "
           f"(triple 3) and yaw turn rate (triple 4 z)")
 
+    # docs/26, "The difficulty block every behaviour holds": the block's seven variables
+    # are carried by the five diff_*.var alone, and nothing in the install names one of
+    # them but the archive that holds them -- where the same search finds the names
+    # that are loaded: prof_war in Behavior.dll, chas_fly in objects.rlb.
+    block = {"Speed_MaximumFactor", "Router_RandomError", "Fire_MissAngle", "Fire_FreqFactor",
+             "Decision_RepairOn", "Decision_RepairOff", "Decision_Dormancy"}
+    carriers = sorted(var for var, v in held.items() if block & set(v))
+    naming: dict[bytes, list[str]] = {b"diff_": [], b"prof_war": [], b"chas_fly": []}
+    for path in sorted(p for p in game.rglob("*") if p.is_file()):
+        data = path.read_bytes().lower()
+        for needle, found in naming.items():
+            if needle in data:
+                found.append(path.name.lower())
+    check("behpsp.res: no file names a difficulty profile, so none is ever loaded",
+          carriers == [f"diff_{n}.var" for n in ("normal", "slow", "strong", "stupid", "weak")]
+          and all(set(held[v]) == block for v in carriers)
+          and naming[b"diff_"] == ["behpsp.res"]
+          and "behavior.dll" in naming[b"prof_war"] and "objects.rlb" in naming[b"chas_fly"],
+          f"the seven variables on {carriers} alone; 'diff_' in {naming[b'diff_']}, against "
+          f"'prof_war' in {naming[b'prof_war']} and 'chas_fly' in {naming[b'chas_fly']}")
+
+    # docs/24, "Ground and slope": the landscape's face class carries 2 from its flags
+    # word's 0x8000 (Terrain.dll:0x1002030c), which gates the slope brake off; the control
+    # is the same count of two bits that are there.
+    counts = {0x8000: 0, 0x2000: 0, 0x4: 0}
+    total = 0
+    for d in gamedir.maps(game):
+        mesh_ = landmesh.load(d / "Land.msh")
+        total += len(mesh_.face_flags)
+        for f in mesh_.face_flags:
+            for bit in counts:
+                counts[bit] += bool(f & bit)
+    check("Land.msh: no landscape face is a walk-through floor to the slope brake",
+          counts[0x8000] == 0 and counts[0x2000] == 6102 and counts[0x4] == 32450,
+          f"flags 0x8000 on {counts[0x8000]} of {total} faces, where 0x2000 is on "
+          f"{counts[0x2000]} and 0x4 on {counts[0x4]}")
+
+    # docs/24, "Ground and slope": a building's walk-through floors, triangle flag 2, keep
+    # the slope brake off; its other walkable faces do not.
+    cos80 = 0.173648
+    bite = (1 + math.cos(0.6)) / 2
+    tally = {"walkable": 0, "floor": 0, "steep floor": 0, "steep other": 0}
+    fortif = NResArchive.open(game / "fortif.rlb")
+    for entry in fortif.entries:
+        if not entry.name.lower().endswith(".msh"):
+            continue
+        m = objmesh.parse(fortif.read(entry), entry.name)
+        for n, node in enumerate(m.nodes):
+            if node.is_cockpit:
+                continue
+            turn = m.world_pose(n)[1]
+            for s in node.slots_for_lod(0):
+                if s >= len(m.slots):
+                    continue
+                slot = m.slots[s]
+                for t in range(slot.first_triangle, slot.first_triangle + slot.triangle_count):
+                    z = objmesh.quaternion_rotate(turn, m.face_normal[t])[2]
+                    if z <= cos80:
+                        continue
+                    floor = bool(m.face_flags[t] & 2)
+                    tally["walkable"] += 1
+                    tally["floor"] += floor
+                    if z < bite:
+                        tally["steep floor" if floor else "steep other"] += 1
+    check("fortif.rlb: the level-0 floors a slope brake passes over",
+          tally == {"walkable": 15562, "floor": 4534, "steep floor": 479, "steep other": 8378},
+          f"{tally}: walkable faces (normal z over cos 80 degrees), those flagged 2, and of "
+          f"those tilted past 24.1 degrees, where the brake bites, flagged 2 and not")
+
 
 #: A robot chassis record's slot that names its input table (the library field is blank).
 CHASSIS_TABLE_SLOT = 6

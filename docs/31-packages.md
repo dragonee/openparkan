@@ -446,14 +446,14 @@ readers were not traced, that is marked.
   `MWalker::SetTarget` (`0x1003bad0`) holds the request
   ([How a walk's speed is held](#how-a-walks-speed-is-held--read)):
   - no more than the unit's speed × `Movement_SpeedPercent` (1) ×
-    `Speed_MaximumFactor`, the difficulty profile's;
+    `Speed_MaximumFactor`, the difficulty block's 1;
   - no more than `Movement_MaxSpeed`, 600;
   - no less than the unit's second figure × `Movement_MinSpeedPercent` (1);
   - no less than 2.
 
   The unit's takt copies the same control record into both `+0x5fc` and the
   `+0x614` the cap reads (`0x1001bbe0`). So 80 × the speed is cut to the unit's
-  full speed × `Speed_MaximumFactor`, exactly what a unit guard's 1.0 gets.
+  full speed, exactly what a unit guard's 1.0 gets.
   Whether 80 was meant as 0.8 cannot be told from the code; in play it is full
   speed.
 
@@ -1106,7 +1106,10 @@ the areal map as the clan's *migration areals* (slot 35, `0x100220e0`).
   attack task's timer helper, (fixed, random) in seconds (`0x1004c4c0`).
 - **The point** (`0x1002cba0`): the pasture's centre plus (*u* × inner,
   *v* × inner), where *u* and *v* are each `rand()` over 32767 held to at least
-  0.2 (`0x10059770`, `0x100597e8`), and the centre's own height. **Both
+  0.2 (`0x10059770`, `0x100597e8`), and the centre's own height. The walker does
+  not keep that height: the walk to a point gives each trajectory point the
+  ground under it and 15, and an animal's 30 and up to 50 more, 45 to 95 m over
+  the ground ([24-motion.md](24-motion.md#a-flyers-walk-points--read-and-measured)). **Both
   offsets are positive**, so the point always lies in the square to the +x, +y
   side of the centre, 0.2 to 1 inner radius along each axis. It tries up to 50
   points until the walker takes one (`0x10001960`, `0x1002cc92`), at the unit's
@@ -1261,7 +1264,9 @@ target the guns are pointed at (`0x100240a6`):
 It starts in mode 2. **A task asks for a mode when it starts**, and some again
 in their takt, through `0x10023f30` with {mode, logic id, 0.5}. The request is
 kept unless `+0x5c` or `+0x60` is set. It also refreshes every gun's fire
-frequency with the difficulty profile's `Fire_FreqFactor` (`0x1001b650`).
+frequency with the difficulty block's `Fire_FreqFactor` (`0x1001b650`), the
+default 1 on every unit
+([26-damage.md](26-damage.md#the-difficulty-block-every-behaviour-holds--read-and-measured)).
 
 | mode | asked by |
 |---:|---|
@@ -1786,9 +1791,11 @@ record (IControl query `0x12`) into both `+0x5fc`..`+0x610` and
 `+0x614`..`+0x628` (`0x1001bbe0`), so `top` is the same speed the task
 multiplied: record `+0x1c`, and `low` is its `+0x10`. `Movement_SpeedPercent`
 and `Movement_MinSpeedPercent` are 1. `Speed_MaximumFactor` is the difficulty
-profile's: 0.7 in `diff_slow`, 1 in the other four
-([24-motion.md](24-motion.md)). **A figure above 1 is therefore the same as 1**, and
-every task's walk is capped at the unit's speed × `Speed_MaximumFactor`.
+block's, and every behaviour holds the block's default, 1: `diff_slow.var`'s 0.7
+is never loaded
+([26-damage.md](26-damage.md#the-difficulty-block-every-behaviour-holds--read-and-measured)).
+**A figure above 1 is therefore the same as 1**, and every task's walk is capped
+at the unit's own speed.
 
 ## How the missions use them — *measured*
 
@@ -1874,8 +1881,11 @@ captures by logic id 34 times.
   ~~who writes the clan attitude's increase field~~ — **nobody**, in any of the
   sixteen modules, with the decrease field's own writer as the control
   ([25-sensors.md](25-sensors.md#what-moves-an-attitude-being-shot-and-nothing-else--read));
-  what `IGameObject` slot 21, the test that the firer still exists, answers; how
-  high a flying medusa holds against its attack's three-dimensional circle.
+  what `IGameObject` slot 21, the test that the firer still exists, answers; ~~how
+  high a flying medusa holds against its attack's three-dimensional circle~~ —
+  **read** for its walk points: 45 to 95 m over the ground, each drawn afresh
+  ([24-motion.md](24-motion.md#a-flyers-walk-points--read-and-measured)); how
+  near it comes to them is the motion's, and a grazing medusa's is its hover.
 - ~~What a unit record's `+0x30` is. The wingman menu lets only 1 or 2 capture, the
   same records speak `_S` voices, 4 and 5 speak `_B`, and boarding wants 4~~ —
   **read**: the size class. One bind, `iron3d.dll:0x1007e3c0`, writes it for a

@@ -244,6 +244,11 @@ pub struct Walker {
     pub base: f32,
     /// The face the ground search last found under the body's centre.
     pub ground: Option<Hit>,
+    /// Whether the slope brake may act (body `+0x1aa`): the body starts with it set
+    /// (`Control.dll:0x100143c6`), and the ground contact sets it from each face it holds, clear
+    /// on a face whose class carries 2 (`0x1001a9b4`-`0x1001a9be`) -- a building's walk-through
+    /// floor, triangle flag 2 -- and set on any other.
+    pub slope_brakes: bool,
     /// The contact points' model, where the controller has contacts and the object
     /// control points.
     pub feet: Option<Feet>,
@@ -348,6 +353,7 @@ impl Walker {
             node_radius: radius,
             base,
             ground: None,
+            slope_brakes: true,
             feet: None,
             planting: Vec::new(),
             planted: Vec::new(),
@@ -493,16 +499,11 @@ impl Walker {
                 motion::integrate_velocity(&mut self.body.velocity, self.body.command, &self.limits, step)
             }
         }
-        // STAND-IN: docs/24-motion.md#the-ground-inside-a-building--read-in-part-and-measured
-        // -- the brake reads the ground normal the lift last averaged whoever's faces the
-        // contacts stood on (`0x100156c6`, body `+0x194`, written only by the lift at
-        // `0x10015e47`), so a building's stairs brake a climber as a hillside does. The
-        // recordings show the hero climbing out of the Large Factory up its 30-degree stairs and
-        // up Mission 04's teleport chamber at a walk, and with the brake on building faces the
-        // engine's hero never reaches that chamber's field; what reconciles the two is not read.
-        // On a building's faces the brake is left out.
-        let on_building = self.ground.is_some_and(|h| h.solid.is_some());
-        if self.controller.mode == SLOPE_MODE && !on_building {
+        // The brake reads the ground normal the lift last averaged, whoever's faces the contacts
+        // stood on (`0x100156c6`, body `+0x194`), and acts only while the body's gate is set
+        // (`0x10015690`): not on a building's walk-through floors, its stairs and ramps among
+        // them, which carry triangle flag 2 (docs/24, "Ground and slope").
+        if self.controller.mode == SLOPE_MODE && self.slope_brakes {
             let along = self.body.to_world(Vec3::from_array(self.body.velocity));
             let normal = self.body.ground_normal;
             // `0x10015738`-`0x10015799`: the brake acts while (velocity x up) . (up x normal)
@@ -511,13 +512,15 @@ impl Walker {
             // (docs/24, "Ground and slope").
             if along.x * normal.x + along.y * normal.y <= 0.0 {
                 let factor = motion::slope_factor(normal.z, self.controller.cone);
-                // STAND-IN: docs/24-motion.md#not-established -- how a velocity the Wizard
-                // writes combines with the integrator is not read, and a written one replaces
-                // the machine's own at the top of every step, so the brake's pull, which
-                // needs several steps to build up, would never hold on a driven machine: the
-                // ground's fraction is taken off the written velocity whole. Without it an
-                // AI unit walks up a 40 degree slope at 8 m/s where the same chassis under
-                // the player is stopped dead.
+                // STAND-IN: docs/24-motion.md#ground-and-slope--read -- the brake is read to be
+                // passed over while a velocity has been written since the command last was
+                // (`0x1001566b`, body `+0x1a8`: `SetTangSpeed` sets it at `0x100044f1`, the
+                // command's setter clears it at `0x1000442b`), so a machine the Wizard drives is
+                // never braked. Here a driven machine still is, the ground's fraction taken off
+                // the written velocity whole: without it an AI unit walks up a 40 degree slope
+                // at 8 m/s, and a small warbot sent into Mission 03's Small Bunker never reaches
+                // its dock, since the local path that would keep it off such faces is a stand-in
+                // of its own (docs/24, "Not established").
                 if self.drive.is_some() {
                     self.body.velocity = self.body.velocity.map(|v| v * factor);
                 } else {
@@ -582,6 +585,9 @@ impl Walker {
         // own radius, not r -- above the centre (`0x1001a70a`).
         let hit = ground.search(centre, self.node_radius);
         self.ground = hit;
+        if let Some(h) = &hit {
+            self.slope_brakes = !ground.class_carries_2(h);
+        }
         let last = Frames { a: state.pair_a[1], b: state.pair_b[1], weight: self.machine.q };
         let searched: Vec<(u32, i32, Vec3, Option<Hit>)> = match &self.feet {
             Some(feet) if state.mode & STATE_GROUND_CONTACTS != 0 => state
@@ -897,6 +903,70 @@ mod tests {
             let r = w.random();
             assert!((0.0..1.0).contains(&r) && (JITTER * (r - 0.5)).abs() <= 0.125);
         }
+    }
+
+    /// A 30° ramp rising along +y, 200 long, as a building's face with the given triangle
+    /// flags standing over a field.
+    fn ramp(triangle_flags: u16) -> Ground {
+        let mut g = field();
+        let rise = 30f32.to_radians().tan();
+        let (a, b, c, d) = (
+            Vec3::new(400.0, 400.0, 0.0),
+            Vec3::new(600.0, 400.0, 0.0),
+            Vec3::new(600.0, 600.0, 200.0 * rise),
+            Vec3::new(400.0, 600.0, 200.0 * rise),
+        );
+        let normal = (b - a).cross(c - a).normalize();
+        let face = |a, b, c| crate::solid::SolidFace {
+            a,
+            b,
+            c,
+            normal,
+            triangle_flags,
+            batch_flags: 0,
+            surface: None,
+            damage_rate: 0.0,
+        };
+        g.solids.push(crate::solid::Solid {
+            centre: Vec3::new(500.0, 500.0, 100.0 * rise),
+            radius: 160.0,
+            ground: true,
+            present: true,
+            mass: 0.0,
+            faces: vec![face(a, b, c), face(a, c, d)],
+            nodes: vec![crate::solid::SolidNode {
+                centre: Vec3::new(500.0, 500.0, 100.0 * rise),
+                radius: 160.0,
+                faces: 0..2,
+                part: 0,
+                node: 0,
+                open: false,
+            }],
+        });
+        g
+    }
+
+    #[test]
+    fn the_slope_brake_holds_a_climber_on_a_buildings_face_unless_it_is_a_walk_through_floor() {
+        // `Control.dll:0x10015690`: the brake acts only while the body's `+0x1aa` is set, and
+        // the ground contact sets it from the class of the face it holds, clear on class 2
+        // (`0x1001a9b4`-`0x1001a9be`) -- a building's floor, triangle flag 2. A 30° climb is
+        // past the hero's 0.6 rad cone's full speed (2 (cos 30° − cos 0.6) ÷ (1 − cos 0.6),
+        // 0.47), so a face without the flag slows it and a floor does not.
+        let climbed = |flags: u16| {
+            let g = ramp(flags);
+            let mut w = walker(Vec3::new(500.0, 420.0, 20.0), 0.0);
+            w.follow_ground(&g);
+            let start = w.body.position.y;
+            w.body.command = [0.0, 1.0, 0.0];
+            w.advance(3000.0, &g);
+            (w.body.position.y - start, w.slope_brakes)
+        };
+        let (floor, floor_brakes) = climbed(2);
+        let (face, face_brakes) = climbed(0);
+        assert!(!floor_brakes && face_brakes);
+        assert!(floor > 35.0, "a walk-through floor lets it climb at speed: {floor} m in 3 s");
+        assert!(face < 0.6 * floor, "any other face brakes it: {face} m against {floor}");
     }
 
     #[test]

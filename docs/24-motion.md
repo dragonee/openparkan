@@ -840,6 +840,39 @@ hero.
   where the dot is 0 and the test passes. The sign does not depend on which way
   the global up points: flipping it flips both cross products and leaves their
   dot alone.
+- **Two bytes of the body gate it** (*read*, `0x1001566b`–`0x10015698`). The
+  brake is passed over while body `+0x1a8` is set, and acts only while body
+  `+0x1aa` is. The body sits at control `+0x1b4`, so these are control `+0x35c`
+  and `+0x35e`, and a scan of `Control.dll` for either displacement finds every
+  writer:
+  - **`+0x1a8`: a written velocity stands.** `SetTangSpeed` (`IControl` slot 5)
+    sets it whenever it changes the velocity (`0x100044f1`); the command's setter,
+    called with a new command or with any while the byte is set, writes the
+    command and clears it (`0x10004407`–`0x1000442b`).
+    The Wizard writes the velocity and never the command
+    ([How the AI drives a machine](#how-the-ai-drives-a-machine--read-and-measured)),
+    so **a machine the AI drives is never braked**; a player's, whose keys write
+    the command, is. The same byte, with the machine's `+0x618`, lets the step
+    pass over the clamp to the live top speed (`0x10014624`).
+  - **`+0x1aa`: the face held is not a walk-through floor.** The body's
+    constructor sets it (`0x100143c6`), and the ground contact sets it from each
+    world face it holds (`0x1001a9b4`–`0x1001a9be`): clear when bit 2 of the
+    face's class is set, set otherwise. The class is what `CWorld::GetWorldFace`
+    (`IWorld` slot 6, `Terrain.dll:0x10024d70`) hands back at the face's `+0x14`,
+    the first word of its owner's face record (`0x10024fb5`). A building's is its
+    triangle word, the stream-7 flags, whose 2 marks a walk-through floor
+    ([The ground inside a building](#the-ground-inside-a-building--read-in-part-and-measured)).
+    The landscape's is a class its face source builds from the face's mask
+    (`Terrain.dll:0x100202a0`): 1 from `0x100`, **2 from `0x8000`**, 4 from
+    `0x10000`, 8 from `0x40000`, `0x10` from `0x80000`, `0x20` from `0x80`.
+- **So the brake acts on the landscape and on a building's other faces, and
+  never on its floors** (*measured*). No `Land.msh` face carries the flags word's
+  `0x8000` — 0 of 275882 across the 33 maps, where the same scan finds `0x2000`
+  on the 6102 liquid beds and `0x4` on 32450. Across `fortif.rlb`'s 30 meshes at
+  level 0, 15562 faces are walkable (normal z above cos 80°) and 4534 of them
+  carry triangle flag 2. Of those steep enough for the brake to bite, tilted past
+  24.1° where (1 + cos 0.6) ÷ 2 takes its factor under 1, 479 carry the flag and
+  8378 do not.
 
 *Measured:* all 509 mode-0 controllers keep the default cone of 1.57079; all
 16 mode-2 controllers carry 0.6 rad (34°); the six mode-3 controllers carry
@@ -1512,7 +1545,10 @@ never pulls it down
 ([above](#holding-the-body-on-the-ground--read-and-measured)). Flying into
 rising ground raises it, and it stays up when the ground falls away again
 (*derived*). **The ceiling** is the world's box: a flyer more than 20 above its
-top is pushed back ([The map edge](#the-map-edge--read)).
+top is pushed back ([The map edge](#the-map-edge--read)). A flyer the AI drives
+holds the heights its walk points are given, 15 m over the ground and 115 over a
+building, a tree or a stone
+([A flyer's walk points](#a-flyers-walk-points--read-and-measured)).
 
 **What a player sees, then** (*measured* on openparkan's engine, which follows
 these reads). Turret pitch reaches nothing that moves the body, and the eye
@@ -2559,19 +2595,29 @@ states all lack it, so a building's floors push a flyer. Triangle flag 2 marks
 exactly the walk-through floors
 ([07-objects.md](07-objects.md#stream-7-is-the-per-face-record)).
 
-**The slope brake reads a building's floors too** (*read*). The mode-2 brake
-tests the body's ground normal `+0x194` (`0x100156c6`), whose only writers are
-the body's constructor and the lift (`0x10015e47`), which averages the normals
-of whatever faces the sphere and the flag-1 contacts stood on, a building's or
-the landscape's; nothing in between asks whose they are
-([Holding the body](#holding-the-body-on-the-ground--read-and-measured)). So
-the 30° stairs brake a hero climbing out, to 2 (cos 30° − cos 0.6) ÷
-(1 − cos 0.6) = 0.47 of its speed (*derived*). The recording's hero walks out
-from 158 to 166.5 s, a second slower than in, which a braked climb up 12.5 m of
-stairs would account for. But openparkan's engine, with the brake on a
-building's faces, never gets its hero up Mission 04's teleport chamber to the
-field, which the recording's hero reaches in 4.6 s. What reconciles those is
-not read, and the engine leaves the brake out on a building's faces.
+**The slope brake reads a building's normals, and not its floors** (*read*).
+The mode-2 brake tests the body's ground normal `+0x194` (`0x100156c6`), whose
+only writers are the body's constructor and the lift (`0x10015e47`), which
+averages the normals of whatever faces the sphere and the flag-1 contacts stood
+on, a building's or the landscape's
+([Holding the body](#holding-the-body-on-the-ground--read-and-measured)). But
+it acts only while the body's `+0x1aa` is set, and the ground contact clears
+that on a face whose class carries 2: on a building, a triangle flagged 2
+([Ground and slope](#ground-and-slope--read)). Every floor on the way to the
+pod carries 2, the 30° stairs among them (all 191 samples,
+[below](#the-way-to-the-pod--measured-and-seen)), so **a hero climbing out is
+not braked**, where a hillside as steep would hold it to 2 (cos 30° − cos 0.6)
+÷ (1 − cos 0.6) = 0.47 of its speed (*derived*). Mission 04's teleport chamber
+is the same: every face the hero stands on from the landing to the field carries
+triangle flag 2, up faces tilted as much as 33° (*measured* on openparkan's
+engine, which walks it on the read rule), and the hero is on the field and the
+mission won 6.0 s after the landing, where the recording's takes 4.6 s
+([27-ownership.md](27-ownership.md#the-main-teleport--read-measured-and-seen)).
+The two reads that seemed at odds — the brake on a building's normals, and the
+recordings' heroes climbing a building's stairs and ramps at a walk — are one:
+the stairs and ramps are floors. The recording's hero walks out of the Large
+Factory from 158 to 166.5 s, a second slower than in; what that second is, is
+not read.
 
 **Steps and lift** (*read*,
 [Finding the ground](#finding-the-ground--read) and
@@ -2602,24 +2648,30 @@ neither limit comes into play.
    a flyer's do. The floors and ramps are then climbed by the lift alone. The
    stairs' 64° side pieces carry no 2 and still push, and the hero still walks
    the stairs (*measured* on openparkan's engine). STAND-IN in openparkan: no
-   robot keeps the floors; with them, Mission 02's flyer made at the Large
-   Factory's creation vertex is pushed 31 m up off its floor and over the shut
-   front door, and how a flyer's height meets this push is not read.
+   robot keeps the floors; with them, Mission 02's flyer, made at the Large
+   Factory's creation vertex 5 m over the hall floor, is pushed 33 m up in its
+   first frame, through the hall's roof. What keeps a flyer's sphere off a
+   floor it is made on is not read; its walk points' heights
+   ([A flyer's walk points](#a-flyers-walk-points--read-and-measured)) are, and
+   they do not.
 5. Take the push as the machine does: with state bit 4, whole when the parent
    is a building and z ≤ 0; otherwise flattened, lengthened to |P| and at
    most ×4.
-6. The way to the Large Factory's pod is the hall way's, over the links the
+6. Brake a mode-2 climber by the averaged normal only while the face its
+   sphere holds is not flagged 2 ([Ground and slope](#ground-and-slope--read)):
+   the floors, stairs and ramps never brake it.
+7. The way to the Large Factory's pod is the hall way's, over the links the
    unit may cross: for a walker, from the west exit alone, vertices 67, 66, 65,
    58, 59, 37, 36, 6, 7, 25, 35, 28 and 31, in the world as the table gives
    them; a flyer may come in at 68 or 69 as well. The side door opens as the
    walker nears it (step 2 of
    [Walking into a building](#walking-into-a-building--read-and-measured)),
    and takes 2.5 s to open at rate 0.4.
-7. Draw no portal quad: the `DEFAULT`, `PORTAL_001` and `PORTAL_004` faces are
+8. Draw no portal quad: the `DEFAULT`, `PORTAL_001` and `PORTAL_004` faces are
    the openings between the building's cells, and a drawn one hides the door a
    step behind it and the next room beyond it
    ([above](#a-building-is-drawn-cell-by-cell-through-its-portals--read)).
-8. Pass them with a round as well as with a mover, by the same batch word, so
+9. Pass them with a round as well as with a mover, by the same batch word, so
    a shot reaches the door behind the doorway
    ([A shot opens a door](#a-shot-opens-a-door--read-and-seen)).
 
@@ -2758,7 +2810,7 @@ and 8.2 on the engine; the bunker's ramp top to command mode 14.2 s and 14.6.
 Both of the recording's heroes shoot the door on the way, and the engine's
 doors open as the hero comes, so the shots change nothing here.
 
-**For an engine**: walk Mission 03's buildings by their hall ways, as step 6
+**For an engine**: walk Mission 03's buildings by their hall ways, as step 7
 above does the Large Factory's: the Small Generator's from 51 (or 46, 49, 53,
 54), the Small Bunker's from 43, in the world as the tables give them. The rules
 above let a walker through; a walker off the bunker's way meets the ramp's
@@ -2968,11 +3020,13 @@ asks for the live top speed (IControl 145) and compares it with 1
   3. to at least triple 2's forward component × `Movement_MinSpeedPercent`
      (`0x1003bed0`);
   4. to at least 2 m/s (`0x1003bf05`).
-- **Where the factor lives.** It is the first float of the difficulty profile
-  at the behaviour's `+0x8d4` ([26-damage.md](26-damage.md)).
-- **What it does.** `diff_slow.var` sets it to 0.7 where the other four
-  difficulties set 1 (*measured*), so on that difficulty an AI unit is driven
-  at no more than 70% of what its engines and load allow — *derived*.
+- **Where the factor lives.** It is the first float of the difficulty block
+  at the behaviour's `+0x8d4` ([26-damage.md](26-damage.md#the-difficulty-block-every-behaviour-holds--read-and-measured)).
+- **What it is: 1, for every unit** (*read*, as a search with a control). The
+  block's constructor sets it to 1 (`Behavior.dll:0x10019b90`), and the one
+  thing that would replace it, the profile loader's kind 5, is handed a
+  `diff_*` name by nothing in the install. `diff_slow.var`'s 0.7 is never
+  loaded, so no AI unit is driven at less than what its engines and load allow.
 - **Triple 2's forward component is the walker's floor.** It is 0.6 on the
   walkers, the Transformer and the hero, 0.49 on the Tiny Spider, 0.1 on the
   Small Tower and the two targets, and 0 on every wheeled, tracked and flying
@@ -3004,9 +3058,12 @@ the points and writes the machine's velocity and spin.
   `PathFind_MinPointInTrajectory`, 3 points, in at most six tries.
 - **The hand-over** (`0x1003d960`) sends the Wizard every record past the
   Wizard's own count, through slot 17. It panics past 300. A point holds a
-  position, a velocity, a heading, a time in ms and flags. Bit 0 comes from
-  the record's byte `+0x44`. **`0x3030` is added unless the chassis profile
-  has `CanFly` and not `WalkChassis`** (`0x1003daab`).
+  position, a velocity, a heading, a time in ms and flags, the record's `+0`,
+  `+0xc`, `+0x18`, `+0x24` and byte `+0x44`, which gives flag bit 0. **`0x3030`
+  is added unless the chassis profile has `CanFly` and not `WalkChassis`**
+  (`0x1003daab`). The heading is not a unit vector: the trajectory writes the
+  point's velocity there, the leg's direction × the walk's speed, or the
+  direction alone for a walk of no speed (`0x1003a7f9`–`0x1003a848`).
 - **A stop** (`0x1003d7f0`) goes through slot 19. It is the last point's
   position plus 0.5 × its velocity, at velocity 0, 1000 ms later, with flags
   `0x3031` or 1. From v to 0 over a second covering 0.5 v is an even
@@ -3040,8 +3097,8 @@ side-slips nor climbs by its points. `0x3331` zeroes all three axes.
    over the time between (the 3 and 2 at `0x100030cc`, `0x1000310d`). With no
    point left it heads for the stop point if there is one. Otherwise it holds:
    velocity 0 and flags `0x3331`, 1000 ms at a time (`0x10002f2d`).
-4. **Sampling** (`0x100031a0`) takes the curve's velocity at t + dt/2 and its
-   heading at t + dt. With flag bit 0 the heading is a straight blend.
+4. **Sampling** (`0x100031a0`) takes the curve's velocity at t + dt/2 and a
+   heading at t + dt ([The heading curve](#the-heading-curve--read)).
 5. **The writes** (`0x10003750`), only while `+0x1f8` is set (1 from the
    constructor; `0x10002b00` sets it):
    - **velocity**: the sampled velocity in the machine's frame, through the
@@ -3069,13 +3126,116 @@ All three controllers are mode 0, with no gravity term
 ([Gravity](#gravity--read-and-measured)). Moving a flyer to a point needs
 nothing more than a walker does: timed points with flags 0 or 1, the cubic's
 velocity in the machine's frame each tick, and the yaw spin. The height its
-points are given is not traced. `Movement_FlyHeight` is 40 and
-`FlyNearLandHeight` 15, and they reach no point: the profile binds them at
-`+0xa8` and `+0xac`, and their one reader, `Behavior.dll:0x100153a0`, which sets a
-point's z to the ground under it plus one of the two, is never called — no call or
-jump reaches it, its address stands in no shipped DLL as a pointer, and it is not
-exported, where the same scan finds all 7 calls of the ground routine
-`0x100146b0` it calls ([36-factory.md](36-factory.md#not-established)).
+points are given is the walker's own
+([A flyer's walk points](#a-flyers-walk-points--read-and-measured)).
+`Movement_FlyHeight` is 40 and `FlyNearLandHeight` 15, and they reach no point:
+the profile binds them at `+0xa8` and `+0xac`, and their one reader,
+`Behavior.dll:0x100153a0`, which sets a point's z to the ground under it plus one
+of the two, is never called — no call or jump reaches it, its address stands in
+no shipped DLL as a pointer, and it is not exported, where the same scan finds
+all 7 calls of the ground routine `0x100146b0` it calls
+([36-factory.md](36-factory.md#not-established)).
+
+### The heading curve — *read*
+
+The Wizard turns the machine toward a heading it samples from a second cubic,
+built beside the position's for each segment (`Wizard.dll:0x10003d80`, called
+at `0x10003171`, the segment's last act before it samples).
+
+- **Its ends.** It runs from the machine's position to the point's, over the
+  segment's time, the same Hermite fit as the position's (`0x10003d80` builds
+  c₂ = (3 (p₁ − p₀ − h₀ T) − (h₁ − h₀) T) ÷ T² and c₃ = ((h₁ − h₀) T − 2 (p₁ −
+  p₀ − h₀ T)) ÷ T³). Its end tangents are not velocities: h₀ is the hull's
+  forward axis as the segment starts, the second column of the machine's matrix
+  (`0x10002cd6`–`0x10002d15`, a unit vector), and h₁ the point's heading (the
+  record's `+0x18`,
+  [above](#how-the-ai-drives-a-machine--read-and-measured)). A segment of 0.1 ms
+  or less keeps h₀ (`0x10003de4`).
+- **Its sample.** Each takt the heading is its tangent, h₀ + 2 c₂ t + 3 c₃ t², at
+  t + dt from the segment's start (`0x100033dc`–`0x100034a2`, into `+0x18c`).
+  With the point's flag bit 0 — a stop's, and a record whose byte `+0x44` is
+  set — it is instead the straight blend (1 − u) h₀ + u h₁, u = (t + dt) ÷ T
+  (`0x1000335d`–`0x100033d7`).
+- **So** (*derived*) a segment starts turning from the way the hull already
+  faces, not from the chord, swings onto the chord as fast as the chord's pull
+  of about 6 |p₁ − p₀| ÷ T outgrows the unit h₀, and arrives facing along the
+  point's velocity. A point 20 m ahead reached in 2 s from a hull at right angles
+  to it faces 0.4 rad off the chord 0.1 s in and within 0.1 of it half-way
+  (*measured* on openparkan's engine, which samples it as read).
+- **The spin** is then as before: the yaw angle from the forward axis to the
+  heading, over dt × the live yaw rate, held to ±1 (`0x100034c0`).
+
+### A flyer's walk points — *read*, and *measured*
+
+**The walker gives a flyer's points their heights, not the task.** The
+trajectory builder (`Behavior.dll:0x1003a480`) takes each place of the local
+queue in turn and cuts the leg to it:
+
+- **Every 20 m across the ground, for a flyer** (`0x1003a5e5`–`0x1003a627`). The
+  leg's length d across the ground (`0x10020f70`) is cut into ⌊d⌋ ÷ 20 points, the
+  last on the place, when that is more than one (`0x1003a6ab`); the division is a
+  multiply by `0x66666667` and a shift by 3. The chassis profile's `CanFly`
+  (`+0xc`) picks it; without it the divisor is 7777 (`0x21b5253b`, shift 10), so a
+  walker's leg is never cut.
+- **Each point is given its height** by `0x10040f20` whenever the place's word
+  `+0x14` is 0 (`0x1003a726`, and the loop's own `0x1003ac3f`, `0x1003aefe`). The
+  point's z becomes the ground under its x and y (`0x100146b0`) **plus 15**, a
+  compiled constant (the float at `0x10059974`), not the profile's
+  `FlyNearLandHeight`. For an **animal**, a unit whose Type (`MBehaviour`
+  `+0xafc`, the behaviour's slot 14) is `0x20000000`, it is that plus 30 plus
+  `rand()` ÷ 32767 × 50 (`0x10040f52`–`0x10040f7c`): **45 to 95 m over the
+  ground**, drawn afresh for each point.
+- **Whose places get it.** The tasks' walk to a point (`0x10001960`), called
+  from 28 sites, migrate's (`0x1002cc84`) and the escape's five among them,
+  builds its place with `+0x14` 0 (`0x10001981`); the walk to a place taken from
+  an object and an offset (`0x100019e0`) sets it to 1 (`0x10001a34`), and keeps
+  its own height. Tasks that call `SetTarget` with a place of their own —
+  seven sites, the patrol's loop (`0x1002dd74`) among them — are not read here.
+  The global path's waypoints carry 0 (`0x10036f9e`, `0x1003711d`,
+  `0x100372e9`, `0x10037775`). A walker's points are given the height too, and
+  zero their z axis with `0x3030`, so only a flyer's is ever flown.
+
+**The ground routine** (`Behavior.dll:0x100146b0`) looks straight down at x and
+y from 1000 over the top of the map's box (`0x100146d5`), through slot 8 of the
+object at the behaviour's `+0x3c`, with query records of the round's form
+([26-damage.md](26-damage.md#the-query-record-and-what-a-round-excludes--read-and-measured)):
+
+1. **Buildings, trees and stones first**: classes 3 and 10 (query word
+   `0x408`), excluding batches flagged `0x400` (`0x10014703`–`0x1001476b`). A face
+   struck there answers **its height plus 100** (`0x100148a5`).
+2. **Then the landscape**, class 1 (`0x10014779`), at the point, 0.1 off in x,
+   and 0.1 off in x and y (`0x10014788`–`0x100147f6`). Its answer is the face's
+   height as it stands; the query excludes the liquid bed's world flag `0x400`
+   ([Finding the ground](#finding-the-ground--read)), so over water it is the
+   water's sheet.
+3. With nothing struck it reports *"Error: hole at landscape or water"*
+   (`0x1001483e`) and answers 0.
+
+So a flyer's point over open ground stands 15 m over it, and one over a building,
+a tree or a stone **115 m over its top** (*read*). *Measured* on openparkan's
+engine, on Mission 02: over the forecourt at (395.8, 940) a flyer's point stands
+at the landscape and 15; over the Large Factory's hall at (408.7, 868.5), the
+point Mission 02's escape once picked, at the factory's top face there and 115;
+and 200 of an animal's points, drawn at the forecourt, fall between 45 and 95 over
+it, spread across the 50.
+
+*Measured on openparkan's engine*, which gives the points their heights as read:
+- **Mission 02's built warbot.** The escape's first point, inside the Large
+  Factory's footprint, is raised over the roof, so the L-2f leaves by the front
+  door, turns back and climbs clear of the factory to hang more than 100 m over
+  its roof, where the stand-in's 15 over the hall floor had it pushed up over the
+  shut door onto the roof. Its escape ends there; hanging over the factory, it is
+  given the escape again, and it ends that one 15 m over open ground to the
+  east. The recording's bot, whose escape point is a random pick, hangs off the
+  factory's end by 234.5 s, low over the ground
+  ([39-boarding.md](39-boarding.md#against-the-recording--seen)).
+- **Mission 02's medusas** are asked for a climb they cannot make
+  ([34-progression.md](34-progression.md#the-medusas--read-and-measured)): grazing
+  11 m over the ground, each is sent to a point 45 to 95 m up at its full
+  13 m/s. The Wizard writes a climb of more than 5.5 m/s, past every moving
+  anchor's box, and the planner keeps the hover it is in
+  (`Control.dll:0x1000531a`). Over 40 s one moves 1.8 m across the ground and
+  1.7 m up.
 
 ### The global path — *read*, and *measured*
 
@@ -3331,7 +3491,11 @@ patrol runs past it.
   **read** for the spin integrator: the spin triple is a fraction, and a step
   turns the hull by spin × the live turn rate × dt (`0x10014b56`,
   [30-turrets.md](30-turrets.md#the-hull-follows-the-turret--read-and-measured)).
-  That the Wizard writes the same triple is not traced.
+  That the Wizard writes the same triple is not traced. The slope brake, at
+  least, is read to pass a written velocity over, body `+0x1a8`
+  ([Ground and slope](#ground-and-slope--read)); the engine still brakes a
+  driven machine, a stand-in, its local path not keeping an AI unit off such
+  faces.
 - ~~The areal search (`MGraph`: algorithm, costs, and what the land answers for
   `0x303`)~~ — **read**
   ([The global path](#the-global-path--read-and-measured)), and how a tree or a
@@ -3355,10 +3519,30 @@ patrol runs past it.
   **measured**: the unit's size class against the vertex's own flag word, and
   the link's tail words 1 and 5
   ([The hall-way gates](#the-hall-way-gates-in-the-shipped-buildings--read-and-measured));
-  the Wizard's heading curve
-  (`0x10003d80`); ~~who reads `Movement_FlyHeight`~~ — **read**: only
-  `Behavior.dll:0x100153a0`, which nothing calls
-  ([How the AI drives a machine](#how-the-ai-drives-a-machine--read-and-measured)).
+  ~~the Wizard's heading curve (`0x10003d80`)~~ — **read**: the tangent at
+  t + dt of a second cubic from the machine to the point, leaving along the
+  hull's forward axis and arriving along the point's heading, its velocity; with
+  flag bit 0 a straight blend of the two
+  ([The heading curve](#the-heading-curve--read)); the engine holds the sample
+  at a segment's end where the game's t + dt runs past it, a stand-in. ~~who
+  reads `Movement_FlyHeight`~~ — **read**: only `Behavior.dll:0x100153a0`,
+  which nothing calls
+  ([How the AI drives a machine](#how-the-ai-drives-a-machine--read-and-measured));
+  ~~and what height a flyer's walk points are given~~ — **read**: the walker's,
+  the ground under each point, as the behaviour's ground routine answers it, and
+  15 — 115 over a building, a tree or a stone — and for an animal 45 to 95
+  ([A flyer's walk points](#a-flyers-walk-points--read-and-measured)).
+- **What keeps a flyer's sphere off a building's floor it is made on.** Its
+  collision flags carry 8, so the floors push it, whole; Mission 02's L-2f, made
+  5 m over the Large Factory's hall floor, would be pushed 33 m up in its first
+  frame (*measured* on openparkan's engine), and the engine lets no robot keep
+  the floors ([The ground inside a building](#the-ground-inside-a-building--read-in-part-and-measured)).
+- **What brings a medusa's written velocity inside its moving states' boxes.**
+  As read, a grazing medusa is asked for 13 m/s and a climb of tens of metres,
+  and holds its hover
+  ([A flyer's walk points](#a-flyers-walk-points--read-and-measured)); the
+  recording's medusas fly in their fight
+  ([34-progression.md](34-progression.md#the-medusas--read-and-measured)).
 - Whether the walker's clear (`0x1003c540`) also empties the points the Wizard
   already holds. `ClearWizardPath` is logged at `0x10040e3b`.
 - **What lets a mover past a face flagged `0x20`.** The collision's own two
@@ -3455,8 +3639,12 @@ patrol runs past it.
   walker lacks 8 and every flyer carries it, and 4 is on 31 rounds alone
   ([The ground inside a building](#the-ground-inside-a-building--read-in-part-and-measured)).
   ~~Whether the slope brake reads a building's stair faces~~ — **read**: it
-  does, since its normal is whatever faces the lift stood on; how the
-  recordings' heroes climb at a walk anyway is not read (same section).
+  does, since its normal is whatever faces the lift stood on; ~~how the
+  recordings' heroes climb at a walk anyway is not read~~ — **read**: the brake
+  is gated off on a face whose class carries 2, and the stairs and ramps are
+  floors, flag 2, so they never brake
+  ([Ground and slope](#ground-and-slope--read),
+  [The ground inside a building](#the-ground-inside-a-building--read-in-part-and-measured)).
 - ~~Where a gathered face's batch word comes from. It is the first word of what
   the face source's slot 3 returns (`AniMesh.dll:0x1000d71f`), and the 8 and
   `0x200` the collision query excludes are not written by `AniMesh.dll`. Also

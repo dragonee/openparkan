@@ -154,14 +154,14 @@ pub const CAPTURE_REFIT_LIFE: f32 = 0.2;
 pub const CAPTURE_REFIT_CHARGE: f32 = 0.3;
 /// The AI's repair decision (`0x10017c70`, docs/26, "What the AI does with the switch"): the
 /// life it switches the repair system on below and off above, and the charge it needs to
-/// switch on and falls back off at.
-///
-/// STAND-IN: docs/26-damage.md#repair-a-units-own-repair-unit-switched-on-and-off--read-and-measured
-/// -- which difficulty profile a unit's behaviour holds (`+0x8d4`) is not read:
-/// `diff_strong.var`'s `Decision_RepairOn` and `Decision_RepairOff` (*measured*), so a unit
-/// looks after itself while it is only lightly damaged.
-pub const REPAIR_ON: f32 = 0.8;
-pub const REPAIR_OFF: f32 = 0.9;
+/// switch on and falls back off at. The two lives are `Decision_RepairOn` and
+/// `Decision_RepairOff` as every behaviour holds them: the difficulty block's compiled
+/// defaults (`Behavior.dll:0x10019b90`), since nothing in the install names a `diff_*` profile
+/// for the loader to replace them with (docs/26, "The difficulty ratio"). Nothing is over a
+/// whole life, so the second never lets go: a unit's repair system stays on until its charge
+/// falls away or a task starts.
+pub const REPAIR_ON: f32 = 0.5;
+pub const REPAIR_OFF: f32 = 1.0;
 pub const REPAIR_CHARGE_ON: f32 = 0.3;
 pub const REPAIR_CHARGE_OFF: f32 = 0.1;
 
@@ -2394,15 +2394,19 @@ mod tests {
         };
         let scratched = Condition { life: 0.7, ..Condition::default() };
 
-        // Only scratched: it switches its own repair system on and stays on its order.
+        // Only scratched: it needs no service and is over `Decision_RepairOn`'s 0.5, so its
+        // repair system stays off, and it stays on its order.
         let mut b = Behaviour::new(3);
         b.order(&Order { code: orders::STAYGROUND, parameter: 0, target: Target::NotDefined });
         b.takt(&of(scratched));
         assert_eq!(b.task(), Task::StayGround);
-        assert!(b.repair, "the repair decision switches it on under 0.8");
-        // Repaired past 0.9 it switches off again, and a flat battery switches it off whatever.
-        b.takt(&of(Condition { life: 0.95, ..Condition::default() }));
-        assert!(!b.repair);
+        assert!(!b.repair, "0.7 of its life is over the 0.5 that switches it on");
+        // Under half its life it switches it on, and repaired whole it keeps it on: nothing is
+        // over `Decision_RepairOff`'s 1. A flat battery switches it off whatever.
+        b.takt(&of(Condition { life: 0.45, ..Condition::default() }));
+        assert!(b.repair, "under 0.5 the repair decision switches it on");
+        b.takt(&of(Condition { life: 1.0, ..Condition::default() }));
+        assert!(b.repair, "a whole life is not over 1");
         b.takt(&of(Condition { life: 0.7, charge: 0.05, ..Condition::default() }));
         assert!(!b.repair, "under a tenth of a battery nothing is repaired");
 

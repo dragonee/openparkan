@@ -42,7 +42,7 @@ use parkan_sim::path::Graph;
 use parkan_sim::progression::Notice;
 use parkan_sim::solid::{self, NO_CONTACT, Solid};
 use parkan_sim::targeting::{Contact, TargetList};
-use parkan_sim::wizard::{GROUND_POINT, path_walk, straight_walk, walk_speed};
+use parkan_sim::wizard::{GROUND_POINT, flight, flight_leg, path_walk, straight_walk, walk_speed};
 
 use crate::assembly::Assembly;
 use crate::battle::{Battle, EffectCommand};
@@ -82,11 +82,21 @@ pub const MARK_OTHER: [u8; 3] = [255, 255, 0];
 /// A shield's effect instances, and the time mode a flash plays in (`0x10025ca0`).
 pub const SHIELD_FLASHES: usize = 3;
 pub const SHIELD_FLASH_MODE: u32 = parkan_formats::fxid::TIME_ONCE;
-/// `FlyNearLandHeight`, bound by name (docs/24): how high a flyer's points keep.
-pub const FLY_NEAR_LAND: f32 = 15.0;
-/// STAND-IN: docs/26-damage.md#the-difficulty-ratio--read-and-measured -- which difficulty
-/// profile a wingman's behaviour holds is not read: `Speed_MaximumFactor` 1, as four of the
-/// five profiles set it.
+/// How high a flyer's walk point stands over what lies under it (`Behavior.dll:0x10040f20`, the
+/// float at `0x10059974`): a compiled 15, not the profile's `FlyNearLandHeight`, whose one
+/// reader nothing calls (docs/24, "A flyer's walk points").
+pub const FLIGHT_CLEARANCE: f32 = 15.0;
+/// What the ground under a walk point is taken to be over a building, a tree or a stone: its top
+/// face and this much more (`Behavior.dll:0x100148a5`, the float at `0x100595bc`).
+pub const OVER_OBSTACLE: f32 = 100.0;
+/// An animal's walk point stands this much higher again, and up to the spread more at random,
+/// drawn for each point (`0x10040f52`-`0x10040f7c`: 30 and `rand()` ÷ 32767 × 50).
+pub const ANIMAL_FLIGHT: f32 = 30.0;
+pub const ANIMAL_FLIGHT_SPREAD: f32 = 50.0;
+/// `Speed_MaximumFactor` as every behaviour holds it: the compiled default of the difficulty
+/// block (`Behavior.dll:0x10019b90`), since the one load that would replace it, the profile
+/// loader's kind 5 (`0x1000a2f4`), is handed a `diff_*` name by nothing in the install
+/// (docs/26, "The difficulty ratio").
 pub const SPEED_MAXIMUM_FACTOR: f32 = 1.0;
 /// A turret channel this close to its target counts as settled.
 pub const AIM_SETTLED: f32 = 0.005;
@@ -356,6 +366,9 @@ pub struct Play {
     pub mindless: Vec<usize>,
     /// The walker's search's random source (docs/24, "The global path").
     pub walk_seed: u32,
+    /// The random source an animal's flight heights draw from (docs/24, "A flyer's walk
+    /// points"), kept apart from the search's so an animal's walk does not move anyone's route.
+    pub flight_seed: u32,
     /// Each clan's current pasture, which its migrating animals ask for (docs/31, "Migrate:
     /// an animal's pasture").
     pub grazing: std::cell::RefCell<Grazing>,
@@ -1011,6 +1024,7 @@ impl Play {
             places: Vec::new(),
             mindless: Vec::new(),
             walk_seed: 0x2545_f491,
+            flight_seed: 0x9e37_79b9,
             grazing: std::cell::RefCell::default(),
         };
         play.research = crate::research::Research::load(game, mission, &battle_objects, &play.units);
@@ -3348,10 +3362,11 @@ impl Play {
                 .mass(|p, n| node_share(target.parts.get(p).and_then(|part| part.life.as_ref()), n));
             // STAND-IN: docs/24-motion.md#the-ground-inside-a-building--read-in-part-and-measured
             // -- a flyer's collision flags are read to carry 8, so a building's floors push it
-            // too, and taken whole since its states lack bit 4. With that, Mission 02's flyer
-            // made at the Large Factory's creation vertex is pushed 31 m up off the floor and
-            // over the shut front door; how a flyer's height (docs/24, "A flyer's height") and
-            // this push meet is not read. No robot keeps the floors.
+            // too, and taken whole since its states lack bit 4. With that, Mission 02's flyer,
+            // made at the Large Factory's creation vertex 5 m over the hall floor, is pushed 33 m
+            // up in its first frame, through the hall's roof; what keeps a flyer's sphere off a
+            // floor it is made on is not read -- its walk points' heights are (docs/24, "A
+            // flyer's walk points"), and they do not. No robot keeps the floors.
             let keeps_floors = robot.walker.keeps_floors() && !robot.flyer;
             let push = collision_push(
                 &self.ground.solids,
@@ -3561,30 +3576,45 @@ impl Play {
             robot.walker.limits.top_speed[1].abs(),
             robot.walker.controller.triples[1][1].abs(),
         );
+        // A walk's legs: those it takes as a walker's are cut, and a flyer's in the open, taken
+        // one point at a time.
         let legs = match takt.walk {
             Walk::Keep => None,
-            Walk::Clear => Some((Vec::new(), 0.0, false)),
+            Walk::Clear => Some((Vec::new(), Vec::new(), 0.0, false)),
+            Walk::To(goal, share) if flyer => {
+                // A flyer's walk out of a building keeps the hall way's vertices at their own
+                // heights; its leg on from there is cut every 20 m across the ground, and each
+                // point is given its height over what lies under it (docs/24, "A flyer's walk
+                // points").
+                let mut hall = self.legs_to(t, at, goal);
+                let open: Vec<Vec3> = match hall.pop() {
+                    Some(end) => {
+                        let start = hall.last().copied().unwrap_or(at);
+                        let cut = flight_leg(start, end);
+                        cut.into_iter().map(|p| p.with_z(self.flight_height(p.x, p.y, animal))).collect()
+                    }
+                    None => Vec::new(),
+                };
+                Some((hall, open, share, false))
+            }
             Walk::To(goal, share) => {
                 let floor = self.ground.below(goal.x, goal.y, 10_000.0).map_or(goal.z, |h| h.point.z);
-                // STAND-IN: docs/24-motion.md#not-established -- the height a flyer's points
-                // are given, and who reads `Movement_FlyHeight`, are not read: a flyer's
-                // points keep at least `FlyNearLandHeight` above the ground under them.
-                let goal =
-                    if flyer { goal.with_z(goal.z.max(floor + FLY_NEAR_LAND)) } else { goal.with_z(floor) };
-                Some((self.legs_to(t, at, goal), share, false))
+                Some((self.legs_to(t, at, goal.with_z(floor)), Vec::new(), share, false))
             }
-            Walk::Inside(id, pod, share) => Some((self.legs_inside(t, at, id, pod), share, true)),
+            Walk::Inside(id, pod, share) => Some((self.legs_inside(t, at, id, pod), Vec::new(), share, true)),
         };
         let (_, robot) = &mut self.robots[r];
         match legs {
             None => {}
-            Some((legs, _, _)) if legs.is_empty() => robot.wizard.clear(),
-            Some((legs, share, inside)) => {
+            Some((hall, open, _, _)) if hall.is_empty() && open.is_empty() => robot.wizard.clear(),
+            Some((legs, open, share, inside)) => {
                 let speed = walk_speed(share * top, top, low, SPEED_MAXIMUM_FACTOR);
                 // A walker's points run along the ground; a flyer's follow each point's height,
                 // down to the hall way's vertices inside a building.
                 let flags = if flyer { 0 } else { GROUND_POINT };
-                let (points, stop) = if legs.len() == 1 && !inside {
+                let (points, stop) = if flyer && !inside {
+                    flight(at, &legs, &open, speed, now)
+                } else if legs.len() == 1 && !inside {
                     straight_walk(at, legs[0], speed, now, flags)
                 } else {
                     path_walk(at, &legs, speed, now, flags, inside)
@@ -3594,8 +3624,50 @@ impl Play {
                 robot.wizard.stop_at(stop);
             }
         }
-        robot.walker.drive = Some(robot.wizard.takt(now, at, dt_ms));
+        let forward = robot.walker.body.forward();
+        robot.walker.drive = Some(robot.wizard.takt(now, at, forward, dt_ms));
         aim_and_fire(robot, t, &takt, seen, &self.battle, &self.ground, animal, false);
+    }
+
+    /// The height a flyer's walk point at `(x, y)` is given (`Behavior.dll:0x10040f20`): the
+    /// ground under it as the behaviour sees it ([`Play::flight_ground`]) and 15, and for an
+    /// animal 30 more and up to 50 more again, drawn afresh for the point.
+    pub fn flight_height(&mut self, x: f32, y: f32, animal: bool) -> f32 {
+        let mut z = self.flight_ground(x, y) + FLIGHT_CLEARANCE;
+        if animal {
+            z += ANIMAL_FLIGHT + ANIMAL_FLIGHT_SPREAD * self.walk_draw();
+        }
+        z
+    }
+
+    /// The ground under `(x, y)` as the behaviour's ground routine answers it
+    /// (`Behavior.dll:0x100146b0`): straight down from above the world, the top face of a
+    /// building, a tree or a stone there and 100 more (classes 3 and 10, `0x10014723`, and
+    /// `0x100148a5`); failing that the landscape's, water's sheet and all, at the point, then
+    /// 0.1 off in x, then in x and y (`0x10014779`-`0x100147f6`); failing that 0.
+    pub fn flight_ground(&self, x: f32, y: f32) -> f32 {
+        let units = &self.units;
+        let obstacle = |i: usize| {
+            units.get(i).is_some_and(|u| matches!(u.kind, KIND_BUILDING | KIND_VEGETATION | KIND_ROCK))
+        };
+        if let Some(top) = self.ground.solid_top(x, y, obstacle) {
+            return top + OVER_OBSTACLE;
+        }
+        [(0.0, 0.0), (0.1, 0.0), (0.1, 0.1)]
+            .into_iter()
+            .find_map(|(dx, dy)| self.ground.landscape_top(x + dx, y + dy))
+            .unwrap_or(0.0)
+    }
+
+    /// A draw from 0 to 1 for an animal's flight height, the engine's stand-in for the
+    /// `rand()` the walker draws from.
+    fn walk_draw(&mut self) -> f32 {
+        let mut x = self.flight_seed;
+        x ^= x << 13;
+        x ^= x >> 17;
+        x ^= x << 5;
+        self.flight_seed = x;
+        (x >> 8) as f32 / (1u32 << 24) as f32
     }
 
     /// The unit takt's escape (`Behavior.dll:0x10005408`, docs/31, "The escape"): a unit with

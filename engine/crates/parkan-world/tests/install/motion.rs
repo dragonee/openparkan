@@ -189,10 +189,12 @@ fn the_hero_crosses_mission_01s_bridge_on_its_deck() {
     assert!(path.last().unwrap().y > 800.0, "and off the far end: {}", path.last().unwrap());
 }
 
-/// A unit the Wizard drives is held by a slope as the player's own machine is (docs/24,
-/// "Ground and slope"). A written velocity replaces the machine's own at the top of every
-/// step, so the brake's pull never built up on one: an AI unit walked up this face at 8 m/s
-/// where the same chassis under the player does not move at all.
+/// A unit the Wizard drives is held by a slope as the player's own machine is: the engine's
+/// stand-in (docs/24, "Ground and slope"). The game is read to pass the brake over while a
+/// written velocity stands, so a driven machine is never braked; the engine brakes it, since its
+/// local path does not keep an AI unit off such a face. A written velocity replaces the
+/// machine's own at the top of every step, so the brake's pull never built up on one: an AI
+/// unit walked up this face at 8 m/s where the same chassis under the player does not move.
 #[test]
 #[ignore = "needs the game install"]
 fn a_slope_past_the_cone_holds_a_wizard_driven_unit_as_it_holds_the_player() {

@@ -5,9 +5,12 @@
 //! search takes a face only while its normal z is above cos 80°.
 
 use glam::Vec3;
-use parkan_formats::landmesh::LandMesh;
+use parkan_formats::landmesh::{FLAGS_LIQUID_BED_BIT, LandMesh};
 
 use crate::solid::Solid;
+
+/// The landscape face flags bit its face source turns into class 2 (`Terrain.dll:0x1002030c`).
+pub const LANDSCAPE_CLASS_2: u16 = 0x8000;
 
 /// cos 80°: a steeper face is never ground (`Control.dll:0x1001a6fd`).
 pub const WALKABLE_NORMAL_Z: f32 = 0.173648;
@@ -351,6 +354,63 @@ impl Ground {
             }
         }
         best
+    }
+
+    /// Whether a face the ground search held carries class 2, which keeps the slope brake off
+    /// (`Control.dll:0x1001a9b4`-`0x1001a9be`, the class `CWorld::GetWorldFace` hands back at
+    /// `+4`, `Terrain.dll:0x10024fb5`). A building's face gives its triangle word, whose 2 marks
+    /// a walk-through floor; the landscape's gives a class it builds from its face mask, 2 from
+    /// the flags word's `0x8000` (`Terrain.dll:0x1002030c`), which no shipped face carries; a
+    /// footing band stands in for landscape.
+    pub fn class_carries_2(&self, h: &Hit) -> bool {
+        match (h.solid, h.face) {
+            (Some((s, f)), _) => {
+                self.solids.get(s).and_then(|s| s.faces.get(f)).is_some_and(|f| f.triangle_flags & 2 != 0)
+            }
+            (None, Some(f)) => self.land.faces.get(f).is_some_and(|f| f.flags & LANDSCAPE_CLASS_2 != 0),
+            (None, None) => false,
+        }
+    }
+
+    /// The landscape's top face at `(x, y)` as a ray from above the world meets it: the water's
+    /// sheet where there is one, never a liquid's bed, and a building's footing where it has cut
+    /// the landscape away. The query `Behavior.dll`'s ground routine asks second
+    /// (`0x10014779`): class 1 alone, excluding world flag `0x400`, the landscape's liquid bed
+    /// (docs/24, "A flyer's walk points").
+    pub fn landscape_top(&self, x: f32, y: f32) -> Option<f32> {
+        let cut = self.cut(x, y);
+        let land = self
+            .holding_in(&self.cells, x, y)
+            .chain(self.holding_in(&self.water, x, y))
+            .filter(|&(f, _)| !cut && self.land.faces[f].flags & FLAGS_LIQUID_BED_BIT == 0)
+            .map(|(_, z)| z);
+        land.chain(self.footing_faces(x, y).map(|h| h.point.z)).reduce(f32::max)
+    }
+
+    /// The top face at `(x, y)` of the solids `keep` names, as a ray from above the world meets
+    /// it: a face the ray reaches from its front, its normal up, or any face of a batch flagged
+    /// 2, which is struck from either side ([`crate::hit`]); a batch flagged `0x400` is passed,
+    /// as the ground routine's first query excludes it (`Behavior.dll:0x10014723`).
+    pub fn solid_top(&self, x: f32, y: f32, keep: impl Fn(usize) -> bool) -> Option<f32> {
+        let p = glam::Vec2::new(x, y);
+        self.solids
+            .iter()
+            .enumerate()
+            .filter(|&(i, s)| s.present && keep(i) && s.centre.truncate().distance(p) <= s.radius)
+            .flat_map(|(_, s)| s.faces.iter())
+            .filter(|f| (f.normal.z > 0.0 || f.batch_flags & 2 != 0) && f.batch_flags & 0x400 == 0)
+            .filter_map(|f| {
+                let (a, b, c) = (f.a, f.b, f.c);
+                let den = (b.y - c.y) * (a.x - c.x) + (c.x - b.x) * (a.y - c.y);
+                if den.abs() < 1e-9 {
+                    return None;
+                }
+                let l1 = ((b.y - c.y) * (x - c.x) + (c.x - b.x) * (y - c.y)) / den;
+                let l2 = ((c.y - a.y) * (x - c.x) + (a.x - c.x) * (y - c.y)) / den;
+                let l3 = 1.0 - l1 - l2;
+                (l1 >= -1e-5 && l2 >= -1e-5 && l3 >= -1e-5).then_some(l1 * a.z + l2 * b.z + l3 * c.z)
+            })
+            .reduce(f32::max)
     }
 
     /// The walk-face query (`IWorld` slot 10, `Terrain.dll:0x10026b20`): the landscape's
