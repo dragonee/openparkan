@@ -2213,17 +2213,21 @@ doorway, a step outside the door `i05`, with a third quad at y 87.4 on the hall
   black and opaque. `World3D.dll` also falls back to it for a material it cannot
   find (`0x10004354`). `PORTAL_001` and `PORTAL_004` wear `PG23.0` and a bright
   green ambient.
-- **They are not drawn** ([below](#a-building-is-drawn-cell-by-cell-through-its-portals--read)).
-  `CBuilding` draws a building one cell at a time and reaches the next cell
-  through these openings, so drawing the quad itself would black out the very
-  room the portal exists to show.
+- **How each is drawn is its batch word's**
+  ([below](#a-building-is-drawn-cell-by-cell-through-its-portals--read)).
+  One carrying `0x40` is never seen: 170 `DEFAULT` quads. A `DEFAULT` doorway
+  without it, 397, is unseen within 75 of the camera and fades to black by 95,
+  and beyond that the room behind it is not drawn at all. The 66 `PORTAL_001`
+  and `PORTAL_004` quads are **signs**, green pictograms that fade in from 4 to
+  36.
 - *Seen*: Mission 03's Small Bunker carries a `DEFAULT` quad on its outer node
   `o01` at y −3.4…−1.5, in front of its door `i03` at y −2.5…0.3, and the hero
   comes down the ramp from −y. In the recording at 164.4–166.6 s that door is
   plainly in view, dark with hazard stripes along its foot, and the lit interior
-  shows through the windows beside it. A drawn quad would hide both.
+  shows through the windows beside it. That quad's word is `0x148`, never seen.
 - The Large Factory's entrance still reads black from outside at 88–93 s because
-  the hall behind it is unlit, not because the quad covers it.
+  the hall behind it is unlit, not because the quad covers it: its quads on
+  `o01` are `0x148` too.
 - It does not stop a walker either (*read*, and *measured*): every level-0
   doorway and portal batch carries 8 in its batch word, which the query
   excludes for every mover ([above](#the-ground-inside-a-building--read-in-part-and-measured)).
@@ -2266,9 +2270,13 @@ with the room it hangs under, and `i16`, `i17` (`0x451`) with `i15`.
    list. Each queued node draws as a room if its flags carry 1, else as the
    exterior.
 
-`PortalNearDist` and `PortalFarDist` are registered as variables
-(`0x1005f24d`, `0x1005f26f`) and nothing reads them; `Ngi32.dll` exports
-`n3dGetPortalClipRect` and no module imports it.
+~~`PortalNearDist` and `PortalFarDist` are registered as variables
+(`0x1005f24d`, `0x1005f26f`) and nothing reads them~~ — they are the render
+settings' entries 27 and 28, 75 and 95 by default
+([10-sky.md](10-sky.md#the-render-settings)), and `CShade` copies them to
+`+0x1660` and `+0x1664` (`0x10046d77`, `0x10046d8e`) for the portal fade below.
+`Ngi32.dll` exports `n3dGetPortalClipRect` and no module imports it: a portal
+does not clip what is drawn through it.
 
 **What a portal names** (*read*, and *measured*). `PortalDrawNotify` is slot 4
 of the interface at `CBuilding +0x10` (vtable `0x1009b4ec`, whose slot 11 is
@@ -2285,13 +2293,78 @@ batches flagged 8, every doorway and portal quad — and on **625 of the 625** o
 those that lie in a level-0 slot it is another node than the batch's own: the
 room beyond. On `fr_b_plant` the entrance quads on `o01` name `i06`, `i06`'s
 name `o01` and `i01`, and the `PORTAL_001` pair at the ramp's foot names `i15`
-from `i13` and `i13` from `i15`. **Not read**: who calls the notify with a
+from `i13` and `i13` from `i15`. ~~**Not read**: who calls the notify with a
 portal's face — no call through that slot is found — and so when during a
-cell's draw it happens.
+cell's draw it happens.~~ — **read**: `CShade`'s portal fade, as each portal
+batch is drawn (below).
 
-**Not implemented**: openparkan draws every cell of a building at once and only
-drops the portal quads. What the cells hide is geometry behind a wall the camera
-cannot see through anyway, so the picture is the same and the cost is frame time.
+**Who calls the notify** (*read*). Interface `0x18` is `IMesh2`'s, and
+`CBuilding` answers it with this interface at `+0x10` (its inner
+`QueryInterface`, `0x10057c20`, jump table `0x10057d13`): a stand-in for its
+real mesh at `+0x2c` whose slots pass on to the mesh's (slot 3, `0x10056c10`)
+except slot 4, the notify, slot 6 (`GetFirstIntersectedFace`, `0x1005a6c0`) and
+slot 11, `Render`. `AniMesh.dll`'s own `IMesh2` slot 4 is a bare `ret 4`
+(`0x10007e80`), so for every mesh but a building's the notify does nothing.
+1. `Render` hands that interface to `CShade` as the mesh it is drawing:
+   `StartMeshRender`, `CShade` slot 5 (`0x100437c0`, called at `0x1005991f`),
+   keeps it at `CShade +0xcb0`.
+2. `CShade`'s mesh draw, slot 21 (`0x10044ea0`), asks that mesh for each
+   batch's record (slot 3, `0x10045016`) and reads its first word. A batch
+   carrying 8 and `0x20` is skipped whole (`0x10045044`–`0x1004505a`); one carrying 8 or
+   `0x100` is filed translucent ([07-objects.md](07-objects.md#what-a-blended-batch-writes-and-the-alpha-tests-reference--read)).
+3. Once the batch's primitive is built, a batch carrying 8 goes to
+   `0x1002c4d0` (`0x10045d30`, its only caller), which sets the primitive's
+   alpha and calls the mesh's slot 4 with the batch's face (`0x1002c65e`) —
+   or does not.
+
+**How a portal quad is drawn** (*read*). `0x1002c4d0` takes `d`, the distance
+from the camera, `CShade +0xb98` (column 3 of the camera's matrix,
+`0x1004651f`), to the primitive's first vertex, the first corner of its first
+triangle (the primitive's slot 5, `0x1003c340`, a length through `Ngi32.dll`'s
+reciprocal square root, `g_FastProc` entry 11). `f` is the camera's field of
+view across, in radians (`ICamera` slot 7's `+0x14`, the angle slot 6 sets,
+`0x100848a0`). By the batch word:
+- **`0x10`**: the alpha runs from 0 where √d is 2.6 ÷ f to 1 where it is 7.8 ÷ f
+  (`0x1009a8ec`, `0x1009a8f4`), and the room beyond is always drawn;
+- **`0x40`**: the alpha stays 0 and the room beyond is always drawn;
+- **neither**: from `0x1002c410`, near = 1.3 × `PortalNearDist` ÷ f and
+  far = 1.3 × `PortalFarDist` ÷ f (`0x1009a908`), **75 and 95 at the game's 1.3
+  rad**; the alpha is 0 within near, 1 beyond far and runs between, and **beyond
+  far the notify is not called**, so the room beyond is not queued.
+
+The alpha is written to the primitive's `+0x90` (`0x1002c63a`), its copy of the
+material's ambient alpha (the material block at `+0x70`, `0x10029aa0`, whose
+`+0x20` the draw also tests against 1 at `0x10045567`), which is the alpha the
+device takes ([07-objects.md](07-objects.md#how-a-material-reaches-the-device--read-and-measured)):
+0 is not drawn at all, the alpha test dropping it, and 1 is opaque. So a
+`DEFAULT` doorway is gone near by and a black wall far away, the black standing
+in front of the room left undrawn behind it; and a sign is gone within 4 of the
+camera and whole from 36 on, at 1.3 rad.
+
+*Measured*, over the 633 batches flagged 8: **397** carry neither `0x10` nor
+`0x40`, every one `DEFAULT`; **66** carry `0x10`, all 36 `PORTAL_001` and all 30
+`PORTAL_004`, and no other batch in the install carries `0x10`; **170** carry
+`0x40`, all `DEFAULT`. None carries `0x20`; all carry `0x100`, and 307 `0x4000`.
+`fr_b_plant`'s level 0 holds 32 of the first, 4 signs and 9 open quads, the two
+at the entrance on `o01` among them (`0x148`). `PG23.0` is an atlas of arrows
+and pictograms, which the `PORTAL_*` materials' green ambient lights: these are
+the signs *"follow the signs to the main engine room"* speaks of.
+
+**So a building draws**: from outside its sphere, its exterior; from inside, the
+rooms the camera stands in; and then every room a drawn portal names, as the
+portal's batch is drawn — always through a sign or an open portal, and through a
+`DEFAULT` doorway only while the camera is within far of it.
+
+*Seen*: in the recording at 98–99 s, at the foot of the Large Factory's stairs,
+green arrow signs stand on both walls of `i13` and a green band at the far end
+of its ramp, and a green translucent sheet fills the left of the frame.
+openparkan drew none of them before the signs were read, and draws them now from
+the same place.
+
+**Not implemented**: openparkan still draws every cell of a building at once. It
+draws each portal quad by the fade above, so beyond far a doorway is the black
+wall the game draws there, and what it hides — the room the game leaves out —
+is drawn and never seen. The cost is frame time.
 
 **The hall way's second word is the vertex's node** (*measured*). Posed through
 the node it names, a vertex lands where it belongs:
@@ -3403,10 +3476,23 @@ patrol runs past it.
   only a flyer crosses
   ([A building is drawn cell by cell](#a-building-is-drawn-cell-by-cell-through-its-portals--read),
   where the hall way's groups are measured).
-- Who calls `CBuilding::PortalDrawNotify` with a portal's face. ~~Which node a
-  portal names~~ — **measured**: its batch record's `+6` halfword, the room
-  beyond, on all 625 level-0 portal batches
+- ~~Who calls `CBuilding::PortalDrawNotify` with a portal's face.~~ — **read**:
+  `CShade`'s portal fade (`Terrain.dll:0x1002c4d0`, from its mesh draw at
+  `0x10045d30`), through the building's own `IMesh2` slot 4, as each portal
+  batch is drawn: always for a sign (`0x10`) or an open portal (`0x40`), and for
+  a `DEFAULT` doorway only within 1.3 × `PortalFarDist` ÷ the field of view of
+  the camera, 95 at the game's 1.3 rad, beyond which the doorway is drawn black
+  and its room not at all. ~~Which node a portal names~~ — **measured**: its
+  batch record's `+6` halfword, the room beyond, on all 625 level-0 portal
+  batches
   ([A building is drawn cell by cell](#a-building-is-drawn-cell-by-cell-through-its-portals--read)).
+- What the camera's field of view is in play, which scales a portal's fade: the
+  outer camera's 1.3 is a *guess* ([30-turrets.md](30-turrets.md)), and the
+  buffering camera starts at 1.7 ([03-terrain.md](03-terrain.md#the-reflection-camera--read)).
+- The 57 batches that wear `DEFAULT` with no portal bit — three trees, four
+  internal systems, three turrets and some buildings' lower levels of detail —
+  which nothing in the draw skips, so the game draws them black; openparkan
+  leaves them out.
 - ~~Which `Land.msh` faces carry the world face bit `0x8` and class bit 8 that
   the ground search excludes; the landscape converts them to its own mask at
   `Terrain.dll:0x10022da0` (world `0x8` → `0x20`, `0x200` → `0x20000`,

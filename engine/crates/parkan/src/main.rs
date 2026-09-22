@@ -626,26 +626,28 @@ fn screenshot(loaded: &scene::Loaded, game: &Path, args: &Args, out: &Path) -> R
     } else {
         start_camera(loaded).view_proj(aspect)
     };
-    // Where the fog is measured from and the flare gate looks along: the camera drawn.
-    let (eye, forward, seconds) = match (&play, args.look) {
+    // Where the fog is measured from and the flare gate looks along: the camera drawn, and
+    // the field of view a portal quad's fade is scaled by.
+    let (eye, forward, field, seconds) = match (&play, args.look) {
         (_, Some([x, y, z, tx, ty, tz])) => {
             let (eye, target) = (Vec3::new(x, y, z), Vec3::new(tx, ty, tz));
             (
                 eye,
                 (target - eye).normalize_or(Vec3::Y),
+                camera::debug_field(aspect),
                 play.as_ref().map_or(0.0, |p| p.hero.time_ms / 1000.0),
             )
         }
         (Some(p), None) => {
             let e = briefing.as_ref().map_or_else(|| p.eye(), |b| b.eye());
-            (e.position, e.forward, p.hero.time_ms / 1000.0)
+            (e.position, e.forward, e.fov_x, p.hero.time_ms / 1000.0)
         }
         (None, None) => {
             let c = start_camera(loaded);
-            (c.position, c.forward(), 0.0)
+            (c.position, c.forward(), camera::debug_field(aspect), 0.0)
         }
     };
-    if let Some((lighting, colours)) = scene::lighting(&world, seconds, eye, forward) {
+    if let Some((lighting, colours)) = scene::lighting(&world, seconds, eye, forward, field) {
         renderer.set_lighting(lighting);
         renderer.set_dome_colours(colours);
         renderer.set_sky_layers(scene::sky_layers(&world, seconds));
@@ -731,7 +733,7 @@ fn screenshot(loaded: &scene::Loaded, game: &Path, args: &Args, out: &Path) -> R
                         hud.cockpit.messages.show(sender, text, now);
                     }
                 }
-                let lighting = scene::lighting(&world, seconds, eye, forward).map(|l| l.0);
+                let lighting = scene::lighting(&world, seconds, eye, forward, field).map(|l| l.0);
                 if let Some(v) = &view {
                     scene::draw_hud(
                         &mut renderer,
@@ -1470,21 +1472,26 @@ impl App {
             ..Default::default()
         });
         let aspect = r.config.width as f32 / r.config.height.max(1) as f32;
-        let (eye, forward, seconds) = match &self.play {
+        let (eye, forward, field, seconds) = match &self.play {
             Some(p) => {
                 let e = self.briefing.as_ref().map_or_else(|| p.eye(), |b| b.eye());
-                (e.position, e.forward, p.hero.time_ms / 1000.0)
+                (e.position, e.forward, e.fov_x, p.hero.time_ms / 1000.0)
             }
-            None => (self.camera.position, self.camera.forward(), self.started.elapsed().as_secs_f64()),
+            None => (
+                self.camera.position,
+                self.camera.forward(),
+                camera::debug_field(aspect),
+                self.started.elapsed().as_secs_f64(),
+            ),
         };
-        if let Some((lighting, colours)) = scene::lighting(&self.world, seconds, eye, forward) {
+        if let Some((lighting, colours)) = scene::lighting(&self.world, seconds, eye, forward, field) {
             r.renderer.set_lighting(lighting);
             r.renderer.set_dome_colours(colours);
             r.renderer.set_sky_layers(scene::sky_layers(&self.world, seconds));
             r.renderer.set_body_sprites(&r.gpu.device, scene::body_sprites(&self.world, seconds));
             r.renderer.set_flare(&r.gpu.device, scene::flare(&self.world, seconds));
         }
-        let lighting = scene::lighting(&self.world, seconds, eye, forward).map(|l| l.0);
+        let lighting = scene::lighting(&self.world, seconds, eye, forward, field).map(|l| l.0);
         let view_proj = match self.play.as_mut() {
             Some(play) => {
                 let briefing = self.briefing.as_ref();

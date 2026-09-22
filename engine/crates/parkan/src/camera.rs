@@ -46,6 +46,11 @@ impl FlyCamera {
     }
 }
 
+/// The debug camera's field of view across, radians, at `aspect`.
+pub fn debug_field(aspect: f32) -> f32 {
+    2.0 * ((DEBUG_FOV_Y_DEGREES.to_radians() / 2.0).tan() * aspect).atan()
+}
+
 /// The view through the hero's eye. Its field of view is horizontal: the camera
 /// keeps tan of half its angle and scales y by it × height ÷ width (docs/30).
 pub fn first_person(eye: &Eye, aspect: f32) -> Mat4 {

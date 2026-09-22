@@ -12,7 +12,7 @@ use std::cell::Cell;
 
 use bytemuck::{Pod, Zeroable};
 use glam::{Mat4, Quat, Vec3};
-use parkan_world::models::Objects;
+use parkan_world::models::{Objects, PortalQuad};
 use parkan_world::textures::{Animation, Phase};
 use wgpu::util::DeviceExt;
 
@@ -39,6 +39,11 @@ struct LookUniform {
     /// x 1: a lit batch, which its lightmap shades in place of the scene's lights; y 1: the
     /// alpha test, on for every blend mode but 0.
     lit: [f32; 4],
+    /// A portal quad's first corner in the model's frame, and w 1 on a portal quad.
+    portal: [f32; 4],
+    /// Its fade under a field of one radian: where it starts, where it is whole, and z 1 where
+    /// it runs on the square root of the distance (`parkan_world::models::Portal::range`).
+    portal_range: [f32; 4],
 }
 
 impl LookUniform {
@@ -47,15 +52,29 @@ impl LookUniform {
     /// scene colour is added to, and the cell's rectangle. A lit batch keeps its diffuse,
     /// which the shader moves into the emissive (docs/07, "How a lightmapped batch is
     /// drawn").
-    fn new(phase: &Phase, blend_mode: u8, lit: bool) -> Self {
+    ///
+    /// A portal quad's alpha replaces the phase's by its distance from the eye
+    /// (`Terrain.dll:0x1002c4d0`, docs/24, "A building is drawn cell by cell through its
+    /// portals"); the shader takes it from `portal`.
+    fn new(phase: &Phase, blend_mode: u8, lit: bool, portal: Option<PortalQuad>) -> Self {
         let [dr, dg, db] = phase.diffuse;
         let [ar, ag, ab] = phase.ambient;
+        let (portal, portal_range) = match portal {
+            Some(p) => {
+                let [x, y, z] = p.anchor;
+                let [near, far, root] = p.kind.range();
+                ([x, y, z, 1.0], [near, far, root, 0.0])
+            }
+            None => ([0.0; 4], [0.0; 4]),
+        };
         Self {
             diffuse: [dr, dg, db, phase.alpha],
             emissive: [ar, ag, ab, 1.0],
             fog: crate::frame::fog_override(blend_mode),
             cell: phase.cell,
             lit: [f32::from(u8::from(lit)), f32::from(u8::from(blend_mode != 0)), 0.0, 0.0],
+            portal,
+            portal_range,
         }
     }
 }
@@ -97,6 +116,7 @@ struct DrawGroup {
     lit: bool,
     /// Filed in the queue's second list: drawn last, writing no depth.
     translucent: bool,
+    portal: Option<PortalQuad>,
     look: wgpu::Buffer,
     /// A bind group for each texture the material's phases draw, and the one drawn now.
     bind_groups: Vec<(Option<usize>, wgpu::BindGroup)>,
@@ -179,7 +199,8 @@ impl ModelRenderer {
         let look_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("model look"),
             entries: &[
-                uniform_entry(0, wgpu::ShaderStages::FRAGMENT),
+                // The vertex stage takes a portal quad's fade from it.
+                uniform_entry(0, wgpu::ShaderStages::VERTEX_FRAGMENT),
                 wgpu::BindGroupLayoutEntry {
                     binding: 1,
                     visibility: wgpu::ShaderStages::FRAGMENT,
@@ -301,7 +322,7 @@ impl ModelRenderer {
                         let lit = g.lightmap.is_some();
                         let mode = if lit { 0 } else { g.look.blend_mode };
                         // Display space: the shader forms the lit colour from them, then decodes it.
-                        let uniform = LookUniform::new(&g.look.still, mode, lit);
+                        let uniform = LookUniform::new(&g.look.still, mode, lit, g.portal);
                         let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                             label: Some(&g.look.material),
                             contents: bytemuck::bytes_of(&uniform),
@@ -344,7 +365,10 @@ impl ModelRenderer {
                             count: g.count,
                             mode,
                             lit,
-                            translucent: g.look.translucent(),
+                            // A portal quad is filed translucent by its batch word's 8
+                            // (`Terrain.dll:0x1004552a`).
+                            translucent: g.look.translucent() || g.portal.is_some(),
+                            portal: g.portal,
                             look: buffer,
                             bind_groups,
                             current: Cell::new(0),
@@ -461,7 +485,8 @@ impl ModelRenderer {
                     Some(f) => animation.by_fraction(f),
                     None => animation.at(lighting.clock_ms),
                 };
-                queue.write_buffer(&g.look, 0, bytemuck::bytes_of(&LookUniform::new(&phase, g.mode, g.lit)));
+                let uniform = LookUniform::new(&phase, g.mode, g.lit, g.portal);
+                queue.write_buffer(&g.look, 0, bytemuck::bytes_of(&uniform));
                 g.current.set(g.bind_groups.iter().position(|(t, _)| *t == phase.texture).unwrap_or(0));
             }
         }

@@ -10205,6 +10205,70 @@ def check_basement_triangulation(check, game: Path) -> None:
           f"{anticlockwise} of the {len(rings)} .bas rings wind anticlockwise")
 
 
+def check_portal_fade(check, game: Path) -> None:
+    """A portal quad fades by its distance from the camera, its batch word saying how, and only
+    a near one names the room beyond.
+
+    docs/24-motion.md, "A building is drawn cell by cell through its portals".
+    """
+    paths = {n: game / n for n in ("Terrain.dll", "AniMesh.dll")}
+    if not all(p.exists() for p in paths.values()):
+        return
+    t_at = _image_at(paths["Terrain.dll"].read_bytes())
+    a_at = _image_at(paths["AniMesh.dll"].read_bytes())
+    dword, call_to = _dword_at, _call_target
+
+    # Who calls the notify, and how each portal quad draws by its word.
+    facade = (t_at(0x10057D2B + 0x18, 1) == b"\x04" and dword(t_at, 0x10057D13 + 16) == 0x10057C63
+              and dword(t_at, 0x1009B4FC) == 0x1005A5D0)
+    mesh_slot4 = (dword(a_at, 0x1002054C) == 0x10007E80
+                  and a_at(0x10007E80, 3) == bytes.fromhex("c20400"))
+    notify = (t_at(0x1002C65E, 3) == bytes.fromhex("ff5010")
+              and call_to(t_at, 0x10045D30) == 0x1002C4D0)
+    words = (t_at(0x1002C4EA, 3) == bytes.fromhex("83e010")
+             and t_at(0x1002C5AE, 3) == bytes.fromhex("83e140"))
+    near_far = (t_at(0x10046D66, 5) == bytes.fromhex("b91b000000")
+                and t_at(0x10046D77, 6) == bytes.fromhex("898260160000")
+                and t_at(0x10046D7D, 5) == bytes.fromhex("b91c000000")
+                and t_at(0x10046D8E, 6) == bytes.fromhex("898264160000"))
+    factors = [round(struct.unpack("<f", t_at(va, 4))[0], 4)
+               for va in (0x1009A908, 0x1009A8EC, 0x1009A8F4)]
+    kinds: Counter[tuple[str, str]] = Counter()
+    for path in all_archives(game):
+        archive = NResArchive.open(path)
+        members = {e.name.lower(): e for e in archive}
+        for entry in list(archive):
+            if entry.tag != "MESH":
+                continue
+            inner = NResArchive(archive.read(entry), entry.name)
+            stream = next((e for e in inner if e.type_id == objmesh.STREAM_BATCH), None)
+            if stream is None:
+                continue
+            raw = inner.read(stream)
+            wea = members.get(entry.name.lower().rsplit(".", 1)[0] + ".wea")
+            wear = objmesh.read_wea(archive.read(wea)) if wea else []
+            for i in range(stream.element_count):
+                f = struct.unpack_from("<10H", raw, i * objmesh.BATCH_SIZE)
+                word = f[0] | f[1] << 16
+                if not word & 0x18:
+                    continue
+                material = wear[f[2] & 0xFF].upper() if (f[2] & 0xFF) < len(wear) else "?"
+                kind = ("skipped" if word & 0x20 else "sign" if word & 0x10 else
+                        "open" if word & 0x40 else "gate") if word & 8 else "0x10 alone"
+                kinds[(kind, material)] += 1
+    want = {("gate", "DEFAULT"): 397, ("sign", "PORTAL_001"): 36, ("sign", "PORTAL_004"): 30,
+            ("open", "DEFAULT"): 170}
+    check("Terrain.dll: CShade's portal fade calls a building's PortalDrawNotify, and the batch "
+          "word says how each portal quad fades",
+          facade and mesh_slot4 and notify and words and near_far and factors == [1.3, 2.6, 7.8]
+          and dict(kinds) == want,
+          f"CBuilding answers interface 0x18 with its +0x10, whose slot 4 is the notify, where "
+          f"AniMesh's is ret 4; 0x1002c4d0, called only at 0x10045d30, calls slot 4 at 0x1002c65e; "
+          f"it tests the word's 0x10 and 0x40, takes PortalNearDist and PortalFarDist (entries 27 "
+          f"and 28) from CShade +0x1660 and +0x1664, and scales by {factors}; the install's "
+          f"batches carrying 8 or 0x10 are {dict(kinds)}")
+
+
 def check_building_ground(check, game: Path) -> None:
     """The ground inside a building: the landscape cut from under it, the collision
     query's filter, its doorways, its hall way's frame and the way down to its pod."""
@@ -24589,7 +24653,7 @@ def run(game: Path) -> int:
         check_batch_word_and_collision_flags,
         check_capture, check_building_entry, check_pod_zone, check_door_shot,
         check_building_lighting,
-        check_basement_triangulation, check_building_ground,
+        check_basement_triangulation, check_portal_fade, check_building_ground,
         check_building_route, check_mission_03_ways,
         check_unit_capture, check_capture_voice, check_mission_04_capture,
         check_repair,

@@ -136,7 +136,8 @@ pub fn body_sprites(world: &World, seconds: f64) -> Vec<parkan_render::body::Spr
 pub use parkan_world::play::Play;
 
 /// The lights, fog and dome colours at `seconds` into the mission, seen from `eye`
-/// looking along `forward`; `None` without an atmosphere.
+/// looking along `forward` with a field of view `field` radians across; `None` without an
+/// atmosphere.
 ///
 /// The clock starts at the file's closing time and plays the sections in turn; the sun
 /// object's two lights shine while a body is up, the first along the body's travel and the
@@ -146,6 +147,7 @@ pub fn lighting(
     seconds: f64,
     eye: Vec3,
     forward: Vec3,
+    field: f32,
 ) -> Option<(parkan_render::frame::Lighting, Vec<[f32; 4]>)> {
     use parkan_render::frame::{Light, linear};
     use parkan_sim::sky as atm;
@@ -176,6 +178,7 @@ pub fn lighting(
         fog_start: sky.fog_start,
         fog_end: sky.fog_end,
         eye,
+        field,
         clock_ms: seconds * 1000.0,
     };
     let colours = sky

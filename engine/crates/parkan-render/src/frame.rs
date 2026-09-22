@@ -40,6 +40,9 @@ pub struct Lighting {
     pub fog_start: f32,
     pub fog_end: f32,
     pub eye: Vec3,
+    /// The eye's field of view across, radians, which a portal quad's fade is scaled by
+    /// (docs/24, "A building is drawn cell by cell through its portals").
+    pub field: f32,
     /// The world clock, ms, that material tracks play on.
     pub clock_ms: f64,
 }
@@ -59,6 +62,7 @@ impl Default for Lighting {
             fog_start: 0.0,
             fog_end: f32::MAX,
             eye: Vec3::ZERO,
+            field: parkan_world::models::PORTAL_FIELD,
             clock_ms: 0.0,
         }
     }
@@ -77,6 +81,7 @@ pub struct FrameUniform {
     /// Start, end; then the height nothing below draws at, where w is 1 (a reflection's clip
     /// plane).
     pub fog: [f32; 4],
+    /// The eye, and in w its field of view across.
     pub eye: [f32; 4],
     /// x 1 where the instances draw in their paint, as a HUD panel's view does.
     pub paint: [f32; 4],
@@ -99,7 +104,7 @@ impl FrameUniform {
             scene_colour: rgb(l.scene_colour),
             fog_colour: rgb(l.fog_colour),
             fog: [l.fog_start, l.fog_end, 0.0, 0.0],
-            eye: [l.eye.x, l.eye.y, l.eye.z, 1.0],
+            eye: [l.eye.x, l.eye.y, l.eye.z, l.field],
             paint: [0.0; 4],
         }
     }

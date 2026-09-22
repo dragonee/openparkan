@@ -31,11 +31,83 @@ pub const NO_LIGHTMAP: u16 = 0xFF;
 /// stand between the rooms").
 pub const PORTAL_MATERIALS: [&str; 3] = ["DEFAULT", "PORTAL_001", "PORTAL_004"];
 
-/// Whether a face of material `name` is a portal: a doorway or room opening, which is not
-/// drawn. A mover and a round pass it by its batch's word ([`passing_triangles`]), which the
-/// same quads, and only they, carry.
+/// Whether a face of material `name` is a portal material: a doorway or room opening. A mover
+/// and a round pass a portal by its batch's word ([`passing_triangles`]), and it is drawn by
+/// that word too ([`Portal`]).
 pub fn doorway(name: &str) -> bool {
     PORTAL_MATERIALS.iter().any(|m| name.eq_ignore_ascii_case(m))
+}
+
+/// The batch word's portal bit: the doorway and portal quads between a building's cells, 633
+/// of the install's 15153 batches (docs/24, "A building is drawn cell by cell through its
+/// portals").
+pub const BATCH_PORTAL: u32 = 0x8;
+/// A portal whose quad fades in close by, as a sign does: the 66 `PORTAL_001` and `PORTAL_004`
+/// batches, and no other (`Terrain.dll:0x1002c4ea`).
+pub const BATCH_PORTAL_SIGN: u32 = 0x10;
+/// A portal whose quad is never seen and whose room is always drawn: 170 `DEFAULT` batches
+/// (`0x1002c5ae`).
+pub const BATCH_PORTAL_OPEN: u32 = 0x40;
+
+/// `PortalNearDist` and `PortalFarDist`, the render settings' entries 27 and 28 at their
+/// compiled defaults (docs/10, "The render settings"), which `CShade` keeps at `+0x1660` and
+/// `+0x1664` (`0x10046d77`).
+pub const PORTAL_NEAR_DIST: f32 = 75.0;
+pub const PORTAL_FAR_DIST: f32 = 95.0;
+/// The field of view, in radians across, at which a portal's distances are the settings' own:
+/// they are scaled by 1.3 (`0x1009a908`) and divided by the camera's field (`0x1002c410`).
+pub const PORTAL_FIELD: f32 = 1.3;
+/// A sign's fade, on the square root of its distance, times the field (`0x1009a8ec`,
+/// `0x1009a8f4`).
+pub const SIGN_NEAR: f32 = 2.6;
+pub const SIGN_FAR: f32 = 7.8;
+
+/// How a portal quad is drawn (`Terrain.dll:0x1002c4d0`, docs/24, "A building is drawn cell by
+/// cell through its portals"). A portal whose word carries [`BATCH_PORTAL_OPEN`] is never seen,
+/// and is not built at all.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Portal {
+    /// A `DEFAULT` doorway: gone within [`PORTAL_NEAR_DIST`], black from [`PORTAL_FAR_DIST`]
+    /// on, and beyond it the room it opens onto is not drawn.
+    Gate,
+    /// A `PORTAL_*` sign: gone within a few units, whole from about 36 on.
+    Sign,
+}
+
+impl Portal {
+    /// The kind a batch's word gives, `None` for a batch that is no portal or is never seen.
+    pub fn of(word: u32) -> Option<Self> {
+        if word & BATCH_PORTAL == 0 || word & BATCH_PORTAL_OPEN != 0 {
+            return None;
+        }
+        Some(if word & BATCH_PORTAL_SIGN != 0 { Self::Sign } else { Self::Gate })
+    }
+
+    /// The alpha its quad draws with, `distance` from the camera to the quad's first corner,
+    /// under a field of view of `field` radians across (`0x1002c4d0`): it replaces the
+    /// material's ambient alpha, which the device takes as the alpha (docs/07).
+    pub fn alpha(self, distance: f32, field: f32) -> f32 {
+        let [near, far, root] = self.range();
+        let at = if root > 0.5 { distance.max(0.0).sqrt() } else { distance };
+        ((at - near / field) / ((far - near) / field)).clamp(0.0, 1.0)
+    }
+
+    /// Its fade as the model shader takes it: where it starts and where it is whole under a
+    /// field of one radian, and 1 where it runs on the square root of the distance.
+    pub fn range(self) -> [f32; 3] {
+        match self {
+            Self::Gate => [PORTAL_FIELD * PORTAL_NEAR_DIST, PORTAL_FIELD * PORTAL_FAR_DIST, 0.0],
+            Self::Sign => [SIGN_NEAR, SIGN_FAR, 1.0],
+        }
+    }
+}
+
+/// A portal quad's batch as drawn: its kind, and its first corner in the model's frame, from
+/// which the camera's distance is taken (the primitive's first vertex, `0x1003c340`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PortalQuad {
+    pub kind: Portal,
+    pub anchor: [f32; 3],
 }
 
 /// Which of `mesh`'s triangles wear a [`doorway`] material, by the batch that covers each:
@@ -92,6 +164,9 @@ pub struct Group {
     pub look: Look,
     /// A lit batch's lightmap page, by index into the store's textures.
     pub lightmap: Option<usize>,
+    /// A portal quad's batch, which fades by its distance from the camera and is filed
+    /// translucent, as every batch whose word carries 8 is (`Terrain.dll:0x1004552a`).
+    pub portal: Option<PortalQuad>,
 }
 
 /// What a model's batches resolve through: a material's look, and a lightmap page.
@@ -141,10 +216,21 @@ impl Model {
             usize::from(slot.first_batch)..usize::from(slot.first_batch) + usize::from(slot.batch_count);
         for batch in batches.filter_map(|b| mesh.batches.get(b)) {
             let name = wear.materials.get(usize::from(batch.material)).cloned().unwrap_or_default();
-            // A portal quad is not drawn: it is the opening between a building's cells, and
-            // `CBuilding` draws the cell beyond it instead (docs/24, "Portal quads stand
-            // between the rooms").
-            if doorway(&name) {
+            // A portal quad fades by its distance from the camera, and one that is never seen
+            // is not built (docs/24, "A building is drawn cell by cell through its portals").
+            //
+            // STAND-IN: docs/24-motion.md#a-building-is-drawn-cell-by-cell-through-its-portals--read
+            // -- no cell is culled: beyond far the game leaves a doorway's room undrawn, and here
+            // it is drawn behind the black the doorway's fade reaches there. And 57 batches wear
+            // `DEFAULT` with no portal bit: three trees, four internal systems, three turrets and
+            // some buildings' lower levels of detail. Nothing in the draw read skips them, so the
+            // game draws them black; they are left out here, as every portal material was
+            // before, until they are looked at.
+            let portal = Portal::of(batch.flags);
+            if batch.flags & BATCH_PORTAL != 0 && portal.is_none() {
+                continue;
+            }
+            if portal.is_none() && doorway(&name) {
                 continue;
             }
             let look = skins.look(&name)?;
@@ -169,7 +255,13 @@ impl Model {
             }
             let count = self.indices.len() as u32 - start;
             if count > 0 {
-                self.groups.push(Group { start, count, look, lightmap });
+                // The distance is taken to the quad's first corner: the first vertex the
+                // primitive holds, its first triangle's first (`0x10045149`).
+                let portal = portal.map(|kind| PortalQuad {
+                    kind,
+                    anchor: mesh.triangles.get(first).map_or([0.0; 3], |t| place(usize::from(t[0])).position),
+                });
+                self.groups.push(Group { start, count, look, lightmap, portal });
             }
         }
         Ok(())
@@ -447,6 +539,47 @@ mod tests {
         let xs: Vec<f32> = cockpit.vertices.iter().map(|v| v.position[0]).collect();
         assert_eq!(xs, vec![2.0, 0.0, 2.0]);
         assert!(cockpit.vertices.iter().all(|v| v.position[2] == 0.0));
+    }
+
+    #[test]
+    fn a_portals_word_says_how_it_fades() {
+        // The install's six portal words (docs/24, "A building is drawn cell by cell").
+        assert_eq!(Portal::of(0x108), Some(Portal::Gate));
+        assert_eq!(Portal::of(0x4108), Some(Portal::Gate));
+        assert_eq!(Portal::of(0x118), Some(Portal::Sign));
+        assert_eq!(Portal::of(0x4118), Some(Portal::Sign));
+        assert_eq!(Portal::of(0x148), None, "never seen");
+        assert_eq!(Portal::of(0x4148), None, "never seen");
+        assert_eq!(Portal::of(0x100), None, "no portal");
+        // At the game's 1.3 rad a doorway is gone to 75 and black from 95; zoomed in to half
+        // the field, both distances double.
+        let gate = |d: f32, field: f32| Portal::Gate.alpha(d, field);
+        let near = |a: f32, b: f32| (a - b).abs() < 1e-5;
+        assert!(near(gate(74.0, 1.3), 0.0) && near(gate(85.0, 1.3), 0.5) && near(gate(96.0, 1.3), 1.0));
+        assert!(near(gate(170.0, 0.65), 0.5));
+        // A sign on the square root of its distance: gone within 4, whole from 36.
+        let sign = |d: f32| Portal::Sign.alpha(d, 1.3);
+        assert!(near(sign(3.9), 0.0) && near(sign(16.0), 0.5) && near(sign(36.1), 1.0));
+    }
+
+    #[test]
+    fn a_portal_batch_builds_a_fading_group_and_one_never_seen_builds_none() {
+        let mut loaded = cockpit_mesh();
+        loaded.mesh.batches[0].flags = 0x4108;
+        loaded.wear.materials[0] = "DEFAULT".to_owned();
+        let model = build_node(&loaded, 0, 0, &mut Fake).unwrap().expect("the doorway");
+        assert_eq!(model.groups[0].portal, Some(PortalQuad { kind: Portal::Gate, anchor: [0.0; 3] }));
+        // Its first corner is the first triangle's first.
+        loaded.mesh.triangles[0] = [2, 1, 0];
+        let model = build_node(&loaded, 0, 0, &mut Fake).unwrap().expect("the doorway");
+        assert_eq!(model.groups[0].portal.map(|p| p.anchor), Some([0.0, 1.0, 0.0]));
+        loaded.mesh.batches[0].flags = 0x148;
+        assert!(build_node(&loaded, 0, 0, &mut Fake).unwrap().is_none(), "an open portal is not drawn");
+        // A plain batch is no portal.
+        loaded.mesh.batches[0].flags = 0x100;
+        loaded.wear.materials[0] = "HULL".to_owned();
+        let model = build_node(&loaded, 0, 0, &mut Fake).unwrap().expect("the hull");
+        assert_eq!(model.groups[0].portal, None);
     }
 
     #[test]

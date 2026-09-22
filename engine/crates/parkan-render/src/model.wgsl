@@ -15,6 +15,7 @@ struct Frame {
     // x start, y end: linear range fog from the eye (docs/10-sky.md, "Fog"); z the height
     // nothing below draws at where w is 1, a reflection's clip plane.
     fog: vec4<f32>,
+    // The eye; w its field of view across, radians.
     eye: vec4<f32>,
     // x 1: every instance draws flat in its paint (a HUD panel's view of a unit).
     paint: vec4<f32>,
@@ -55,6 +56,11 @@ struct Look {
     cell: vec4<f32>,
     // x 1: a lit batch, its lightmap in place of the scene's lights; y 1: the alpha test.
     lit: vec4<f32>,
+    // A portal quad's first corner in the model's frame; w 1 on a portal quad.
+    portal: vec4<f32>,
+    // Its fade under a field of one radian: where it starts, where it is whole; z 1 where it
+    // runs on the square root of the distance.
+    portal_range: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> frame: Frame;
@@ -79,7 +85,25 @@ struct VertexOut {
     @location(2) world: vec3<f32>,
     @location(3) paint: vec4<f32>,
     @location(4) lightmap: vec2<f32>,
+    // The alpha a portal quad draws with in place of its material's; 1 on anything else.
+    @location(5) fade: f32,
 };
+
+// A portal quad's alpha by the eye's distance from its first corner (Terrain.dll:0x1002c4d0,
+// docs/24, "A building is drawn cell by cell through its portals"): 0 up to where its fade
+// starts, 1 from where it is whole, both divided by the field of view.
+fn portal_fade() -> f32 {
+    if look.portal.w < 0.5 {
+        return 1.0;
+    }
+    let corner = (instance.model * vec4<f32>(look.portal.xyz, 1.0)).xyz;
+    let d = distance(corner, frame.eye.xyz);
+    let at = select(d, sqrt(d), look.portal_range.z > 0.5);
+    let field = max(frame.eye.w, 0.001);
+    let near = look.portal_range.x / field;
+    let far = look.portal_range.y / field;
+    return clamp((at - near) / max(far - near, 0.001), 0.0, 1.0);
+}
 
 @vertex
 fn vs_main(v: VertexIn) -> VertexOut {
@@ -92,6 +116,7 @@ fn vs_main(v: VertexIn) -> VertexOut {
     out.uv = v.uv;
     out.lightmap = v.lightmap;
     out.paint = instance.paint;
+    out.fade = portal_fade();
     return out;
 }
 
@@ -129,7 +154,8 @@ fn fs_main(v: VertexOut) -> @location(0) vec4<f32> {
     // texture's times the material's ambient alpha.
     let lights = frame.light_colour.rgb * a + frame.second_colour.rgb * b;
     let lit = min(vec3<f32>(1.0), look.emissive.rgb + frame.scene_colour.rgb + look.diffuse.rgb * lights);
-    let alpha = texel.a * look.diffuse.a;
+    // A portal quad's fade stands in for the material's ambient alpha (Terrain.dll:0x1002c63a).
+    let alpha = texel.a * select(look.diffuse.a, v.fade, look.portal.w > 0.5);
     // Every blend mode but 0 alpha-tests GREATEREQUAL against ALPHAREF 1 (docs/07, "What a
     // blended batch writes"): an 8-bit alpha of 0 is dropped, and with it its depth.
     if look.lit.y > 0.5 && round(alpha * 255.0) < 1.0 {

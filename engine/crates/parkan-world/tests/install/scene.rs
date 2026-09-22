@@ -328,10 +328,10 @@ fn wrapped(a: f32, b: f32) -> f32 {
 
 #[test]
 #[ignore = "needs the game install"]
-fn the_large_factorys_portal_quads_are_not_drawn_so_its_doors_and_rooms_show() {
+fn the_large_factorys_portal_quads_fade_by_their_word_and_the_open_ones_are_never_drawn() {
     use parkan_formats::mission;
     use parkan_world::assembly::Assembly;
-    use parkan_world::models;
+    use parkan_world::models::{self, Portal};
     use parkan_world::textures::TextureStore;
 
     let game = gamedir::find(None).expect("a Parkan install: set PARKAN_DIR");
@@ -339,7 +339,7 @@ fn the_large_factorys_portal_quads_are_not_drawn_so_its_doors_and_rooms_show() {
     let mut store = TextureStore::open(&game).unwrap();
     // `fr_b_plant` wears 87 `DEFAULT` and 16 `PORTAL_*` triangles: the black doorway a step
     // in front of each door, and the openings between its rooms (docs/24, "The doorways are
-    // black quads").
+    // portal quads").
     let part = assembly
         .parts(mission::KIND_BUILDING, "UNITS\\BUILDS\\PLANT\\lplant01.dat")
         .into_iter()
@@ -348,7 +348,6 @@ fn the_large_factorys_portal_quads_are_not_drawn_so_its_doors_and_rooms_show() {
     let loaded = assembly.mesh(&part.reference).expect("its mesh");
     let portals = models::portal_triangles(&loaded.mesh, &loaded.wear);
     assert_eq!(portals.iter().filter(|&&p| p).count(), 103, "its portal triangles");
-    // None of them reaches the drawn model.
     let model = models::build_model(
         &mut assembly,
         &mut store,
@@ -358,10 +357,21 @@ fn the_large_factorys_portal_quads_are_not_drawn_so_its_doors_and_rooms_show() {
     .unwrap()
     .expect("the Large Factory");
     assert!(!model.groups.is_empty());
+    // Its level 0 draws the doorways as gates and the green signs as signs, each by its batch
+    // word (docs/24, "A building is drawn cell by cell through its portals"); the open ones,
+    // the entrance on `o01` among them, are not drawn, and no portal material is drawn as
+    // anything but a portal.
+    let kinds: Vec<(String, Portal)> = model
+        .groups
+        .iter()
+        .filter_map(|g| g.portal.map(|p| (g.look.material.to_ascii_uppercase(), p.kind)))
+        .collect();
+    assert!(kinds.iter().all(|(m, k)| (m == "DEFAULT") == (*k == Portal::Gate)), "{kinds:?}");
+    let count = |kind| kinds.iter().filter(|(_, k)| *k == kind).count();
+    assert_eq!((count(Portal::Gate), count(Portal::Sign)), (32, 4), "{kinds:?}");
     assert!(
-        !model.groups.iter().any(|g| models::doorway(&g.look.material)),
-        "a portal quad is drawn: {:?}",
-        model.groups.iter().map(|g| g.look.material.clone()).collect::<Vec<_>>()
+        !model.groups.iter().any(|g| g.portal.is_none() && models::doorway(&g.look.material)),
+        "a portal material drawn as no portal"
     );
     // A robot wears none at all, so nothing of it is dropped.
     let hero = assembly
