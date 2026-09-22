@@ -185,16 +185,19 @@ stops it (`0x1000ba17`, `0x1000ba45`). For the query:
    `0x207`) is 1, a flyer (`0x1000baf4`), the builder's position and the model's
    are looked up (`0x100366b0`, `0x10043220`) and a path is searched between them
    (`0x10020910`). A search that fails or comes back empty: *"BAD PATH"*, 0.
+   It is **the walker's own search** ([below](#the-path-and-the-exits--read-and-measured)).
 4. **The map.** The sphere must lie strictly inside the world box
    (`MBehaviour+0x690`) in x and y: else *"Intersects with Boundary"*, 0.
 5. **Other buildings.** For every other building (the world's class-3 objects),
    the distance between the two spheres' centres across the ground must be at
    least the model's radius plus the other's (slot 16 again): else *"Intersects
    with …"*, 0 (`0x1000be44`–`0x1000bf21`).
-6. **Its vertices.** Each vertex of the model's interface `0x303` whose flag word
-   has bit 1 must fall on an areal of `GetSystemArealMap`'s map whose record's
-   `+0x20` is set: else *"HallVertex …"*, 0 (`0x1000bf4a`–`0x1000bfa9`). That
-   `0x303` is the hall way, and what bit 1 marks, are *guesses*.
+6. **Its exits.** Each vertex of the model's hall way (interface `0x303`) whose
+   flag word has bit 0 — an **exit** — must fall on an areal of
+   `GetSystemArealMap`'s map whose first flag word (`+0x20`) is set, a walkable
+   one: else *"HallVertex … is out of map"* or *"… is in Non-Reachable Areal"*, 0
+   (`0x1000bf4a`–`0x1000bfa9`). This is *read* now
+   ([below](#the-path-and-the-exits--read-and-measured)).
 7. **The basement** (`CLandscape::CheckMaxBasementAngle`, `Terrain.dll:0x10014c60`,
    through `+0x40` slot 8 at `0x1000c128`). Each outer-contour vertex is dropped
    onto the landscape; every inner-contour vertex is set to the mean of those
@@ -210,6 +213,65 @@ stops it (`0x1000ba17`, `0x1000ba45`). For the query:
    triangles labelled 1), the same triangulation the insertion lets in
    ([03-terrain.md](03-terrain.md#the-pieces-are-triangles-of-a-constrained-delaunay-triangulation--read-and-measured)).
 8. Otherwise *"Place OK"*, 1.
+
+**Steps 2 to 6 need a hall way.** The query first asks the model for interface
+`0x303` and then `0x17` (`0x1000baa4`, `0x1000babc`), and without either it goes
+straight to the basement (`0x1000c108`). `0x303` **is the hall way** (*read*): the
+agent build calls `CreateHallWay` (`AniMesh.dll:0x100034fe`, the import at
+`0x100192d6`) and files what answers `0x303` at `+0x180` (`0x1000350c`), which is
+what the agent's own `QueryInterface` hands back for `0x303` (`0x100018fc`). So a
+model with no hall way would skip the sphere, the path, the map and the other
+buildings. *Measured*: none does — all 12 first buildings a builder puts up carry
+a hall way with an exit, 55 exits in all (the generator 11, the mine 3, the
+storage 4, the plant 20, the Outpost 2, the Main Teleport 3, the institute 3,
+the three bunkers 1, 3 and 3, the two towers 1 each).
+
+#### The path and the exits — *read*, and *measured*
+
+**The path is the walker's own search.** It runs on the behaviour's graph at
+`MBehaviour` `+0x1e0`, the same `MWorldGraph` `MWalker::SetTarget` runs
+([24-motion.md](24-motion.md#the-global-path--read-and-measured)), with the same
+two gates set the walker's way (`0x1000bcf8`–`0x1000bd17` against
+`0x10036934`–`0x1003694c`): the graph's `+0x30`, the `CanFly` word, is 0, so no
+flyer's link is crossed, and its `+0x34`, the size a hall-way vertex gates, is the
+builder's variable `0x201`, its size class. Its start is the builder's own place —
+the 36-byte record at `MBehaviour` `+0x124`, the walker's `+0x6c` with its building
+and vertex (`0x1000bb0d`) — and its goal the model's sphere centre as a place
+(`+0x48` slot 48, `0x1000bba2`); `0x10043220` turns each into a graph node, the areal
+under it or the hall-way vertex it holds. The search fails, or comes back with no
+node, when no linked way joins the two or its 2048 nodes run out first, which is where
+the walker would refuse the same goal: an areal whose word is 0 has no links, so a sphere centred on one, or a
+builder standing on one, fails.
+
+**Step 6 tests the exits.** The loop runs `MHallWay` slot 3, the vertex count, and
+slot 4 for each (`ArealMap.dll:0x1000a6b0`, `0x1000a6c0`); slot 4 carries the vertex
+into the world through its node with slot 5 (`0x1000a760`) and hands back its flag
+word at `+0xc`. The test is `and 1` (`0x1000bf65`): **flag 1, an exit**, the vertex
+the areal map links to the walkable areal under it
+([24-motion.md](24-motion.md#the-global-path--read-and-measured)). Its areal comes
+from the system areal map's slots 7 and 6 and its first flag word is read at
+`+0x20`, exactly as `SetTarget` reads a goal's (`0x1000bf7a`–`0x1000bfa1` against
+`Behavior.dll:0x1003bd47`–`0x1003bd67`). **So a building may stand only where every
+door it will be walked in by is on walkable ground**, and the builder can get there.
+
+*Measured* on Mission 03, a storage at yaw 0 on every point of a 20 m grid, 10,000
+of them, the builder `tut3_b` named: the test without the two steps passes 205, with
+them 189. The 16 it now refuses all have an exit off the walkable areals, 3 of them no
+way from the builder besides; on no point does the path alone refuse, since a site
+on one of the walled-off patches puts an exit off the walkable ground too. The Medium
+Tower at yaw 0: 505 without, 453 with. The lode itself passes at all 16 turns of the
+mine — the builder's way there is found and its three exits all stand on walkable
+areals — which is the green the recording shows at 184 s. On the missions' own
+buildings the same posing lands the Large Factory's exit 67 on Tut_2 at (337.4,
+790.0), as [24-motion.md](24-motion.md#the-hall-way-gates-in-the-shipped-buildings--read-and-measured)
+measured it, and puts 58 of the 73 exits of Missions 02–04's placed buildings on
+walkable areals: the designers' generators on high ground are the exception, and no
+test put them there.
+
+**On Mission 04 a Small Research Center fits nowhere** (*measured*): of 7,225 points
+on a 20 m grid, 700 are walkable, at yaw 0 its three exits — 80 m out — all stand on
+walkable areals at 212 and its basement and sphere pass at 43, and at no point of any
+of eight turns do both.
 
 **The query is the model's alone** (*read*, with a byte search). Its only
 callers are `iron3d.dll`'s wrapper `0x10033d10` (`0x10033d29`, `0x10033d66`),
@@ -444,11 +506,13 @@ frames taken every half second):
 
 Against the read sequence
 ([above](#the-construction-sphere--read-and-measured)), with the building made
-between 194.5 and 195.0 s: the sign for 5 s, the clearing about 200 s, the
-dome's obstacle and then the ray, the dome and the kill from about 230 s, the ray
-stopped at about 235 s and the task done at about 236 s — each within the
-half-second sampling. The builder's own task ends as the building appears, and it
-walks out once the sign's phase ends. What the site shows of the unfinished mine
+between 194.5 and 195.0 s: the sign's first phase over at about 200 s and the
+clearing begun, the dome's obstacle and then the ray, the dome and the kill from
+about 230 s, the ray stopped at about 235 s and the task done at about 236 s — each
+within the half-second sampling. The builder's own task ends as the building
+appears, and it walks out once the sign's phase ends. The sign stays up through the
+clearing, as no code is sent there, and the recording shows it there
+([below](#what-the-buildings-controller-does-with-the-codes--read-and-measured)). What the site shows of the unfinished mine
 before the dome was not made out: the recording's views of it are distant or
 behind the dome.
 
@@ -457,7 +521,7 @@ behind the dome.
 2. On the takt after it arrives, create the scheme's first building at the
    placement matrix for the builder's clan, take its ore cost from the builder
    (going below zero), and end the builder's task.
-3. Give the building order 18, parameter 0: the 41 s sign, clearing, dome, ray
+3. Give the building order 18, parameter 0: the 41 s of sign, clearing, dome, ray
    and kill of [the construction sphere](#the-construction-sphere--read-and-measured).
    The builder goes out with everyone else when the clearing phase starts.
 4. Hide the lode's plume from the moment the building exists
@@ -508,29 +572,37 @@ building**. It is a list of timed phases picked by the order's parameter
 length in seconds, and the task steps to the next when the length runs out
 (`0x10031680`):
 
-| parameter | given | phases (code, seconds) | total |
+| parameter | given | phases (code, seconds; *c* clears the area) | total |
 |---|---|---|---:|
-| 0 | a new building (`0x1001e007`) | 1 for 5 · — for 25 · — for 5 · 2 for 5 · 0 for 1 | 41 s |
-| 1 | the building being upgraded (`0x100335a1`) | `0x309` for 25 · — for 1 · 8 for 90 | 116 s |
+| 0 | a new building (`0x1001e007`) | 1 for 5 · — for 25 *c* · — for 5 *c* · 2 for 5 · 0 for 1 | 41 s |
+| 1 | the building being upgraded (`0x100335a1`) | `0x309` for 25 *c* · — for 1 · 8 for 90 | 116 s |
 | 2 | the building an upgrade made (`0x10033790`) | 10 for 3 · 0 for 1 | 4 s |
+
+A phase is 16 bytes — code, flags, clear, seconds — written by the three branches
+that log *"Construct array set"*, *"CloseSphere array set"* and *"array set"*
+(`0x10031253`, `0x100311fd`, `0x100311c0`). "—" is a code of −1, which the step does
+not send (`0x100312f8`). The flags: 8 on parameter 0's first phase; 1 on its third,
+on parameter 1's second and on parameter 2's first; 2 on the two last phases.
 
 What a phase does when it starts:
 
 - **Its code goes to the building's controller** (IControl slot 19,
-  `Control.dll:0x10004800`), except `0x309`, and is kept as behaviour property
-  `0x205`. A building controller's states each carry a request code at `+0x98`;
-  a state applies only when that is the current code or −1
-  (`Control.dll:0x10001140`). The controller's own code starts at **0**, the
-  constructor's (`0x10006ecf`), so a building applies its code-0 state — the one
-  that stops the ray — before any phase has sent it anything
-  ([24-motion.md](24-motion.md#a-states-use-count-and-its-request-code--read-and-measured)). Entering a state runs the state's **action group**
-  (`+0x90`, section 5; `Control.dll:0x1000c37c`, interpreter `0x10002800`).
+  `Control.dll:0x10004800`), except `0x309` and −1, and is kept as behaviour
+  property `0x205` (`0x1003130d`). **A phase with no code leaves the controller on
+  the last one**: a new building holds code 1 for its first 35 s. A building
+  controller's states each carry a request code at `+0x98`; a state applies only
+  when that is the current code or −1 (`Control.dll:0x10001140`). The controller's
+  own code starts at **0**, the constructor's (`0x10006ecf`)
+  ([24-motion.md](24-motion.md#a-states-use-count-and-its-request-code--read-and-measured)).
+  Entering a state runs the state's **action group** (`+0x90`, section 5;
+  `Control.dll:0x1000c37c`, interpreter `0x10002800`).
 - **Clearing the area.** Every unit within the sphere's radius + 15 (on start)
   or + 20 (on a phase change) is ordered `ORDER_ROBOT_LEAVE` to radius + 20
   from the building, unless it is already leaving or upgrading. A leaving unit
   keeps going while the building's code is 1 or `0x309` or `0x20c` is 1
-  (`0x1002c1ba`). This is the builder "escaping" — and, on an upgrade, the
-  builder is exempt because it is on `ORDER_ROBOT_UPGRADE`.
+  (`0x1002c1ba`). This is the builder "escaping" — and, on an upgrade, whose
+  first phase clears, the builder is exempt because it is on
+  `ORDER_ROBOT_UPGRADE`.
 - **The sphere as an obstacle.** A flag raises the sphere: the building's
   ground-plan obstacle becomes an octagon round the sphere, radius
   r / cos 22.5° + 20 (`0x1000a6f3`), re-registered on the areal map
@@ -540,26 +612,73 @@ What a phase does when it starts:
 - The last phase of parameters 0 and 2 carries a flag value 2 that the task's
   step does not test (it tests 1, 8 and 4); what reads it is *unknown*.
 
-**What the building's controller does with the codes** — *measured*: every
-one of the 30 `fortif.rlb` building controllers has 14 states, and the codes
-6, 1, 2, 0, 8 and 10 each open exactly one of them; no state in any other
-archive (1,270) has a code. The action groups (a plant's, the rest alike):
+### What the building's controller does with the codes — *read*, and *measured*
 
-| code | action group |
-|---|---|
-| 1 | start effect 9002 — the **sign** (`B_Sphere_Sign`: glow, `build_sign.wav`) |
-| 2 | its state kills inside the sphere; the state before it on the chain starts 9100 — the **dome** (`B_Sphere_Main`: four `NE_Shield3`, `build_sphere.wav`) — and 9001 — the **ray** (`B_Sphere_Start`: plasma, lightning, `build_ray.wav`), stops the sign, and **kills inside the sphere** |
-| 8, 10 | **kill inside the sphere** |
-| 0 | stop the ray |
+Every one of the 30 `fortif.rlb` building controllers has 14 states, and the codes
+6, 1, 2, 0, 8 and 10 each open exactly one of them, an **anchor**; no state in any
+other archive (1,270) has a code. The planner's way to each is read
+([24-motion.md](24-motion.md#playing-a-state--read-and-measured)): when the anchor
+it is on stops applying, it queues the cheapest path to the anchor that does, and
+each state on the path runs its action group as it plays, one 250 ms step each.
+**Played through that planner, all 30 controllers take the same paths**
+(*measured*; the three factories also switch their chimneys' smoke off on code 8,
+and `fr_l_mtp`'s code-0 anchor steps at 50 ms rather than 5,000):
 
-Which state each code opens is *measured*; the path the controller takes
-between them (its transition table) is a *guess*. Code 6 is in every
-controller and in no phase.
+| the code changes | the states it plays, and their groups | then, on the anchor |
+|---|---|---|
+| 0 → 1 | action 1; **start the sign** in time mode 2 | nothing, every 250 ms |
+| 1 → 2 | **start the dome** and **the ray** in mode 1, switch the sign off, **kill** | **kill** every 250 ms |
+| 2 → 0 | switch the ray off, place the building (action 20), action 2 · **start the dome in mode 3** | nothing, every 5 s |
+| 0 → 8 | **start the dome** in mode 1 | **kill** every 250 ms |
+| 0 → 10 | **start the dome in mode 3** · place the building | **kill** every 250 ms |
+| 10 → 0 | — | nothing |
 
-The **kill** (action 21, `Control.dll:0x100033e6`) takes the building's
-construction sphere, finds every world object of classes `0x4`, `0x10` and
-`0x400` inside it, and kills each through its life system. That these classes
-are units is a *guess*.
+The effects are the sign, 9002 (`B_Sphere_Sign`: glow, `build_sign.wav`), the ray,
+9001 (`B_Sphere_Start`: plasma, lightning, `build_ray.wav`; `B_Sphere_Start_BT` on
+the bunkers and towers) and the dome, 9100 (`B_Sphere_Main`: four `NE_Shield3`,
+`build_sphere.wav`). The mode is action 10's second argument, which overrides the
+effect's own header mode ([11-effects.md](11-effects.md#how-an-effect-runs--read)):
+2 loops, 1 plays once through and 3 plays once backward. Code 6 is in every
+controller and in no phase. A new building's controller has made no move when its
+first code arrives, and plans from state 0; from the code-0 anchor there is no way
+to code 1's, so the order matters.
+
+**Where an action-5 effect stands** (*read*). The building's load group makes the
+three at load (action 5, `Control.dll:0x10002e0e`), each an instance under its own
+id, in the header's time mode 0, whose *t* stays 0 — and all 133 blocks of the four
+effects have windows beginning above 0, so an idle one draws and sounds nothing
+([11-effects.md](11-effects.md#time-mode-0-waits-for-a-start--read-and-measured)).
+Its frame is the controller's construction sphere, `+0x38` slot 12 with 2
+(`0x10002e6f`), put into the 16-float matrix kept at `0x10041ba8`. The initialiser
+(`0x10003d70`) writes that matrix as an identity with its axes turned round; the
+handler scales its three axes by the sphere's radius, makes the sphere's centre its
+translation, and hands it over through manager slot 10 with 2 (`0x10002f8a`) — the
+node's world frame, which the manager inverts it against (`Effect.dll:0x10004930`,
+`0x10005140`), so the matrix stands in the world. In the column order action 4 writes
+its points into (`0x10003780`), **its first axis is world z**, its second x and its
+third y. So the effect's depth — the axis its position channel travels, a stretched
+sprite's length and a dome's pole — **stands up**, the sphere's radius long. The
+ray's plasma falls along it from one radius over the centre toward the centre,
+`NE_PFire`'s (2, 0.4, 0.4) streaks stand upright, and the dome's shells sit on the
+centre, 1.5 then 1 radius across. A stream is not sized by its frame
+([11-effects.md](11-effects.md#a-control-point-frames-axes-are-depth-width-and-height--measured)),
+so the ray's clouds keep their own metres.
+
+**The kill** (action 21, `Control.dll:0x100033e6`) takes the building's
+construction sphere and asks the world (`+0x44` slot 3) for its objects inside it
+under the class mask `[0x1003b1c8] | [0x1003b1a8] | [0x1003b1b0]` — entries 10, 2
+and 4 of a table at `0x1003b1a0` whose entry k is `1 << k` — so **`0x414`, classes 2,
+4 and 10**, which the old reading had as the classes `0x4`, `0x10` and `0x400`.
+Class 4 is a unit and 10 a tree or a stone
+([30-turrets.md](30-turrets.md#not-established)); what answers class 2 is not
+established there either. Each is killed through `ILifeSystem` slot 7
+(`0x1000eb70`), which takes the object's whole total as a loss **unless its
+invulnerability byte is set** — `+0x5ac` of the life system (`0x1000eb76`), the byte
+action 17 clears before it calls the same slot (`0x100033d7`), which is control
+`+0x5b0`, property 162 ([26-damage.md](26-damage.md)). A tree and a stone carry a
+life system ([26-damage.md](26-damage.md#vegetation-and-rock-carry-node-life--read-and-measured)).
+So **the sphere fells the trees and stones inside it** as it kills the units, and
+**a builder upgrading, invulnerable, stands through its own building's kill**.
 
 **The kill repeats every 250 ms while the code is held** (*read*, and
 *measured*). The controller runs its action group each time it takes a state
@@ -578,28 +697,46 @@ self-edge included.
 
 So while the building's code stays 2, 8 or 10, the state takes itself again
 every step and kills inside the sphere four times a second:
-- about 20 times in a new building's 5-second code-2 phase;
-- for the rest of the upgrade on the old building, from 26 s until it is
+- about 20 times in a new building's 5-second code-2 phase, the state before it
+  killing once more as it passes;
+- for the rest of the upgrade on the old building, from 26.25 s until it is
   replaced at 50 s;
-- about 12 times in the new building's 3-second code-10 phase.
-
-The state before code 2's, which starts the dome and the ray, kills once more
-as it passes.
+- about 10 times in the new building's 3-second code-10 phase, from 0.5 s.
 
 **The sphere** is `CBuilding`'s construction sphere (`Terrain.dll:0x1005bd70`):
 built round the building's outer contours ("Illegal placement" without them),
 with 15 more radius on a mine (`0x1005c50c`).
 
 So a **new building**, which appears the moment the builder arrives, shows the
-sign for 5 s; for the next 30 s it sends everyone out, with the dome's obstacle
-up for the last 5; then the dome, the ray and the kill come on for 5 s, the ray
-stops, and a second later the task ends and the building is done — 41 s. An
-**upgrade** sends everyone but the builder out of the old building's sphere for
-25 s and then holds the dome with its kill (code 8); at 50 s the upgrade
-replaces the building, and the new one kills once more (code 10) and finishes
-in 4 s. *Measured*: 24 of 30 controllers name the three sphere effects; the 5
-bunkers and towers use `B_Sphere_Start_BT` for the ray; the six without are the
-ruins and main teleports, which nothing builds.
+sign from the start; after 5 s it sends everyone out for 30 s, the sign still up
+and the dome's obstacle up for the last 5; then the sign goes, the ray and the dome
+play through while the kill comes on for 5 s, the ray is switched off, and the dome
+plays itself back out over its next 4 s — a second into that the task ends and the
+building is done, 41 s. The dome, 6 s long, shows its first shells only from a third
+of the way through, so it rises 2 s after the ray starts and has just reached its
+second pair when code 0 turns it round. An **upgrade** sends everyone but the builder
+out of the old building's sphere as it starts, and 26 s in raises the dome with its
+kill (code 8); at 50 s the upgrade replaces the building, and the new one comes up
+under its dome playing backward, kills again (code 10) and finishes in 4 s.
+*Measured*: 24 of 30 controllers name the three sphere effects; the 5 bunkers and
+towers use `B_Sphere_Start_BT` for the ray; the six without are the ruins and main
+teleports, which nothing builds.
+
+**Seen**, in the recording of *The Field Base*
+([above](#building-a-building-tick-by-tick--read-and-seen)), frames taken at the
+seconds named:
+- **The sign stays up through the clearing**: a cyan glow at the site at 203, 220
+  and 226 s, 8 to 31 s after the mine appeared. It flickers between frames (none
+  at 224 or 228 s), as a 1.5 s loop of sprites whose windows open and close would.
+- **The ray stands up**: at 232 s a column of lightning rises straight from the
+  site.
+- **The dome's pole is up**: at 236 s an upright blue dome covers the site, and at
+  237.0 s a translucent one over the finished mine; by 237.5 s it is gone. That is
+  the read's backward dome: its last pair of shells draws at full strength, and the
+  first pair fades as its progress to the power 10 (the fade (0, 1, 10) at `+20`), so
+  played backward it is all but gone about 1.5 s after code 0 — which, the ray first
+  seen at 231.5 s, came at about 235.7 s. Rising, the same fade has it a faint shimmer
+  at 234 s.
 
 ### The beam — *read*, and *measured*
 
@@ -712,8 +849,25 @@ laser (`e_gun_lc_03`, `e_gun_mc_20`).
   ([23-economy.md](23-economy.md#a-mine-digs-to-500-and-then-a-draw-does-not-empty-it--read)).
 - What the pick's query record (first word `0xa`, `iron3d.dll:0x10035e82`) asks
   the world's segment query for, so which objects stop the cursor's ray.
-- That interface `0x303` is the hall way and what its vertex bit 1 marks, which
-  `IsPlacementValid` tests against the system areal map's `+0x20`.
+- ~~That interface `0x303` is the hall way and what its vertex bit 1 marks, which
+  `IsPlacementValid` tests against the system areal map's `+0x20`; and what its path
+  search asks.~~ — **read**: `0x303` is the hall way the agent build files at `+0x180`
+  (`AniMesh.dll:0x1000350c`), the bit is flag 1, an **exit**, and every exit must stand
+  on a walkable areal; the path is the walker's own search from the builder's place to
+  the sphere's centre, gated by its size class and crossing no flyer's link. All 12
+  first buildings carry a hall way, 55 exits in all, and on Mission 03 the two steps
+  refuse 16 of the 205 storage sites the rest of the test passes
+  ([The path and the exits](#the-path-and-the-exits--read-and-measured)).
+- ~~Which state each sphere code opens, where an action-5 effect is placed, and which
+  classes the sphere's kill takes.~~ — **read** and **measured**: the planner's paths
+  through all 30 building controllers start the sign looping on code 1, the ray and
+  the dome once through on 2, the dome backward on 0 and 10 and forward on 8; an
+  action-5 effect stands in a world frame at the sphere's centre whose first axis is
+  up, the sphere's radius long; and the kill takes classes 2, 4 and 10 — units, trees
+  and stones — sparing the invulnerable
+  ([What the building's controller does with the codes](#what-the-buildings-controller-does-with-the-codes--read-and-measured)).
+- How the world's query (the controller's `+0x44` slot 3) decides that an object lies
+  inside the kill's sphere — by its origin, its bounding sphere or its nodes.
 - What the game's `+0xe4` byte is (`0x10033d36`), under which a placement within
   400 of one of the level's `+0x728` records turns red.
 - Whether holding `,` or `.` turns the model again on the key's repeats.

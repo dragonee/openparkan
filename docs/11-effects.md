@@ -321,7 +321,7 @@ record's id.
 
 | mode | *t* |
 |---|---|
-| 0 | a value set from outside (slot `0x1c`), **0 until set** |
+| 0 | a value set from outside (slot `0x1c`), **0 until set** — and a start in another mode replaces it ([below](#time-mode-0-waits-for-a-start--read-and-measured)) |
 | 1 | (now − start) / (end − start): once through |
 | 2 | its fractional part: looping |
 | 3 | 1 − mode 1 |
@@ -370,6 +370,33 @@ action that calls each ([13-control.md](13-control.md#the-section-5-record--read
 update, or within 50 ms of a command to it. The emitters' own clock is
 **seconds since the instance started** (`0x1000846c`), which is what a phase
 "in seconds when negative" and a stream's interval count.
+
+### Time mode 0 waits for a start — *read*, and *measured*
+
+A header's time mode is only the mode an instance **starts life in**. Action 10
+hands the manager's start (slot `0x2c`) the record's v4 and v5 (`Control.dll:0x10002f9d`),
+and the start takes v5 as the mode, so a controller that starts an effect picks its
+clock whatever the header says. An instance made and not yet started runs in the
+header's mode, and in mode 0 its *t* is the value slot `0x1c` sets
+(`Effect.dll:0x100047b0`, into the instance's `+0x28`) — 0 until something sets it.
+
+**Nothing in `Control.dll` sets it** (*read*, a controlled negative): a sweep for
+calls through the controller's manager (`[ebp+0x3c]`, then an indirect call within
+twelve instructions) finds 22 calls at 13 slots — the start at `0x10002fad`, action
+4's and action 5's slot `0x28` at `0x10002e06` and `0x10002f8a`, the switch and delete
+among them — and none at `0x1c`.
+
+**So a mode-0 effect shows what its windows hold at 0**, and the construction
+sphere's three are made to show nothing. `B_Sphere_Sign`, `B_Sphere_Main`,
+`B_Sphere_Start` and `B_Sphere_Start_BT` are mode 0, and all **133** of their blocks
+open their windows above 0, the lowest at 0.001 (*measured*). A building's load group
+makes them (action 5) and they wait there, drawn and heard not at all, until the
+construction codes start them — the sign in mode 2, the ray and the dome in mode 1,
+the dome again in mode 3 ([32-builder.md](32-builder.md#what-the-buildings-controller-does-with-the-codes--read-and-measured)).
+The control is a building's screens and chimneys, which nothing starts: `f_pict_13`,
+`f_pict_08` and `smoke_fr_02` are mode 0 as well, and every one of their four blocks
+opens its window at 0, so they run at *t* = 0 for good
+([13-control.md](13-control.md#a-buildings-load-group--read-and-measured)).
 
 ### The jitter, flag 1, and the dead flag 8 — *read*, and *measured*
 

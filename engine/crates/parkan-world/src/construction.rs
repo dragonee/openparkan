@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use glam::Vec3;
 use parkan_formats::controls::BuildScheme;
 use parkan_formats::mission::{self, KIND_BUILDING, Mission, Value};
-use parkan_formats::{basement, control, gamedir};
+use parkan_formats::{basement, control, gamedir, hallway};
 use parkan_sim::behaviour::{BuildState, Task, UpgradeState};
 use parkan_sim::combat::Event;
 use parkan_sim::effects::Frame;
@@ -17,6 +17,7 @@ use parkan_sim::solid::Solid;
 
 use crate::building_fx::BuildingEffects;
 use crate::buildings::Building;
+use crate::capture::PLACE_EXIT;
 use crate::factory::Factory;
 use crate::fx::Owner;
 use crate::places::Places;
@@ -48,8 +49,11 @@ pub const KILL_STEP_MS: f64 = 250.0;
 pub const SIGN: i32 = 9002;
 pub const RAY: i32 = 9001;
 pub const DOME: i32 = 9100;
-/// The time mode the sphere's effects run in: looping.
-pub const SPHERE_TIME_MODE: u32 = 2;
+/// The modes action 10 starts the sphere's effects in (docs/11, "Effect time"): the sign
+/// loops, the ray and the dome play once through, and the dome plays back out.
+pub const TIME_ONCE: u32 = 1;
+pub const TIME_LOOP: u32 = 2;
+pub const TIME_REVERSE: u32 = 3;
 /// The construction sphere's action, filed in a building's load group.
 pub const ACT_SPHERE_EFFECT: i32 = 5;
 /// The takt after a builder arrives: `now − +0x128 ≥ 1000 ms`, `+0x128` only ever zero
@@ -65,8 +69,10 @@ pub struct Phase {
     pub clear: bool,
 }
 
-/// Order 18 with parameter 0, a new building's sphere (`0x10031150`): the sign for 5 s, 30 s
-/// clearing the area, the dome, ray and kill for 5 s, the ray stopped for 1 s.
+/// Order 18 with parameter 0, a new building's sphere (`0x10031150`, the 16-byte records
+/// "Construct array set" writes: code, flags, clear, seconds): code 1 for 5 s, 30 s with no
+/// code sent (−1), clearing the area, then 2 for 5 s and 0 for 1. A phase with no code leaves
+/// the controller on the last one, so the sign shows for all of the first 35 s.
 pub const NEW_BUILDING: [Phase; 5] = [
     Phase { code: Some(1), seconds: 5.0, clear: false },
     Phase { code: None, seconds: 25.0, clear: true },
@@ -75,14 +81,17 @@ pub const NEW_BUILDING: [Phase; 5] = [
     Phase { code: Some(0), seconds: 1.0, clear: false },
 ];
 
-/// Order 18 with parameter 1, the building an upgrade is taking (`0x100335a1`): `0x309` for
-/// 25 s, a second with no code, then 8 for 90 s. The swap comes 50 s in, part way through the
-/// last phase, and the building is gone before it ends.
+/// Order 18 with parameter 1, the building an upgrade is taking (`0x100335a1`, "CloseSphere
+/// array set"): `0x309` for 25 s, clearing the area, a second with no code, then 8 for 90 s.
+/// `0x309` is kept as property `0x205` and never reaches the controller. The swap comes 50 s
+/// in, part way through the last phase, and the building is gone before it ends.
 pub const UPGRADING: [Phase; 3] = [
-    Phase { code: Some(0x309), seconds: 25.0, clear: false },
+    Phase { code: Some(0x309), seconds: 25.0, clear: true },
     Phase { code: None, seconds: 1.0, clear: false },
     Phase { code: Some(8), seconds: 90.0, clear: false },
 ];
+/// The code the task keeps from the controller (`Behavior.dll:0x10031307`).
+pub const CODE_UPGRADING: i32 = 0x309;
 /// Order 18 with parameter 2, the building an upgrade made (`0x10033790`): 10 for 3 s, then 0
 /// for 1. The builder waits while it runs.
 pub const UPGRADED: [Phase; 2] = [
@@ -113,7 +122,11 @@ pub struct Sphere {
     pub phases: &'static [Phase],
     pub phase: usize,
     pub phase_ms: f64,
-    pub next_kill_ms: f64,
+    /// The code the building's controller holds: 0 from its constructor until a phase sends
+    /// another (`Control.dll:0x10006ecf`).
+    pub code: i32,
+    /// When its kill state next takes itself, while the code holds one.
+    pub next_kill_ms: Option<f64>,
     /// The load group's sphere effects by id: its name.
     pub effects: Vec<(i32, String)>,
 }
@@ -172,6 +185,8 @@ pub struct Construction {
     /// The buildings' hall ways and the units walked into them (docs/31, "The capture, tick by
     /// tick").
     pub ways: crate::capture::Ways,
+    /// Each model's hall-way exits in its own frame, `None` for a model with no hall way.
+    pub exits: HashMap<String, Option<Vec<Vec3>>>,
 }
 
 impl Construction {
@@ -246,6 +261,45 @@ impl Play {
         plan
     }
 
+    /// The exits of the hall way of the building at `path` (vertices with flag 1), in the
+    /// model's own frame: each posed through its node's rest pose on the root part, as
+    /// `MHallWay` slot 5 carries a vertex into the world (`ArealMap.dll:0x1000a760`). `None`
+    /// for a model that carries no hall way.
+    pub fn hall_exits(&mut self, path: &str) -> Option<Vec<Vec3>> {
+        let key = path.to_ascii_lowercase();
+        if let Some(e) = self.construction.exits.get(&key) {
+            return e.clone();
+        }
+        let exits = (|| {
+            let parts = self.assembly.parts(KIND_BUILDING, path);
+            let root = parts.iter().find(|p| p.host == -1)?.clone();
+            let blob = self
+                .assembly
+                .archive(&root.reference.library)?
+                .read_name(&root.reference.member)
+                .ok()?
+                .to_vec();
+            let way = hallway::parse(&blob, &root.reference.member).ok()?;
+            if way.vertices.is_empty() {
+                return None;
+            }
+            let mesh = self.assembly.mesh(&root.reference)?;
+            Some(
+                way.vertices
+                    .iter()
+                    .filter(|v| v.flags & PLACE_EXIT != 0 && (v.joint as usize) < mesh.mesh.nodes.len())
+                    .map(|v| {
+                        let pose = root.pose.compose(&mesh.mesh.world_pose(v.joint as usize));
+                        let p = pose.apply(v.position.map(f64::from));
+                        Vec3::new(p[0] as f32, p[1] as f32, p[2] as f32)
+                    })
+                    .collect(),
+            )
+        })();
+        self.construction.exits.insert(key, exits.clone());
+        exits
+    }
+
     /// Target `t`'s contour sphere across the ground, where it stands.
     fn building_sphere(&mut self, t: usize) -> Option<(Vec3, f32)> {
         let (at, yaw) = *self.construction.placements.get(&t)?;
@@ -272,33 +326,60 @@ impl Play {
     /// edges and the inner's laid in as constraints), the outer corners on the ground and the
     /// inner ones at their mean (docs/32, "The test").
     ///
-    /// STAND-IN: docs/32-builder.md#the-test-isplacementvalid--read -- the path search from
-    /// the builder (`0x10020910`) and the hall-way vertices' areal test (step 6) are not
-    /// modelled: every site has a path and usable areals.
+    /// Steps 3 to 6 run only for a model that answers its hall way (interface `0x303`,
+    /// `0x1000baa4`, which the agent files at `AniMesh.dll:0x1000350c`); without one the query
+    /// goes straight to the basement (`0x1000c108`). With a builder named that does not fly,
+    /// the walker's own search (`0x10020910` on `MBehaviour` `+0x1e0`, as `MWalker::SetTarget`
+    /// runs it) must find a way from the builder's place to the sphere's centre, gated by the
+    /// builder's size class and crossing no flyer's link (`+0x210` 0, `+0x214` its variable
+    /// `0x201`). And every exit of the model's hall way (vertex flag 1), posed into the world
+    /// through its node (`MHallWay` slot 4 → slot 5), must stand on an areal of the system map
+    /// whose first flag word is set: *"HallVertex … is out of map"* or *"… is in Non-Reachable
+    /// Areal"* else (`0x1000bf4a`–`0x1000bfa9`).
     pub fn placement_valid(&mut self, builder: Option<usize>, type_word: u32, at: Vec3, yaw: f32) -> bool {
         if type_word == BUILDING_MINE && !self.on_lode(at) {
             return false;
         }
         let Some(path) = self.placement_model(type_word) else { return false };
         let plan = self.plan(&path);
-        let Some((mid, reach)) = plan.contour_sphere() else { return false };
-        let radius = reach + QUERY_MARGIN;
-        let [cx, cy] = placed(mid, at, yaw);
-        // The map: the sphere strictly inside the world box across the ground.
-        let (lo, hi) = self.ground.bounds();
-        if !(cx - radius > lo[0] && cx + radius < hi[0] && cy - radius > lo[1] && cy + radius < hi[1]) {
-            return false;
-        }
-        // Other buildings: the two spheres' centres at least both radii apart.
-        let others: Vec<usize> = self.construction.placements.keys().copied().collect();
-        for t in others {
-            if !self.battle.combat.targets.get(t).is_some_and(|x| x.alive)
-                || self.deleted.get(t) == Some(&true)
-            {
-                continue;
+        if let Some(exits) = self.hall_exits(&path) {
+            let Some((mid, reach)) = plan.contour_sphere() else { return false };
+            let radius = reach + QUERY_MARGIN;
+            let [cx, cy] = placed(mid, at, yaw);
+            // The path: the walker's search from the builder to the sphere's centre.
+            if let Some(b) = builder {
+                let from = self.battle.combat.targets.get(b).map(|x| x.position);
+                if let Some(from) = from
+                    && self.walker_search(b, from, Vec3::new(cx, cy, at.z)).is_some_and(|r| r.is_err())
+                {
+                    return false;
+                }
             }
-            if let Some((c, r)) = self.building_sphere(t)
-                && c.truncate().distance(Vec3::new(cx, cy, 0.0).truncate()) < radius + r
+            // The map: the sphere strictly inside the world box across the ground.
+            let (lo, hi) = self.ground.bounds();
+            if !(cx - radius > lo[0] && cx + radius < hi[0] && cy - radius > lo[1] && cy + radius < hi[1]) {
+                return false;
+            }
+            // Other buildings: the two spheres' centres at least both radii apart.
+            let others: Vec<usize> = self.construction.placements.keys().copied().collect();
+            for t in others {
+                if !self.battle.combat.targets.get(t).is_some_and(|x| x.alive)
+                    || self.deleted.get(t) == Some(&true)
+                {
+                    continue;
+                }
+                if let Some((c, r)) = self.building_sphere(t)
+                    && c.truncate().distance(Vec3::new(cx, cy, 0.0).truncate()) < radius + r
+                {
+                    return false;
+                }
+            }
+            // The exits: each on a walkable areal. A map with no areal map tests none.
+            if let Some(graph) = self.graph.as_ref()
+                && !exits.iter().all(|e| {
+                    let [x, y] = placed([e.x, e.y], at, yaw);
+                    graph.usable(x, y)
+                })
             {
                 return false;
             }
@@ -428,7 +509,8 @@ impl Play {
     /// target test refuses one ("dead, enemy or fully upgraded building").
     ///
     /// STAND-IN: docs/32-builder.md#upgrading-a-building--read -- the builder's invulnerability
-    /// (property 162) while it works is not modelled: it is hurt as it always is.
+    /// (property 162) while it works is modelled against its building's kill alone, which
+    /// passes it over ([`Play::kill_inside`]): anything else hurts it as it always does.
     fn start_upgrade(&mut self, builder: usize, id: i32, now: f64) {
         let clan = self.units.get(builder).and_then(|u| u.clan);
         let building = self.units.iter().position(|u| {
@@ -555,19 +637,27 @@ impl Play {
         }
     }
 
-    /// Sphere `phases` started on building `t`, round its outer contour.
+    /// Sphere `phases` started on building `t`, round its outer contour, 15 wider on a mine.
+    /// The building's load group has made the three effects already (action 5), idle in their
+    /// header's time mode 0 until a code starts them.
     fn start_sphere(&mut self, t: usize, phases: &'static [Phase], now: f64) {
         let path = self.commander.paths.get(t).cloned().unwrap_or_default();
         let effects = sphere_effects(&mut self.assembly, &path);
-        for (_, name) in &effects {
-            self.fx.template(name);
-        }
         let Some((position, radius)) =
             self.battle.combat.targets.get(t).map(|target| (target.position, target.radius))
         else {
             return;
         };
         let (centre, radius) = self.building_sphere(t).unwrap_or((position, radius));
+        let mine = self.units.get(t).is_some_and(|u| u.type_word == BUILDING_MINE);
+        let radius = radius + if mine { MINE_SPHERE_EXTRA } else { 0.0 };
+        let frame = sphere_frame(centre, radius);
+        for (id, name) in &effects {
+            let owner = Owner::Building(t, *id);
+            if self.fx.owned(owner).next().is_none() {
+                self.fx.start(owner, name, frame, 1.0, now, None);
+            }
+        }
         self.construction.spheres.retain(|s| s.target != t);
         self.construction.spheres.push(Sphere {
             target: t,
@@ -576,7 +666,8 @@ impl Play {
             phases,
             phase: 0,
             phase_ms: now,
-            next_kill_ms: now,
+            code: 0,
+            next_kill_ms: None,
             effects,
         });
         self.start_phase(self.construction.spheres.len() - 1, now, true);
@@ -723,7 +814,6 @@ impl Play {
             self.places.push(places);
             true
         });
-        let sphere_effects = sphere_effects(&mut self.assembly, &path);
         if let Some(effects) = BuildingEffects::load(&mut self.assembly, &one, 0, t) {
             if let Some(part) = self.battle.combat.targets.get(t).and_then(|x| x.parts.get(effects.part)) {
                 for e in &effects.effects {
@@ -741,71 +831,25 @@ impl Play {
         if docked {
             self.join_dock_glows();
         }
-        for (_, name) in &sphere_effects {
-            self.fx.template(name);
-        }
         self.construction.placements.insert(t, (at, yaw));
         if let Some(p) = self.progression.as_mut() {
             p.progress.place_building(logical_id, clan, type_word, at);
         }
-        // The sphere, round the outer contour, 15 wider on a mine.
-        let (centre, radius) = self.building_sphere(t).unwrap_or((at, self.battle.combat.targets[t].radius));
-        let radius = radius + if type_word == BUILDING_MINE { MINE_SPHERE_EXTRA } else { 0.0 };
-        self.construction.spheres.push(Sphere {
-            target: t,
-            centre,
-            radius,
-            phases,
-            phase: 0,
-            phase_ms: now,
-            next_kill_ms: now,
-            effects: sphere_effects,
-        });
-        self.start_phase(self.construction.spheres.len() - 1, now, true);
+        self.start_sphere(t, phases, now);
         self.spawned += 1;
         self.added.push(t);
         Some(t)
     }
 
-    /// A sphere's phase starting: its code's effects, and the clearing.
+    /// A sphere's phase starting: its code sent to the building's controller, and the clearing.
     ///
-    /// STAND-IN: docs/32-builder.md#the-construction-sphere--read-and-measured -- the
-    /// controller's path between the states the codes open is not read, nor where an action-5
-    /// effect is placed: code 1 starts the sign, code 2 the dome and the ray and stops the
-    /// sign, code 0 stops the ray, each effect at the sphere's centre sized by its radius. An
-    /// upgrade's codes -- `0x309`, 8 and 10 -- show nothing, and neither of its two phase lists
-    /// clears the area, whose switches the docs' table does not carry: the builder must stand
-    /// where it is until the swap is made.
-    ///
-    /// STAND-IN: docs/11-effects.md#how-an-effect-runs--read -- the three effects' records give
-    /// time mode 0, a value set from outside (slot `0x1c`), and what sets it is not read: they
-    /// loop on their own durations (mode 2) while their phase runs.
+    /// Every unit within the sphere's radius + 15 (as the task starts) or + 20 (on a later
+    /// phase) is ordered out, unless it is leaving already or upgrading (`0x10031680`).
     fn start_phase(&mut self, s: usize, now: f64, first: bool) {
         let sphere = self.construction.spheres[s].clone();
         let Some(phase) = sphere.phases.get(sphere.phase) else { return };
-        let frame = Frame::along(sphere.centre, Vec3::X, 1.0);
-        let start = |play: &mut Play, id: i32| {
-            if let Some((_, name)) = sphere.effects.iter().find(|(i, _)| *i == id) {
-                play.fx.remove(Owner::Building(sphere.target, id));
-                play.fx.start(
-                    Owner::Building(sphere.target, id),
-                    name,
-                    frame,
-                    sphere.radius,
-                    now,
-                    Some(SPHERE_TIME_MODE),
-                );
-            }
-        };
-        match phase.code {
-            Some(1) => start(self, SIGN),
-            Some(2) => {
-                start(self, DOME);
-                start(self, RAY);
-                self.fx.remove(Owner::Building(sphere.target, SIGN));
-            }
-            Some(0) => self.fx.remove(Owner::Building(sphere.target, RAY)),
-            _ => {}
+        if let Some(code) = phase.code.filter(|&c| c != CODE_UPGRADING) {
+            self.enter_code(s, code, now);
         }
         if phase.clear {
             let reach = sphere.radius + if first { CLEAR_ON_START } else { CLEAR_ON_CHANGE };
@@ -813,7 +857,7 @@ impl Play {
             for (t, robot) in &mut self.robots {
                 let Some(target) = self.battle.combat.targets.get(*t).filter(|x| x.alive) else { continue };
                 if target.position.truncate().distance(sphere.centre.truncate()) > reach
-                    || matches!(robot.behaviour.task(), Task::Leave { .. })
+                    || matches!(robot.behaviour.task(), Task::Leave { .. } | Task::Upgrade { .. })
                 {
                     continue;
                 }
@@ -823,8 +867,68 @@ impl Play {
         }
     }
 
+    /// The building's controller taking `code` (`IControl` slot 19): the path its planner
+    /// takes to the anchor that code opens, each state's action group run as it plays
+    /// (docs/32, "What the building's controller does with the codes"). *Measured* on all 30
+    /// `fortif.rlb` controllers, whose construction states have one shape:
+    ///
+    /// | code | from | the states' groups |
+    /// |---|---|---|
+    /// | 1 | 0 | start the sign in mode 2 |
+    /// | 2 | 1 | start the dome and the ray in mode 1, switch the sign off, kill; then kill every 250 ms |
+    /// | 0 | 2 | switch the ray off, place the building; then start the dome in mode 3 |
+    /// | 8 | 0 | start the dome in mode 1; then kill every 250 ms |
+    /// | 10 | 0 | start the dome in mode 3, place the building; then kill every 250 ms |
+    /// | 0 | 10 | nothing |
+    ///
+    /// Each state plays for 250 ms, so a kill anchor's first kill comes one or two states
+    /// after the code. Action 20 places the building in the landscape (`CLandscape::PlaceBuilding`),
+    /// which this engine does as the building is made.
+    ///
+    /// STAND-IN: docs/32-builder.md#the-construction-sphere--read-and-measured -- a state's
+    /// action group runs as the code arrives rather than at the controller's next 250 ms
+    /// step, and the states the path passes through play at once; action 1 and 2's properties
+    /// `0x200` and `0x201`, and the plants' smoke switched off on code 8, are not followed.
+    fn enter_code(&mut self, s: usize, code: i32, now: f64) {
+        let sphere = self.construction.spheres[s].clone();
+        let t = sphere.target;
+        let start =
+            |play: &mut Play, id: i32, mode: u32| play.fx.restart(Owner::Building(t, id), now, Some(mode));
+        let kill_after = match (sphere.code, code) {
+            (_, 1) => {
+                start(self, SIGN, TIME_LOOP);
+                None
+            }
+            (_, 2) => {
+                start(self, DOME, TIME_ONCE);
+                start(self, RAY, TIME_ONCE);
+                self.fx.switch(Owner::Building(t, SIGN), false);
+                Some(0.0)
+            }
+            (2, 0) => {
+                self.fx.switch(Owner::Building(t, RAY), false);
+                start(self, DOME, TIME_REVERSE);
+                None
+            }
+            (_, 8) => {
+                start(self, DOME, TIME_ONCE);
+                Some(KILL_STEP_MS)
+            }
+            (_, 10) => {
+                start(self, DOME, TIME_REVERSE);
+                Some(2.0 * KILL_STEP_MS)
+            }
+            _ => None,
+        };
+        let sphere = &mut self.construction.spheres[s];
+        sphere.code = code;
+        sphere.next_kill_ms = kill_after.map(|after| now + after);
+    }
+
     /// Every construction sphere's step at `now` (`0x10031680`): the next phase once one runs
-    /// out, the kill every 250 ms while code 2 holds, and the task's end.
+    /// out, the kill every 250 ms while the controller holds a kill code, and the task's end.
+    /// The effects outlive the task: the controller stays on its code-0 state, and the dome
+    /// plays itself back out there.
     fn step_spheres(&mut self, now: f64) -> Vec<Event> {
         let mut events = Vec::new();
         let mut s = 0;
@@ -834,12 +938,8 @@ impl Play {
             if now - sphere.phase_ms >= length {
                 sphere.phase += 1;
                 sphere.phase_ms += length;
-                sphere.next_kill_ms = now;
                 if sphere.phase >= sphere.phases.len() {
                     let done = self.construction.spheres.remove(s);
-                    for id in [SIGN, RAY, DOME] {
-                        self.fx.remove(Owner::Building(done.target, id));
-                    }
                     // A mine's order 10, queued behind the sphere, digs now (docs/23).
                     if let Some(site) = self.economy.site_mut(done.target)
                         && site.mine.is_some()
@@ -851,8 +951,10 @@ impl Play {
                 self.start_phase(s, now, false);
             }
             let sphere = self.construction.spheres[s].clone();
-            if sphere.phases[sphere.phase].code == Some(2) && now >= sphere.next_kill_ms {
-                self.construction.spheres[s].next_kill_ms = now + KILL_STEP_MS;
+            if let Some(due) = sphere.next_kill_ms
+                && now >= due
+            {
+                self.construction.spheres[s].next_kill_ms = Some(now + KILL_STEP_MS);
                 events.extend(self.kill_inside(sphere.target, sphere.centre, sphere.radius));
             }
             s += 1;
@@ -860,18 +962,28 @@ impl Play {
         events
     }
 
-    /// The kill (action 21, `Control.dll:0x100033e6`): every unit inside the sphere loses its
-    /// life.
+    /// The kill (action 21, `Control.dll:0x100033e6`): the world's objects of classes 2, 4 and
+    /// 10 inside the building's construction sphere — the mask `0x414`, bits `1 << class` from
+    /// the table at `0x1003b1a0` — each through its life system's slot 7, which does nothing to
+    /// an invulnerable one (`0x1000eb76`, the byte property 162 sets). Class 4 is a unit and 10
+    /// a tree or a stone (docs/30, "A class is slot 11"); a builder upgrading is invulnerable.
     ///
-    /// STAND-IN: docs/32-builder.md#the-construction-sphere--read-and-measured -- that the
-    /// classes the kill takes (`0x4`, `0x10`, `0x400`) are the units is a guess: every live
-    /// robot whose position lies inside, the hero among them.
+    /// STAND-IN: docs/32-builder.md#the-construction-sphere--read-and-measured -- what answers
+    /// class 2 is not established, and how the world's query decides an object is inside the
+    /// sphere is not read: every live robot, the hero, tree or stone whose origin lies inside.
     fn kill_inside(&mut self, building: usize, centre: Vec3, radius: f32) -> Vec<Event> {
         let mut events = Vec::new();
-        let inside: Vec<usize> = self
+        let upgrading: Vec<usize> = self
             .robots
             .iter()
+            .filter(|(_, r)| matches!(r.behaviour.task(), Task::Upgrade { state: UpgradeState::Working, .. }))
             .map(|(t, _)| *t)
+            .collect();
+        let robots = self.robots.iter().map(|(t, _)| *t).filter(|t| !upgrading.contains(t));
+        let scenery = (0..self.units.len())
+            .filter(|&t| matches!(self.units[t].kind, mission::KIND_VEGETATION | mission::KIND_ROCK));
+        let inside: Vec<usize> = robots
+            .chain(scenery)
             .filter(|&t| t != building)
             .filter(|&t| {
                 self.battle
@@ -892,6 +1004,16 @@ impl Play {
         }
         events
     }
+}
+
+/// The frame an action-5 effect hangs in (`Control.dll:0x10002e72`): the identity kept at
+/// `0x10041ba8`, which its initialiser (`0x10003d70`) writes with its axes turned round — the
+/// first along z, the second along x, the third along y — each column scaled by the sphere's
+/// radius and its translation the sphere's centre, handed to the effect as a world frame
+/// (manager slot 10 with 2). So the effect's depth, the axis its position channel travels and
+/// a dome's pole, stands up, and a sprite is drawn through a frame the sphere's size.
+pub fn sphere_frame(centre: Vec3, radius: f32) -> Frame {
+    Frame { origin: centre, axes: [Vec3::Z * radius, Vec3::X * radius, Vec3::Y * radius], points: true }
 }
 
 /// The steepest basement face's normal z between `inner` and `outer`, 1 with no face: the
@@ -955,6 +1077,24 @@ mod tests {
         assert!((basement_steepest(&square(5.0, 0.0), &square(8.0, 0.0)) - 1.0).abs() < 1e-6);
         // Three metres down over three across: 45°, steeper than 28.4°.
         assert!(basement_steepest(&square(5.0, 0.0), &square(8.0, -3.0)) < SLOPE_WITH_BUILDER);
+    }
+
+    #[test]
+    fn a_sphere_effect_stands_up_the_spheres_radius_long() {
+        let frame = sphere_frame(Vec3::new(10.0, 20.0, 30.0), 40.0);
+        assert_eq!(frame.origin, Vec3::new(10.0, 20.0, 30.0));
+        assert_eq!(frame.axes, [Vec3::Z * 40.0, Vec3::X * 40.0, Vec3::Y * 40.0]);
+        // A real matrix, so a sprite is drawn through it.
+        assert!(frame.basis().is_some());
+        // The ray's plasma falls along the first axis from a radius up to the centre.
+        assert_eq!(frame.point(Vec3::X), Vec3::new(10.0, 20.0, 70.0));
+    }
+
+    #[test]
+    fn an_upgrade_clears_the_area_as_it_starts_and_keeps_0x309_from_the_controller() {
+        assert!(UPGRADING[0].clear && !UPGRADING[1].clear && !UPGRADING[2].clear);
+        assert_eq!(UPGRADING[0].code, Some(CODE_UPGRADING));
+        assert!(UPGRADED.iter().all(|p| !p.clear));
     }
 
     #[test]

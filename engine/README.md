@@ -381,11 +381,13 @@ the own panel's unit while aboard.
 - A build order walks its builder to the site at full speed. On arrival the scheme's first
   building appears for the builder's clan, on its clan's list at once (function 34
   counts it), the builder pays its ore, going below 0, and is left with no order; the
-  building runs its 41 s construction sphere: the sign for 5 s, 30 s sending everyone
-  out, then the dome and the ray with a kill inside every 250 ms, and the ray stopped a
-  second before it is done. A site is tested as `IsPlacementValid` reads it: inside
-  the map, clear of the other buildings' spheres, no basement face steeper than acos 0.88
-  with a builder, and a mine on a found lode within 20. On Mission 03 `tut3_b` puts the
+  building runs its 41 s construction sphere: the sign up for 35 s, sending everyone out
+  after the first 5, then the ray and the dome rising, standing up in the sphere, with a
+  kill inside every 250 ms, and the ray stopped and the dome played back out a second
+  before it is done. A site is tested as `IsPlacementValid` reads it: a way for
+  the builder to the site by the walker's own search, inside the map, clear of the other
+  buildings' spheres, every hall-way exit on a walkable areal, no basement face steeper
+  than acos 0.88 with a builder, and a mine on a found lode within 20. On Mission 03 `tut3_b` puts the
   Small Mine on the lode for 540, left owing 340, and objective 3 completes. A Route's go
   task walks to its place and is over within 30.
 - Ore and power move as docs/23 reads them. Every building has its profile's figures, its
@@ -1357,7 +1359,7 @@ a row here. A row leaves this table when research closes it.
 | M11 | Which cell of its material an effect sprite samples, and when the material's track plays for a particle | the entry's cell, as a mesh batch takes it, from the key the track is on at the sprite's own age — a stream's particle counting from when it left, everything else from its instance's start; the masked colour lerp between two keys is not drawn | [07](../docs/07-objects.md#how-a-material-reaches-the-device--read-and-measured) |
 | M12 | Whether the character handler sees Esc before its binding leaves command mode: the path the key takes is not traced | an open satellite map closes first, then a page other than 0 turns to 0, then Esc leaves, as Mission 04's recording shows one Esc at a time | [40](../docs/40-command-mode.md#not-established) |
 | M12 | What `0x10034230` accepts for an Upgrade row | the upgrade task's own target test (`0x100332e0`): a live building of that Type of the clan whose level -- its place in its scheme's ladder -- has another entry above it; and, *derived* from the recording of Mission 03, where the clan's Small Warehouse is offered no Upgrade row, that the entry above it is researched whole, as a Build row asks of its first | [41](../docs/41-commander.md#not-established) |
-| M14 | The clear-the-area switches of the sphere's phase lists for parameters 1 and 2, and what their codes `0x309`, 8 and 10 show; the builder's invulnerability (property 162) while it works | neither list clears the area, so the builder stands where it is; the codes show nothing; the builder is hurt as it always is | [32](../docs/32-builder.md#upgrading-a-building--read) |
+| M14 | The builder's invulnerability (property 162) while it works, but against its building's kill | the builder is hurt as it always is; the sphere's kill passes it over | [32](../docs/32-builder.md#upgrading-a-building--read) |
 | M14 | How the point beside a building an upgrade walks to is drawn (`0x100338a0`) | a random one on the ring 20 out past the building's sphere, on walkable ground, as the attack draws its own | [32](../docs/32-builder.md#upgrading-a-building--read) |
 | M12 | A builder's beam's life, which the Build rows need intact | a live builder can build | [32](../docs/32-builder.md#building-a-building--read) |
 | M12 | A unit's property `0x207`, and how the icon routine turns a building's record `+0x30` -- its size class, 2 to 5 (docs/38, "The catalogue") -- into a cell and a tint, which pick and tint the panel's icons; the width of the piece a building row's icon stands in | a unit's second icon is the cell for 1; a building's icon red (2), as the recording shows; the building row's icon piece 20 wide | [41](../docs/41-commander.md#not-established) |
@@ -1370,8 +1372,7 @@ a row here. A row leaves this table when research closes it.
 | M12 | Function 15's answer: whether the unit takes the order (1) or refuses it (0) | an id some unit or building answers gives 1, and the unit is handed the order after the handler's run | [34](../docs/34-progression.md#what-the-scripts-ask--read-and-measured-1) |
 | M12 | A building's contour (property `0x203`), whose vertices a patrol of the building walks | eight points on the building's sphere, pushed out by 30 | [31](../docs/31-packages.md#the-patrol-tick-by-tick--read) |
 | M12 | What makes the walker take a migrate point (`0x10001960`), and the areal map's `rand()` its clan's pasture pick and timer draw on | the areal under the point, a flyer's none, as the follower's spot; a 32-bit xorshift of the play's | [31](../docs/31-packages.md#migrate-an-animals-pasture--read-and-measured) |
-| M12 | `IsPlacementValid`'s path search from the builder and its hall-way vertices' areal test | every site has a path and usable areals | [32](../docs/32-builder.md#the-test-isplacementvalid--read) |
-| M12 | Which state each construction-sphere code opens, where and how big an action-5 effect is placed, what drives its time, and which classes the sphere's kill takes | code 1 starts the sign; code 2 the dome and the ray and stops the sign; code 0 stops the ray; each at the sphere's centre sized by its radius, looping on its duration (its records' time mode 0, a value set from outside, is not followed); the kill takes every live robot and the hero inside the sphere | [32](../docs/32-builder.md#the-construction-sphere--read-and-measured) |
+| M12 | When a building controller's states play after a construction code, its actions 1 and 2, the factories' smoke on code 8; what answers the kill's class 2, and how the world's query finds what is inside the sphere | each code's states run their groups the moment it is sent, a kill anchor's first kill 0, 250 or 500 ms after as its path is long; actions 1 and 2 and the smoke are not followed; the kill takes every live robot but an upgrading builder, the hero, and every tree and stone whose origin lies inside | [32](../docs/32-builder.md#what-the-buildings-controller-does-with-the-codes--read-and-measured) |
 | M12 | Whether the go task's 30 about its place is measured in three dimensions | across the ground | [31](../docs/31-packages.md#what-each-package-does--read) |
 | M12 | Which controllers a building's control system gathers its batteries and efficiency from | its root record's: the 19.5 to 20 held and 50 to 52 a second put out that docs/23 measures, not the internal parts' (`i_pws_*`) | [23](../docs/23-economy.md#a-power-shortage-lowers-efficiency-once-the-batteries-run-down--read-and-measured) |
 | M12 | The random sources of the distribution step's timer (`0..63` ms) and the power tick's jitter (a shift register) | a 32-bit xorshift | [23](../docs/23-economy.md#how-often-and-where-it-settles--read-with-a-derived-settle-point) |

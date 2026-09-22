@@ -132,6 +132,16 @@ fn shortest(
     (dist, prev)
 }
 
+/// The walker search's random draw, 0..1, off the play's own 32-bit xorshift in `seed`.
+fn xorshift(seed: &mut u32) -> f32 {
+    let mut x = *seed;
+    x ^= x << 13;
+    x ^= x >> 17;
+    x ^= x << 5;
+    *seed = x;
+    (x >> 8) as f32 / (1u32 << 24) as f32
+}
+
 /// The vertices from `to` back along `prev` to the way's start, start first.
 fn walk_back(prev: &[Option<usize>], to: usize) -> Vec<usize> {
     let mut out = vec![to];
@@ -354,9 +364,25 @@ impl Play {
     /// fails is not read: it holds, its queues emptied as `SetTarget` empties them first. The
     /// game's `rand()` is not followed: a 32-bit xorshift of the play's own.
     pub fn route(&mut self, t: usize, from: Vec3, goal: Vec3) -> Vec<Vec3> {
-        let Some((_, robot)) = self.robots.iter().find(|(rt, _)| *rt == t) else { return vec![goal] };
+        match self.walker_search(t, from, goal) {
+            None => vec![goal],
+            Some(Ok(legs)) => legs,
+            Some(Err(Refusal::Stranded)) => {
+                let Play { graph, walk_seed, .. } = self;
+                let graph = graph.as_ref().expect("a search ran");
+                graph.escape(from, &mut || xorshift(walk_seed)).into_iter().collect()
+            }
+            Some(Err(Refusal::Goal | Refusal::NoWay)) => Vec::new(),
+        }
+    }
+
+    /// The walker's global search for robot target `t` from `from` to `goal` (`MWorldGraph`,
+    /// docs/24, "The global path"): its legs, or why it refuses. `None` where no search runs:
+    /// `t` is no robot, it flies, or the map has no areal map.
+    pub fn walker_search(&mut self, t: usize, from: Vec3, goal: Vec3) -> Option<Result<Vec<Vec3>, Refusal>> {
+        let (_, robot) = self.robots.iter().find(|(rt, _)| *rt == t)?;
         if robot.flyer || self.graph.is_none() {
-            return vec![goal];
+            return None;
         }
         let (clearance, standing) =
             (robot.collision.1, robot.walker.ground.and_then(|h| h.solid).map(|s| s.0));
@@ -367,19 +393,7 @@ impl Play {
         let ways: Vec<Way> = ways.into_iter().map(|(_, w)| w).collect();
         let Play { graph, walk_seed, .. } = self;
         let graph = graph.as_ref().expect("tested above");
-        let mut random = || {
-            let mut x = *walk_seed;
-            x ^= x << 13;
-            x ^= x >> 17;
-            x ^= x << 5;
-            *walk_seed = x;
-            (x >> 8) as f32 / (1u32 << 24) as f32
-        };
-        match graph.route(from, goal, &ways, aboard, clearance, size, &mut random) {
-            Ok(legs) => legs,
-            Err(Refusal::Stranded) => graph.escape(from, &mut random).into_iter().collect(),
-            Err(Refusal::Goal | Refusal::NoWay) => Vec::new(),
-        }
+        Some(graph.route(from, goal, &ways, aboard, clearance, size, &mut || xorshift(walk_seed)))
     }
 
     /// Whether robot target `t` flies, and so may cross a hall-way link only a flyer crosses.

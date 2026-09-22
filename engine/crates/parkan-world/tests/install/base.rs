@@ -585,6 +585,9 @@ fn c03_m01s_builder_upgrades_the_captured_factory_to_the_medium_one_its_clan_has
         }
     }
     assert!(!matches!(task(&play), Task::Upgrade { .. }), "the builder is let go: {:?}", task(&play));
+    // It stood through the old factory's kill every 250 ms from 26 s and the new one's:
+    // invulnerable while it upgrades, which the kill's life-system slot 7 respects.
+    assert!(play.battle.combat.targets[builder].alive, "the builder lives");
     assert!(!play.battle.combat.targets[factory].alive && play.deleted[factory], "the small one is gone");
     let made = (0..play.units.len())
         .find(|&t| {
@@ -783,6 +786,107 @@ fn mission_03s_builder_puts_a_mine_on_the_lode_that_counts_at_once_and_runs_its_
 
 #[test]
 #[ignore = "needs the game install"]
+fn mission_03s_site_test_asks_for_the_builders_way_there_and_walkable_ground_under_every_exit() {
+    use parkan_world::construction::BUILDING_MINE;
+    const STORAGE: u32 = 0x8000_0008;
+
+    let (mut play, m) = mission_03_play();
+    let builder = object_target(&play, &m, "tut3_b.dat");
+    // Every first building a builder puts up has a hall way with an exit (docs/32, "The test").
+    for (t, exits) in [
+        (0x8000_0002, 11),
+        (BUILDING_MINE, 3),
+        (STORAGE, 4),
+        (0x8000_0010, 20),
+        (0x8000_0040, 2),
+        (0x8000_0200, 3),
+        (0x8000_0400, 3),
+        (0x8001_0000, 1),
+        (0x8002_0000, 3),
+        (0x8004_0000, 3),
+        (0x8010_0000, 1),
+        (0x8020_0000, 1),
+    ] {
+        let path = play.placement_model(t).unwrap();
+        assert_eq!(play.hall_exits(&path).map(|e| e.len()), Some(exits), "{path}");
+    }
+    // The lode: the builder's way there is found and the mine's three exits stand on walkable
+    // areals at every turn, so the site the recording's mine went up on stays green.
+    let lode = glam::Vec3::new(1026.1, 942.7, 0.0);
+    let at = lode.with_z(play.ground.below(lode.x, lode.y, 1.0e5).unwrap().point.z);
+    let from = play.battle.combat.targets[builder].position;
+    assert!(matches!(play.walker_search(builder, from, at), Some(Ok(_))));
+    for k in 0..16 {
+        let yaw = k as f32 * std::f32::consts::TAU / 16.0;
+        assert!(play.placement_valid(Some(builder), BUILDING_MINE, at, yaw), "turned {yaw}");
+    }
+    // West of the base a storage's basement is level, its way there is found, and an exit falls
+    // on an areal whose word is 0: "HallVertex … is in Non-Reachable Areal".
+    let west = glam::Vec3::new(410.0, 730.0, play.ground.below(410.0, 730.0, 1.0e5).unwrap().point.z);
+    assert!(matches!(play.walker_search(builder, from, west), Some(Ok(_))));
+    let storage = play.placement_model(STORAGE).unwrap();
+    let exits = play.hall_exits(&storage).unwrap();
+    let graph = play.graph.as_ref().unwrap();
+    assert!(!exits.iter().all(|e| graph.usable(west.x + e.x, west.y + e.y)));
+    assert!(!play.placement_valid(Some(builder), STORAGE, west, 0.0), "an exit off the walkable ground");
+    let graph = play.graph.take();
+    assert!(play.placement_valid(Some(builder), STORAGE, west, 0.0), "the rest of the test passes it");
+    play.graph = graph;
+    // A builder standing on an areal no link leaves finds no way anywhere: "BAD PATH".
+    let stranded = glam::Vec3::new(300.0, 700.0, from.z);
+    assert!(!play.graph.as_ref().unwrap().usable(stranded.x, stranded.y));
+    play.battle.combat.targets[builder].position = stranded;
+    assert!(matches!(play.walker_search(builder, stranded, at), Some(Err(_))));
+    assert!(!play.placement_valid(Some(builder), BUILDING_MINE, at, 0.0), "no way from the builder");
+    assert!(play.placement_valid(None, BUILDING_MINE, at, 0.0), "with no builder named, no search");
+}
+
+#[test]
+#[ignore = "needs the game install"]
+fn mission_03s_mine_plays_its_sphere_as_the_controllers_codes_start_and_stop_its_three_effects() {
+    use parkan_world::construction::{BUILDING_MINE, DOME, RAY, SIGN};
+    use parkan_world::fx::Owner;
+
+    let (mut play, _) = mission_03_play();
+    let player = play.player_clan;
+    let lode = glam::Vec3::new(1026.1, 942.7, 0.0);
+    let at = lode.with_z(play.ground.below(lode.x, lode.y, 1.0e5).unwrap().point.z);
+    let now = play.hero.time_ms;
+    let mine = play.create_building(player, BUILDING_MINE, at, 0.0, now).expect("the mine stands");
+    let state = |play: &mut parkan_world::play::Play, id: i32| {
+        let i = play.fx.owned(Owner::Building(mine, id)).next().expect("made at load");
+        (i.mode, i.on, i.frame)
+    };
+    // Action 5 made all three, idle in their header's mode 0; code 1 started the sign looping.
+    play_for(&mut play, 1.0, |_| {});
+    assert_eq!(state(&mut play, SIGN).0, 2);
+    assert_eq!(state(&mut play, DOME).0, 0);
+    assert_eq!(state(&mut play, RAY).0, 0);
+    // The sign loops through the 30 s the task sends no code.
+    play_for(&mut play, 33.0, |_| {});
+    assert_eq!((state(&mut play, SIGN).0, state(&mut play, SIGN).1), (2, true));
+    // Code 2 at 35 s: the dome and the ray once through, the sign off.
+    play_for(&mut play, 1.5, |_| {});
+    assert_eq!(state(&mut play, DOME).0, 1);
+    assert_eq!(state(&mut play, RAY).0, 1);
+    assert!(!state(&mut play, SIGN).1, "the sign is off");
+    // The frame stands up: its first axis, the ray's travel and the dome's pole, is z, the
+    // sphere's radius long.
+    let (_, _, frame) = state(&mut play, DOME);
+    let sphere = play.construction.spheres.iter().find(|s| s.target == mine).unwrap().clone();
+    assert!((frame.axes[0] - glam::Vec3::Z * sphere.radius).length() < 1e-3, "{frame:?}");
+    assert_eq!(frame.origin, sphere.centre);
+    // Code 0 at 40 s: the ray off, the dome played back out; it outlives the task's end.
+    play_for(&mut play, 5.0, |_| {});
+    assert!(!state(&mut play, RAY).1, "the ray is off");
+    assert_eq!(state(&mut play, DOME).0, 3);
+    play_for(&mut play, 2.0, |_| {});
+    assert!(!play.building_itself(mine));
+    assert_eq!(state(&mut play, DOME).0, 3, "the controller stays on its code-0 state");
+}
+
+#[test]
+#[ignore = "needs the game install"]
 fn mission_03s_large_factory_waits_on_ore_and_builds_an_ssw_x_in_25_seconds_once_the_mine_digs() {
     use parkan_world::construction::BUILDING_MINE;
 
@@ -920,7 +1024,10 @@ fn a_research_centre_built_in_play_takes_the_research_panels_orders() {
 
     // A Small Research Center of the player's, put up east of the hero.
     let at = glam::Vec3::new(683.17, 146.46, 215.13);
-    assert!(play.placement_valid(None, RESEARCH_CENTRE, at, 0.0), "somewhere to put it");
+    // Not a site the placement test passes: its three exits stand 80 m out, and on Mission 04
+    // no 20 m grid point at any of eight turns has all three on walkable areals and a level
+    // basement besides. `CreateObjectFromScheme` asks neither (docs/32, "The test").
+    assert!(!play.placement_valid(None, RESEARCH_CENTRE, at, 0.0), "an exit off the walkable ground");
     let now = play.hero.time_ms;
     let centre = play.create_building(player, RESEARCH_CENTRE, at, 0.0, now).expect("it stands");
     play_for(&mut play, 1.0 / 60.0, |_| {});
