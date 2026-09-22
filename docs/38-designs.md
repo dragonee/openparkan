@@ -397,8 +397,11 @@ is **LFW-2** (*derived*, and *seen*).
   design to `<game>\units\temp_unit.dat` (`0x100516b3`), with the design writer
   `0x100544b0`.
 - **Save** writes `units/<name>.dat` with the same writer (`0x10050c28`).
-- **Load** lists `units/*.dat` but for the files named `bld_unit_`,
-  `view_unit_` and `temp_unit` (`0x100511b3`).
+- **Load** lists the `units/*.dat` that `World3D.dll`'s `stdGetValidRobots`
+  keeps — read as designs, no bigger than the factory builds, every part in the
+  tree and researched — but for any whose name holds `bld_unit_`, `view_unit_` or
+  `temp_unit` (`strstr`, `0x100511b3`), and fits a picked one's parts again in its
+  own order ([37-designer.md](37-designer.md#the-buttons--read-and-seen)).
 - **Cancel** discards the design and reopens the root page, `r_` for a robot
   (`0x100513bf`).
 - **The factory** writes `%s\units\view_unit_%d.dat` and, when it can start

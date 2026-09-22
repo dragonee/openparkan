@@ -46,6 +46,16 @@ and calls the holder's open (`0x10055c70`, at `0x1009810a`) with the record,
 kind 1, the string `"r"`, 0 and the record's `+0x30`. The factory screen itself
 is [36-factory.md](36-factory.md)'s.
 
+**Nothing opens the other two kinds** — *read*. That call is the only one to the
+open in `iron3d.dll`: its address is the target of no other `call`, and it sits
+in no table — the four-byte value `0x10055c70` occurs nowhere in the file, where
+the same search finds the holder's constructor `0x10055910` called once, at
+`0x1008cf33`. The kind at `+0x28` has four writers — the constructor's zero
+(`0x100559a6`), the open (`0x10055c8a`), and the two closes' zeroes (`0x10055dad`,
+`0x10055f88`) — so it is only ever 1. The `fr_` base designer and the `a_`
+designer that clear lays out by the kind (`0x100513c5`) are left over in the
+shipped game.
+
 **Opening** (`0x10055c70`) does nothing while a kind is set. Otherwise it stores
 the arguments, sets `+0x2c`, writes 9 to the game camera's flag word, shows the
 mouse cursor, and lays the designer out with the string (`0x1004dff0`). The
@@ -67,8 +77,25 @@ finds the infrared `0x20` (`0x10084524`, through slot 20), `0x10`
 (`0x10084a88`) and `0x200` (`0x10084790`). So while the designer is up **the
 game camera draws no world** — the designer's black rectangle covers the screen
 anyway — and nothing here pauses it. The 9 also overwrites the rest of the word,
-so a night sight the player had on (`0x20`) is off when the designer closes;
-what bit 1, which it sets and the close leaves, does was not read.
+so a night sight the player had on (`0x20`) is off when the designer closes.
+
+**Bit 1 is the view's "the eye places me"**, and the 9 keeps it — *read*. The unit
+camera's getter sets it (`0x1007e707`), the hand-over to a boarded bot clears it on
+the hero's view and sets it on the bot's (`0x10075174`, `0x10075180`;
+[39-boarding.md](39-boarding.md)), and its one reader is `Control.dll`'s
+first-person eye: the per-tick routine that sets the view's frame from the turret's
+`CameraCenter` and `TargetDirect` (`0x100234c0`,
+[30-turrets.md](30-turrets.md)) asks the view's slot 20 and skips everything unless
+bit 1 is set (`0x100234e9`–`0x100234ee`). Sweeping all fourteen modules for a
+slot-20 call followed, within eight instructions and after any shift, by a test or
+mask of `eax` finds that site alone testing 1 on the answer (three more hits, in
+`AniMesh`, `MisLoad` and `Terrain`, test a byte loaded from a global after the
+call's loop ends); the same sweep finds the tests
+of `0x20` (`iron3d.dll:0x10035c2d`, `0x10038973`; `Terrain.dll:0x10084527`) and
+`0x10` (`iron3d.dll:0x10035c8d`), the four clears of 8, and six clears of 1
+(`iron3d.dll:0x10038772`, `0x100388ed`, `0x10038b05`, `0x10075174`, `0x10075605`,
+`0x1007595e`). So behind the designer the hero's eye goes on placing the view it
+does not draw, as it did before.
 
 **It is drawn instead of the mode's own screen.** The screens' draw
 (`0x1008d200`) switches on the `CState` mode. In modes 3 and 4 (`0x1008d51c`)
@@ -87,10 +114,17 @@ mode's own screen comes back:
 - **accept** (`0x1005144c`), below.
 
 **Input** reaches the holder while it is open. Its mouse handler
-(`0x10055ff0`) and its Esc act only while the game object's `+0x08` is 4 (not
-read). A click goes to the designer's buttons first (`0x100504d0`), then the
+(`0x10055ff0`) and its Esc act only while the game object's `+0x08` is 4
+(`0x10056004`, `0x10055ea6`): that is the game's state word, and 4 is *playing*
+([34-progression.md](34-progression.md#after-the-outcome--read-and-measured)).
+Once the mission is won or lost the designer takes neither, and they pass on — Esc
+to the one that leaves the mission; the interface pass draws the outcome panel in
+place of the screens then, the designer's among them. A click goes to the
+designer's buttons first (`0x100504d0`), then the
 source panel (`0x10049b80`), then the destination panel; the first to take it
-ends the search. Its character handler (`0x10055fa0`) feeds the name field.
+ends the search. While the name field or the load list is up the buttons are not
+asked ([The buttons](#the-buttons--read-and-seen)). Its character handler
+(`0x10055fa0`) feeds the name field.
 
 ## The screen, piece by piece — *read*, and *seen*
 
@@ -253,6 +287,28 @@ taken.
 the panel's takt (`0x1004bb90` for the source) makes a model view of the part
 (`0x1009df90`) on (*X*₀ + 12, 244) sized 160 × 151, carrying the old model's
 angle on (`0x1004bcca`).
+
+**The destination's takt** (`0x1004cd00`) — *read* — is the source's with two
+things more:
+- **scrolling** as the source's: the scroll bar's up and down move the selected
+  tab's first shown row by one (`0x1004cd97`–`0x1004ce0b`);
+- **an empty slot shows nothing**: for a tab that has just been turned on, when its
+  selected row holds no part (the row's `+0x20` is −1), the preview's model is
+  deleted (`0x1004ce12`–`0x1004cfcc`). The Armour tab's test reads the Ammo tab's
+  selected row (`+0x4d7fc`, `0x1004cf9d`) where every other tab reads its own; an
+  armour row always holds a part once a chassis is in — its `_df` defaults — so the
+  slip shows nowhere;
+- **a picked row sets the source's offer**: the first tab, in the order Chassis,
+  Turrets, Internal systems, Weapons, Ammo, Armour, whose control answers a row that
+  has just turned on (`0x100481a0`) has the source panel's same tab rebuilt by the
+  page builder (`0x10048220`,
+  [28-chassis.md](28-chassis.md#what-the-label-is-not--read-as-a-search)) from that
+  row's socket label, Weapons with its flag 1; Chassis hands it the destination's
+  own prefix (`+0x4dff0`);
+- then, when the row holds a part, the preview is made again as the source's is,
+  its angle carried on (`0x1004d0e9`–`0x1004d264`); a picked row with none leaves
+  the model that was up (`0x1004d0dd`). The fits write the panels' previews too
+  (`+0x4dffc`), which is not traced here.
 
 ### A row's record — *read*, and *measured*
 
@@ -491,18 +547,81 @@ yellow box beside it, and the accept frame's lamp is green.
   Either way the designer closes.
 - **Clear** deletes the project and lays the designer out again with the kind's
   prefix: `r_`, `fr_` or `a_` (`0x100513c5`).
-- **Save**, with a project, opens **the name field**: 3056 *Type the name of the
-  designed warbot...* centred on x 320 at y 326 in green, over a field on (270,
-  410)–(370, 430) that takes up to 16 characters. A printable character (the C
-  library's `isprint`, mask `0x157`) is added, backspace takes the last off,
-  Enter ends it (`0x100458f0`), and the takt then
-  writes `units/<name>.dat` (`0x10050c28`). Esc drops the field.
-- **Load** lists the `.dat` files in the game's `units/` directory, leaving out
-  names that begin `bld_unit_`, `view_unit_` or `temp_unit`
-  (`0x100511b3`–`0x100511f5`). With any, **the load list** is up: rows at y 320 +
-  22 × *i*, four shown at a time with a scroll control; a clicked row loads its
-  design (`0x10050c86` onward, in outline). Esc drops the list.
+- **Save**, with a project, opens **the name field** (below). Enter, or a click
+  on the field, ends the typing, and the next takt writes `units/<name>.dat`
+  (`0x10050c28`, the writer accept uses) and drops the field. Esc drops it unsaved.
+- **Load** lists the saved designs (below). With any, **the load list** is up; a
+  clicked row loads its design. Esc drops the list.
 - **Exit** closes the designer (above).
+
+**The name field** — *read*. Save empties the field at the designer's `+0x1444`
+and sets it typing (`0x100510b4`–`0x1005112d`); the designer's `+0xad7e` says it is
+up. It is a text field on (270, 410)–(370, 430), laid out at `0x1004eaad`, that
+holds up to 16 characters.
+- **The draw** (`0x10050202`–`0x10050349`): 3056 *Type the name of the designed
+  warbot...* centred on x 320 at the view's foot plus 25, y 326, in green; an empty
+  load row at (200, 410) (the `+0x146c` control, below); and the field's text,
+  centred in the field (`0x100454e0`, handed 0, so with no frame). Typing, all six
+  of its glyph colours are magenta `0xffff00ff`; idle they are `0xff323264` at the
+  top and foot and `0xffc8c8ff` halfway, and with the cursor on the field
+  `0xff9696c8` and white. While it types, a caret — a filled `0xff9600ff` bar 5 wide,
+  from the text's end plus 1, as tall as a glyph — shows for the first half of
+  every second (`0x10045721`–`0x10045812`).
+- **A character** (`0x10055fa0` → `0x100458f0`): the holder passes the C library's
+  printable ones, backspace and Enter. Backspace takes the last off; Enter stops the
+  typing (`+0x14` clear); any other is added while fewer than 16 are there and the
+  text so far is narrower than the field less 30, 70 across (`0x100459a4`–
+  `0x100459af`).
+- **A click** strictly inside the field turns the typing over and plays
+  `BUTTON_CLICK` (`0x10045820`); a click elsewhere is not the buttons', and goes on
+  to the panels (`0x100504d0`).
+- **The takt** saves when the field is up and not typing (`0x10050b93`–`0x10050c33`),
+  so an Enter or a click that stops the typing saves at once. The path is `units/`,
+  the text and `.dat`; an empty field writes `units/.dat`.
+
+**The load list** — *read*. Load (`0x10051153`) empties the list and asks
+`World3D.dll`'s `stdGetValidRobots` for the designs under `units/`
+(`0x10014ce0`). That opens each `units/*.dat` and keeps one that reads as a design
+— the `0xf0f1` word, the type, and every component (`0x10014e5d`–`0x10014f07`) —
+whose chassis is no bigger than the factory builds, its size letter against the
+factory's property `0x201` (`0x10014f19`–`0x10014fc2`), and whose every part is in
+the tree and researched, the two flags [38-designs.md](38-designs.md#the-price--read)'s
+price reads (`0x1001505b`–`0x1001511c`). The designer then passes over any name
+**holding** `bld_unit_`, `view_unit_` or `temp_unit` — the C library's `strstr`
+(`0x100b47f0`), not a test of the start — and makes a row of each other, its label
+the name between `units/` and `.dat` (`0x100511b3`–`0x1005130b`). With none the
+list does not come up.
+- **A row** is a control of `0x300` bytes from `+0x176c` (`0x10045bd0`): 242 × 21 at
+  x 200, row *i* at y 320 + 22 × (*i* − the first shown), four shown at a time
+  (`+0xad6c` the first shown, `+0xad70` the count). It draws page1 (14, 57, 242, 21)
+  across, a lamp of the panel rows' three at its left — dark in white, the bright
+  one in `0xffc8ffc8` when on, the bright and the green alternating every 0.1 s in
+  `0xffffc8c8` under the cursor — and its label centred on x 320 and in the row's
+  height, a gradient from `0xff326496` through `0xff9696c8` to `0xff96c8fa`
+  (`0x10045e60`).
+- **The scroll control** at `+0xc60`, laid out at y 410 (`0x10046080`): a lamp at
+  (230, 410), page4 (0, 0, 130, 21) from 235 to 377, and two buttons — up, frames
+  page1 (216, 78 + 21*k*, 15, 21) on (377, 410)–(392, 431) and icons (154, 0, 11,
+  11) at (378, 413), 13 × 13; down, frames page1 (231, 78 + 21*k*, 18, 21) on (392,
+  410)–(410, 431) and icons (154, 11, 11, 11) at (392, 413) — drawn as the
+  designer's buttons are (`0x100464c0`). Up takes the first shown back one, down on
+  one while more than four are left (`0x10050f53`–`0x10051077`); a click must land
+  on the icon (`0x10035920`).
+- **A clicked row** (`0x10050cd0`–`0x10050efc`) drops the list and both panels'
+  previews, lays both panels out again with the kind's prefix, deletes the project,
+  and loads `units/<label>.dat` (`0x10055190`). That reads the file and fits its
+  parts again in the file's order, each through the add a double click uses
+  (`0x100519e0`), with the destination's row set first: the chassis; a turret in the
+  Turrets row of its socket; the chassis's armour in the next Armour row and each
+  internal system, the chassis's and the turret's, in the next Internal systems row,
+  counted over the file; a gun in the Weapons row of its socket; a clip in the first
+  Ammo row of its gun from the last one used. A part not in the tree is passed over
+  (`0x100552c8`). The loader then prices the design (`0x100555a5` onward). Both panels
+  turn to Chassis, and the recent projects' buttons go off (`0x10050ecb`–`0x10050efc`).
+- **The box** while the field or the list is up draws neither the black inner panel
+  nor the numbers (`0x1004f1db`, `0x1004f2ea`), and the hint not while the list is
+  up (`0x1004faba`); with a project, accept and save are then drawn bright, the
+  numbers' routine that would dim them not being run (`0x1004f2f0`, `0x10050409`).
 
 **Recent projects**: when the designer was opened for robots and the designer's
 count at `+0xb8e0` is above 0, five icon buttons icons (216, 96) at (200 + 30*k*,
@@ -557,15 +676,36 @@ rectangle and a camera of the same kind as the HUD panels'
   the full horizontal field ([10-sky.md](10-sky.md#the-sun-and-the-moon-are-drawn)).
   The panels' 160 × 151 views are 60° across and a little less high; the
   project's 250 × 290 view 60° across and about 68° high.
-- **The model's frame** is its centre moved to the origin, turned about z,
-  (0, 0, 1) (the axis the static initialiser `0x1009f300` sets), and **pitched by
-  −0.5 rad about y**: the first frame the camera routine builds (`0x1009ec9d`–
-  `0x1009ed6c`, two angles, 0 and −0.5 from `0x100e5d70` and `0x100e6980`) is
-  (cos 0.5, 0, −sin 0.5; 0, 1, 0; sin 0.5, 0, cos 0.5) by rows, which leans the
-  model's up toward −x, **toward the camera**: the view looks down on the model at
-  0.5 rad. Each draw composes the turn with it (`0x1009efea`–`0x1009f04d`); that
-  the turn is the model's own, under the pitch, is *inferred* from the recording,
-  where the tilt holds steady as a part turns.
+- **The model's frame is pitched by −0.5 rad about y**: the first frame the camera
+  routine builds (`0x1009ec9d`–`0x1009ed6c`, two angles, 0 and −0.5 from
+  `0x100e5d70` and `0x100e6980`), kept at the view's `+0x28`, is (cos 0.5, 0,
+  −sin 0.5; 0, 1, 0; sin 0.5, 0, cos 0.5) by rows, which leans the model's up toward
+  −x, **toward the camera**: the view looks down on the model at 0.5 rad. Its
+  translation column is −*c*, the sphere's centre negated (`0x1009ec66`–`0x1009ec91`).
+- **The turn is the model's own, under the pitch** — *read*. Each draw
+  (`0x1009efea`–`0x1009f060`) builds the turn *R* from a quaternion (cos ½*θ*,
+  *a* sin ½*θ*) about the view's axis *a* = (0, 0, 1) (`+0x10`, from the static
+  initialiser `0x1009f300`), `ngiGetSinCos` giving sine first
+  (`Ngi32.dll:0x1001b6e0`), and `g_FastProc`'s quaternion-to-matrix (its `+0x38`,
+  `Ngi32.dll:0x10014540` in plain x87) lays the matrix down transposed from the
+  column-vector one, so *R* turns the model **clockwise seen from above**. The
+  multiply at `g_FastProc`'s `+0x10` (`Ngi32.dll:0x1001c540`) is *A* · *B* for
+  3 × 4 matrices whose fourth column is the translation, as `0x100326a0` sets it.
+  The draw forms *R* · T(−*c*), then T(*c*) before it, then the pitch frame before
+  that, and hands the model **P · T(*c*) · R · T(−*c*)** as its placement: turned
+  about its own centre and its own z, then pitched. The pitch frame's −*c* then
+  lands the centre not on the origin the camera looks at but at (P − I) · *c*: a
+  centre *h* above the model's origin sits *h* sin 0.5 nearer the camera and
+  *h* (1 − cos 0.5) lower. *Derived*, with the stream-2 header's sphere as *c*: of
+  the 342 offered parts' meshes, 164 have their centre on their origin and sit
+  true; the rest sit off the view's middle, 127 by more than 3 % of the view's
+  half-width and at most `e_gun_bs_01` by 18 %; the recording's parts by 5 % or
+  less.
+- *Seen*: the turn's sense in the recording. From 108.95 to 109.95 s the source's
+  first turret — a long box, its red end on the left — turns so that the red end
+  rises and shrinks as it goes away and the right end's grille face comes into view
+  as it comes near: the model's +y side going to +x, away from a camera on −x, is
+  the clockwise turn. The offsets are too small to measure on a turning silhouette.
 - **It turns** at 0.00075 rad a millisecond, 0.75 rad a second, a whole turn in
   8.4 s: each draw adds the milliseconds since the last times that rate to its
   angle (`0x1009ef1c`), and the turn is built from `Ngi32.dll`'s `ngiGetSinCos`
@@ -585,9 +725,18 @@ rectangle and a camera of the same kind as the HUD panels'
   down at 45° from its own two sides, ±x, its top lit by both, its sides by one,
   its front and back by neither, however it turns. The draw then turns the z test
   on with writes and `LESSEQUAL` (render states 7, 14 and 23), and draws the mesh
-  with flags `0x5f0` (`0x1009ee30`). The scene colour a material adds is the
-  sky's, as every drawn material's is ([10-sky.md](10-sky.md#the-scene-colour-is-added-to-every-material));
-  its value while the designer is up was not traced.
+  with flags `0x5f0` (`0x1009ee30`) between the view camera's `ICamera2` slots 3
+  and 4 (`0x1009f168`, `0x1009f190`).
+- **The scene colour is the world's, this takt** — *read*. The colour a material
+  adds (`Terrain.dll:0x100308b8`) is the renderer's `+0x2c`, and the renderer is one
+  global, `0x100a5d30` (`0x1002ff22`); each prim buffer's render copies its state
+  block from the shader state it was handed (`0x1003d990`–`0x1003da6c`, and its three
+  siblings), and every prim buffer is handed the same one, the shader component's
+  interface 4, a singleton ([10-sky.md](10-sky.md#the-scene-colour-is-added-to-every-material)).
+  Nothing in the model view's draw sends it a colour, and the sky sends its own every
+  takt, whether or not the world is drawn. So a preview's materials take the scene
+  colour the world's take at that moment of the sky's clock; with no sky yet, the
+  shader's own 0.2 grey.
 
 ## The scan bands — *read*, and *seen*
 
@@ -657,12 +806,16 @@ from top to bottom in about a second. Its brightest pixels go (63, 175, 63) at
 5. **Prompts**: *SELECT CHASSIS* with no project; then *SELECT TURRET*, *SELECT
    WEAPON* or *TUNE UP OR ACCEPT TO PRODUCTION* by the selected tab.
 6. **Previews**: the camera at 2 × the model's radius on −x, looking along +x,
-   60° across the view's width; the model pitched −0.5 rad about y, its top
-   toward the camera, turning at 0.75 rad/s about its own z; two lights of
-   (2, 2, 2) from (∓1, 0, −1) in the model's own frame.
+   60° across the view's width; the model placed by P · T(*c*) · R · T(−*c*), R
+   turning it clockwise seen from above at 0.75 rad/s about its own z through its
+   centre, P the −0.5 rad pitch about y, its top toward the camera, with −*c* in its
+   translation; two lights of (2, 2, 2) from (∓1, 0, −1) in the model's own frame;
+   the world's scene colour.
 7. **Buttons**: accept (enabled with a turret and a valid design) hands the
-   design to the factory and closes; clear empties the project; save and load
-   use `units/<name>.dat`; exit closes.
+   design to the factory and closes; clear empties the project; save opens the
+   name field and writes `units/<name>.dat` when its typing ends; load lists the
+   valid `units/*.dat` a page of four at a time and fits a picked one's parts
+   again; exit closes. Take the mouse and Esc only while the mission is played.
 
 ## Not established
 
@@ -671,8 +824,12 @@ from top to bottom in about a second. Its brightest pixels go (63, 175, 63) at
   a unit's, and bit 8 makes its frame render skip the world
   (`Terrain.dll:0x100845e5`, `0x100846fb`), so the world is not drawn behind the
   designer and nothing is paused by it ([Opening and closing](#opening-and-closing--read)).
-  Still open: what the game object's `+0x08` value 4 is, and what the word's
-  bit 1 does.
+  ~~Still open: what the game object's `+0x08` value 4 is, and what the word's
+  bit 1 does.~~ **Read**: `+0x08` is the game's state word and 4 is *playing*
+  ([34-progression.md](34-progression.md#after-the-outcome--read-and-measured)), so
+  the designer takes the mouse and Esc only until the mission is won or lost; and
+  bit 1 is the view's "placed by the eye", read only by `Control.dll`'s first-person
+  eye (`0x100234ec`), which the 9 leaves on ([Opening and closing](#opening-and-closing--read)).
 - ~~The condition under which fitting a chassis enables Armour (`0x10052491`).~~
   **Read**: the chassis gives the Armour tab a row, an `i_arm_`-labelled slot —
   the count the slot loop keeps (zeroed at `0x10051fe4`, raised at
@@ -683,21 +840,39 @@ from top to bottom in about a second. Its brightest pixels go (63, 175, 63) at
   `0xffc8c8c8`, white, `0xffc8c8c8` on a selected row, `0xff323296`, white,
   `0xff9696fa` on the rest ([The rows](#the-rows--read-and-seen);
   [12-rsli.md](12-rsli.md#how-the-text-is-coloured--read)).
-- The load list's rows, scroll control and loading, beyond their outline.
+- ~~The load list's rows, scroll control and loading, beyond their outline.~~
+  **Read**: `stdGetValidRobots` lists the `units/*.dat` that read as designs, fit
+  the factory's size and are all researched; names holding `bld_unit_`,
+  `view_unit_` or `temp_unit` are passed over; four 242 × 21 rows from (200, 320)
+  and a scroll control at y 410; a picked file's parts are fitted again in its own
+  order, and both panels turn to Chassis. The name field is read with it: 16
+  characters in (270, 410)–(370, 430), magenta while typing, saved when the typing
+  stops ([The buttons](#the-buttons--read-and-seen)).
 - ~~Who fills the recent projects' count (`+0xb8e0`)~~ — already **read** in
   [36-factory.md](36-factory.md#projects--read-and-measured) and
   [23-economy.md](23-economy.md#what-prebuild-does--read-and-seen): the filled
   slots, counted again at each push to the front, by an accepted design and by
-  `prebuild` ([The buttons](#the-buttons--read-and-seen)). Still open: the kinds
-  2 and 3 (`fr_`, `a_`): which screen opens the designer for them.
+  `prebuild` ([The buttons](#the-buttons--read-and-seen)). ~~Still open: the kinds
+  2 and 3 (`fr_`, `a_`): which screen opens the designer for them.~~ **Read**:
+  none. The factory's call at `0x1009810a` is the only one to the open, with kind 1,
+  and the kind's other writers only zero it ([Opening and closing](#opening-and-closing--read)).
 - ~~The tooltip's box and timing (`0x1009bbc0`, [35-hud.md](35-hud.md#who-draws-it-and-what-it-hides--read)).~~
   **Read**: it shows after the cursor has held within 2 pixels for more than
   250 ms (`0x1009bc20`), a box of the text plus 8 each way, pale yellow
   `0xfff5f596` outlined black, the text black, 16 below the cursor and turned
   left or up at the screen's edges (`0x1009b970`; [The buttons](#the-buttons--read-and-seen)).
-- The destination panel's takt (`0x1004cd00`). Its draw is **read**: `0x1004ccb0`
+- ~~The destination panel's takt (`0x1004cd00`).~~ Its draw is **read**: `0x1004ccb0`
   is the source's `0x1004bb00` with the side argument 1 and without the source's
-  dropping of its preview when the selected tab has no rows.
+  dropping of its preview when the selected tab has no rows. **Read**, the takt: it
+  scrolls as the source's, drops its preview when a tab turns on at an empty row,
+  and a picked row rebuilds the source's same tab for that row's socket and, when
+  it holds a part, the preview ([The rows](#the-rows--read-and-seen)). What the fits
+  do to the panels' previews (`+0x4dffc`) is not traced.
+- ~~The scene colour a preview's materials take while the designer is up, and the
+  order of the turn and the pitch (*inferred*).~~ **Read**: the world's scene colour,
+  one for the game, which the sky sends every takt; and P · T(*c*) · R · T(−*c*), the
+  turn clockwise about the model's own centre under the pitch, the centre left off
+  the origin by (P − I) · *c* ([The previews](#the-previews--read-and-seen)).
 - ~~What writes a row's attach node at `+0x04`~~ — **read**, and **measured**:
   the fits' loop over the part's nodes writes its own counter, which runs 1 up to
   the part's node count and skips the nodes with no socket label, so the field is

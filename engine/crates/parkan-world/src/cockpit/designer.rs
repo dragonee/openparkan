@@ -9,10 +9,14 @@ use std::collections::BTreeMap;
 use anyhow::{Context, Result};
 use glam::{Mat4, Vec3};
 use parkan_formats::mission::KIND_UNIT;
+use parkan_formats::objects;
 
 use super::{Cockpit, Ink, argb};
 use crate::assembly::Assembly;
-use crate::designs::{BoxLine, Designer, Node, Place, Rating, Tab};
+use crate::designs::{
+    BoxLine, CLASS_ARMOUR, CLASS_CLIP, CLASS_GUN, CLASS_INTERNAL, CLASS_TURRET, Designer, Host, Node, Place,
+    Rating, Tab,
+};
 use crate::hud::{Blend, Layer, Pin};
 use crate::play::Play;
 
@@ -58,9 +62,9 @@ pub const PART_BOX_UNIT: f32 = 128.0;
 pub const LAMP_COLOUR: u32 = 0xffc8_ffc8;
 pub const BUTTON_ICON: u32 = 0xff9b_9bff;
 pub const BUTTON_ICON_OFF: u32 = 0xff4d_4d7f;
-/// A preview's camera stands K × the model's radius from its centre, K = 1 ÷ sin 30°, across
-/// a field of 60°; the model is pitched by −0.5 rad about y and turns at 0.75 rad a second
-/// (`0x1009dc10`, `0x1009ec9d`, `0x1009ef1c`).
+/// A preview's camera stands K × the model's radius from the origin, K = 1 ÷ sin 30°, across
+/// a field of 60°; the model is pitched by −0.5 rad about y and turns clockwise, seen from
+/// above, at 0.75 rad a second (`0x1009dc10`, `0x1009ec9d`, `0x1009ef1c`).
 pub const PREVIEW_K: f32 = 2.0;
 pub const PREVIEW_FIELD: f32 = std::f32::consts::FRAC_PI_3;
 pub const PREVIEW_PITCH: f32 = -0.5;
@@ -70,6 +74,113 @@ pub const PREVIEW_TURN_RATE: f32 = 0.00075;
 /// with it; and their colour, (2, 2, 2) each (`0x1009e888`).
 pub const PREVIEW_LIGHTS: [[f32; 3]; 2] = [[-1.0, 0.0, -1.0], [1.0, 0.0, -1.0]];
 pub const PREVIEW_LIGHT_COLOUR: f32 = 2.0;
+/// Save's name field (`+0x1444`, laid out at `0x1004eaad`): its rectangle, the most
+/// characters it holds, and the room a character needs to be taken: the text so far must be
+/// narrower than the field less 30 (`0x100459a4`–`0x100459af`).
+pub const FIELD: [f32; 4] = [270.0, 410.0, 370.0, 430.0];
+pub const FIELD_MAX: usize = 16;
+pub const FIELD_ROOM: f32 = FIELD[2] - FIELD[0] - 30.0;
+/// "Type the name of the designed warbot...", centred on x 320 at the view's foot plus 25
+/// (`0x1005020e`–`0x10050332`).
+pub const STRING_TYPE_NAME: u32 = 3056;
+pub const TYPE_NAME_Y: f32 = 326.0;
+/// The field's text: magenta while it takes characters, else pale blue between dark blue
+/// (`0x10045597`–`0x10045639`); the caret, a 5-wide bar after the text for the first half of
+/// every second (`0x10045721`–`0x10045812`).
+pub const FIELD_ACTIVE: u32 = 0xffff_00ff;
+pub const FIELD_IDLE: u32 = 0xffc8_c8ff;
+pub const CARET: u32 = 0xff96_00ff;
+/// Load's rows (`0x10045bd0`, placed at `0x100512e3`): 242 × 21 from x 200, the first at the
+/// box's top plus 20 and each 22 below, 4 shown at a time (`0x100503a0`).
+pub const LIST_ROW: [f32; 2] = [200.0, 320.0];
+pub const LIST_ROW_SIZE: [f32; 2] = [242.0, 21.0];
+pub const LIST_ROW_STEP: f32 = 22.0;
+pub const LIST_SHOWN: usize = 4;
+/// Load's scroll control (`0x10046080` at y 410): a lamp at x 230, its bar from 235 to 377,
+/// and the up and down buttons whose 13 × 13 icons take the click (`0x10035a30`).
+pub const LIST_SCROLL_Y: f32 = 410.0;
+pub const LIST_UP: [f32; 4] = [378.0, 413.0, 391.0, 426.0];
+pub const LIST_DOWN: [f32; 4] = [392.0, 413.0, 405.0, 426.0];
+/// A load row's text: a gradient down the glyph from `0xff326496` to `0xff96c8fa`, halfway
+/// `0xff9696c8` (`0x10045fac`–`0x10045fcb`).
+///
+/// STAND-IN: docs/37-designer.md#the-rows--read-and-seen -- a text run here takes one colour:
+/// the gradient's middle.
+pub const LIST_TEXT: u32 = 0xff96_96c8;
+/// The files load leaves out: any whose name holds one of these (`strstr`,
+/// `0x100511b3`–`0x100511f5`).
+pub const LEFT_OUT: [&str; 3] = ["bld_unit_", "view_unit_", "temp_unit"];
+
+/// Save's name field.
+#[derive(Clone, Debug, PartialEq)]
+pub struct NameField {
+    pub text: String,
+    /// Taking characters (`+0x14`). Enter clears it, and a click on the field turns it over
+    /// (`0x10045820`); once it is clear the next takt saves and the field goes.
+    pub active: bool,
+    /// When the caret's blink last started (`+0x10`).
+    pub stamp_ms: f64,
+}
+
+impl NameField {
+    /// A character typed into the field (`0x100458f0`), `width` measuring text as the game
+    /// font sets it: backspace takes the last character off, Enter stops the typing, and any
+    /// other character the holder passes on — the C library's printable ones
+    /// (`0x10055fbd`) — is added while fewer than 16 are there and the text so far fits.
+    /// Whether the typing stopped.
+    pub fn key(&mut self, c: char, width: impl Fn(&str) -> f32) -> bool {
+        match c {
+            '\u{8}' => {
+                self.text.pop();
+            }
+            '\r' | '\n' => {
+                self.active = false;
+                return true;
+            }
+            c if (' '..='~').contains(&c)
+                && self.text.chars().count() < FIELD_MAX
+                && width(&self.text) < FIELD_ROOM =>
+            {
+                self.text.push(c);
+            }
+            _ => {}
+        }
+        false
+    }
+}
+
+/// Load's list of saved designs, by the name they were saved under.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct LoadList {
+    pub names: Vec<String>,
+    /// The first shown (`+0xad6c`).
+    pub first: usize,
+}
+
+impl LoadList {
+    /// How many rows show: four, or what is left from the first.
+    pub fn shown(&self) -> usize {
+        self.names.len().saturating_sub(self.first).min(LIST_SHOWN)
+    }
+
+    /// Up one row, or down one while more than four are left (`0x10050f7a`, `0x10051007`).
+    pub fn scroll(&mut self, down: bool) {
+        if down {
+            if self.first + LIST_SHOWN < self.names.len() {
+                self.first += 1;
+            }
+        } else {
+            self.first = self.first.saturating_sub(1);
+        }
+    }
+
+    /// The layout rectangle of shown row `k`.
+    pub fn row(k: usize) -> [f32; 4] {
+        let y = LIST_ROW[1] + LIST_ROW_STEP * k as f32;
+        [LIST_ROW[0], y, LIST_ROW[0] + LIST_ROW_SIZE[0], y + LIST_ROW_SIZE[1]]
+    }
+}
+
 /// The scan bands' cycle, and the strips they are drawn from.
 pub const BAND_CYCLE_MS: f64 = 4000.0;
 /// The colour of every texel of the three `ui_tex5` strips the bands draw, (255, 221, 255):
@@ -345,6 +456,9 @@ pub struct Session {
     pub angle: f32,
     pub turned_ms: f64,
     pub opened_ms: f64,
+    /// Save's name field (`+0xad7e`) and load's list (`+0xad7d`), while either is up.
+    pub field: Option<NameField>,
+    pub list: Option<LoadList>,
 }
 
 /// What the screen does after a click.
@@ -352,6 +466,15 @@ pub struct Session {
 pub enum Outcome {
     None,
     Close,
+    /// Save: the design written as `units/<name>.dat` (`0x10050c28`).
+    Save {
+        name: String,
+        bytes: Vec<u8>,
+    },
+    /// Load was clicked: the screen lists the saved designs ([`Session::show_list`]).
+    List,
+    /// A load row was clicked: the design saved under this name (`0x10050c86`).
+    Load(String),
     /// Accept: the design's bytes, its Type and name, its chassis's size and its price.
     Accept {
         bytes: Vec<u8>,
@@ -372,6 +495,11 @@ pub struct Screen {
     pub accepted: usize,
     /// How many sessions have opened, for their previews' paths.
     pub opened: usize,
+    /// Where save writes `<name>.dat` and load lists from: the game's `units/`, as the game
+    /// has it. With none the designs saved are only kept here, as they always also are.
+    pub units: Option<std::path::PathBuf>,
+    /// The designs saved while the engine runs, by name.
+    pub saved: Vec<(String, Vec<u8>)>,
 }
 
 /// The sphere about a set of points: the middle of their box, reaching the farthest.
@@ -470,6 +598,8 @@ impl Session {
             angle: 0.0,
             turned_ms: now_ms,
             opened_ms: now_ms,
+            field: None,
+            list: None,
         };
         s.refresh(assembly, &BTreeMap::new());
         s
@@ -820,8 +950,20 @@ impl Session {
         }
     }
 
-    /// A click at the layout point `at` at `now_ms` (`0x10055ff0`): the buttons first, then
-    /// the source panel, then the destination.
+    /// Whether a button is drawn bright: as [`Session::enabled_button`], but with a project and
+    /// the name field or the load list up, accept and save are drawn bright whatever the
+    /// design, the numbers' routine that would say otherwise not being run (`0x1004f2ea`–
+    /// `0x1004f306`, `0x10050409`).
+    pub fn drawn_enabled(&self, button: Button) -> bool {
+        let over = self.design.is_some() && (self.field.is_some() || self.list.is_some());
+        (over && matches!(button, Button::Accept | Button::Save)) || self.enabled_button(button)
+    }
+
+    /// A click at the layout point `at` at `now_ms` (`0x10055ff0`, `0x100504d0`). While the
+    /// name field is up a click on it turns its typing over, and while the list is up a click
+    /// takes a shown row or a scroll button; neither lets a click reach the buttons, and one
+    /// that falls elsewhere goes on to the panels. Otherwise the buttons come first, then the
+    /// source panel, then the destination.
     pub fn click(
         &mut self,
         at: [f32; 2],
@@ -830,22 +972,45 @@ impl Session {
         strings: &BTreeMap<u32, String>,
     ) -> Outcome {
         let inside = |[x0, y0, x1, y1]: [f32; 4]| (x0..=x1).contains(&at[0]) && (y0..=y1).contains(&at[1]);
-        for b in &BUTTONS {
-            let icon = [b.icon[0], b.icon[1], b.icon[0] + 24.0, b.icon[1] + 24.0];
-            if !inside(icon) || !self.enabled_button(b.button) {
-                continue;
+        if let Some(field) = self.field.as_mut() {
+            // Strictly inside (`0x100504e5`–`0x10050512`).
+            let [x0, y0, x1, y1] = FIELD;
+            if at[0] > x0 && at[0] < x1 && at[1] > y0 && at[1] < y1 {
+                field.active = !field.active;
+                field.stamp_ms = now_ms;
+                return if field.active { Outcome::None } else { self.save() };
             }
-            return match b.button {
-                Button::Exit => Outcome::Close,
-                Button::Clear => {
-                    self.clear(assembly, strings);
-                    Outcome::None
+        } else if let Some(list) = self.list.as_mut() {
+            // The control test is the cursor in [x0, x1) × [y0, y1) (`0x10035920`).
+            let within = |[x0, y0, x1, y1]: [f32; 4]| at[0] >= x0 && at[0] < x1 && at[1] >= y0 && at[1] < y1;
+            if let Some(k) = (0..list.shown()).find(|&k| within(LoadList::row(k))) {
+                return Outcome::Load(list.names[list.first + k].clone());
+            }
+            if within(LIST_UP) || within(LIST_DOWN) {
+                list.scroll(within(LIST_DOWN));
+                return Outcome::None;
+            }
+        } else {
+            for b in &BUTTONS {
+                let icon = [b.icon[0], b.icon[1], b.icon[0] + 24.0, b.icon[1] + 24.0];
+                if !inside(icon) || !self.enabled_button(b.button) {
+                    continue;
                 }
-                // STAND-IN: docs/37-designer.md#not-established -- save's name field and load's
-                // list are not built: the buttons do nothing.
-                Button::Save | Button::Load => Outcome::None,
-                Button::Accept => self.accept(),
-            };
+                return match b.button {
+                    Button::Exit => Outcome::Close,
+                    Button::Clear => {
+                        self.clear(assembly, strings);
+                        Outcome::None
+                    }
+                    // Save opens the name field, empty and typing (`0x100510b4`–`0x1005112d`).
+                    Button::Save => {
+                        self.field = Some(NameField { text: String::new(), active: true, stamp_ms: now_ms });
+                        Outcome::None
+                    }
+                    Button::Load => Outcome::List,
+                    Button::Accept => self.accept(),
+                };
+            }
         }
         for side in [Side::Source, Side::Destination] {
             let x0 = side.x();
@@ -919,6 +1084,164 @@ impl Session {
         }
     }
 
+    /// The name field done with: the design written under the field's text, the same writer
+    /// accept uses (`0x10050c28`), and the field gone (`0x10050c2d`).
+    fn save(&mut self) -> Outcome {
+        let Some(field) = self.field.take() else { return Outcome::None };
+        let Some(design) = self.design.clone() else { return Outcome::None };
+        let type_word = self.designer.type_word(&design);
+        Outcome::Save { name: field.text, bytes: self.designer.dat_bytes(&design, type_word) }
+    }
+
+    /// A character while the name field is up (`0x10055fa0`); Enter saves.
+    pub fn key(&mut self, c: char, width: impl Fn(&str) -> f32) -> Outcome {
+        let done = self.field.as_mut().is_some_and(|field| field.key(c, width));
+        if done { self.save() } else { Outcome::None }
+    }
+
+    /// Esc (`0x10055e80`): it drops the load list or the name field, unsaved, while one is up,
+    /// and closes the designer otherwise. Whether the designer stays.
+    pub fn escape(&mut self) -> bool {
+        if self.list.take().is_some() {
+            return true;
+        }
+        self.field.take().is_some()
+    }
+
+    /// Put up the load list from the designs saved under `files`' names, when any of them
+    /// qualifies (`0x10051153`–`0x1005139a`): a name holding `bld_unit_`, `view_unit_` or
+    /// `temp_unit` is left out, and `World3D.dll`'s `stdGetValidRobots` keeps a file that
+    /// reads as a design (`0x10014e5d`–`0x10014f07`) whose chassis is no bigger than the
+    /// factory builds (`0x10014f19`–`0x10014fc2`) and whose every part is in the tree and
+    /// researched (`0x1001505b`–`0x1001511c`).
+    pub fn show_list(&mut self, files: &[(String, objects::Unit)]) {
+        let sizes = crate::designs::chassis_prefixes(self.designer.grade);
+        let names: Vec<String> = files
+            .iter()
+            .filter(|(name, _)| {
+                let low = name.to_ascii_lowercase();
+                !LEFT_OUT.iter().any(|w| low.contains(w))
+            })
+            .filter(|(_, unit)| {
+                Node::from_unit(unit).is_some_and(|tree| {
+                    let chassis = tree.part.to_ascii_lowercase();
+                    sizes.iter().any(|p| chassis.starts_with(&p.to_ascii_lowercase()))
+                        && self.designer.price(&tree).2
+                })
+            })
+            .map(|(name, _)| name.clone())
+            .collect();
+        self.list = (!names.is_empty()).then_some(LoadList { names, first: 0 });
+    }
+
+    /// Load a saved design (`0x10050cef`–`0x10050efc`, `0x10055190`): the list goes, the
+    /// project is cleared, and the file's parts are fitted again in its own order, each through
+    /// the same add a double click makes, into the row the loader picks for it — the chassis;
+    /// a turret into the socket it names; the chassis's armour and every internal system into
+    /// the next row of their tab, counted over the file; a gun into its socket; a clip into
+    /// the first ammunition row of its gun from the last one used. A part not in the tree is
+    /// passed over (`0x100552c8`). Both panels then turn to Chassis (`0x10050ecb`–`0x10050ee4`).
+    pub fn load(
+        &mut self,
+        unit: &objects::Unit,
+        assembly: &mut Assembly,
+        strings: &BTreeMap<u32, String>,
+    ) -> bool {
+        self.list = None;
+        self.clear(assembly, strings);
+        let Some(tree) = Node::from_unit(unit) else { return false };
+        if !self.replay(Tab::Chassis, &|_, _| true, &tree.part, assembly, strings) {
+            return false;
+        }
+        let (mut armour, mut internal, mut clip) = (0, 0, 0);
+        for child in &tree.children {
+            match child.class {
+                CLASS_TURRET => {
+                    let at = child.attach;
+                    self.replay(Tab::Turrets, &|_, p| p.attach == at, &child.part, assembly, strings);
+                    for part in &child.children {
+                        match part.class {
+                            CLASS_GUN => {
+                                let at = part.attach;
+                                self.replay(
+                                    Tab::Weapons,
+                                    &|_, p| p.attach == at,
+                                    &part.part,
+                                    assembly,
+                                    strings,
+                                );
+                                for c in part.children.iter().filter(|c| c.class == CLASS_CLIP) {
+                                    let (gun, from) = (Host::Gun(at), clip);
+                                    let wanted = |i: usize, p: &Place| i >= from && p.host == gun;
+                                    let rows =
+                                        self.designer.places(assembly, self.design.as_ref(), Tab::Ammo);
+                                    if let Some(i) = rows.iter().enumerate().position(|(i, p)| wanted(i, p)) {
+                                        clip = i;
+                                    }
+                                    self.replay(Tab::Ammo, &wanted, &c.part, assembly, strings);
+                                }
+                            }
+                            CLASS_INTERNAL => {
+                                let k = internal;
+                                self.replay(Tab::Internal, &|i, _| i == k, &part.part, assembly, strings);
+                                internal += 1;
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                CLASS_ARMOUR => {
+                    let k = armour;
+                    self.replay(Tab::Armour, &|i, _| i == k, &child.part, assembly, strings);
+                    armour += 1;
+                }
+                CLASS_INTERNAL => {
+                    let k = internal;
+                    self.replay(Tab::Internal, &|i, _| i == k, &child.part, assembly, strings);
+                    internal += 1;
+                }
+                _ => {}
+            }
+        }
+        self.select_tab(Tab::Chassis, assembly, strings);
+        true
+    }
+
+    /// Fit `part` into the row of `tab` that `wanted` picks, as the loader's add does: the
+    /// tab's row set, the part picked in the source, and a double click from there.
+    fn replay(
+        &mut self,
+        tab: Tab,
+        wanted: &dyn Fn(usize, &Place) -> bool,
+        part: &str,
+        assembly: &mut Assembly,
+        strings: &BTreeMap<u32, String>,
+    ) -> bool {
+        if self.designer.catalogue.item(part).is_none() || !self.enabled[tab_index(tab)] {
+            return false;
+        }
+        if self.tab != tab {
+            self.remembered[tab_index(self.tab)] = self.destination.selected;
+            self.tab = tab;
+            self.destination = Panel { selected: self.remembered[tab_index(tab)], ..Panel::default() };
+        }
+        let rows = self.designer.places(assembly, self.design.as_ref(), tab);
+        let Some(row) = rows.iter().enumerate().position(|(i, p)| wanted(i, p)) else { return false };
+        self.destination.selected = Some(row);
+        self.source = Panel::default();
+        self.refresh(assembly, strings);
+        let Some(offered) = self
+            .source
+            .rows
+            .iter()
+            .position(|r| r.part.as_deref().is_some_and(|p| p.eq_ignore_ascii_case(part)))
+        else {
+            return false;
+        };
+        self.source.selected = Some(offered);
+        self.double_click(Side::Source, assembly, strings)
+    }
+
     /// The previews' turn at `now_ms`: 0.75 rad a second since the last draw.
     pub fn turn(&mut self, now_ms: f64) -> f32 {
         let dt = (now_ms - self.turned_ms).max(0.0) as f32;
@@ -934,9 +1257,15 @@ impl Session {
 /// The camera is a `CCamera` placed once at (−K × radius, 0, 0) with no turn
 /// (`iron3d.dll:0x1009ec03`–`0x1009ec61`), so it looks along +x with z up, and its 60° is the
 /// view's field, which spans the view's width (`Terrain.dll:0x100848a0` → the view's slot
-/// 10; docs/10, "The sun and the moon are drawn"). The model's centre is moved to the origin, it is turned by
-/// `angle` about z and pitched by −0.5 rad about y, which tips its top toward the camera
-/// (`0x1009ec9d`–`0x1009ed6c`). The radius is the one about the drawn level-0 vertices.
+/// 10; docs/10, "The sun and the moon are drawn").
+///
+/// The placement each draw sets (`0x1009efea`–`0x1009f060`) is P · T(c) · R · T(−c): R the
+/// turn, a quaternion of `angle` about +z made into a matrix that turns the model **clockwise
+/// seen from above** (`Ngi32.dll:0x10014540`), about its own centre; then P, the frame the
+/// camera routine built (`0x1009ec66`–`0x1009ed6c`), the pitch of −0.5 rad about y with −c in
+/// its translation column. So the turn is the model's own, under the pitch, and the centre
+/// lands not at the origin but at (P's rotation − I) · c. The radius is the one about the
+/// drawn level-0 vertices.
 pub fn preview_camera(centre: Vec3, radius: f32, angle: f32, viewport: [f32; 4]) -> (Mat4, Mat4) {
     let distance = PREVIEW_K * radius.max(0.1);
     let aspect = (viewport[2] / viewport[3].max(1.0)).max(0.01);
@@ -946,9 +1275,10 @@ pub fn preview_camera(centre: Vec3, radius: f32, angle: f32, viewport: [f32; 4])
     let field_y = 2.0 * ((PREVIEW_FIELD / 2.0).tan() / aspect).atan();
     let view_proj =
         Mat4::perspective_rh(field_y, aspect, far, near) * Mat4::look_at_rh(eye, Vec3::ZERO, Vec3::Z);
-    let model =
-        Mat4::from_rotation_y(PREVIEW_PITCH) * Mat4::from_rotation_z(angle) * Mat4::from_translation(-centre);
-    (view_proj, model)
+    let pitch = Mat4::from_translation(-centre) * Mat4::from_rotation_y(PREVIEW_PITCH);
+    let turn =
+        Mat4::from_translation(centre) * Mat4::from_rotation_z(-angle) * Mat4::from_translation(-centre);
+    (view_proj, pitch * turn)
 }
 
 /// The tint that draws a scan band's strip as the device lit it, `g` being the specular's
@@ -1190,14 +1520,27 @@ fn draw_session(
     cut(ink, "page4", [154.0, 169.0, 5.0, 43.0], [263.0, 437.0, 6.0, 43.0], 0xffff_ffff);
     cut(ink, "page4", [75.0, 213.0, 67.0, 43.0], [338.0, 437.0, 67.0, 43.0], 0xffff_ffff);
     cut(ink, "page4", [182.0, 213.0, 9.0, 43.0], [446.0, 437.0, 9.0, 43.0], 0xffff_ffff);
-    cut(ink, "page3", [41.0, 140.0, 32.0, 115.0], [195.0, 320.0, 32.0, 115.0], 0xffff_ffff);
-    let mut x = 227.0;
-    while x < 440.0 {
-        cut(ink, "page3", [74.0, 140.0, 64.0, 115.0], [x, 320.0, 64.0f32.min(440.0 - x), 115.0], 0xffff_ffff);
-        x += 64.0;
+    // The black inner panel and the numbers only while neither the name field nor the load
+    // list is up (`0x1004f1db`, `0x1004f2ea`), and the hint while the list is not
+    // (`0x1004faba`).
+    let over = s.field.is_some() || s.list.is_some();
+    if !over {
+        cut(ink, "page3", [41.0, 140.0, 32.0, 115.0], [195.0, 320.0, 32.0, 115.0], 0xffff_ffff);
+        let mut x = 227.0;
+        while x < 440.0 {
+            cut(
+                ink,
+                "page3",
+                [74.0, 140.0, 64.0, 115.0],
+                [x, 320.0, 64.0f32.min(440.0 - x), 115.0],
+                0xffff_ffff,
+            );
+            x += 64.0;
+        }
+        cut(ink, "page3", [139.0, 140.0, 32.0, 115.0], [423.0, 320.0, 32.0, 115.0], 0xffff_ffff);
     }
-    cut(ink, "page3", [139.0, 140.0, 32.0, 115.0], [423.0, 320.0, 32.0, 115.0], 0xffff_ffff);
     match (&s.design, s.rating) {
+        _ if s.list.is_some() || (s.design.is_some() && over) => {}
         (Some(_), Some(rating)) => {
             ink.text(&s.name, [220.0, 331.0], YELLOW);
             let lines = rating.lines(s.designer.offence_range, s.designer.defence_range);
@@ -1221,9 +1564,59 @@ fn draw_session(
             }
         }
     }
+    // A load row, and the empty one behind the name field (`+0x146c`): page 1's long bar
+    // and the dark lamp (`0x10045e60`). The lamp's lit states come and go with a click, which
+    // loads at once here.
+    let row_art = |ink: &mut Ink, y: f32| {
+        let [w, h] = LIST_ROW_SIZE;
+        cut(ink, "page1", [14.0, 57.0, 242.0, 21.0], [LIST_ROW[0], y, w, h], 0xffff_ffff);
+        cut(ink, "page1", [178.0, 141.0, 17.0, 21.0], [LIST_ROW[0], y, 17.0, h], 0xffff_ffff);
+    };
+    if let Some(field) = &s.field {
+        // The name field (`0x10050202`–`0x10050349`): the prompt, the row, and the field's
+        // text centred in it, drawn with no frame (`0x100454e0` handed 0), and the caret.
+        let prompt = cockpit.string(STRING_TYPE_NAME).to_owned();
+        ink.centred(&prompt, 0.0, 640.0, TYPE_NAME_Y, GREEN);
+        row_art(ink, FIELD[1]);
+        let [x0, y0, x1, y1] = FIELD;
+        let w = ink.font.advance(&field.text);
+        let a = ((y1 - y0 - text_height) / 2.0).floor();
+        let x = x0 + ((x1 - x0 - w) / 2.0).floor();
+        // STAND-IN: docs/37-designer.md#the-rows--read-and-seen -- idle, the field's text is
+        // a gradient from `0xff323264` through `0xffc8c8ff` halfway; a text run takes the
+        // middle.
+        let colour = if field.active { FIELD_ACTIVE } else { FIELD_IDLE };
+        ink.text(&field.text, [x, y0 + a], colour);
+        if field.active && (now_ms - field.stamp_ms).rem_euclid(1000.0) < 500.0 {
+            let end = x0 + ((x1 - x0) / 2.0).floor() + (w / 2.0).floor();
+            ink.painter.fill(Blend::Alpha, [end + 1.0, y0 + a, 5.0, y1 - y0 - 2.0 * a], argb(CARET));
+        }
+    } else if let Some(list) = &s.list {
+        // The load list (`0x100503a0`–`0x10050404`): the shown rows, each name centred on
+        // x 320, and the scroll control (`0x100464c0`).
+        for k in 0..list.shown() {
+            let [_, y0, _, y1] = LoadList::row(k);
+            row_art(ink, y0);
+            let name = &list.names[list.first + k];
+            let w = ink.font.advance(name);
+            ink.text(
+                name,
+                [(320.0 - w / 2.0).floor(), y0 + ((y1 - y0 - text_height) / 2.0).floor()],
+                LIST_TEXT,
+            );
+        }
+        let y = LIST_SCROLL_Y;
+        cut(ink, "page1", [178.0, 141.0, 17.0, 21.0], [230.0, y, 17.0, 21.0], 0xffff_ffff);
+        cut(ink, "page4", [0.0, 0.0, 130.0, 21.0], [235.0, y, 142.0, 21.0], 0xffff_ffff);
+        cut(ink, "page1", [216.0, 78.0, 15.0, 21.0], [377.0, y, 15.0, 21.0], 0xffff_ffff);
+        cut(ink, "icons", [154.0, 0.0, 11.0, 11.0], [LIST_UP[0], LIST_UP[1], 13.0, 13.0], BUTTON_ICON);
+        cut(ink, "page1", [231.0, 78.0, 18.0, 21.0], [392.0, y, 18.0, 21.0], 0xffff_ffff);
+        cut(ink, "icons", [154.0, 11.0, 11.0, 11.0], [LIST_DOWN[0], LIST_DOWN[1], 13.0, 13.0], BUTTON_ICON);
+    }
+
     // The buttons.
     for b in &BUTTONS {
-        let enabled = s.enabled_button(b.button);
+        let enabled = s.drawn_enabled(b.button);
         let [bx0, by0, bx1, by1] = b.frame;
         let c = b.cuts[0];
         cut(ink, "page4", [c[0], c[1], b.size[0], b.size[1]], [bx0, by0, bx1 - bx0, by1 - by0], 0xffff_ffff);
@@ -1258,6 +1651,11 @@ fn draw_session(
             paint: None,
         });
     }
+    // STAND-IN: docs/37-designer.md#the-rows--read-and-seen -- which model the destination's
+    // preview keeps is read in part: a picked row with no part leaves the last model up
+    // (`0x1004d0dd`), a tab turned on at an empty row drops it (`0x1004ce12`), and the fits
+    // write the previews too, which is not traced; here each preview shows its selected
+    // row's part.
     for (side, rect, sphere) in [
         (Side::Source, SOURCE_PREVIEW, s.source_sphere),
         (Side::Destination, DESTINATION_PREVIEW, s.destination_sphere),
@@ -1386,6 +1784,72 @@ impl Screen {
         self.session = None;
     }
 
+    /// Whether the designer takes the mouse and Esc: while it is up and the mission is being
+    /// played, the game's state word 4 (`0x10055ea6`, `0x10056004`; docs/34, "After the
+    /// outcome"). Once it is won or lost they pass on, and the outcome panel is what shows.
+    pub fn takes_input(&self, play: &Play) -> bool {
+        self.is_open() && play.progression.as_ref().is_none_or(|p| p.progress.outcome.is_none())
+    }
+
+    /// Esc: the load list or the name field goes, or the designer closes (`0x10055e80`).
+    pub fn escape(&mut self) {
+        if !self.session.as_mut().is_some_and(Session::escape) {
+            self.close();
+        }
+    }
+
+    /// A character typed while the name field is up, measured by the game font.
+    pub fn key(&mut self, c: char, font: &crate::text::GameFont) {
+        let Some(session) = self.session.as_mut() else { return };
+        let outcome = session.key(c, |t| font.advance(t));
+        self.keep(outcome);
+    }
+
+    /// A design saved, kept by name, and written to the game's `units/` when there is one.
+    fn keep(&mut self, outcome: Outcome) {
+        let Outcome::Save { name, bytes } = outcome else { return };
+        if let Some(dir) = &self.units
+            && let Err(e) = std::fs::create_dir_all(dir)
+                .and_then(|_| std::fs::write(dir.join(format!("{name}.dat")), &bytes))
+        {
+            eprintln!("cannot save units/{name}.dat: {e}");
+        }
+        self.saved.retain(|(n, _)| !n.eq_ignore_ascii_case(&name));
+        self.saved.push((name, bytes));
+    }
+
+    /// The saved designs by name: the `.dat` files in `units/` that read as designs, and the
+    /// ones kept here, in name order.
+    pub fn saved_designs(&self) -> Vec<(String, objects::Unit)> {
+        let mut out: Vec<(String, objects::Unit)> = Vec::new();
+        let mut add = |name: String, bytes: &[u8]| {
+            if let Ok(unit) = objects::parse_unit(bytes, &name) {
+                out.retain(|(n, _)| !n.eq_ignore_ascii_case(&name));
+                out.push((name, unit));
+            }
+        };
+        if let Some(entries) = self.units.as_ref().and_then(|d| std::fs::read_dir(d).ok()) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                let Some(name) = path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .and_then(|n| n.strip_suffix(".dat").or_else(|| n.strip_suffix(".DAT")))
+                else {
+                    continue;
+                };
+                if let Ok(bytes) = std::fs::read(&path) {
+                    add(name.to_owned(), &bytes);
+                }
+            }
+        }
+        for (name, bytes) in &self.saved {
+            add(name.clone(), bytes);
+        }
+        out.sort_by_key(|(n, _)| n.to_ascii_uppercase());
+        out
+    }
+
     /// A click at the layout point `at`: a button, a tab, a row. Accept hands the factory a
     /// project, registered in memory under its own path, and closes (docs/37, "What each
     /// does").
@@ -1395,6 +1859,20 @@ impl Screen {
         match session.click(at, now, &mut play.assembly, strings) {
             Outcome::None => {}
             Outcome::Close => self.close(),
+            outcome @ Outcome::Save { .. } => self.keep(outcome),
+            Outcome::List => {
+                let files = self.saved_designs();
+                if let Some(session) = self.session.as_mut() {
+                    session.show_list(&files);
+                }
+            }
+            Outcome::Load(name) => {
+                let files = self.saved_designs();
+                let unit = files.into_iter().find(|(n, _)| *n == name).map(|(_, u)| u);
+                if let (Some(session), Some(unit)) = (self.session.as_mut(), unit) {
+                    session.load(&unit, &mut play.assembly, strings);
+                }
+            }
             Outcome::Accept { bytes, type_word, name, chassis_size, ore, power, lines } => {
                 let factory = session.factory;
                 self.accepted += 1;
@@ -1446,6 +1924,30 @@ mod tests {
     }
 
     #[test]
+    fn the_name_field_takes_sixteen_printable_characters_while_they_fit_and_enter_ends_it() {
+        let mut f = NameField { text: String::new(), active: true, stamp_ms: 0.0 };
+        // Each character 4 wide: the text so far must stay under 70 (`0x100459aa`).
+        let width = |t: &str| 4.0 * t.chars().count() as f32;
+        for c in "Warbot Mk.2\u{7}é".chars() {
+            assert!(!f.key(c, width));
+        }
+        assert_eq!(f.text, "Warbot Mk.2", "a bell and a letter past ASCII are not printable");
+        f.key('\u{8}', width);
+        assert_eq!(f.text, "Warbot Mk.");
+        for _ in 0..20 {
+            f.key('x', width);
+        }
+        assert_eq!(f.text.len(), FIELD_MAX, "sixteen at most");
+        // Wide characters stop sooner: the 18th unit of width no longer fits.
+        let mut g = NameField { text: String::new(), active: true, stamp_ms: 0.0 };
+        for _ in 0..20 {
+            g.key('W', |t: &str| 7.5 * t.chars().count() as f32);
+        }
+        assert_eq!(g.text.len(), 10, "7.5 × 10 = 75 is past the 70 of room");
+        assert!(f.key('\r', width) && !f.active, "Enter stops the typing");
+    }
+
+    #[test]
     fn a_list_scrolls_one_row_at_a_time_while_rows_are_left() {
         let mut p = rows(8);
         p.scroll(false);
@@ -1457,23 +1959,28 @@ mod tests {
     }
 
     #[test]
-    fn a_previews_sphere_fits_its_view_whatever_its_turn() {
-        let (centre, radius) = (Vec3::new(3.0, -2.0, 1.0), 5.0);
-        for viewport in [[0.0, 0.0, 250.0, 290.0], [0.0, 0.0, 160.0, 151.0]] {
-            for angle in [0.0, 1.0, 2.5] {
-                let (view_proj, model) = preview_camera(centre, radius, angle, viewport);
-                let world = model * centre.extend(1.0);
-                assert!(world.truncate().length() < 1e-4, "the centre is moved to the origin");
-                for d in [Vec3::X, Vec3::Y, Vec3::Z, -Vec3::X, -Vec3::Y, -Vec3::Z] {
-                    // A point on the sphere, turned as the model is, stays inside the view.
-                    let clip = view_proj * (world.truncate() + d * radius * 0.99).extend(1.0);
-                    let ndc = clip.truncate() / clip.w;
-                    assert!(
-                        clip.w > 0.0 && ndc.x.abs() <= 1.0 && ndc.y.abs() <= 1.0,
-                        "{viewport:?} {d} {ndc}"
-                    );
-                }
-            }
+    fn a_previews_model_turns_clockwise_about_its_centre_under_a_pitch_that_leaves_the_centre_off_the_origin()
+    {
+        let viewport = [0.0, 0.0, 160.0, 151.0];
+        // The turn is the model's own, clockwise seen from above (`Ngi32.dll:0x10014540`):
+        // a quarter turn takes its left side, +y, to +x, away from the camera; the pitch then
+        // tips that point up by the 0.5 rad the frame leans (`0x1009ec9d`).
+        let (_, model) = preview_camera(Vec3::ZERO, 3.0, std::f32::consts::FRAC_PI_2, viewport);
+        let left = model.transform_point3(Vec3::Y);
+        assert!(left.distance(Vec3::new(0.5f32.cos(), 0.0, 0.5f32.sin())) < 1e-5, "{left}");
+        // A small turn moves the left side away from the camera, at −x.
+        let (_, model) = preview_camera(Vec3::ZERO, 3.0, 0.1, viewport);
+        assert!(model.transform_point3(Vec3::Y).x > 0.0);
+        // The pitch's frame keeps −c in its translation column (`0x1009ec66`–`0x1009ec91`), so
+        // the centre, turned about itself and put back, lands at (pitch − I) · c whatever the
+        // turn (`0x1009efea`–`0x1009f04d`): a centre 2 m above the origin sits 0.96 m nearer the
+        // camera and 0.24 m lower than the origin the camera looks at.
+        let centre = Vec3::new(0.0, 0.0, 2.0);
+        for angle in [0.0, 1.0, 2.5, 4.0] {
+            let (_, model) = preview_camera(centre, 5.0, angle, viewport);
+            let at = model.transform_point3(centre);
+            let want = Vec3::new(-2.0 * 0.5f32.sin(), 0.0, 2.0 * (0.5f32.cos() - 1.0));
+            assert!(at.distance(want) < 1e-5, "{angle}: {at} against {want}");
         }
     }
 

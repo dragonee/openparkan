@@ -1190,9 +1190,15 @@ slots, accept hands the design to the factory, and exit or Esc closes it. A
 chassis turns the panels to Turrets and a turret to Weapons; on the tabs they
 stay on, a fit steps the destination to the next slot, so the guns, the armour,
 the systems and the clips fill one after the other.
+Save opens the name field: type a name and press Enter, or click the field, and
+the design is written to the game's `units/<name>.dat`; Esc drops the field.
+Load lists the saved designs the factory can build, four rows at a time, and a
+click on one fits its parts again. Once the mission is won or lost the designer
+takes neither the mouse nor Esc.
 `--designer` draws a screenshot with the designer open on the first factory,
-and `--design PART,…` fits those parts to it in turn; `accept` among them
-clicks accept, leaving the factory screen with the project.
+and `--design PART,…` fits those parts to it in turn; `accept`, `save` and
+`load` among them click those buttons, and `type=TEXT` types into the name
+field, `\r` for Enter; a screenshot's saves stay in memory.
 
 Taking a bunker's pod opens command mode: the arrows and PageUp/PageDown move the camera,
 the cursor at a screen edge turns it, Z zooms; the icon column opens the unit and building
@@ -1339,9 +1345,8 @@ a row here. A row leaves this table when research closes it.
 | M11 | How a flyer's height meets the push of a building's floors, which its collision flags are read to keep (8, from states that all lack bit 4; a walker's never do) | no robot keeps the floors: with them Mission 02's flyer made at the Large Factory's creation vertex is pushed 31 m up and over the shut front door; and a walker's segment test passes the floors as its push-out does, where the segment's filter is read to keep them for every mover | [24](../docs/24-motion.md#not-established) |
 | M11 | When a door's holds are worked out: `CBuilding` does it as each child moves (event 1, `Terrain.dll:0x10059f40`) | the holds are worked out from every child each tick; the capsule each is measured against is read (`IJointMesh` slot 5, `AniMesh.dll:0x1000fd60`) | [24](../docs/24-motion.md#walking-into-a-building--read-and-measured) |
 | M11 | How the recordings' heroes climb a building's stairs and ramps at a walk, when the slope brake is read to take a building's faces as it takes the ground's | on a building's faces the slope brake is left out | [24](../docs/24-motion.md#the-ground-inside-a-building--read-in-part-and-measured) |
-| M11 | The designer's save name field and load list | not built: save and load do nothing | [37](../docs/37-designer.md#not-established) |
-| M11 | The scene colour a model view's materials take: every drawn material takes the sky's (docs/10), and its value while the designer is up is not traced | the world's scene colour this frame, 0.15 without an atmosphere | [37](../docs/37-designer.md#the-previews--read-and-seen) |
-| M11 | A designer row's text colour: the game hands the font a gradient down the glyph, `0xffc8c8c8`, white, `0xffc8c8c8` on a selected row and `0xff323296`, white, `0xff9696fa` on the rest, which a text run here cannot take | one colour, the light grey `0xffc8c8c8` the recording reads | [37](../docs/37-designer.md#the-rows--read-and-seen) |
+| M11 | Which model the designer's destination preview keeps: a picked empty row leaves the last one up (`0x1004d0dd`), a tab turned on at an empty row drops it, and what the fits do to the previews (`+0x4dffc`) is not traced | each preview shows its selected row's part | [37](../docs/37-designer.md#the-rows--read-and-seen) |
+| M11 | A designer row's text colour: the game hands the font a gradient down the glyph, `0xffc8c8c8`, white, `0xffc8c8c8` on a selected row and `0xff323296`, white, `0xff9696fa` on the rest, which a text run here cannot take; so too a load row's and the idle name field's | one colour, the light grey `0xffc8c8c8` the recording reads; a load row and the idle field the gradient's middle | [37](../docs/37-designer.md#the-rows--read-and-seen) |
 | M11 | Which cell of its material an effect sprite samples, and when the material's track plays for a particle | the entry's cell, as a mesh batch takes it, from the key the track is on at the sprite's own age — a stream's particle counting from when it left, everything else from its instance's start; the masked colour lerp between two keys is not drawn | [07](../docs/07-objects.md#how-a-material-reaches-the-device--read-and-measured) |
 | M12 | Whether the character handler sees Esc before its binding leaves command mode: the path the key takes is not traced | an open satellite map closes first, then a page other than 0 turns to 0, then Esc leaves, as Mission 04's recording shows one Esc at a time | [40](../docs/40-command-mode.md#not-established) |
 | M12 | What `0x10034230` accepts for an Upgrade row | the upgrade task's own target test (`0x100332e0`): a live building of that Type of the clan whose level -- its place in its scheme's ladder -- has another entry above it; and, *derived* from the recording of Mission 03, where the clan's Small Warehouse is offered no Upgrade row, that the entry above it is researched whole, as a Build row asks of its first | [41](../docs/41-commander.md#not-established) |

@@ -7,6 +7,12 @@
 use bytemuck::{Pod, Zeroable};
 use glam::{Mat4, Vec3};
 
+/// The scene colour before any sky has sent one: the shader component's state block, one for
+/// the whole game (`CID_SHADER` is `terrain.dll CreateShader`, a singleton), is built with
+/// (0.2, 0.2, 0.2) (`Terrain.dll:0x1004bbcd`), and only the sky's mask-`0x10` message changes
+/// it (docs/10-sky.md, "The scene colour is added to every material").
+pub const SHADER_SCENE_COLOUR: [f32; 3] = [0.2; 3];
+
 /// A directional light.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Light {
@@ -48,7 +54,7 @@ impl Default for Lighting {
                 Light { direction: Vec3::new(-0.35, -0.45, -0.82), colour: [0.85, 0.85, 0.8] },
                 Light::OFF,
             ],
-            scene_colour: [0.16, 0.16, 0.16],
+            scene_colour: SHADER_SCENE_COLOUR,
             fog_colour: [0.05, 0.06, 0.08],
             fog_start: 0.0,
             fog_end: f32::MAX,
@@ -144,6 +150,13 @@ mod tests {
         assert_eq!(u.second_direction, [0.0, 0.0, -1.0, 0.0], "normalised");
         assert_eq!(u.second_colour, [0.3, 0.3, 0.4, 1.0]);
         assert_eq!(u.light_colour, [0.85, 0.85, 0.8, 1.0], "display space, as given");
+    }
+
+    #[test]
+    fn with_no_sky_the_scene_colour_is_the_shaders_own_grey() {
+        // `Terrain.dll:0x1004bbcd` stores 0x3e4ccccd three times into the block's colour.
+        assert_eq!(f32::from_bits(0x3e4c_cccd), 0.2);
+        assert_eq!(Lighting::default().scene_colour, [0.2; 3]);
     }
 
     #[test]

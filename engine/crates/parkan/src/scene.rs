@@ -398,8 +398,12 @@ pub fn hud(
     renderer.set_ui_pages(device, queue, &pages.pages);
     renderer.set_font_slot(device, queue, HUD_TEXT_SLOT, GameFont::ui(game, "GAME_FONT")?);
     renderer.set_font_slot(device, queue, HUD_MENU_SLOT, GameFont::ui(game, "MENU_FONT")?);
+    let mut cockpit = parkan_world::cockpit::Cockpit::open(game, &pages, play)?;
+    // The designer saves to and loads from the game's `units/` (docs/37, "The buttons").
+    cockpit.designer.units =
+        Some(parkan_formats::gamedir::resolve(game, "UNITS").unwrap_or_else(|| game.join("units")));
     Ok(Hud {
-        cockpit: parkan_world::cockpit::Cockpit::open(game, &pages, play)?,
+        cockpit,
         font: GameFont::ui(game, "GAME_FONT")?,
         menu: GameFont::ui(game, "MENU_FONT")?,
         stretch,
@@ -530,10 +534,11 @@ fn previews(
                 view_proj: p.view_proj,
                 lighting: parkan_render::frame::Lighting {
                     lights: [light(a), light(b)],
-                    // STAND-IN: docs/37-designer.md#the-previews--read-and-seen -- the scene
-                    // colour a preview's materials take: the sky's, as every drawn material
-                    // takes it (docs/10), whose value while the designer is up is not traced.
-                    scene_colour: scene_colour.unwrap_or([0.15; 3]),
+                    // The scene colour is one for the whole game, the shader singleton's, which
+                    // the sky's takt sends every takt whether or not the world is drawn, and
+                    // which the model view's draw copies as the world's does (docs/37, "The
+                    // previews"): the world's this frame, or the shader's own 0.2 before any.
+                    scene_colour: scene_colour.unwrap_or(parkan_render::frame::SHADER_SCENE_COLOUR),
                     fog_start: f32::MAX,
                     fog_end: f32::MAX,
                     eye: glam::Vec3::ZERO,

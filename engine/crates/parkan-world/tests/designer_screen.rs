@@ -270,3 +270,87 @@ fn each_tab_keeps_its_row_and_a_removal_turns_off_the_tabs_it_empties() {
     assert!(s.design.as_ref().unwrap().turret().is_none());
     assert_eq!(s.enabled, [true, true, false, true, true, false], "Weapons and Ammo are off");
 }
+
+/// Save opens the name field; typed and ended with Enter, the design is kept under its name.
+/// Load lists the saved designs but for the designer's own files and ones the factory cannot
+/// build, and a row loads its design back, fitted again part by part; Esc drops the list, and
+/// neither takes the mouse once the mission is decided (docs/37, "The buttons").
+#[test]
+#[ignore = "needs the game install"]
+fn save_keeps_the_design_under_the_typed_name_and_load_fits_it_again() {
+    use parkan_world::cockpit::designer::{FIELD, LoadList};
+
+    let mut play = mission_02_play();
+    let game = gamedir::find(None).unwrap();
+    let strings = parkan_world::resources::game_strings(&game).unwrap();
+    let font = parkan_world::text::GameFont::ui(&game, "GAME_FONT").unwrap();
+    let f =
+        play.factories.iter().position(|f| f.logic_id == 0x8000_0001_u32 as i32).expect("the Large Factory");
+    let t = play.factories[f].target;
+    let mut screen = Screen::default();
+    screen.open(&mut play, t, &strings).unwrap();
+    // Save is dim with no project; with one it opens the field, empty and typing.
+    click(&mut play, &mut screen, [285.0, 460.0], &strings);
+    assert!(screen.session.as_ref().unwrap().field.is_none(), "no project, no field");
+    for part in ["R_B_02", "e_tur_bb_01", "e_gun_bl_15", "e_gun_bc_06", "i_eng_b_01", "i_arm_b_02"] {
+        let s = screen.session.as_mut().unwrap();
+        assert!(s.fit_part(part, &mut play.assembly, &strings), "{part}");
+    }
+    let file = |s: &designer::Session| {
+        let design = s.design.as_ref().unwrap();
+        s.designer.dat_bytes(design, s.designer.type_word(design))
+    };
+    let saved = file(screen.session.as_ref().unwrap());
+    click(&mut play, &mut screen, [285.0, 460.0], &strings);
+    let field = screen.session.as_ref().unwrap().field.clone().expect("the name field");
+    assert!(field.text.is_empty() && field.active);
+    // While it is up the buttons take no click: exit does nothing.
+    click(&mut play, &mut screen, [420.0, 460.0], &strings);
+    assert!(screen.is_open());
+    for c in "Tester\r".chars() {
+        screen.key(c, &font);
+    }
+    assert!(screen.session.as_ref().unwrap().field.is_none(), "Enter saves and the field goes");
+    assert_eq!(screen.saved.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>(), ["Tester"]);
+    // A second, clicked shut on the field itself; and one named as the designer's own files.
+    click(&mut play, &mut screen, [285.0, 460.0], &strings);
+    for c in "Second".chars() {
+        screen.key(c, &font);
+    }
+    click(&mut play, &mut screen, [(FIELD[0] + FIELD[2]) / 2.0, 420.0], &strings);
+    assert_eq!(screen.saved.len(), 2, "a click on the field ends it too");
+    click(&mut play, &mut screen, [285.0, 460.0], &strings);
+    for c in "my_temp_unit\r".chars() {
+        screen.key(c, &font);
+    }
+    // Esc drops a field unsaved.
+    click(&mut play, &mut screen, [285.0, 460.0], &strings);
+    screen.key('Z', &font);
+    screen.escape();
+    assert!(screen.is_open() && screen.session.as_ref().unwrap().field.is_none());
+    assert_eq!(screen.saved.len(), 3);
+    // Clear, then load: two rows, the designer's own name left out, in name order.
+    click(&mut play, &mut screen, [240.0, 460.0], &strings);
+    assert!(screen.session.as_ref().unwrap().design.is_none());
+    click(&mut play, &mut screen, [320.0, 460.0], &strings);
+    let list = screen.session.as_ref().unwrap().list.clone().expect("the load list");
+    assert_eq!(list.names, ["Second", "Tester"]);
+    // Esc drops the list and leaves the designer up; load again, and take the second row.
+    screen.escape();
+    assert!(screen.is_open() && screen.session.as_ref().unwrap().list.is_none());
+    click(&mut play, &mut screen, [320.0, 460.0], &strings);
+    let [x0, y0, x1, y1] = LoadList::row(1);
+    click(&mut play, &mut screen, [(x0 + x1) / 2.0, (y0 + y1) / 2.0], &strings);
+    let s = screen.session.as_ref().unwrap();
+    assert!(s.list.is_none(), "a row loads and the list goes");
+    assert!(file(s) == saved, "the design back, part for part: the same file");
+    assert_eq!(s.tab, Tab::Chassis, "both panels turned to Chassis");
+    assert!(
+        s.enabled[1] && s.enabled[2] && s.enabled[5],
+        "Turrets, Weapons and Ammo on as the fits left them"
+    );
+    // Once the mission is decided the designer takes neither the mouse nor Esc.
+    assert!(screen.takes_input(&play));
+    play.progression.as_mut().unwrap().progress.outcome = Some(true);
+    assert!(!screen.takes_input(&play));
+}

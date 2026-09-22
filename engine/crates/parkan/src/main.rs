@@ -692,12 +692,27 @@ fn screenshot(loaded: &scene::Loaded, game: &Path, args: &Args, out: &Path) -> R
                         p.modes.push(parkan_world::play::Mode::Factory(t));
                     }
                     let cockpit = &mut hud.cockpit;
+                    // A screenshot's saves stay in memory, out of the install's `units/`.
+                    cockpit.designer.units = None;
                     match cockpit.designer.open(p, t, &cockpit.strings) {
                         Ok(()) => {
                             for part in &args.design {
-                                // `accept` clicks the accept button.
-                                if part == "accept" {
-                                    cockpit.designer.click(p, [213.0, 462.0], &cockpit.strings);
+                                // `accept`, `save` and `load` click their buttons; `type=TEXT`
+                                // types into the name field, `\r` for Enter.
+                                let button = match part.as_str() {
+                                    "accept" => Some([213.0, 462.0]),
+                                    "save" => Some([290.0, 462.0]),
+                                    "load" => Some([320.0, 462.0]),
+                                    _ => None,
+                                };
+                                if let Some(at) = button {
+                                    cockpit.designer.click(p, at, &cockpit.strings);
+                                    continue;
+                                }
+                                if let Some(text) = part.strip_prefix("type=") {
+                                    for c in text.replace("\\r", "\r").chars() {
+                                        cockpit.designer.key(c, &hud.font);
+                                    }
                                     continue;
                                 }
                                 let Some(s) = cockpit.designer.session.as_mut() else { break };
@@ -1119,8 +1134,9 @@ impl App {
         let (Some(play), Some(hud)) = (self.play.as_mut(), self.hud.as_mut()) else { return };
         let now = play.hero.time_ms;
         let cockpit = &mut hud.cockpit;
-        // The warbot designer, while it is up, takes the click (`0x10055ff0`).
-        if cockpit.designer.is_open() {
+        // The warbot designer, while it is up and the mission is played, takes the click
+        // (`0x10055ff0`).
+        if cockpit.designer.takes_input(play) {
             if pressed && button == MouseButton::Left {
                 let at = parkan_world::cockpit::designer::layout_point(space, cursor);
                 cockpit.designer.click(play, at, &cockpit.strings);
@@ -1619,13 +1635,31 @@ impl ApplicationHandler for App {
                     }
                     return;
                 }
-                // Esc closes the warbot designer first (`0x10055e80`).
+                // While save's name field is up the designer takes the characters (`0x10055fa0`):
+                // the printable ones, backspace and Enter.
+                if event.state == ElementState::Pressed
+                    && let Some(hud) = self.hud.as_mut()
+                    && hud.cockpit.designer.session.as_ref().is_some_and(|s| s.field.is_some())
+                    && code != KeyCode::Escape
+                {
+                    let typed: Vec<char> = match code {
+                        KeyCode::Backspace => vec!['\u{8}'],
+                        KeyCode::Enter | KeyCode::NumpadEnter => vec!['\r'],
+                        _ => event.text.as_ref().map(|t| t.chars().collect()).unwrap_or_default(),
+                    };
+                    for c in typed {
+                        hud.cockpit.designer.key(c, &hud.font);
+                    }
+                    return;
+                }
+                // Esc goes to the warbot designer first while the mission is played
+                // (`0x10055e80`): its load list or name field, else the designer itself.
                 if code == KeyCode::Escape
                     && event.state == ElementState::Pressed
-                    && let Some(hud) = self.hud.as_mut()
-                    && hud.cockpit.designer.is_open()
+                    && let (Some(hud), Some(play)) = (self.hud.as_mut(), self.play.as_ref())
+                    && hud.cockpit.designer.takes_input(play)
                 {
-                    hud.cockpit.designer.close();
+                    hud.cockpit.designer.escape();
                     return;
                 }
                 // Esc in command mode: the character handler's cases first (`0x10071027`,

@@ -658,7 +658,7 @@ against the screen's edges; slot 27 is pixels per radian, so the two are
 `extent × 0.1625` **radians**
 ([above](#the-sun-and-the-moon-are-drawn)).
 
-### The colour filter is the camera's infrared, not the shader — *narrowed*
+### The colour filter is the camera's infrared, in the shader component — *read*
 
 This page used to call it "the shader's slot 5". It is not the shader. `CSun`
 keeps the object at `+0x1c` and the sky at `+0x18`, both handed down by
@@ -683,9 +683,23 @@ The sky also sets its colour mask to `0xff00ff00` in that mode (`0x100797a8`,
 against `0xffffffff` otherwise) — green only. That names the filter: it is the
 camera's **infrared**, `CMD_CAMERA_INFRARED` (35) with `CIS_INFRARED_ON`,
 `_OFF` and `_INV` in `World3D.dll` and `NightVisionOn` in `iron3d.dll`, whose
-HUD lamp is already read ([35-hud.md](35-hud.md)). **What slot 5 computes is
-still not read**: the object's vtable is installed outside `Terrain.dll` and
-its class was not found.
+HUD lamp is already read ([35-hud.md](35-hud.md)).
+
+**The object is the shader component's one state, and slot 5 greys a colour into
+green** — *read*. `Comp.ini` binds `CID_SHADER` (6) to `terrain.dll CreateShader`,
+and `CreateShader` (`0x1004b910`) builds its object once and hands the same one back
+ever after (the global `0x100a60e8`), so whoever loads the component gets the one
+object. Of the fourteen modules only `Terrain.dll` imports `LoadComponent`, and its
+four calls all load component 6 (`0x10032a69` the prim buffer, `0x10041fcd`
+`CShade`, `0x1006ef14` the atmosphere, `0x10083b72` the camera). The constructor
+(`0x1004b9a0`) installs interface 4 at `+4`, vtable `0x1009b2fc` — in this module
+after all; the earlier search missed it for looking at the camera's vtables. Its
+**slot 5** (`0x1004f900`) takes 0.33 of each of red, green and blue, sums them,
+multiplies by 7, holds the result to 255 and returns it as the green alone, the
+alpha kept and red and blue 0: green = min(255, 2.31 (R + G + B)). Its **slot 7**
+(`0x1004fa70`) returns the state block at `+0x38`, whose flag word is `+8`; the
+camera's frame render sets bit 0 every frame from its own flag word's `0x20`
+(`0x10084514`–`0x1008456a`, [The scene colour](#the-scene-colour-is-added-to-every-material)).
 
 ### Where the two lights point — *read*
 
@@ -1112,6 +1126,33 @@ entry's emissive is never read. Nothing sets `D3DRS_AMBIENT`, so the zero
 ambient term is moot: a material's ambient colour is its self-light. See
 [07-objects.md](07-objects.md#how-a-material-reaches-the-device--read-and-measured).
 
+**There is one scene colour, the shader component's, and a model view takes it
+too** — *read*. The colour `0x100308b8` adds is `+0x2c`–`+0x34` of the item
+renderer, one global object at `0x100a5d30` (`0x1002ff22`): `+0x18` of it is a copy
+of a state block, `+0x14` the block's colour. Each prim buffer's render copies that
+block in, asking the state object it holds at `+0x9c` for it (that object's slot 7;
+`0x1003d990`–`0x1003da6c`, and the three renders like it at `0x1003dd59`,
+`0x1003e230`, `0x1003f169`), and
+`CShade` hands every prim buffer the same object, its `+0xbd0`, the shader
+component's interface 4 ([above](#the-colour-filter-is-the-cameras-infrared-in-the-shader-component--read)),
+through their slot 8 (`0x10046824`–`0x100468f8` → `0x10031bb0`). The block is built
+with the colour (0.2, 0.2, 0.2) (`0x1004bbcd`), and interface 4's slot 6
+(`0x1004f9a0`) merges a block into it field by field as its `+4` mask says
+(`0x1004c080`): bit `0x10` the colour, `0x40` the fog's start and end, `0x20` the
+word at `+0x24`, 1 and 2 the flag bits. **Only the sky sends the colour**: of the
+five places in `Terrain.dll` that fill a block's mask and send it, the sky's is the
+one with `0x10` — `0x50`, the colour with the fog range (`0x1007bbc5`); the others
+are `CShade`'s `0x180` (`0x10046c31`), `0x20` (`0x10078689`), the camera's 1, the
+infrared flag it sends every frame (`0x10084514`), and the sky's `0x40`, which rides
+with its own draw item rather than being sent (`0x1007a5d4`). The sky sends it from
+its slot 3 (`0x1007ac60`), the last step the atmosphere's property hand-over takes
+for each body (`0x10070b3f`), and that runs on the atmosphere's takt message (event
+6, 1, `0x10070040`–`0x100702fa`), not in the draw. So the scene colour follows the
+sky's clock whether or not the world is drawn — behind the warbot designer too —
+and every view's materials take it, a HUD or designer model view's as much as the
+world's ([37-designer.md](37-designer.md#the-previews--read-and-seen)); before any
+sky has sent one it is 0.2 grey.
+
 ### The render settings
 
 `Terrain.dll` reads 36 settings from `shade.cfg` (`0x1005f652`). No
@@ -1293,14 +1334,17 @@ which is what the game does.
   the two cancel: a body's half-width is `extent × 0.1625` radians, so extent 1
   is **18.6° across** and the shipped 0.4 to 3.3 span 7.4° to 61°
   ([The sun and the moon are drawn](#the-sun-and-the-moon-are-drawn)).
-- The **colour filter's slot 5**, and its flag bit 0. *Narrowed.* It is not the
-  shader: it is an object `CAtmosphere` hands its bodies from `+0x16c` and the
-  item renderer gets from the shader component's interface 4, and it is the
-  camera's infrared. Its slot 7 returns a block whose `+8` bit 0 is the flag,
-  and slot 5 maps one `D3DCOLOR`; what slot 5 computes is not read, because the
-  object's vtable is installed outside `Terrain.dll`
-  ([The colour filter is the camera's infrared, not the
-  shader](#the-colour-filter-is-the-cameras-infrared-not-the-shader--narrowed)).
+- ~~The **colour filter's slot 5**, and its flag bit 0.~~ **Read**: the object is
+  the shader component's one state (`CreateShader`, a singleton; interface 4's vtable
+  `0x1009b2fc` is in `Terrain.dll` after all), slot 5 (`0x1004f900`) returns
+  green = min(255, 7 × 0.33 (R + G + B)) with red and blue 0 and the alpha kept, and
+  bit 0 is set every frame by the camera from its flag word's infrared `0x20`
+  ([The colour filter is the camera's infrared, in the shader
+  component](#the-colour-filter-is-the-cameras-infrared-in-the-shader-component--read)).
+- ~~What scene colour a view that is not the world's takes~~ — the one there is:
+  the shader state's, which only the sky sends, every takt, whether or not the world
+  is drawn; 0.2 grey before it has
+  ([The scene colour is added to every material](#the-scene-colour-is-added-to-every-material)).
 - ~~Which of the flare's pair the engine calls texture 0~~ — slot 5; the column
   branches into the material blocks the constructor fills from slots 5 and 6
   ([The lens flare](#the-lens-flare)).
