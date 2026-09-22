@@ -395,6 +395,43 @@ The levels are [31-packages.md](31-packages.md#the-escape--read)'s. The
 button's layout and art are [41-commander.md](41-commander.md)'s. A fourth
 button (`+0x588`) is shown for an HQ unit and pushes mode 3.
 
+**What each level hands the AI** (*read*). Taking a bot (`0x10074ff0` with 1,
+`0x10075027`–`0x100750c9`) writes the unit's `Wizard.dll` words through its
+slot 9 (`0x10002070`: mask bit 0 → `+0x200`, 1 → `+0x204`, 4 → `+0x208`,
+5 → `+0x20c`, 6 → `+0x210`, 7 → `+0x214`, 8 → `+0x218`, 9 → `+0x21c`), each
+3 for the player, 1 for the AI and 0 to follow the mode message 7 sets. The
+Wizard (`0x10003890`) then gives each side its bits: the behaviour's mode word
+bit 2 from `+0x200`, which the mode set makes flag `0x10`, movement; bits 4 and
+8 from `+0x20c`, flags `0x20` and `0x40`, the fight module; bit 1 from `+0x204`
+(not followed); each component by its power group (interface `0x204`
+slot 9, [29-weapons.md](29-weapons.md#who-may-drive-a-units-guns--read)) — 4,
+the turret, guns, arms and builder, from `+0x20c`; 5, shields and armour, from
+`+0x208`; 2, camera, radar and seeker, from `+0x210`; 0 from `+0x214`; 3, the
+engines, from `+0x218`; 1 from `+0x21c`; and the unit's own rows (component −1)
+their input bit from `+0x200` and their fire bit from `+0x204`
+(`0x10003a67`–`0x10003a9a`).
+
+| level | `+0x200`: the unit's rows, movement | `+0x20c`: turret and guns, fight | `+0x208`: shields | `+0x210`, `+0x214` | mode (message 7) | `+0xa2` | turret lock (179) |
+|---:|---|---|---|---|---|---|---|
+| 0 | player | player | player | player | 1, player | 1 | 1 |
+| 1 | **AI** | player | player | player | 1, player | 1 | 0 |
+| 2 | **AI** | **AI** | **AI** | not written | **0, AI** | 0 | 0 |
+
+So **level 1 gives the AI the walk**: the behaviour's flag `0x10` is on, so its
+unit takt runs the unit's orders and walker, and the player's movement rows
+take no input; the turret, guns, shields, sensors and engines stay the
+player's, the fight module off. **Level 2 gives the AI the unit**: movement,
+turret and guns with the fight module, shields and armour, and by message 7
+with 0 every word left to follow the mode: `+0x204`, the engines' and group
+1's. The two words level 2 does not write, `+0x210` (camera, radar, seeker) and
+`+0x214`, keep what was last written: 1 after a letting-go, which writes 1 into
+every word (`0x10075131`), and 3 when the key steps a driven unit from 1 to 2,
+so the sensors then stay the player's. A unit's words before its first take
+are its Wizard's constructor's (not read). The player rides along in the
+unit's cockpit. The hero ignores the level: its take gives every word 3
+(`0x10075018`). `CMD_JAMES_AUTO_DRIVER` (744) steps the level 0 → 1 → 2 → 0 and
+takes the unit again at the new one (`0x10075fc0`).
+
 **Mode 4 → 2** (`0x10063e90`): clears the selection and selects the unit; sends
 the bunker the (`0x20`, 1) and (6, 7, 0) above; **takes the unit**
 (`0x10074ff0` with 1); lets the camera go; makes the unit the driven unit,
@@ -783,8 +820,10 @@ mode.
    on screen, an open satellite map, then a page other than 0; only then does
    the binding leave.
 8. **Telepresence**: a unit page's three buttons set the unit's auto-driver
-   level 0, 1 or 2 and push mode 2 (take the unit, cockpit view). Esc returns to
-   the command view, the camera where it was.
+   level 0, 1 or 2 and push mode 2 (take the unit, cockpit view). At 0 the
+   player drives it whole; at 1 its AI walks it on its orders and the player
+   has the turret and guns; at 2 its AI has it whole, fire included, and the
+   player rides along. Esc returns to the command view, the camera where it was.
 
 ## Not established
 
@@ -807,6 +846,10 @@ mode.
   only when no listener takes it (`0x100a0eb8`, `0x100a0fe5`), in
   [Input](#input--read-and-measured). Mission 04's recording peels the map and
   the page back one Esc at a time (*seen*).
+- ~~What telepresence's auto-driver levels 1 and 2 hand to the AI~~ — **read**:
+  level 1 the walk, level 2 the whole unit, fire and shields included
+  (`0x10074ff0`, `Wizard.dll:0x10003890`), in
+  [Telepresence](#telepresence-mode-2--read).
 - ~~What mode 2 does when its unit dies~~ — **read**: the unit record's removal
   rolls the stack back in modes 1, 2, 5 and 7 (`0x100755a9`, table
   `0x1007563c`), so telepresence ends with its unit, back to the command view.

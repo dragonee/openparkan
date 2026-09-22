@@ -428,7 +428,8 @@ the own panel's unit while aboard.
   plume, `env_mineral`, shows on the ground under it until a building stands within 80.
 - Telepresence: a unit page's three drive buttons take the selected unit over (mode 2) with
   its own cockpit and table while the hero stays in the bunker; Esc goes back to the command
-  view with the camera where it was left.
+  view with the camera where it was left. At auto-driver level 1 the unit's AI walks it on
+  its orders and the player has its turret and guns; at level 2 the AI has it whole.
 - The hero walks into Mission 03's buildings by their hall ways (docs/24, "The ways into
   Mission 03's Small Generator and Small Bunker"): from the Small Generator's south exit down
   its ramp and through its sliding door to the pod, which captures it 8.2 s after it steps on,
@@ -1366,7 +1367,7 @@ a row here. A row leaves this table when research closes it.
 | M12 | The commander's satellite map's title bar and exit icon, beyond their place | a page header's pieces 20 tall at (374, 43), the title 5074 centred | [35](../docs/35-hud.md#not-established-4) |
 | M12 | Whether the hero has a parent object in command mode, without which the object pick passes it over (`IGameObject` slot 3) | the hero is never picked | [42](../docs/42-selection.md#not-established) |
 | M12 | Whether the display's slot 12 answers, so the system's cursor is used | the software cursor's four phases from `new_ui1` are drawn and the system's hidden | [42](../docs/42-selection.md#the-cursor-shows-a-state--read-and-measured) |
-| M12 | What telepresence's auto-driver levels 1 and 2 give the AI | the player drives the unit whole at every level | [40](../docs/40-command-mode.md#telepresence-mode-2--read) |
+| M12 | A bot's auto-driver level kept on its record between takes; the camera words a level 2 reached by the key keeps the player's; its AI's repair decision and hit reaction at levels 1 and 2 | each take names its level, boarding 0; at level 2 the camera is the AI's; at every level the unit's power spends on the player's switches and a hit asks its behaviour for nothing | [40](../docs/40-command-mode.md#telepresence-mode-2--read) |
 | M6 | What a node naming a variable, operand, formula or handler that does not exist reads | the node does nothing; a switch to no handler ends the run; a run stops after a million nodes | [15](../docs/15-behaviour.md#how-a-handler-runs) |
 | M12 | Function 15's answer: whether the unit takes the order (1) or refuses it (0) | an id some unit or building answers gives 1, and the unit is handed the order after the handler's run | [34](../docs/34-progression.md#what-the-scripts-ask--read-and-measured-1) |
 | M12 | A building's contour (property `0x203`), whose vertices a patrol of the building walks | eight points on the building's sphere, pushed out by 30 | [31](../docs/31-packages.md#the-patrol-tick-by-tick--read) |

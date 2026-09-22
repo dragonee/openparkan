@@ -128,7 +128,8 @@ impl Hero {
     pub fn tick(&mut self, dt_ms: f64, mouse: [f32; 2], ground: &Ground) -> Vec<(usize, Shot)> {
         let lives = &self.lives;
         self.robot.check_devices(|p, n| crate::play::node_alive(lives.get(p).and_then(Option::as_ref), n));
-        let shots = drive(&mut self.robot, &mut self.pilot, &mut self.fire_held, dt_ms, mouse, ground);
+        let shots =
+            drive(&mut self.robot, &mut self.pilot, &mut self.fire_held, dt_ms, mouse, ground, Reach::Whole);
         let lives = &self.lives;
         self.robot.turn_devices(|p, n| crate::play::node_alive(lives.get(p).and_then(Option::as_ref), n));
         shots
@@ -145,9 +146,61 @@ impl Hero {
     }
 }
 
+/// What of a taken unit the player's input reaches, by its auto-driver level (record `+0x9c`):
+/// `iron3d.dll:0x10074ff0` writes the unit's `Wizard.dll` group words by it, and the Wizard
+/// hands each word's side its bits (`Wizard.dll:0x10003890`; docs/40, "Telepresence").
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Reach {
+    /// Level 0: the whole unit -- its own rows, turret, guns, shields and sensors.
+    Whole,
+    /// Level 1: all but the unit's own rows, whose word goes to the AI and with it the
+    /// behaviour's movement flag `0x10`. The turret, guns, camera and the rest stay the player's.
+    Weapons,
+    /// Level 2: nothing. The AI has the movement, the turret and guns (group 4) with its fight
+    /// module (flags `0x20`, `0x40`), the shields and armour (group 5), and by message 7 with 0
+    /// every group left to follow the mode.
+    Nothing,
+}
+
+impl Reach {
+    /// The reach of auto-driver level `level`, which the game steps 0, 1, 2 and round.
+    pub fn of(level: u8) -> Reach {
+        match level {
+            0 => Reach::Whole,
+            1 => Reach::Weapons,
+            _ => Reach::Nothing,
+        }
+    }
+
+    /// Whether the unit's behaviour walks it: flag `0x10` on, at levels 1 and 2.
+    pub fn ai_moves(self) -> bool {
+        self != Reach::Whole
+    }
+
+    /// Whether its fight module aims and fires: flags `0x20` and `0x40` on, at level 2.
+    pub fn ai_fights(self) -> bool {
+        self == Reach::Nothing
+    }
+}
+
+/// `f` given the unit's hands, what `reach` keeps from the player swapped for scratch copies:
+/// the pilot's held keys and mouse stay its own and move nothing they do not reach.
+fn reached<R>(robot: &mut Robot, reach: Reach, f: impl FnOnce(&mut Hands) -> R) -> R {
+    let mut body = robot.walker.body;
+    let mut turret = robot.rig.aim;
+    let mut camera = robot.rig.look;
+    let hands = &mut Hands {
+        body: if reach == Reach::Whole { &mut robot.walker.body } else { &mut body },
+        turret: if reach == Reach::Nothing { &mut turret } else { &mut robot.rig.aim },
+        camera: if reach == Reach::Nothing { &mut camera } else { &mut robot.rig.look },
+    };
+    f(hands)
+}
+
 /// One tick of a unit driven from `pilot`: the mouse counts since the last, then the
 /// machine, the guns the number keys select and the button fires, then the turret and the
-/// guns. Returns the rounds that left, by gun.
+/// guns. Returns the rounds that left, by gun. A unit the player reaches nothing of runs as
+/// the AI leaves it, and what the player asked of its guns is dropped.
 pub fn drive(
     robot: &mut Robot,
     pilot: &mut Pilot,
@@ -155,16 +208,14 @@ pub fn drive(
     dt_ms: f64,
     mouse: [f32; 2],
     ground: &Ground,
+    reach: Reach,
 ) -> Vec<(usize, Shot)> {
-    {
-        let hands = &mut Hands {
-            body: &mut robot.walker.body,
-            turret: &mut robot.rig.aim,
-            camera: &mut robot.rig.look,
-        };
-        pilot.mouse(mouse, hands);
-    }
+    reached(robot, reach, |hands| pilot.mouse(mouse, hands));
     robot.advance(dt_ms, ground);
+    if reach == Reach::Nothing {
+        pilot.selects.clear();
+        return robot.takt(dt_ms);
+    }
 
     // `World3D.dll:0x100109f8`: a gun's number toggles it and sends its arm state 1
     // or 2; -1 selects and resets every gun and sends every arm `0x21`.
@@ -198,21 +249,35 @@ pub fn drive(
     r.takt(dt_ms)
 }
 
-/// A key to a unit driven from `pilot`.
-pub fn drive_key(robot: &mut Robot, pilot: &mut Pilot, scan: &str, pressed: bool) {
-    let hands =
-        &mut Hands { body: &mut robot.walker.body, turret: &mut robot.rig.aim, camera: &mut robot.rig.look };
-    pilot.key(scan, pressed, hands);
+/// A key to a unit driven from `pilot`, as far as `reach` goes.
+pub fn drive_key(robot: &mut Robot, pilot: &mut Pilot, scan: &str, pressed: bool, reach: Reach) {
+    reached(robot, reach, |hands| pilot.key(scan, pressed, hands));
 }
 
-/// The input update of a unit driven from `pilot`, or every key coming up.
-pub fn drive_input(robot: &mut Robot, pilot: &mut Pilot, release: bool) {
+/// The input update of a unit driven from `pilot` as far as `reach` goes, or every key
+/// coming up.
+pub fn drive_input(robot: &mut Robot, pilot: &mut Pilot, release: bool, reach: Reach) {
     let now = robot.time_ms;
-    let hands =
-        &mut Hands { body: &mut robot.walker.body, turret: &mut robot.rig.aim, camera: &mut robot.rig.look };
-    if release {
-        pilot.release_all(hands);
-    } else {
-        pilot.update(now, hands);
+    reached(robot, reach, |hands| {
+        if release {
+            pilot.release_all(hands);
+        } else {
+            pilot.update(now, hands);
+        }
+    });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Reach;
+
+    #[test]
+    fn level_1_gives_the_ai_the_walk_and_level_2_the_fight_as_well() {
+        // `iron3d.dll:0x10074ff0`: level 1 hands the Wizard's unit word to the AI, level 2 the
+        // guns' and shields' words too, and message 7 with 0.
+        let of = |l| (Reach::of(l), Reach::of(l).ai_moves(), Reach::of(l).ai_fights());
+        assert_eq!(of(0), (Reach::Whole, false, false));
+        assert_eq!(of(1), (Reach::Weapons, true, false));
+        assert_eq!(of(2), (Reach::Nothing, true, true));
     }
 }

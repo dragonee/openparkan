@@ -985,6 +985,57 @@ fn telepresence_takes_a_warbot_from_command_mode_and_esc_returns_to_the_camera_w
     assert!(play.selected_units().is_empty());
 }
 
+/// Telepresence at auto-driver level 1 leaves the unit's walk to its AI and at 0 does not
+/// (`iron3d.dll:0x10074ff0`: level 1 gives the Wizard's unit word, the behaviour's movement
+/// flag `0x10`, to the AI, and keeps the turret and guns the player's).
+#[test]
+#[ignore = "needs the game install"]
+fn telepresence_at_level_1_lets_the_warbots_ai_walk_it_and_at_level_0_the_player_does() {
+    use parkan_sim::orders::{GO, Order, Target};
+    use parkan_world::play::Mode;
+
+    let walked = |level: u8| {
+        let (mut play, m) = mission_03_play();
+        let bunker = object_target(&play, &m, "sbunk01.dat");
+        play.units[bunker].clan = Some(play.player_clan);
+        play.enter_command(bunker);
+        let project = play.factories[0].projects[0].clone();
+        let at = play.battle.combat.targets[bunker].position + glam::Vec3::new(40.0, 0.0, 0.0);
+        let bot = play.spawn(&project, play.player_clan, at, 0.0).expect("the prebuilt design is a robot");
+        play.tick(1000.0 / 60.0, [0.0; 2]);
+        let hero_level = play.auto_driver;
+        assert!(play.telepresence(bot, level));
+        assert_eq!((play.mode(), play.auto_driver), (Mode::Driving(bot), level));
+        fn robot(p: &parkan_world::play::Play, bot: usize) -> &parkan_world::hero::Robot {
+            &p.robots.iter().find(|(t, _)| *t == bot).unwrap().1
+        }
+        assert_eq!(robot(&play, bot).walker.body.turret_lock, level == 0, "the lock is level 0's alone");
+        // A Route 40 m on, given while the player has it.
+        let from = robot(&play, bot).walker.body.position;
+        let goal = from + glam::Vec3::new(40.0, 0.0, 0.0);
+        play.dispatch(Order { code: GO, parameter: 0, target: Target::Place(goal.to_array()) });
+        for _ in 0..(60 * 20) {
+            play.update_input();
+            play.tick(1000.0 / 60.0, [0.0; 2]);
+        }
+        let to = robot(&play, bot).walker.body.position;
+        assert_eq!(robot(&play, bot).walker.body.command, [0.0; 3], "no key of the player's moved it");
+        assert!(play.roll_back());
+        assert_eq!(play.auto_driver, hero_level, "letting go reads the hero's level again");
+        (from.truncate().distance(goal.truncate()), to.truncate().distance(goal.truncate()))
+    };
+    let (before, after) = walked(1);
+    assert!(
+        after < before - 20.0,
+        "at level 1 its AI walks it: {before:.1} m from the goal, then {after:.1}"
+    );
+    let (before, after) = walked(0);
+    assert!(
+        (after - before).abs() < 5.0,
+        "at level 0 it only settles, waiting for the player: {before:.1}, then {after:.1}"
+    );
+}
+
 /// Where Mission 04's capturer is when a landing flag is set with building `id` picked: its
 /// landing corner.
 fn landing_corner(
