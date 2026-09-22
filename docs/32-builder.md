@@ -512,9 +512,17 @@ about 230 s, the ray stopped at about 235 s and the task done at about 236 s —
 within the half-second sampling. The builder's own task ends as the building
 appears, and it walks out once the sign's phase ends. The sign stays up through the
 clearing, as no code is sent there, and the recording shows it there
-([below](#what-the-buildings-controller-does-with-the-codes--read-and-measured)). What the site shows of the unfinished mine
-before the dome was not made out: the recording's views of it are distant or
-behind the dome.
+([below](#what-the-buildings-controller-does-with-the-codes--read-and-measured)). **The unfinished building is not
+shown** (*seen*): at 230–234 s the camera stands close on the site, and it shows the
+builder, the sign's rings, the ray and the rising dome over bare ground; the mine
+stands only from 237 s, as the dome plays back out. That is the controller's code-0
+state placing it in the landscape (action 20, `CLandscape::PlaceBuilding`,
+[13-control.md](13-control.md)), at 40 s. How the unplaced building is kept out of the
+draw is not read. It matters to the sign: `B_Sphere_Sign` carries header flag
+0x400 and draws nothing while its tested point, the sphere's centre, is hidden
+([11-effects.md](11-effects.md#a-beacon-lights-glow--read-and-measured)), so a
+building drawn over that centre takes the sign's ball and its ring of points with
+it. Unplaced, the site shows both, as the recording does.
 
 **For an engine.**
 1. On a build order, walk the builder to the placement's origin at its top speed.
@@ -523,6 +531,8 @@ behind the dome.
    (going below zero), and end the builder's task.
 3. Give the building order 18, parameter 0: the 41 s of sign, clearing, dome, ray
    and kill of [the construction sphere](#the-construction-sphere--read-and-measured).
+   Draw nothing of the building, cut no landscape and give it no faces until code 0
+   places it, 40 s in.
    The builder goes out with everyone else when the clearing phase starts.
 4. Hide the lode's plume from the moment the building exists
    ([A mine must stand on a lode](#a-mine-must-stand-on-a-lode)).
@@ -707,8 +717,8 @@ every step and kills inside the sphere four times a second:
 built round the building's outer contours ("Illegal placement" without them),
 with 15 more radius on a mine (`0x1005c50c`).
 
-So a **new building**, which appears the moment the builder arrives, shows the
-sign from the start; after 5 s it sends everyone out for 30 s, the sign still up
+So a **new building**, made the moment the builder arrives but placed in the
+landscape only by its code-0 state, shows the sign from the start; after 5 s it sends everyone out for 30 s, the sign still up
 and the dome's obstacle up for the last 5; then the sign goes, the ray and the dome
 play through while the kill comes on for 5 s, the ray is switched off, and the dome
 plays itself back out over its next 4 s — a second into that the task ends and the

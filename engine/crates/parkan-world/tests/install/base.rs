@@ -927,6 +927,40 @@ fn mission_03s_mine_plays_its_sphere_as_the_controllers_codes_start_and_stop_its
 
 #[test]
 #[ignore = "needs the game install"]
+fn mission_03s_mine_stands_only_once_its_controller_places_it_as_the_dome_turns_back_at_40_seconds() {
+    use parkan_world::construction::{BUILDING_MINE, SIGN};
+    use parkan_world::fx::Owner;
+
+    let (mut play, _) = mission_03_play();
+    let player = play.player_clan;
+    let lode = glam::Vec3::new(1026.1, 942.7, 0.0);
+    let at = lode.with_z(play.ground.below(lode.x, lode.y, 1.0e5).unwrap().point.z);
+    let now = play.hero.time_ms;
+    let cuts = play.ground.cuts.len();
+    let mine = play.create_building(player, BUILDING_MINE, at, 0.0, now).expect("the mine stands");
+    let present = |play: &parkan_world::play::Play| play.ground.solids[mine].present;
+    // Seen in The Field Base: the site shows the sign, then the ray and the dome, and no mine.
+    // Nothing of it is ground from the moment it is made.
+    assert!(!present(&play));
+    play_for(&mut play, 1.0, |_| {});
+    assert!(!play.placed(mine) && !present(&play) && play.ground.cuts.len() == cuts);
+    // Nor is it in the way: the sign draws nothing while its tested point is hidden, and seen
+    // from any side its point is clear.
+    let sign = play.fx.owned(Owner::Building(mine, SIGN)).next().unwrap().test_point().unwrap();
+    for (x, y) in [(900.0f32, 943.0f32), (1100.0, 1000.0), (1026.0, 800.0), (960.0, 1050.0)] {
+        let eye = glam::Vec3::new(x, y, play.ground.below(x, y, 1.0e5).unwrap().point.z + 3.0);
+        assert!(play.battle.combat.clear_line(&play.ground, eye, sign), "from {eye:?}");
+    }
+    play_for(&mut play, 38.5, |_| {});
+    assert!(!play.placed(mine) && !present(&play), "not through code 2");
+    // Code 0 at 40 s: action 20 places it, cutting the landscape under it.
+    play_for(&mut play, 1.0, |_| {});
+    assert!(play.placed(mine) && present(&play));
+    assert_eq!(play.ground.cuts.len(), cuts + 1);
+}
+
+#[test]
+#[ignore = "needs the game install"]
 fn mission_03s_large_factory_waits_on_ore_and_builds_an_ssw_x_in_25_seconds_once_the_mine_digs() {
     use parkan_world::construction::BUILDING_MINE;
 

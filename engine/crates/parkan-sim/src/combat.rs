@@ -255,6 +255,9 @@ pub struct Combat {
     /// numbered after the targets ([`Combat::hero_index`]), as the radar numbers it.
     pub hero: Option<Target>,
     pub fired: u64,
+    /// Targets not in the world yet, which nothing strikes or sees: a building its
+    /// controller has not placed in the landscape.
+    pub absent: std::collections::HashSet<usize>,
 }
 
 /// Part `p`'s socket, as the walk from node 0 treats the node standing in for the part's node 0
@@ -365,7 +368,7 @@ impl Combat {
 
     /// Every target by its number, the hero last.
     pub fn every(&self) -> impl Iterator<Item = (usize, &Target)> {
-        self.targets.iter().chain(self.hero.as_ref()).enumerate()
+        self.targets.iter().chain(self.hero.as_ref()).enumerate().filter(|(t, _)| !self.absent.contains(t))
     }
 
     /// A round leaves a muzzle (`0x1002a387`): facing `direction` with z up, at its top
@@ -1111,6 +1114,7 @@ mod tests {
             fired: 0,
             hero: None,
             targets: vec![post(Vec3::new(20.0, 30.0, 0.0), 500.0)],
+            absent: Default::default(),
         };
         let muzzle = Vec3::new(20.0, 5.0, 1.0);
         for shot in 0..2 {
@@ -1225,6 +1229,7 @@ mod tests {
             fired: 0,
             hero: None,
             targets: vec![post(Vec3::new(20.0, 16.0, 0.0), 5000.0), post(Vec3::new(20.0, 12.0, 0.0), 5000.0)],
+            absent: Default::default(),
         };
         // Fired by the nearer post, from inside it: it passes its owner and flies on.
         c.fire(0, Some(1), Vec3::new(20.0, 11.0, 1.0), Vec3::Y, Vec3::ZERO, 1.0, None);

@@ -3817,11 +3817,13 @@ impl Play {
         }
     }
 
-    /// A placed object's faces are in the world while its target is alive (docs/26).
+    /// A placed object's faces are in the world while its target is alive (docs/26), and a
+    /// building made in play's once its controller has placed it.
     fn refresh_present(&mut self) {
         for (i, target) in self.battle.combat.targets.iter().enumerate() {
+            let placed = !self.construction.unplaced.contains_key(&i);
             if let Some(s) = self.ground.solids.get_mut(i) {
-                s.present = target.alive;
+                s.present = target.alive && placed;
             }
         }
     }

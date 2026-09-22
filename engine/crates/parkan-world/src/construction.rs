@@ -187,6 +187,23 @@ pub struct Construction {
     pub ways: crate::capture::Ways,
     /// Each model's hall-way exits in its own frame, `None` for a model with no hall way.
     pub exits: HashMap<String, Option<Vec<Vec3>>>,
+    /// The buildings made in play that their controller has not yet placed in the landscape
+    /// (action 20), by target: what placing them lets in.
+    pub unplaced: HashMap<usize, Unplaced>,
+}
+
+/// A building made in play, not yet placed in the landscape (action 20,
+/// `CLandscape::PlaceBuilding`): not drawn, not in the world's faces, not struck and not in
+/// the way of a sight ray, the landscape not cut under it and its load group's effects not
+/// shown. *Seen*: in the recording of *The Field
+/// Base* the site shows only the sign, then the ray and the dome, until the dome plays back
+/// out and the building stands (docs/32, "Mission 03's mine").
+#[derive(Clone, Debug, Default)]
+pub struct Unplaced {
+    /// The cut its footing makes in the landscape.
+    pub cut: Option<parkan_sim::ground::Cut>,
+    /// Its load group's effects.
+    pub effects: Option<BuildingEffects>,
 }
 
 impl Construction {
@@ -627,6 +644,8 @@ impl Play {
         self.building_effects.retain(|(x, _)| x.target != b);
         self.emplacements.retain(|(t, _)| *t != b);
         self.construction.spheres.retain(|s| s.target != b);
+        self.construction.unplaced.remove(&b);
+        self.battle.combat.absent.remove(&b);
         self.construction.placements.remove(&b);
         self.economy.sites.retain(|s| s.target != b);
         self.economy.ore.remove(&b);
@@ -793,11 +812,10 @@ impl Play {
         // STAND-IN: docs/03-terrain.md#for-an-engine -- how a building made in play is drawn is
         // not followed: it is drawn node by node from level 0 without a lightmap, and only the
         // ground queries, not the landscape's drawing, are cut under it.
-        if let Some(footing) =
-            crate::basement::footings(&mut self.assembly, &one, &self.ground.land).into_iter().next()
-        {
-            self.ground.cuts.push(crate::basement::cut(footing));
-        }
+        let cut = crate::basement::footings(&mut self.assembly, &one, &self.ground.land)
+            .into_iter()
+            .next()
+            .map(crate::basement::cut);
         if let Some(mut b) = Building::load(&mut self.assembly, &one, 0, t) {
             if let Some(part) = self.battle.combat.targets.get(t).and_then(|x| x.parts.get(b.part)) {
                 b.place_zone(part);
@@ -809,12 +827,45 @@ impl Play {
         }
         // A building put up in play docks units like any other: an Outpost or a generator is
         // built to be the charging station its ground-level dock makes it (docs/27). Its glows
-        // are joined once its load group below has placed them.
-        let docked = Places::load(&mut self.assembly, &one, 0, t).is_some_and(|places| {
+        // are joined once its load group has placed them, as its controller places it.
+        if let Some(places) = Places::load(&mut self.assembly, &one, 0, t) {
             self.places.push(places);
-            true
-        });
-        if let Some(effects) = BuildingEffects::load(&mut self.assembly, &one, 0, t) {
+        }
+        let effects = BuildingEffects::load(&mut self.assembly, &one, 0, t);
+        self.construction.unplaced.insert(t, Unplaced { cut, effects });
+        self.battle.combat.absent.insert(t);
+        if let Some(s) = self.ground.solids.get_mut(t) {
+            s.present = false;
+        }
+        self.construction.placements.insert(t, (at, yaw));
+        if let Some(p) = self.progression.as_mut() {
+            p.progress.place_building(logical_id, clan, type_word, at);
+        }
+        self.start_sphere(t, phases, now);
+        self.spawned += 1;
+        self.added.push(t);
+        Some(t)
+    }
+
+    /// Whether target `t` stands in the landscape: every building but one made in play that its
+    /// controller has not yet placed.
+    pub fn placed(&self, t: usize) -> bool {
+        !self.construction.unplaced.contains_key(&t)
+    }
+
+    /// Building `t`'s controller placing it in the landscape (action 20,
+    /// `CLandscape::PlaceBuilding`, docs/13): the landscape cut under it, its faces in the
+    /// world, and its load group's effects shown.
+    fn place_in_landscape(&mut self, t: usize, now: f64) {
+        let Some(Unplaced { cut, effects }) = self.construction.unplaced.remove(&t) else { return };
+        self.battle.combat.absent.remove(&t);
+        if let Some(cut) = cut {
+            self.ground.cuts.push(cut);
+        }
+        if let Some(s) = self.ground.solids.get_mut(t) {
+            s.present = self.battle.combat.targets.get(t).is_some_and(|x| x.alive);
+        }
+        if let Some(effects) = effects {
             if let Some(part) = self.battle.combat.targets.get(t).and_then(|x| x.parts.get(effects.part)) {
                 for e in &effects.effects {
                     if let Some(frame) = effects.frame(part, e.on) {
@@ -828,17 +879,9 @@ impl Play {
             let n = effects.effects.len();
             self.building_effects.push((effects, vec![0.0; n]));
         }
-        if docked {
+        if self.places.iter().any(|p| p.target == t) {
             self.join_dock_glows();
         }
-        self.construction.placements.insert(t, (at, yaw));
-        if let Some(p) = self.progression.as_mut() {
-            p.progress.place_building(logical_id, clan, type_word, at);
-        }
-        self.start_sphere(t, phases, now);
-        self.spawned += 1;
-        self.added.push(t);
-        Some(t)
     }
 
     /// A sphere's phase starting: its code sent to the building's controller, and the clearing.
@@ -882,8 +925,8 @@ impl Play {
     /// | 0 | 10 | nothing |
     ///
     /// Each state plays for 250 ms, so a kill anchor's first kill comes one or two states
-    /// after the code. Action 20 places the building in the landscape (`CLandscape::PlaceBuilding`),
-    /// which this engine does as the building is made.
+    /// after the code. Action 20 places the building in the landscape (`CLandscape::PlaceBuilding`):
+    /// until then it is not drawn, has no faces and has cut nothing ([`Unplaced`]).
     ///
     /// STAND-IN: docs/32-builder.md#the-construction-sphere--read-and-measured -- a state's
     /// action group runs as the code arrives rather than at the controller's next 250 ms
@@ -907,6 +950,7 @@ impl Play {
             }
             (2, 0) => {
                 self.fx.switch(Owner::Building(t, RAY), false);
+                self.place_in_landscape(t, now);
                 start(self, DOME, TIME_REVERSE);
                 None
             }
@@ -916,6 +960,7 @@ impl Play {
             }
             (_, 10) => {
                 start(self, DOME, TIME_REVERSE);
+                self.place_in_landscape(t, now);
                 Some(2.0 * KILL_STEP_MS)
             }
             _ => None,
