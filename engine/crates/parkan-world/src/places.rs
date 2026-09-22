@@ -13,7 +13,15 @@ use parkan_sim::damage::{Life, raise_life_share};
 
 use crate::assembly::Assembly;
 use crate::buildings::Child;
+use crate::economy::{BUILDER, TRANSPORT};
 use crate::play::{BUILDING_GENERATOR, Play, ROBOT_HERO};
+
+/// A mine's loading place and a storage's unloading place (docs/27, "The places").
+pub use parkan_formats::hallway::{PLACE_LOADING, PLACE_UNLOADING};
+/// A unit's efficiency: its class-26 components' sum (`Behavior.dll:0x100198e0`), and class 26
+/// is on buildings alone (docs/23, "Efficiency is a building's size"), so what a unit offers
+/// a place, its efficiency times `Transfer_Ore_OffBoard`, is nothing.
+pub const UNIT_KPD: f32 = 0.0;
 
 /// The main teleport's in and out places, and the vertex an in place puts a hero on, which is
 /// no place (docs/27, "The places").
@@ -110,9 +118,9 @@ pub struct Place {
 
 /// One building's docks and teleport places.
 ///
-/// STAND-IN: docs/27-ownership.md#the-places--read-and-measured -- only a dock and the main
-/// teleport's in and out places are ticked here; a transport's loading and unloading places
-/// keep the transport's own arrival.
+/// STAND-IN: docs/27-ownership.md#the-places--read-and-measured -- only a dock, the main
+/// teleport's in and out places and the ore a loading or unloading place moves by itself are
+/// ticked here; a transport's round still keeps its own arrival.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Places {
     pub target: usize,
@@ -142,7 +150,7 @@ impl Places {
 
     /// The docks and teleport places of `hall_way`, on part `part` of target `target`.
     pub fn of(hall_way: &HallWay, target: usize, part: usize) -> Option<Places> {
-        let acts = PLACE_DOCK | PLACE_TELEPORT_IN | PLACE_TELEPORT_OUT;
+        let acts = PLACE_DOCK | PLACE_TELEPORT_IN | PLACE_TELEPORT_OUT | PLACE_LOADING | PLACE_UNLOADING;
         let places: Vec<Place> = hall_way
             .vertices
             .iter()
@@ -300,7 +308,14 @@ impl Play {
                 }
                 let flags = self.places[i].places[k].vertex.flags;
                 let mut charging = false;
+                let count = self.places[i].places[k].occupants.len();
                 for occupant in self.places[i].places[k].occupants.clone() {
+                    if flags & PLACE_LOADING != 0 {
+                        self.ore_place(t, occupant, count, dt, true);
+                    }
+                    if flags & PLACE_UNLOADING != 0 {
+                        self.ore_place(t, occupant, count, dt, false);
+                    }
                     if flags & PLACE_DOCK != 0 {
                         charging |= self.dock(t, occupant, dt);
                     }
@@ -346,6 +361,45 @@ impl Play {
             }
         }
         out
+    }
+
+    /// The ore a mine's loading place (`0x8`, "Mined", `Behavior.dll:0x10019482`) or a
+    /// storage's unloading place (`0x10`, "Stored", `0x100195b8`) moves by itself, over `dt`
+    /// seconds, for one of its `count` occupants: a transport or a builder of the building's
+    /// clan whose property `0x208` is 0 -- set only while an object is not simulated here, so
+    /// always 0 in single play (docs/23, "The ore a place moves by itself"). Each such
+    /// occupant's share is `dt / count` of a rate a second (`0x10019588`, `0x100196d4`):
+    ///
+    /// - at a loading place, the building gives: the smaller of its efficiency times its
+    ///   `Transfer_Ore_OffBoard` and the unit's `Transfer_Ore_OnBoard`, 1 a second at a small
+    ///   mine;
+    /// - at an unloading place, a transport gives: the smaller of the storage's
+    ///   `Transfer_Ore_OnBoard` and the transport's efficiency times its
+    ///   `Transfer_Ore_OffBoard`, which is nothing ([`UNIT_KPD`]);
+    /// - and a builder there is given, as at a loading place ("Stored ???").
+    ///
+    /// Moved as `0x100155f0` moves it: no more than the giver holds or the taker has room for.
+    fn ore_place(&mut self, t: usize, occupant: Child, count: usize, dt: f32, loading: bool) {
+        let Child::Robot(r) = occupant else { return };
+        let Some(Some(clan)) = self.occupant_clan(occupant) else { return };
+        if !self.battle.combat.targets.get(t).is_some_and(|x| x.alive)
+            || self.units.get(t).and_then(|u| u.clan) != Some(clan)
+        {
+            return;
+        }
+        let type_word = self.units.get(r).map_or(0, |u| u.type_word);
+        if type_word != TRANSPORT && type_word != BUILDER {
+            return;
+        }
+        let Some(site) = self.economy.site(t) else { return };
+        let (gives, takes) = (site.kpd() * site.off_board, site.on_board);
+        let (on_board, off_board) = self.economy.unit_rates(&self.assembly, type_word);
+        let share = dt / count.max(1) as f32;
+        if loading || type_word == BUILDER {
+            self.economy.transfer(t, r, share * gives.min(on_board));
+        } else {
+            self.economy.transfer(r, t, share * takes.min(UNIT_KPD * off_board));
+        }
     }
 
     /// The clan of a place's occupant, and whether it is still there to act on.

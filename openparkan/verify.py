@@ -6459,38 +6459,142 @@ def check_efficiency(check, game: Path) -> None:
           f"named ones agree: " + ", ".join(f"{f} {named.get(f, '?')[6:]}"
                                             for f in sorted(want)))
 
-    # Power, per controller tick: stores give up to their power figure a second
-    # times their charge; channel 3 is served first, and on every building the
-    # efficiency component is alone there.  So its level -- the 0x200 factor in
-    # KPD -- stays at 1 until the batteries hold less than draw / output.
-    role_profile = {"_inst": "prof_institute.var", "_plan": "prof_plant.var",
-                    "_mine": "prof_mine.var"}
+    # Power, per controller tick: stores give min(output x charge x dt, capacity x
+    # charge); channel 3 is served first, and on every building the efficiency
+    # component is alone there.  A building's stores are its root's slots with
+    # the i_pws_f parts fitted into them (8 held, 500 a second), so what binds a
+    # quarter-second tick is what they hold: its level -- the 0x200 factor in
+    # KPD -- stays at 1 until capacity x charge falls under one tick's draw.
+    role_profile = {"INSTITUT": "prof_institute.var", "PLANT": "prof_plant.var",
+                    "MINE": "prof_mine.var"}
     held = profiles.load(game) if (game / profiles.ARCHIVE).exists() else {}
     alone = []
-    margins = []
     for name, parsed in sorted(buildings.items()):
         parts = parsed.components
         if not any(p.type_id == control.EFFICIENCY_TYPE for p in parts):
             continue
         first = [p for p in parts if p.channel in control.POWER_ORDER[0]]
         alone.append(all(p.type_id == control.EFFICIENCY_TYPE for p in first))
-        stores = [p for p in parts if p.type_id == control.POWER_STORE_TYPE
-                  and p.values[0] > 0]
-        role = next((r for r in role_profile if r in name), None)
-        if role and stores and role_profile[role] in held:
-            draw = (sum(p.power for p in first)
-                    + held[role_profile[role]][profiles.USE_POWER].value)
-            margins.append((name, draw / sum(p.power for p in stores)))
+    margins = []
+    for dat, (_, stores, _) in sorted(building_batteries(game).items()):
+        role = dat.split("/")[2] if dat.count("/") >= 3 else ""
+        capacity = sum(c for c, _ in stores)
+        if role in role_profile and capacity > 0 and role_profile[role] in held:
+            draw = 0.01 + held[role_profile[role]][profiles.USE_POWER].value
+            margins.append((dat, draw * 0.25 / capacity))
     worst = max(margins, key=lambda m: m[1]) if margins else ("-", 1.0)
     check(".ctl: a building's batteries keep its efficiency whole until nearly empty",
           alone and all(alone) and margins and worst[1] < 0.1
           and all(math.isfinite(v) and v >= 0 for v in powers),
           f"on all {len(alone)} building controllers with an efficiency component "
           f"it is the only thing on channel 3, served first; across "
-          f"{len(margins)} research centres, factories and mines the charge "
-          f"below which it gets less than it draws is at most "
-          f"{100 * worst[1]:.1f}% ({worst[0]}); every one of {len(powers)} power "
-          f"figures is finite and non-negative")
+          f"{len(margins)} research centre, factory and mine assemblies, with their "
+          f"fitted batteries, the charge below which a 250 ms tick gets less than "
+          f"it draws is at most {100 * worst[1]:.1f}% ({worst[0]}); every one of "
+          f"{len(powers)} power figures is finite and non-negative")
+
+
+def building_batteries(game: Path) -> dict[str, tuple[list, list, tuple]]:
+    """Each building assembly under ``UNITS``: its root controller's batteries as
+    (capacity, output) pairs, the same with every internal part re-parsing the slot
+    its attach field names (docs/28, "A fitted part takes over its slot"), and its
+    class-26 values with the parts fitted, keyed by the ``.dat``'s path."""
+    library = objects.ObjectLibrary(game / "objects.rlb")
+    archives: dict[str, NResArchive] = {}
+
+    def controller(member: str, depth: int = 0):
+        record = library.get(member)
+        if record is None or depth > 3:
+            return None
+        slot = record.slot_with_suffix("ctl")
+        if slot is None:
+            for s in record.slots:
+                if s and s.member and not s.suffix:
+                    found = controller(s.member, depth + 1)
+                    if found is not None:
+                        return found
+            return None
+        key = slot.library.lower()
+        if key not in archives:
+            path = next((p for p in game.iterdir() if p.name.lower() == key), None)
+            if path is None:
+                return None
+            archives[key] = NResArchive.open(path)
+        try:
+            return control.parse(archives[key].read_name(slot.member))
+        except (KeyError, control.ControlFormatError):
+            return None
+
+    out = {}
+    for dat in sorted(p for p in (game / "UNITS").rglob("*") if p.suffix.lower() == ".dat"):
+        try:
+            unit = objects.load_unit(dat)
+        except (objects.ObjectFormatError, OSError):
+            continue
+        if not unit.is_building:
+            continue
+        parents = unit.parents()
+        devices: dict[int, list] = {}
+        for i, component in enumerate(unit.components):
+            parsed = controller(component.ref.member)
+            if i == 0 or component.is_external:
+                devices[i] = list(parsed.components) if parsed else []
+                continue
+            host = devices.get(parents[i])
+            if parsed is None or not parsed.components or host is None:
+                continue
+            if 0 <= component.attach_node < len(host):
+                host[component.attach_node] = parsed.components[0]
+        root = controller(unit.components[0].ref.member)
+        own = [(k.values[0], k.power) for k in (root.components if root else [])
+               if k.type_id == control.POWER_STORE_TYPE]
+        stores = [(k.values[0], k.power) for v in devices.values() for k in v
+                  if k.type_id == control.POWER_STORE_TYPE]
+        eff = tuple(k.values[0] for v in devices.values() for k in v
+                    if k.type_id == control.EFFICIENCY_TYPE)
+        out[dat.relative_to(game).as_posix()] = (own, stores, eff)
+    return out
+
+
+def check_no_logical_id_0(check, game: Path) -> None:
+    """No placed object has logical id 0, so a build's reserved mind names none."""
+    tmas = sorted((game / "MISSIONS").rglob("data.tma"))
+    if not tmas:
+        return
+    ids = Counter(o.logical_id for t in tmas for o in mission.load(t).objects)
+    names = {name for t in tmas for o in mission.load(t).objects for name in o.properties}
+    check("data.tma: no placed object carries logical id 0",
+          sum(ids.values()) == 864 and ids[0] == 0 and ids[-1] == 401
+          and len(names) == 15 and not any("mirror" in n.lower() for n in names),
+          f"0 of {sum(ids.values())} objects in {len(tmas)} missions have id 0 "
+          f"({ids[-1]} carry -1, to be given one), so the takt's sweep "
+          f"(ai.dll:0x10006580) frees a reservation, which is 0; the {len(names)} "
+          f"property names they carry do not include the behaviour's mirror word "
+          f"0x208")
+
+
+def check_building_batteries(check, game: Path) -> None:
+    """A building's batteries are its root's slots with its i_pws_f parts fitted."""
+    if not (game / "objects.rlb").exists():
+        return
+    fitted = building_batteries(game)
+    with_stores = {d: v for d, v in fitted.items() if v[0] or v[1]}
+    changed = {d: v for d, v in with_stores.items() if v[0] != v[1]}
+    pairs = Counter((sum(c for c, _ in own), sum(o for _, o in own),
+                     sum(c for c, _ in new), sum(o for _, o in new))
+                    for own, new, _ in changed.values())
+    parts = Counter(p for own, new, _ in changed.values() for p in new)
+    check("UNITS: a building's batteries are the i_pws_f parts fitted into its slots",
+          len(fitted) == 76 and len(with_stores) == 74 and len(changed) == 53
+          and set(parts) == {(8.0, 500.0)}
+          and set(pairs) == {(20.0, 50.0, 16.0, 1000.0), (19.5, 51.0, 24.0, 1500.0),
+                             (20.0, 52.0, 32.0, 2000.0)},
+          f"of {len(fitted)} building assemblies {len(with_stores)} have batteries; "
+          f"on {len(changed)} every root slot takes a fitted part, "
+          f"{sum(parts.values())} parts all {sorted(parts)} (held, a second), so "
+          + ", ".join(f"{a:g}/{b:g} becomes {c:g}/{d:g} on {n}"
+                      for (a, b, c, d), n in sorted(pairs.items()))
+          + "; without the parts the walk gives the root's own back")
 
 
 #: Mission 03's placed economy: name -> (Type, clan index, MaximumOre, CurrentOre).
@@ -24839,7 +24943,8 @@ def run(game: Path) -> int:
         check_effects, check_effect_timing, check_sounds, check_music, check_actions,
         check_footprints,
         check_rsli,
-        check_control, check_efficiency, check_mission_03_economy,
+        check_control, check_efficiency, check_building_batteries, check_no_logical_id_0,
+        check_mission_03_economy,
         check_motion, check_playback, check_ground, check_sensors, check_hit_test,
         check_collision, check_lake_and_buoys,
         check_combat, check_ownership, check_owner_word, check_hall_way_gates,

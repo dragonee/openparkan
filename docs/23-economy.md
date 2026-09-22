@@ -366,11 +366,61 @@ every `.ctl` label family sits on one class, and the named ones agree —
 
 **So a building's efficiency is served first and alone** (*measured*). On all
 27 building controllers that have an efficiency component, it is the only
-thing on channel 3. Its own power figure is 0.01; the batteries put out 50 to
-52 a second at full charge, holding 19.5 to 20. Its level — and `KPD` — stays
-at 1 until the batteries hold less than `(0.01 + Use_Power) / output`: **8.0%
-for a small factory**, about 6% for a research centre, 2% for a mine.
-Below that it falls in proportion to the charge.
+thing on channel 3. Its own power figure is 0.01. The batteries it runs on are
+the parts fitted into the controller's battery slots, 8 held and 500 a second
+each ([below](#a-buildings-batteries-are-the-parts-fitted-into-its-slots--read-and-measured)),
+so what binds a tick is what they hold, not how fast they give it: `min(500 ×
+charge × dt, 8 × charge)` is the second for any tick under 16 ms. Its level —
+and `KPD` — stays at 1 until what the batteries hold falls below one tick's
+draw, `capacity × charge < (0.01 + Use_Power) × dt`: at a quarter-second tick,
+**6.3% for a small factory** (16 held), 3.1% for the Large Factory (32), 4.7%
+for a small research centre and 1.6% for a small mine. Below that it falls in
+proportion to the charge. (This page once put the thresholds at 8.0%, 6% and
+2%, from the root controller's own 19.5 to 20 held and 50 to 52 a second,
+which the fitted parts replace.)
+
+### A building's batteries are the parts fitted into its slots — *read*, and *measured*
+
+**The machinery is one control system per agent.** A building's control system
+answers the distribution step's fill and capacity over every class-19 device
+it has (`Control.dll:0x1002b42b`, `0x1002b4e9`), and a building gets its
+devices as a robot does
+([28-chassis.md](28-chassis.md#a-fitted-part-takes-over-its-slot--read-and-measured)):
+the root record's controller, each external part's records appended, and each
+internal part **re-parsing the slot its attach field names**, its figures and
+record in place of the slot's. So the batteries are neither the root's alone
+nor the root's plus the parts': they are the root's slots, holding the parts'
+figures.
+
+*Measured*, over the 76 building assemblies in `UNITS`:
+
+- **74 have batteries.** In **53** every root battery slot is filled by an
+  `i_pws_f_*` part (`_01`, `_02`, `_03` or `_df`, 152 parts in all), and every
+  one of those parts holds **8** and puts out **500** a second.
+- **What that makes of the root's figures:**
+
+  | root's slots | root's own figures | with the parts fitted | assemblies |
+  |---|---|---|---:|
+  | 2 × (10, 25) | 20 held, 50 a second | 16 held, 1,000 a second | 20 |
+  | 3 × (6.5, 17) | 19.5 held, 51 a second | 24 held, 1,500 a second | 20 |
+  | 4 × (5, 13) | 20 held, 52 a second | 32 held, 2,000 a second | 13 |
+
+- **The other 21 keep their root's own**: the generators' −1, which reads
+  full, the bunkers' and the ruins'.
+- **Efficiency is untouched.** On all 76 the class-26 values come out the same
+  with the parts fitted as without, so `KPD` is still the root's own value.
+- **Mission 03's:** the Large Factory (`lplant01`) holds 32 and the Small
+  Storage (`sstore01`) and the built Small Mine (`smine01`) 16 each.
+- **The control:** the same walk, run without the fitted parts, gives back the
+  19.5 to 20 held and 50 to 52 a second this page measured before on all 53.
+
+The internal parts' slots are the parts' own class on all but 4 of the 3,832
+internal parts in `UNITS`, buildings' among them
+([28-chassis.md](28-chassis.md#a-fitted-part-takes-over-its-slot--read-and-measured)).
+That a building's parts go through the same attaching as a robot's is
+*inferred*: the part loop (`Behavior.dll:0x1001cd40`, called from `0x1001cec5`
+and `0x1001da86`) was not followed for a building; that buildings carry
+external parts the game draws is what says their parts are attached at all.
 
 That is how a short clan slows its work. The distribution step refills every
 building's batteries by `Available / Total` of what they lack; a working
@@ -397,23 +447,44 @@ the game's millisecond clock:
 Neither is a multiple of the other, and the jitter keeps them from locking.
 Neither timer is in any data file.
 
+**Where the randomness comes from** (*read*):
+
+- **The step's 0..63 ms is `Behavior.dll`'s own `rand()`**: the C library's
+  generator, statically linked at `0x1004ce3c` — state times 214013 plus
+  2531011, bits 16 to 30 returned. The timer (`0x1004c569`) takes the draw's
+  low byte times its one unit of 64 ms over 256. The state (`0x10063c1c`) is
+  written by `rand()` alone and starts at 1: nothing in the module seeds it.
+  It is one stream for the whole module, and 65 other call sites draw on it.
+- **The power tick's jitter is a 16-bit shift register** that the whole of
+  `Control.dll` shares, two words at `0x10043228` and `0x1004322a`, stepped on
+  every controller's tick, a unit's as much as a building's. The first becomes
+  itself doubled crossed (xor) with the second; the second, itself halved
+  crossed with the new first; and the second over 65,536 moves the 250 ms by a
+  quarter of it about centre (`0x1000c756`–`0x1000c7b5`), so 218.75 to 281.25
+  ms. The 250 is a float stored into `0x10042480` at `0x10006364`, and both words
+  are seeded from one dword an `Ngi32.dll` import by ordinal returns
+  (`0x1000dc34`) — which import was not followed.
+
 **The top-up never overshoots**: a building receives at most `capacity × (1 −
 fill)`, and a clan's surplus is simply not drawn. Full buildings ask for
 nothing, so **only the draining buildings share a shortage**. For `N` equally
 busy buildings on a clan making `G` power a second, each with draw `d = 0.01 +
-Use_Power` and battery output `R`, the averages settle at
+Use_Power`, batteries holding `C` and a power tick of `dt`, the averages settle
+at
 
 ```
 level (and KPD)   r = min(1, G / (N × d))
-charge            f = r × d / R
+charge            f = r × d × dt / C
 ```
 
 — a derivation from the read formulas over the discrete steps, so a *guess* in
 its exactness. One generator (`G` = 10) and three small factories building at
-once (`d` = 4.01, `R` = 50) settle at a level of 0.83 and a charge of 6.7%:
-research and construction at 83% speed. The building's capacity drops out,
-which is measurable to matter little anyway — every `fortif.rlb` building with
-batteries holds 19.5 or 20 and puts out 50 to 52 a second.
+once (`d` = 4.01, `C` = 16, `dt` = 0.25) settle at a level of 0.83 and a charge
+of 5.2%: research and construction at 83% speed. The level is the clan's
+supply over its draw whatever the batteries; their capacity sets only the
+charge it settles at. (This page once gave the charge as `r × d / R`, 6.7%,
+from the root controller's 50 a second, which the fitted parts replace, and
+at 500 a second each the store's content binds before its output does.)
 
 ## Bots spend power through the same code, priced by part — *read*, and *measured*
 
@@ -427,7 +498,7 @@ battery code.
 
 | | a building | a bot |
 |---|---|---|
-| batteries | `i_pws` parts holding 19.5–20, 50–52 a second | the fitted battery, which replaces the chassis's 10,000 at 250: 3,000–4,080 at 5–6.8 a second small, 9,600–12,000 at 12–15 medium, 22,000–31,000 at 25.5–34.5 large ([28-chassis.md](28-chassis.md#a-fitted-part-takes-over-its-slot--read-and-measured)) |
+| batteries | the fitted `i_pws_f` parts, 8 held and 500 a second each, which replace the root's slots: 16 to 32 held ([above](#a-buildings-batteries-are-the-parts-fitted-into-its-slots--read-and-measured)) | the fitted battery, which replaces the chassis's 10,000 at 250: 3,000–4,080 at 5–6.8 a second small, 9,600–12,000 at 12–15 medium, 22,000–31,000 at 25.5–34.5 large ([28-chassis.md](28-chassis.md#a-fitted-part-takes-over-its-slot--read-and-measured)) |
 | refilled by | the clan's generators, through the distribution step | never by the distributor (*measured*: its registration needs bit 31 of `Type`, set on all 167 placed buildings and none of the 296 units); a docked unit gains 10% of a full charge a second (`Behavior.dll:0x10019372`, "Reloaded") |
 | main draw | the efficiency component, `(0.01 + Use_Power) × dt` | engines, first on the same channel |
 
@@ -510,7 +581,35 @@ CPUs" in the game's own interface (`iron3d.dll` string 3067).
   (`0x1001e0e0`) and reservation (`0x1002a348`), the two known before it.
 - **What frees one.** A bot destroyed or deleted, or captured by another clan
   (`ai.dll:0x10003e40`, `0x10006530`), or a build that is aborted
-  (`0x10029910`).
+  (`0x10029910`) — and, for a reservation, the clan's next takt (below).
+- **A build holds its mind only until the clan's next takt** — *read*, and
+  *seen*. The takt (`ai.dll:0x10001780`, every 7 to 8 s) opens with the drain
+  `0x10005910`, which checks the SuperAI's units (`0x10003e40`) and ends in a
+  sweep of the mind list (`0x100059e3` → `0x10006580`): every entry that is
+  not −1 is looked up by logical id through the clan's areal map (slot 7), and
+  one that names no object is written −1. A reservation is 0, and **no object
+  has logical id 0**: the areal map's id table (`ArealMap.dll`, "MLogicIDMap")
+  keeps a counter for buildings and one for robots, both zeroed by its
+  constructor (`0x1002b19f`, `0x1002b1a2`) and bumped before each use
+  (`0x1002b305`, `0x1002b3e9`), so ids count up from 1; a building's carries
+  the top bit besides, and a robot's comes back round to 0 only on its
+  16,777,215th. And 0 of the 864 objects the 29 missions place carry id 0
+  (*measured*; 401 carry −1, to be given one). So the sweep frees every reservation. The sweep runs before
+  `Problems<n>` reads `dFreeMindNumber`, and it runs for the player's clan too:
+  after loading, `iron3d.dll` starts every clan's SuperAI (slot 5, through
+  `0x100392d0`) with 1 for the local player's clan and 2 for the others
+  (`0x100a2750`–`0x100a2760`), and the takt runs while that word is non-zero
+  (`ai.dll:0x100017d0`).
+  - **The completion drops the clan's *first* reserved entry**, whichever
+    build made it (`Behavior.dll:0x1002a7c7`–`0x1002a7e5`), and does nothing if
+    the takt has freed them all; an abort does the same (`0x10029966`–
+    `0x10029983`). Then the bot claims a free entry. **With none free the bot
+    is not made** — *"No free Mind... CreateObjectFromScheme failed"*
+    (`0x1001d4a6`) — and the build is over all the same: "Construction
+    Complete", and a free bot is spent (`0x1002a7f9`).
+  - So what "Available CPUs" counts, the entries reading −1
+    (`iron3d.dll:0x10039330`), is the minds neither a bot nor a build started
+    since the clan's last takt holds.
 - **What the player hears.** When the player clan has none free, the
   constructor plays `VOICE_NO_CPU` (`iron3d.dll:0x1005ee43`).
 - **A refused build is dropped, not retried** — *read*. A factory's orders are
@@ -568,8 +667,11 @@ CPUs" in the game's own interface (`iron3d.dll` string 3067).
   back only when something wants a robot again. `ai.dll:0x10007fd0`, named here
   before, is only a helper in the handlers' code that evaluates one argument.
 
-So a clan with 5 minds can have at most 5 bots alive or under construction,
-and its factories stop until one is lost. Buildings take no mind.
+So a clan with 5 minds can have at most 5 bots alive, and its factories stop
+until one is lost. Buildings take no mind. A build under way holds a mind only
+until the clan's next takt: after it, the figure reads one more, a second
+factory may start on that mind, and whichever bot finishes last without a free
+one is not made.
 
 *Measured:* across all 101 shipped clans no clan is placed with more robots
 than its minds, two sit exactly at the limit, and counting every owned object
@@ -881,6 +983,62 @@ With the mine full as above:
 - **The round** is 91.5 s, 13 s more than the two walks at full speed, the
   loading and the unloading add up to.
 
+### The ore a place moves by itself — *read*
+
+Beside the transport's own task, the building's place tick
+(`Behavior.dll:0x100189c7`, every 64 to 128 ms, `dt` the time since the last
+in seconds, `0x10018b0e`) moves ore of its own accord for the occupants of a
+mine's loading place and a storage's unloading place
+([27-ownership.md](27-ownership.md#the-places--read-and-measured)). An
+occupant counts when it is a transport (`0x1002000`) or a builder
+(`0x1004000`), of the building's clan, with its property `0x208` at 0
+(`0x100194d5`–`0x10019501`, `0x10019611`–`0x1001963d`).
+
+- **Which way.** Every move goes through `0x100155f0`, which takes the
+  property, an amount, the giver and the taker, and moves no more than the
+  giver holds and, where the taker has a maximum, no more than its room.
+  - **At a mine's loading place ("Mined")**, the mine gives to the unit
+    (`0x10019580`–`0x100195a0`).
+  - **At a storage's unloading place, a transport gives to the storage**
+    ("Stored", `0x100196cd`–`0x1001975e`).
+  - **A builder there is given to** by the storage ("Stored ???",
+    `0x1001973e`–`0x1001975e`).
+- **At what rate.** The smaller of the giver's offer and the taker's intake,
+  where a building's or unit's offer is id `0x1002`, its efficiency times its
+  `Transfer_Ore_OffBoard`, and its intake id `0x1001`, its
+  `Transfer_Ore_OnBoard` ([the id table](#how-ore-reaches-a-consumer--read-after-two-corrections)).
+- **The divisor is the place's occupant count.** Each counted occupant gets
+  `dt / n` of that rate (`0x10019588`, `0x100196d4`, `0x10019746`), `n` being
+  every object standing in the place (`0x10019493`), counted or not.
+- **What `0x208` is.** It is the behaviour's `+0xa64` (the getter's table,
+  `0x1000aa2c`). The constructor clears it (`0x10003c60`); the behaviour's
+  message 7 (`0x10005a83` → slot 64, `0x10006250`) sets it for argument 2 and
+  clears it for 0 and 1, reloading the SuperAI as it does ("Switch from Mirror
+  to Behaviour", `0x10008c70`). Nothing else writes it. Message 7 is the one
+  [13-control.md](13-control.md#control-message-7-says-who-simulates-the-object--read)
+  reads on the control side: argument 2 means **the object is not simulated
+  here**, a network mirror or one part way through changing hands. It is not a
+  mission property — the 29 missions' 864 objects carry 15 property names, and
+  the mirror word is none of them — and in single play it is 0 but for that
+  moment of a change of owner.
+
+So, with the profiles' figures (*measured*: `prof_trn` and `prof_bld` take
+and give 100, `prof_mine` gives 1 and `prof_storage` takes 20 and gives 1):
+
+- **A transport or a builder in a mine's loading place** is given the mine's
+  efficiency times 1 a second, shared among the place's occupants: 1 a second
+  at a small mine, 5 at a large.
+- **A transport in a storage's unloading place gives nothing**: its offer is
+  its efficiency times 100, and a unit has no efficiency component — class 26
+  is on buildings alone ([above](#efficiency-is-a-buildings-size)), and the
+  sum `0x100198e0` makes over none is 0.
+- **A builder in a storage's unloading place** is given the storage's
+  efficiency times 1 a second.
+
+In Mission 03 that is 1 ore a second into the transport while it loads at the
+mine, so it fills its 2,000 in 19.8 s rather than 20 (*derived*); the
+recording's 20-second rises on the Ore bar cannot tell the two apart.
+
 ### Power — *read*, and *measured*
 
 - **Supply.** A generator gives `Transfer_Power_Out × dt` to its clan. After
@@ -948,6 +1106,28 @@ file again on the frame the factory is idle
 - **The Ore row** is up from 178.5 s, reading 0% in red with its figure
   blinking. It stays at 0% until the mine digs: the storage is empty and no
   mine exists.
+- **The minds.** Read off the factory panel every half second while it is
+  open (the figure at (344, 129) of the 640 × 480 panel):
+
+  | s | Available CPUs | what holds the 7 |
+  |---|---:|---|
+  | 211–212.5, 215–217.5 | 4 | the hero, the builder, the transport |
+  | 218–221 | 3 | and build 1's reservation, from 217.8 s |
+  | 221.5–223 | 4 | the clan's takt has swept the reservation |
+  | 260–261 | 5 | the builder is gone |
+  | 261.5 | 3 | SSW-4, and build 2's reservation |
+
+  - **The builder is gone at 237.1 s.** Its page shows *SWB-2 Builder \[no
+    order\]* with the cursor on its *Explode!* button (6244), the tooltip up,
+    from 236.4 s; by 237.1 s the page has closed and its marker is gone from
+    the dome. Its mind comes back by the clan's next takt, whose check of the
+    clan's units frees a dead one's (`ai.dll:0x10003e40`).
+  - **Five warbots on four free minds** is then the rule, not an exception:
+    with the builder's mind back there are five, SSW-4 to SSW-7 take four, and
+    build 5 starts at 320.7 s on the last. SSW-8 takes it, and the batch
+    restart finds none free: no sixth build.
+  - Build 1's reservation went between 221.0 and 221.5 s, 3.2 to 3.7 s after
+    it was made: a takt's 7 to 8 s leaves room for that anywhere.
 
 ### For an engine
 
@@ -982,6 +1162,9 @@ Tick the economy on its own timers, per clan:
    - loads at 100 a second up to 2,000 (a full mine gives it all);
    - walks to the storage and unloads at 100 a second while there is room;
    - walks back, and repeats.
+   - Standing in the mine's loading place it is also given the mine's
+     `KPD × 1` a second, over the place's occupants; in the storage's unloading
+     place it gives nothing by itself.
 6. **Energy** = (the player clan's power out − its batteries' losses since the
    last step) over every clan's power out.
    - Every building draws 0.01 a second.
@@ -991,6 +1174,12 @@ Tick the economy on its own timers, per clan:
    a second.
 8. **`prebuild`** pushes each named design into the factory's recent projects,
    the last named first.
+9. **Minds.** Free minds are the clan's 7 less every live robot and every
+   build started since the clan's last takt; each takt (7 to 8 s) forgets the
+   builds. A finished bot takes a mind, and is not made when none is free.
+10. **Batteries** are the fitted parts': 16 held in the storage and the mine,
+    32 in the Large Factory, each part giving up to 500 a second, so a tick
+    gives at most what the batteries hold.
 
 ## Against what the game looked like
 
@@ -1010,8 +1199,8 @@ construction slows research.
   drop below a few percent.
 - **Construction slowing research** — *read*, when the clan is short for long
   enough. Every building's batteries get the same fraction of what they lack,
-  `Available / Total`, and a working factory adds its own lack to `Total`. The
-  research centre slows once its batteries fall under 6%; with a surplus the
+  `Available / Total`, and a working factory adds its own lack to `Total`. A
+  small research centre slows once its batteries fall under 4.7%; with a surplus the
   fraction is 1 and building costs research nothing.
 - **A mine ≈ 11%** — *read*, and exact. The ore bar divides held ore by 4500,
   one full mine plus one full storage, and a full mine holds 500: 11.1%.
@@ -1022,7 +1211,8 @@ construction slows research.
   came from a component averaging three inputs, is withdrawn.
 - **A cap on bots, after which factories stop** — *read*, and exact. It is the
   clan's mind count from the mission, 2 to 17, shown as "Available CPUs"; a bot
-  alive or under construction holds one, and losing a bot gives it back.
+  alive holds one, a build under way until the clan's next takt, and losing a
+  bot gives it back.
 
 ## Not established
 
@@ -1034,31 +1224,40 @@ construction slows research.
   problem comes back only when one of the 108 raises in the corpus wants a
   robot again ([The bot
   limit](#the-bot-limit-is-the-clans-mind-count--read-and-measured)).
-- **Which of Mission 03's units hold a mind, and what the factory's "Available
-  CPUs" counts** as a build runs. ~~Which hold one~~ — **read**: all three
-  placed robots, the hero among them
-  ([above](#the-bot-limit-is-the-clans-mind-count--read-and-measured)), so 4 of
-  the 7 are free before any build, as seen. Still open: the 4 from 221.5 s, when
-  the finished bot should hold the mind its build reserved, and the five
-  warbots built on four free minds.
-  - The player clan has 7 minds and starts with the hero, a builder and a
-    transport.
-  - *Seen*, the figure reads:
-    - 4 at 215.5 s, before any build;
-    - 3 from 218 to 220.5 s, while the first build collects its power;
-    - 4 from 221.5 s;
-    - 3 at 262 s, during the second build's power.
-  - Five warbots are built (*SSW-4* to *SSW-8*), and no sixth build starts.
-- **The ore an ore place moves by itself.** A transport or builder standing in a
-  mine's loading place or a storage's unloading place, with its property `0x208`
-  at 0, also exchanges ore through the building's place tick (`0x10019482`,
-  `0x100195b8`, through `0x100155f0`), at the smaller of the building's and the
-  unit's rate. Not established here:
-  - which way the ore goes;
-  - what `0x208` is;
-  - what the tick's divisor is.
-  The model above leaves it out; beside the task's 100 a second it is at most a
-  few ore a second.
+- ~~**Which of Mission 03's units hold a mind, and what the factory's "Available
+  CPUs" counts** as a build runs: the 4 from 221.5 s, when the finished bot
+  should hold the mind its build reserved, and the five warbots built on four
+  free minds.~~ **Read**, and *seen*: a build's reservation lasts only until
+  the clan's next takt, whose sweep (`ai.dll:0x10006580`) frees every entry
+  naming no object, and a reservation's 0 names none, so the figure is back at
+  4 by 221.5 s. The builder is gone at 237.1 s, which gives its mind back: the
+  panel reads 5 at 260 s, and five warbots take the five. The completion drops
+  the clan's first reserved entry (`Behavior.dll:0x1002a7e5`), and a bot
+  finished with none free is not made (`0x1001d4a6`)
+  ([The bot limit](#the-bot-limit-is-the-clans-mind-count--read-and-measured),
+  [against the recording](#against-the-recording--seen)).
+- ~~**The ore an ore place moves by itself**: which way it goes, what `0x208`
+  is, what the tick's divisor is.~~ **Read**: a mine's loading place gives the
+  unit the smaller of the mine's `KPD × Transfer_Ore_OffBoard` and the unit's
+  `Transfer_Ore_OnBoard`, 1 a second at a small mine; a storage's unloading
+  place takes from a transport the smaller of its 20 and the transport's
+  `KPD × 100`, which is 0, a unit having no efficiency component; a builder
+  there is given to. The divisor is the place's occupant count. `0x208` is the
+  behaviour's "not simulated here" word, which only message 7 with argument 2
+  sets: 0 in single play
+  ([The ore a place moves by itself](#the-ore-a-place-moves-by-itself--read)).
+- ~~Which controllers a building's control system gathers its batteries and
+  efficiency from.~~ **Read**, and *measured*: its root's slots with the
+  internal parts fitted into them, so on 53 of the 76 building assemblies the
+  `i_pws_f_*` parts' 8 held and 500 a second each stand in the root's 19.5 to
+  20 and 50 to 52; efficiency is the root's on all 76
+  ([A building's batteries](#a-buildings-batteries-are-the-parts-fitted-into-its-slots--read-and-measured)).
+- ~~The random sources of the economy's two timers.~~ **Read**: the
+  distribution step's is `Behavior.dll`'s own `rand()`, unseeded and shared by
+  the module; the power tick's a 16-bit shift register all of `Control.dll`
+  shares ([How often](#how-often-and-where-it-settles--read-with-a-derived-settle-point)).
+  Still open: the `Ngi32.dll` import that seeds the register
+  (`Control.dll:0x1000dc34`).
 - **The 13 s a recorded transport round takes** beyond two walks at full speed:
   its held speed on Tut_3's slopes and the distance between its two places are
   not measured.

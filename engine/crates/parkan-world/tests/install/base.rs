@@ -170,7 +170,7 @@ fn mission_02s_factory_builds_a_free_warbot_which_leaves_by_the_front_door_and_c
     play.factories[f].accept(project);
     let free = play.free_minds(play.player_clan);
     assert_eq!(free, 1, "two minds, the hero holds one");
-    assert!(play.factories[f].start(true, free));
+    assert!(play.start_factory(f, true));
     assert_eq!(play.free_minds(play.player_clan), 0);
     let robots = play.robots.len();
     let mut ticks = 0;
@@ -942,8 +942,7 @@ fn mission_03s_large_factory_waits_on_ore_and_builds_an_ssw_x_in_25_seconds_once
     assert_eq!((play.factories[f].efficiency, play.factories[f].use_power), (5.0, 4.0));
     let ssw = play.factories[f].projects.iter().position(|p| p.name.starts_with("SSW-X")).unwrap();
     play.factories[f].selected = Some(ssw);
-    let free = play.free_minds(player);
-    assert!(play.factories[f].start(false, free));
+    assert!(play.start_factory(f, false));
     let cost = play.factories[f].build.as_ref().unwrap().construct.ore_cost;
     assert!((cost - 125.6 / 5.0).abs() < 0.1, "the price over the factory's efficiency: {cost}");
 
@@ -976,6 +975,75 @@ fn mission_03s_large_factory_waits_on_ore_and_builds_an_ssw_x_in_25_seconds_once
     assert!((85.0..=95.0).contains(&energy), "the mine at work draws 1: {energy} of {energies:?}");
     // 25.1 s with the mine alone (docs/23, "A warbot from the Large Factory").
     assert!((seconds - 25.1).abs() < 2.0, "the bot is done {seconds} s after the mine digs");
+}
+
+/// Mission 03's "Available CPUs" as the recording reads it (docs/23, "The bot limit is the
+/// clan's mind count"): 4 before a build, 3 once it starts, 4 again after the clan's next takt
+/// sweeps the reservation, 5 once the builder is gone, and the finished bot takes one.
+#[test]
+#[ignore = "needs the game install"]
+fn mission_03s_free_minds_come_back_at_the_clans_takt_and_the_finished_bot_takes_one() {
+    let (mut play, m) = mission_03_play();
+    let player = play.player_clan;
+    // The generator and the bunker taken, so the factory has its power.
+    for name in ["gener01.dat", "sbunk01.dat"] {
+        let t = object_target(&play, &m, name);
+        play.units[t].clan = Some(player);
+    }
+    let plant = object_target(&play, &m, "lplant01.dat");
+    let builder = object_target(&play, &m, "tut3_b.dat");
+    let f = play.factories.iter().position(|f| f.target == plant).unwrap();
+    let ssw = play.factories[f].projects.iter().position(|p| p.name.starts_with("SSW-X")).unwrap();
+    play.factories[f].selected = Some(ssw);
+    // Let the takt that runs at the start pass, so the next is 7 to 8 s off.
+    play_for(&mut play, 0.1, |_| {});
+    assert_eq!(play.free_minds(player), 4, "7 minds; the hero, the builder and the transport");
+    assert!(play.start_factory(f, false));
+    assert_eq!(play.free_minds(player), 3, "the build reserves one");
+    let mut back = None;
+    for tick in 0..(8.1 * 60.0) as usize {
+        play_for(&mut play, 1.0 / 60.0, |_| {});
+        if play.free_minds(player) == 4 {
+            back = Some(tick as f32 / 60.0);
+            break;
+        }
+    }
+    let back = back.expect("the clan's takt frees the reservation within 8 s");
+    assert!(play.factories[f].build.is_some(), "while the build still runs, {back} s in");
+    // The builder gone, as it goes at 237 s in the recording: 5, as at 260 s.
+    play.battle.combat.targets[builder].alive = false;
+    assert_eq!(play.free_minds(player), 5);
+    // Ore in the factory's hands: the build completes and the bot claims a mind.
+    let robots = play.robots.len();
+    for _ in 0..60 * 60 {
+        if play.factories[f].build.is_none() {
+            break;
+        }
+        let most = play.economy.most(plant);
+        play.economy.ore.insert(plant, (1000.0, most));
+        play_for(&mut play, 1.0 / 60.0, |_| {});
+    }
+    assert!(play.factories[f].build.is_none(), "the build completed");
+    assert_eq!(play.robots.len(), robots + 1, "the bot is made");
+    assert_eq!(play.free_minds(player), 4, "and holds a mind, as at 261.5 s with no build");
+
+    // With no mind free at completion the bot is not made, and the build is over all the
+    // same ("No free Mind... CreateObjectFromScheme failed").
+    assert!(play.start_factory(f, false));
+    let c = usize::try_from(player).unwrap();
+    play.clans[c].minds = 3;
+    assert_eq!(play.free_minds(player), 0);
+    let robots = play.robots.len();
+    for _ in 0..60 * 60 {
+        if play.factories[f].build.is_none() {
+            break;
+        }
+        let most = play.economy.most(plant);
+        play.economy.ore.insert(plant, (1000.0, most));
+        play_for(&mut play, 1.0 / 60.0, |_| {});
+    }
+    assert!(play.factories[f].build.is_none(), "the build completed");
+    assert_eq!(play.robots.len(), robots, "no bot without a free mind");
 }
 
 #[test]
@@ -1036,6 +1104,81 @@ fn mission_03s_transport_carries_2000_ore_from_the_mine_to_the_small_warehouse()
     play_for(&mut play, 3.0, |_| {});
     let task = play.robots.iter().find(|(t, _)| *t == transport).unwrap().1.behaviour.task();
     assert!(matches!(task, Task::Transport { goal: Some(_), .. }), "{task:?}");
+}
+
+/// A building's batteries are its root controller's slots with its `i_pws_f_*` parts fitted
+/// into them, 8 held and 500 a second each (docs/23, "A power shortage lowers efficiency"):
+/// Mission 03's Large Factory holds 32, not its root's 20, and its Small Storage 16; the
+/// generator still reads full, and efficiency is the root's class-26 value.
+#[test]
+#[ignore = "needs the game install"]
+fn mission_03s_buildings_run_on_the_batteries_fitted_into_their_slots() {
+    let (mut play, m) = mission_03_play();
+    play_for(&mut play, 0.1, |_| {});
+    let site = |play: &parkan_world::play::Play, name: &str| {
+        let t = object_target(play, &m, name);
+        play.economy.site(t).cloned().unwrap_or_else(|| panic!("{name} joined"))
+    };
+    let plant = site(&play, "lplant01.dat");
+    assert_eq!((plant.battery.capacity, plant.battery.output, plant.efficiency), (32.0, 2000.0, 5.0));
+    let store = site(&play, "sstore01.dat");
+    assert_eq!((store.battery.capacity, store.battery.output, store.efficiency), (16.0, 1000.0, 1.0));
+    assert_eq!((store.on_board, store.off_board), (20.0, 1.0));
+    assert!(site(&play, "gener01.dat").battery.capacity < 0.0, "a generator reads full");
+}
+
+/// The ore a place moves by itself (docs/23, "The ore a place moves by itself"): a transport
+/// standing in a storage's unloading place gives it nothing, a unit's efficiency being 0;
+/// standing in a mine's loading place it is given the mine's 1 a second.
+#[test]
+#[ignore = "needs the game install"]
+fn a_loading_place_gives_a_transport_one_ore_a_second_and_an_unloading_place_takes_none() {
+    use parkan_world::construction::BUILDING_MINE;
+    use parkan_world::places::{PLACE_LOADING, PLACE_UNLOADING};
+
+    let (mut play, m) = mission_03_play();
+    let player = play.player_clan;
+    let generator = object_target(&play, &m, "gener01.dat");
+    play.units[generator].clan = Some(player);
+    let transport = object_target(&play, &m, "tut3_t.dat");
+    let store = object_target(&play, &m, "sstore01.dat");
+    let lode = glam::Vec3::new(1026.1, 942.7, 0.0);
+    let at = lode.with_z(play.ground.below(lode.x, lode.y, 1.0e5).unwrap().point.z);
+    let now = play.hero.time_ms;
+    let mine = play.create_building(player, BUILDING_MINE, at, 0.0, now).expect("the mine stands");
+    play_for(&mut play, 52.0, |_| {});
+    assert_eq!(play.resource_rows(player)[0], 11, "a full mine");
+    // Where a place stands in the world, by its flag.
+    let place = |play: &parkan_world::play::Play, t: usize, flag: u32| {
+        let set = play.places.iter().find(|s| s.target == t).expect("its places");
+        let p = set.places.iter().find(|p| p.vertex.flags & flag != 0).expect("the place");
+        let part = &play.battle.combat.targets[t].parts[set.part];
+        parkan_world::factory::vertex_world(&p.vertex, part).unwrap()
+    };
+    let park = |play: &mut parkan_world::play::Play, at: glam::Vec3| {
+        let r = play.robots.iter().position(|(t, _)| *t == transport).unwrap();
+        let body = &mut play.robots[r].1.walker.body;
+        body.position = at;
+        body.velocity = [0.0; 3];
+    };
+    // Parked in the storage's unloading place with 1000 aboard: nothing moves by itself.
+    let unloading = place(&play, store, PLACE_UNLOADING);
+    play.economy.ore.insert(transport, (1000.0, 2000.0));
+    let stored = play.economy.held(store);
+    for _ in 0..5 * 60 {
+        park(&mut play, unloading);
+        play_for(&mut play, 1.0 / 60.0, |_| {});
+    }
+    assert_eq!(play.economy.held(transport), 1000.0, "a transport's efficiency is 0");
+    assert!(play.economy.held(store) <= stored + 1e-3);
+    // In the mine's loading place: about 1 a second, the mine's efficiency times its 1.
+    let loading = place(&play, mine, PLACE_LOADING);
+    for _ in 0..10 * 60 {
+        park(&mut play, loading);
+        play_for(&mut play, 1.0 / 60.0, |_| {});
+    }
+    let gained = play.economy.held(transport) - 1000.0;
+    assert!((8.0..=11.0).contains(&gained), "{gained} in 10 s");
 }
 
 /// Mission 04, loaded with its scripts, for the research tests.

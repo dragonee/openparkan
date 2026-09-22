@@ -434,8 +434,7 @@ fn mission_02s_built_warbots_escape_to_a_point_over_its_factory_takes_it_115_m_o
         lines: Vec::new(),
         sphere: None,
     });
-    let free = play.free_minds(play.player_clan);
-    assert!(play.factories[f].start(true, free));
+    assert!(play.start_factory(f, true));
     let robots = play.robots.len();
     while play.robots.len() == robots {
         play.tick(1000.0 / 60.0, [0.0; 2]);

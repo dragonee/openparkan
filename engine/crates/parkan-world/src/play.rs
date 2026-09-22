@@ -367,6 +367,10 @@ pub struct Play {
     pub places: Vec<crate::places::Places>,
     /// The units the hero's Enter took, which hold no mind (see [`Play::free_minds`]).
     pub mindless: Vec<usize>,
+    /// Each clan's mind entries a build's start reserved (`Behavior.dll:0x1002a348`, written
+    /// 0), which the clan's next takt frees again (`ai.dll:0x10006580`, see
+    /// [`Play::free_minds`]).
+    pub reserved: HashMap<i64, usize>,
     /// The walker's search's random source (docs/24, "The global path").
     pub walk_seed: u32,
     /// The random source an animal's flight heights draw from (docs/24, "A flyer's walk
@@ -1026,6 +1030,7 @@ impl Play {
             research: crate::research::Research::default(),
             places: Vec::new(),
             mindless: Vec::new(),
+            reserved: HashMap::new(),
             walk_seed: 0x2545_f491,
             flight_seed: 0x9e37_79b9,
             grazing: std::cell::RefCell::default(),
@@ -2713,11 +2718,15 @@ impl Play {
     }
 
     /// Clan `clan`'s minds not held: its mission's count less every live robot of the clan
-    /// (the hero among them) and every build its factories are running (docs/23, "The bot
-    /// limit is the clan's mind count"). Every robot a mission places takes one as it is
-    /// made (`iron3d.dll:0x100774d1`, `ArealMap.dll:0x100152ba`), the hero too, and a unit the
-    /// hero's Enter took holds none: `Capture` on a unit takes no mind
-    /// (`Behavior.dll:0x10009051`), so Mission 04's HQ is the one of its three that holds none.
+    /// (the hero among them) and every reservation a build's start made that the clan's takt
+    /// has not yet swept (docs/23, "The bot limit is the clan's mind count"). Every robot a
+    /// mission places takes one as it is made (`iron3d.dll:0x100774d1`,
+    /// `ArealMap.dll:0x100152ba`), the hero too, and a unit the hero's Enter took holds none:
+    /// `Capture` on a unit takes no mind (`Behavior.dll:0x10009051`), so Mission 04's HQ is
+    /// the one of its three that holds none. A build holds its reservation only until the
+    /// clan's next takt, which frees every entry naming no object (`ai.dll:0x10006580`), so
+    /// Mission 03's figure reads 3 while the first build collects its power and 4 again
+    /// from 221.5 s.
     pub fn free_minds(&self, clan: i64) -> usize {
         let minds =
             usize::try_from(clan).ok().and_then(|c| self.clans.get(c)).map_or(0, |c| c.minds as usize);
@@ -2734,34 +2743,58 @@ impl Play {
             })
             .count();
         let hero = usize::from(clan == self.player_clan && !self.hero.dead());
-        let building = self
-            .factories
-            .iter()
-            .filter(|f| self.units[f.target].clan == Some(clan) && f.build.is_some())
-            .count();
-        minds.saturating_sub(robots + hero + building)
+        let reserved = self.reserved.get(&clan).copied().unwrap_or(0);
+        minds.saturating_sub(robots + hero + reserved)
+    }
+
+    /// Start factory `f`'s shown project, in batch or not, as its panel's buttons do: nothing
+    /// without a free mind, and a start reserves one.
+    pub fn start_factory(&mut self, f: usize, batch: bool) -> bool {
+        let Some(t) = self.factories.get(f).map(|f| f.target) else { return false };
+        let clan = self.units.get(t).and_then(|u| u.clan).unwrap_or(self.player_clan);
+        let free = self.free_minds(clan);
+        let started = self.factories[f].start(batch, free);
+        if started {
+            self.reserve_mind(clan);
+        }
+        started
+    }
+
+    /// A build of clan `clan` started: it takes a free entry and marks it reserved
+    /// (`Behavior.dll:0x1002a348`, and `0x1002a0bb` for a free bot).
+    fn reserve_mind(&mut self, clan: i64) {
+        *self.reserved.entry(clan).or_default() += 1;
+    }
+
+    /// A build of clan `clan` completed (`0x1002a7e5`) or was aborted (`0x10029983`): the
+    /// clan's first reserved entry is freed, whichever build reserved it, if the takt has not
+    /// freed it already.
+    fn release_mind(&mut self, clan: i64) {
+        if let Some(n) = self.reserved.get_mut(&clan) {
+            *n = n.saturating_sub(1);
+        }
     }
 
     /// A click on the factory screen of the plant that is target `target` (docs/36, "What the
     /// controls do").
     pub fn factory_click(&mut self, target: usize, click: crate::cockpit::factory::Click) {
         use crate::cockpit::factory::Click;
-        let free = self.free_minds(self.player_clan);
-        let Some(f) = self.factories.iter_mut().find(|f| f.target == target) else { return };
+        let clan = self.units.get(target).and_then(|u| u.clan).unwrap_or(self.player_clan);
+        let Some(i) = self.factories.iter().position(|f| f.target == target) else { return };
         match click {
             Click::Exit => {
                 self.roll_back();
             }
             Click::Build | Click::Batch => {
                 let batch = click == Click::Batch;
-                if f.idle() {
-                    f.start(batch, free);
-                } else {
-                    f.stop(batch);
+                if self.factories[i].idle() {
+                    self.start_factory(i, batch);
+                } else if self.factories[i].stop(batch) {
+                    self.release_mind(clan);
                 }
             }
-            Click::Recent(i) => f.selected = Some(i),
-            Click::Active => f.selected = None,
+            Click::Recent(r) => self.factories[i].selected = Some(r),
+            Click::Active => self.factories[i].selected = None,
             // The designer opens from the screen (docs/37), which the cockpit keeps.
             Click::Constructor => {}
         }
@@ -2794,7 +2827,13 @@ impl Play {
             let Some(at) = place.or_else(|| self.battle.combat.targets.get(t).map(|x| x.position)) else {
                 continue;
             };
-            if let Some(unit) = self.spawn(&project, clan, at, 0.0) {
+            // The completion frees the clan's first reserved entry and the bot then claims a
+            // free one; with none free it is not made at all ("No free Mind...
+            // CreateObjectFromScheme failed", `Behavior.dll:0x1001d4a6`), and the build is
+            // over all the same.
+            self.release_mind(clan);
+            let made = if self.free_minds(clan) > 0 { self.spawn(&project, clan, at, 0.0) } else { None };
+            if let Some(unit) = made {
                 // The bot is made at the factory's creation vertex, inside it (docs/36, "The
                 // bot appears"), so it walks out along the building's own paths, as the
                 // escape's 20-second check routes out a unit still on a building ("LEAVE IS
@@ -2822,7 +2861,9 @@ impl Play {
             let factory = &mut self.factories[f];
             if factory.batch {
                 factory.batch = false;
-                factory.start(true, free);
+                if factory.start(true, free) {
+                    self.reserve_mind(clan);
+                }
             }
         }
     }
@@ -3029,7 +3070,7 @@ impl Play {
     /// -- the AI's repair decision (`Behavior.dll:0x10017c70`) and its camouflage are not
     /// modelled: a unit the player does not drive keeps its repair system and camouflage off.
     fn tick_power(&mut self) {
-        let jitter = |p: &mut Play| (p.economy.random() * 2.0 - 1.0) * parkan_sim::economy::POWER_JITTER_MS;
+        let jitter = |p: &mut Play| p.economy.power_jitter();
         // A paused world, a dead hero and a hero out of the world keep their tick's clock moving
         // and spend nothing, so no tick afterwards pays for the gap.
         let hero_runs = !self.paused && !self.hero.dead() && !self.hero_away();
@@ -3556,7 +3597,11 @@ impl Play {
             return false;
         };
         let free = self.free_minds(clan);
-        self.factories[f].start_project(project, false, free)
+        let started = self.factories[f].start_project(project, false, free);
+        if started {
+            self.reserve_mind(clan);
+        }
+        started
     }
 
     /// One robot's behaviour takt (docs/31): its task's walk handed to the walker, which
@@ -3889,13 +3934,16 @@ impl Play {
             ));
         }
         let clans: Vec<i64> = (0..self.clans.len() as i64).collect();
-        let free: Vec<usize> = clans.iter().map(|&c| self.free_minds(c)).collect();
+        let free: Vec<(usize, usize)> = clans
+            .iter()
+            .map(|&c| (self.free_minds(c), self.reserved.get(&c).copied().unwrap_or(0)))
+            .collect();
         let Some(p) = self.progression.as_mut() else { return };
         for (id, contact) in contacts {
             p.progress.refresh(id, contact);
         }
-        for (clan, free) in clans.into_iter().zip(free) {
-            p.set_free_minds(clan, free);
+        for (clan, (free, reserved)) in clans.into_iter().zip(free) {
+            p.set_free_minds(clan, free, reserved);
         }
     }
 
@@ -3917,6 +3965,11 @@ impl Play {
         let now = self.hero.time_ms;
         let Some(p) = self.progression.as_mut() else { return };
         let notices = p.tick(now, |id| at.get(&id).copied());
+        // A clan's takt freed its reservations (`ai.dll:0x10006580`).
+        for clan in std::mem::take(&mut p.swept) {
+            self.reserved.remove(&clan);
+        }
+        let Some(p) = self.progression.as_ref() else { return };
         for n in &notices {
             let says = p.say(n);
             self.says.extend(says);

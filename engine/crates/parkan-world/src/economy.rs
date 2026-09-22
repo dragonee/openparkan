@@ -8,8 +8,8 @@ use std::collections::{BTreeSet, HashMap};
 use parkan_formats::mission::{KIND_BUILDING, Mission, Value};
 use parkan_formats::{control, gamedir, nres, profiles};
 use parkan_sim::economy::{
-    Battery, Dug, EFFICIENCY_POWER, LODE_REACH, MINE_MAX_ORE, Mine, ORE_ROW_SCALE, POWER_JITTER_MS,
-    POWER_TICK_MS, STEP_MS, STEP_RANDOM_MS, STORAGE_MAX_ORE, WANT_FLOOR, share,
+    Battery, Dug, EFFICIENCY_POWER, LODE_REACH, MINE_MAX_ORE, Mine, ModuleRand, ORE_ROW_SCALE, POWER_TICK_MS,
+    STEP_MS, STORAGE_MAX_ORE, ShiftJitter, WANT_FLOOR, share,
 };
 
 use crate::assembly::Assembly;
@@ -24,6 +24,18 @@ pub const GENERATOR: u32 = 0x8000_0002;
 pub const MINE: u32 = 0x8000_0004;
 pub const STORAGE: u32 = 0x8000_0008;
 pub const BUNKERS: [u32; 3] = [0x8001_0000, 0x8002_0000, 0x8004_0000];
+/// The two unit Types a mine's loading place and a storage's unloading place move ore with by
+/// themselves (`Behavior.dll:0x100194db`).
+pub const TRANSPORT: u32 = 0x0100_2000;
+pub const BUILDER: u32 = 0x0100_4000;
+/// The power tick's shift register's seed.
+///
+/// STAND-IN: docs/23-economy.md#how-often-and-where-it-settles--read-with-a-derived-settle-point
+/// -- `Control.dll` seeds its two words from an `Ngi32.dll` import by ordinal as it loads
+/// (`0x1000dc34`), which is not followed: a fixed dword. And `Behavior.dll`'s `rand()` is one
+/// stream for the whole module, which 65 other call sites draw on between two steps; the
+/// engine's step draws on it alone.
+pub const JITTER_SEED: u32 = 0x2545_f491;
 /// The efficiency component, `CICLS_` 26 (docs/23, "Efficiency is a building's size").
 pub const EFFICIENCY_TYPE: i32 = 26;
 
@@ -51,11 +63,13 @@ pub fn profile_of(type_word: u32) -> Option<&'static str> {
 pub struct Site {
     pub target: usize,
     pub type_word: u32,
-    /// `Transfer_Power_Out`, `Use_Power`, `Use_Ore` and `Transfer_Ore_OffBoard`.
+    /// `Transfer_Power_Out`, `Use_Power`, `Use_Ore`, `Transfer_Ore_OffBoard` and
+    /// `Transfer_Ore_OnBoard`.
     pub power_out: f32,
     pub use_power: f32,
     pub use_ore: f32,
     pub off_board: f32,
+    pub on_board: f32,
     /// The class-26 value, and the level the batteries serve it at: KPD is their product.
     pub efficiency: f32,
     pub level: f32,
@@ -88,7 +102,13 @@ pub struct Economy {
     pub power: HashMap<i64, (f32, f32)>,
     /// Each transport's round, by target.
     pub rounds: HashMap<usize, crate::transport::Round>,
-    seed: u32,
+    /// A transport's and a builder's `Transfer_Ore_OnBoard` and `Transfer_Ore_OffBoard`, by
+    /// Type, from their profiles once read.
+    pub unit_rates: HashMap<u32, (f32, f32)>,
+    /// `Behavior.dll`'s `rand()`, which the distribution step's timer draws on, and
+    /// `Control.dll`'s shift register, which every controller's power tick draws on.
+    pub step_rand: ModuleRand,
+    pub jitter: ShiftJitter,
 }
 
 fn float(v: Value) -> f32 {
@@ -112,7 +132,7 @@ impl Economy {
                 (most > 0.0 || held != 0.0).then_some((t, (held, most)))
             })
             .collect();
-        Economy { ore, seed: 0x2545_f491, ..Economy::default() }
+        Economy { ore, jitter: ShiftJitter::seeded(JITTER_SEED), ..Economy::default() }
     }
 
     /// The ore target `t` holds.
@@ -145,25 +165,65 @@ impl Economy {
         self.sites.iter_mut().find(|s| s.target == t)
     }
 
-    /// STAND-IN: docs/23-economy.md#how-often-and-where-it-settles--read-with-a-derived-settle-point
-    /// -- the timers' random sources (the step's `0..63`, the power tick's shift register)
-    /// are not transcribed: a 32-bit xorshift, 0..1.
-    pub(crate) fn random(&mut self) -> f64 {
-        let mut x = self.seed;
-        x ^= x << 13;
-        x ^= x >> 17;
-        x ^= x << 5;
-        self.seed = x;
-        f64::from(x >> 8) / f64::from(1u32 << 24)
+    /// The next power tick's offset from 250 ms, from `Control.dll`'s shift register, which
+    /// every controller's tick steps, a building's and a unit's alike (`0x1000c756`).
+    pub(crate) fn power_jitter(&mut self) -> f64 {
+        self.jitter.next_ms()
+    }
+
+    /// The distribution step's wait: 192 ms and `Behavior.dll`'s `rand()`'s share of 64 more
+    /// (`0x10019e1b`, `0x1004c569`).
+    pub(crate) fn step_wait(&mut self) -> f64 {
+        STEP_MS + self.step_rand.timer_share_ms(1)
+    }
+
+    /// Move up to `amount` of ore from `from` to `to` (`Behavior.dll:0x100155f0`): no more than
+    /// `from` holds, and, where `to` has a most, no more than its room. Returns what moved.
+    pub fn transfer(&mut self, from: usize, to: usize, amount: f32) -> f32 {
+        let held = self.held(from);
+        let (to_held, to_most) = (self.held(to), self.most(to));
+        let mut moved = amount.min(held);
+        if to_most > 0.0 {
+            moved = moved.min(to_most - to_held);
+        }
+        if moved <= 0.0 {
+            return 0.0;
+        }
+        self.take_ore(from, moved);
+        self.add_ore(to, moved);
+        moved
+    }
+
+    /// A transport's or a builder's `Transfer_Ore_OnBoard` and `Transfer_Ore_OffBoard`, by its
+    /// Type's profile (`Behavior.dll:0x10008a80`): `prof_trn` and `prof_bld`, 100 and 100 each.
+    pub fn unit_rates(&mut self, assembly: &Assembly, type_word: u32) -> (f32, f32) {
+        if let Some(&r) = self.unit_rates.get(&type_word) {
+            return r;
+        }
+        let member = match type_word {
+            TRANSPORT => "prof_trn.var",
+            BUILDER => "prof_bld.var",
+            _ => return (0.0, 0.0),
+        };
+        let vars = gamedir::resolve(&assembly.game, profiles::ARCHIVE)
+            .and_then(|p| nres::Archive::open(&p).ok())
+            .and_then(|a| a.read_name(member).ok().and_then(|d| profiles::parse(d, member).ok()));
+        let figure = |name: &str| -> f32 {
+            vars.as_ref().and_then(|v| v.iter().find(|v| v.name == name)).map_or(0.0, |v| v.value as f32)
+        };
+        let r = (figure("Transfer_Ore_OnBoard"), figure("Transfer_Ore_OffBoard"));
+        self.unit_rates.insert(type_word, r);
+        r
     }
 
     /// Building `t` of `type_word` at `path` joins the distribution at `now`: its profile, its
     /// class-26 efficiency and its class-19 batteries, a mine's and a storage's most.
     ///
-    /// STAND-IN: docs/23-economy.md#a-power-shortage-lowers-efficiency-once-the-batteries-run-down--read-and-measured
-    /// -- which controllers a building's control system gathers its batteries from is not
-    /// followed: its root record's, which hold the 19.5 to 20 and put out the 50 to 52 a second
-    /// docs/23 measures, and not the internal parts' (`i_pws_*`).
+    /// The batteries are the root controller's slots with the parts fitted into them: an
+    /// internal part re-parses the slot its attach field names (docs/28, "A fitted part takes
+    /// over its slot"), so a building's `i_pws_f_*` parts, 8 held and 500 a second each, stand
+    /// in its root's 5 to 10 held and 13 to 25 a second (docs/23, "A power shortage lowers
+    /// efficiency").
     pub fn join_building(&mut self, assembly: &mut Assembly, t: usize, type_word: u32, path: &str, now: f64) {
         if self.site(t).is_some() {
             return;
@@ -176,25 +236,40 @@ impl Economy {
         let figure = |name: &str| -> f32 {
             vars.as_ref().and_then(|v| v.iter().find(|v| v.name == name)).map_or(0.0, |v| v.value as f32)
         };
-        let (power_out, use_power, use_ore, off_board) = (
+        let (power_out, use_power, use_ore, off_board, on_board) = (
             figure("Transfer_Power_Out"),
             figure("Use_Power"),
             figure("Use_Ore"),
             figure("Transfer_Ore_OffBoard"),
+            figure("Transfer_Ore_OnBoard"),
         );
         let (mut efficiency, mut capacity, mut output) = (None, 0.0_f32, 0.0_f32);
-        for record in assembly.records(path).into_iter().take(1) {
-            let Some(slot) = assembly.library.record_slot(assembly.library.get(&record), "ctl", 0) else {
-                continue;
-            };
-            let Some(c) = assembly
+        let controller = |assembly: &mut Assembly, record: &str| {
+            let slot = assembly.library.record_slot(assembly.library.get(record), "ctl", 0)?;
+            assembly
                 .archive(&slot.library)
                 .and_then(|a| a.read_name(&slot.member).ok())
                 .and_then(|d| control::parse(d, &slot.member).ok())
-            else {
-                continue;
-            };
-            for k in &c.components {
+        };
+        if let Some(root) = assembly.records(path).into_iter().next()
+            && let Some(c) = controller(assembly, &root)
+        {
+            let mut components = c.components;
+            // Each part fitted into the root's controller takes over its slot with its first
+            // record (docs/28): the class-19 slots take the `i_pws_f_*` parts.
+            for (host, slot, record) in assembly.fitted(path) {
+                if host != 0 {
+                    continue;
+                }
+                let Some(part) = controller(assembly, &record).and_then(|p| p.components.into_iter().next())
+                else {
+                    continue;
+                };
+                if let Some(k) = components.get_mut(slot) {
+                    *k = part;
+                }
+            }
+            for k in &components {
                 match k.type_id {
                     EFFICIENCY_TYPE => {
                         efficiency.get_or_insert(k.values[0]);
@@ -220,7 +295,7 @@ impl Economy {
         };
         let held = self.held(t);
         self.ore.insert(t, (held, most));
-        let jitter = (self.random() * 2.0 - 1.0) * POWER_JITTER_MS;
+        let jitter = self.power_jitter();
         self.sites.push(Site {
             target: t,
             type_word,
@@ -228,6 +303,7 @@ impl Economy {
             use_power,
             use_ore,
             off_board,
+            on_board,
             efficiency: efficiency.unwrap_or(1.0),
             level: 1.0,
             battery: Battery::new(capacity, output),
@@ -301,7 +377,7 @@ impl Play {
             if now < self.economy.sites[i].next_power_ms {
                 continue;
             }
-            let jitter = (self.economy.random() * 2.0 - 1.0) * POWER_JITTER_MS;
+            let jitter = self.economy.power_jitter();
             let site = &mut self.economy.sites[i];
             let step = ((now - site.last_power_ms) / 1000.0) as f32;
             site.last_power_ms = now;
@@ -322,7 +398,7 @@ impl Play {
             if now < next {
                 continue;
             }
-            let wait = STEP_MS + self.economy.random() * STEP_RANDOM_MS;
+            let wait = self.economy.step_wait();
             self.economy.steps.insert(clan, (now + wait, now));
             self.distribute(clan, ((now - last) / 1000.0) as f32);
         }

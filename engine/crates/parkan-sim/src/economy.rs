@@ -28,6 +28,58 @@ pub const STEP_RANDOM_MS: f64 = 64.0;
 pub const POWER_TICK_MS: f64 = 250.0;
 pub const POWER_JITTER_MS: f64 = 31.0;
 
+/// The distribution step's random source: `Behavior.dll`'s own copy of the C library's
+/// `rand()` (`0x1004ce3c`), one stream for the whole module, which nothing in the module
+/// seeds, so it starts at 1 (`0x10063c1c`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ModuleRand(pub u32);
+
+impl Default for ModuleRand {
+    fn default() -> Self {
+        Self(1)
+    }
+}
+
+impl ModuleRand {
+    /// The next draw, 0..32767: the state times 214013 plus 2531011, bits 16 to 30.
+    pub fn next(&mut self) -> u32 {
+        self.0 = self.0.wrapping_mul(214_013).wrapping_add(2_531_011);
+        (self.0 >> 16) & 0x7fff
+    }
+
+    /// A timer's random share (`0x1004c569`): the draw's low byte times `units` × 64 ms over
+    /// 256. The distribution step's timer takes one unit of it on its three (`0x10019e1b`), so
+    /// 0..63 ms.
+    pub fn timer_share_ms(&mut self, units: u32) -> f64 {
+        f64::from(((self.next() & 0xff) * (units << 6)) >> 8)
+    }
+}
+
+/// The power tick's jitter (`Control.dll:0x1000c756`): two 16-bit words the whole module
+/// shares, stepped on every controller's tick. The first becomes itself doubled crossed with
+/// the second; the second, itself halved crossed with the new first; and the second's value
+/// over 65,536 moves the 250 ms by a quarter of it either side of centre, so ±31.25 ms. Two
+/// zero words stay zero, so it wants [`ShiftJitter::seeded`].
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct ShiftJitter {
+    pub a: u16,
+    pub b: u16,
+}
+
+impl ShiftJitter {
+    /// The words a dword seeds, low word first (`0x1000dc39`).
+    pub fn seeded(seed: u32) -> Self {
+        Self { a: seed as u16, b: (seed >> 16) as u16 }
+    }
+
+    /// The next tick's offset from [`POWER_TICK_MS`], ms.
+    pub fn next_ms(&mut self) -> f64 {
+        self.a = self.a.wrapping_shl(1) ^ self.b;
+        self.b = (self.b >> 1) ^ self.a;
+        POWER_TICK_MS * 0.25 * (f64::from(self.b) / 65_536.0 - 0.5)
+    }
+}
+
 /// A building's batteries, its class-19 components together: their capacity, their output a
 /// second, and their charge 0..1. A negative capacity reads full whatever is drawn (a
 /// generator's); none at all serves every draw.
@@ -156,6 +208,28 @@ pub fn share(available: f32, total: f32) -> f32 {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_steps_rand_is_the_c_librarys_from_1_and_its_share_is_0_to_63_ms() {
+        let mut r = super::ModuleRand::default();
+        // The C library's first three draws from its unseeded state.
+        assert_eq!([r.next(), r.next(), r.next()], [41, 18467, 6334]);
+        let mut r = super::ModuleRand::default();
+        let shares: Vec<f64> = (0..1000).map(|_| r.timer_share_ms(1)).collect();
+        assert!(shares.iter().all(|&s| (0.0..64.0).contains(&s)));
+        assert!(shares.iter().any(|&s| s >= 60.0) && shares.iter().any(|&s| s < 4.0));
+    }
+
+    #[test]
+    fn the_power_ticks_jitter_stays_within_a_quarter_of_250_ms_about_it() {
+        let mut j = super::ShiftJitter::seeded(0x1234_5678);
+        let offsets: Vec<f64> = (0..1000).map(|_| j.next_ms()).collect();
+        assert!(offsets.iter().all(|&o| (-31.25..31.25).contains(&o)), "{offsets:?}");
+        assert!(offsets.iter().any(|&o| o > 20.0) && offsets.iter().any(|&o| o < -20.0));
+        // Two zero words stay zero: the register needs its seed.
+        let mut z = super::ShiftJitter::seeded(0);
+        assert_eq!(z.next_ms(), -31.25);
+    }
+
     use super::*;
 
     #[test]

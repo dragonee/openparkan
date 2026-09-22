@@ -170,6 +170,12 @@ pub struct Progression {
     /// from the mission's own counts and `Play` refreshes it each tick (docs/23, "The bot
     /// limit is the clan's mind count").
     pub free_minds: Vec<usize>,
+    /// Each clan's minds a build's start holds reserved, as `Play` last counted them: a
+    /// clan's takt frees them before its handlers run (`ai.dll:0x10005910` ends in the sweep
+    /// `0x10006580`, ahead of `Problems<n>`), and names the clan in `swept`.
+    pub reserved: Vec<usize>,
+    /// The clans whose takt swept their reservations since `Play` last looked.
+    pub swept: Vec<i64>,
     pub messages: Messages,
     pub sounds: Sounds,
     pub strings: BTreeMap<u32, String>,
@@ -760,6 +766,8 @@ impl Progression {
             clan,
             base,
             relations: mission::relation_words(&mission.clans),
+            reserved: vec![0; mission.clans.len()],
+            swept: Vec::new(),
             free_minds,
             messages,
             sounds: Sounds::open(game, mission_dir)?,
@@ -860,11 +868,29 @@ impl Progression {
         })
     }
 
-    /// Clan `clan`'s free minds, which function 49 answers, as `Play` last counted them.
-    pub fn set_free_minds(&mut self, clan: i64, free: usize) {
-        if let Some(slot) = usize::try_from(clan).ok().and_then(|c| self.free_minds.get_mut(c)) {
+    /// Clan `clan`'s free minds, which function 49 answers, and the reservations among the
+    /// held ones, as `Play` last counted them.
+    pub fn set_free_minds(&mut self, clan: i64, free: usize, reserved: usize) {
+        let Ok(c) = usize::try_from(clan) else { return };
+        if let Some(slot) = self.free_minds.get_mut(c) {
             *slot = free;
         }
+        if let Some(slot) = self.reserved.get_mut(c) {
+            *slot = reserved;
+        }
+    }
+
+    /// The first thing a clan's takt does to its minds (`ai.dll:0x10006580`, the end of the
+    /// drain `0x10005910`): every entry that is not free and names no object is freed. A
+    /// build's reservation (0) names none -- the areal map's logic ids count up from 1
+    /// (`ArealMap.dll:0x1002b3ec`) -- so all of them go, before `Problems<n>` asks function 49.
+    fn sweep(&mut self, clan: i64) {
+        let Ok(c) = usize::try_from(clan) else { return };
+        let reserved = self.reserved.get_mut(c).map_or(0, std::mem::take);
+        if let Some(free) = self.free_minds.get_mut(c) {
+            *free += reserved;
+        }
+        self.swept.push(clan);
     }
 
     fn which(&self, clan: i64) -> Option<Which> {
@@ -1008,10 +1034,12 @@ impl Progression {
         self.progress.takt(now_ms, position);
         let mut notices = Vec::new();
         if self.takt.due(now_ms) {
+            self.sweep(self.clan);
             notices.extend(self.clan_takt(Which::Player));
         }
         for i in 0..self.others.len() {
             if self.others[i].takt.due(now_ms) {
+                self.sweep(self.others[i].clan);
                 notices.extend(self.clan_takt(Which::Other(i)));
             }
         }
