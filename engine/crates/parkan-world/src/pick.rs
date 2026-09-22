@@ -81,11 +81,12 @@ pub struct Pick {
 }
 
 /// A unit's pick on the map reaches this far, a building's this far (`0x10072b70`,
-/// `0x100728e0`); a ray takes a unit within this share of its radius, a building within all
-/// of it (`0x100361a0`).
+/// `0x100728e0`); a ray takes a building, the world's class 3, within this share of its
+/// radius, and a unit, class 4, within all of it (`0x100360f0`, docs/42, "What it looks at").
 pub const MAP_UNIT_REACH: f32 = 40.0;
 pub const MAP_BUILDING_REACH: f32 = 80.0;
-pub const RAY_UNIT_SHARE: f32 = 0.7;
+pub const RAY_BUILDING_SHARE: f32 = 0.7;
+pub const RAY_UNIT_SHARE: f32 = 1.0;
 /// The ray's world place is kept this share of the map's side inside it (`0x10035eee`).
 pub const MAP_MARGIN_SHARE: f32 = 0.001;
 /// A drag becomes a band once the button has been held this long, and a band selects only
@@ -279,12 +280,16 @@ impl Play {
     }
 
     /// In the world: where the ray first meets the ground or an object, kept inside the map,
-    /// and the object whose bounding sphere the ray passes (`0x10035e40`, `0x100360f0`).
+    /// and the object whose bounding sphere the ray passes (`0x10035e40`, `0x100360f0`):
+    /// the buildings at 0.7 of their radius, then the units at all of it, the nearest centre
+    /// to the eye winning ([`nearest_on_ray`]).
     ///
-    /// STAND-IN: docs/42-selection.md#not-established -- which objects the world's classes 3
-    /// and 4 are, and the pick's order and nearest-hit rule, are not read: a unit is taken
-    /// within 0.7 of its radius and a building within all of it, a sphere holding the eye is
-    /// passed over, and of the rest the one whose centre is nearest along the ray wins.
+    /// The frustum test each object passes first (`0x10036280`) is left out: a sphere the
+    /// cursor's ray passes ahead of the eye is in view.
+    ///
+    /// STAND-IN: docs/42-selection.md#not-established -- the walk passes over an object whose
+    /// `IGameObject` slot 3, its parent, answers none; whether the hero has one in command
+    /// mode is not traced, and the hero is never picked.
     fn ray_pick(&self, eye: Vec3, direction: Vec3) -> (Option<Vec3>, Option<usize>) {
         let (lo, hi) = self.ground.world_box();
         let length = (hi - lo).length() + 200.0;
@@ -295,29 +300,15 @@ impl Play {
             self.battle.combat.first_hit(&self.ground, None, eye, end, 0.0).map(|(s, _, _)| s.point).filter(
                 |p| p.x > lo.x + margin && p.y > lo.y + margin && p.x < hi.x - margin && p.y < hi.y - margin,
             );
-        let mut best: Option<(f32, usize)> = None;
-        for (t, target) in self.battle.combat.targets.iter().enumerate() {
+        let spheres = self.battle.combat.targets.iter().enumerate().filter_map(|(t, target)| {
             let kind = self.units.get(t).map_or(u32::MAX, |u| u.kind);
-            if !target.alive
-                || !(kind == KIND_UNIT || kind == KIND_BUILDING)
-                || self.units[t].logical_id == self.hero_id
-                || self.deleted.get(t).copied().unwrap_or(false)
-            {
-                continue;
-            }
-            let reach = if kind == KIND_BUILDING { target.radius } else { target.radius * RAY_UNIT_SHARE };
-            let along = (target.centre - eye).dot(direction);
-            if along <= 0.0
-                || target.centre.distance(eye) <= reach
-                || (target.centre - (eye + direction * along)).length() > reach
-            {
-                continue;
-            }
-            if best.is_none_or(|(d, _)| along < d) {
-                best = Some((along, t));
-            }
-        }
-        (point, best.map(|(_, t)| t))
+            let pickable = target.alive
+                && (kind == KIND_UNIT || kind == KIND_BUILDING)
+                && self.units[t].logical_id != self.hero_id
+                && !self.deleted.get(t).copied().unwrap_or(false);
+            pickable.then_some(Sphere { index: t, centre: target.centre, radius: target.radius, building: kind == KIND_BUILDING })
+        });
+        (point, nearest_on_ray(eye, direction, length, spheres))
     }
 
     /// A left click in the world or on the map (`0x1008fe80`, table `0x10090758`). Returns
@@ -606,6 +597,48 @@ pub struct RightClick {
     pub close_map: bool,
 }
 
+/// An object the world ray may pick: its target, its bounding sphere, and whether it is a
+/// building, the world's class 3, or a unit, class 4.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Sphere {
+    pub index: usize,
+    pub centre: Vec3,
+    pub radius: f32,
+    pub building: bool,
+}
+
+/// The object the ray from `eye` along the unit `direction`, `length` long, picks
+/// (`0x100360f0`, walking the world's classes 3 and 4 with `0x100361a0`; docs/42, "What it
+/// looks at"). The buildings are walked first, at 0.7 of their radius, then the units at all
+/// of it, and the two walks share one nearest distance. An object is passed over when the eye
+/// is inside its whole sphere, when its centre is not ahead of the eye, or not nearer the eye
+/// than the ray is long. Of the rest, the one whose centre is nearest the eye, in a straight
+/// line, wins; a later one only when strictly nearer, so a tie keeps the building.
+pub fn nearest_on_ray(
+    eye: Vec3,
+    direction: Vec3,
+    length: f32,
+    spheres: impl Iterator<Item = Sphere> + Clone,
+) -> Option<usize> {
+    let mut best: Option<(f32, usize)> = None;
+    for building in [true, false] {
+        let share = if building { RAY_BUILDING_SHARE } else { RAY_UNIT_SHARE };
+        for s in spheres.clone().filter(|s| s.building == building) {
+            let to = s.centre - eye;
+            let distance = to.length();
+            let along = to.dot(direction);
+            let off = (to - direction * along).length();
+            if distance < s.radius || along <= 0.0 || distance >= length || off > s.radius * share {
+                continue;
+            }
+            if best.is_none_or(|(d, _)| distance < d) {
+                best = Some((distance, s.index));
+            }
+        }
+    }
+    best.map(|(_, t)| t)
+}
+
 /// The unit page a unit's Type opens: builders 3, transports 2, warriors and HQs 1.
 pub fn unit_page(type_word: u32) -> u8 {
     if hq::within(type_word, BUILDERS) {
@@ -649,6 +682,39 @@ mod tests {
             [0x8001_0000, 0x8020_0000, 0x8000_0010, 0x8000_0400, 0x8000_0004].map(building_page),
             [7, 6, 5, 4, 8]
         );
+    }
+
+    fn sphere(index: usize, centre: [f32; 3], radius: f32, building: bool) -> Sphere {
+        Sphere { index, centre: Vec3::from(centre), radius, building }
+    }
+
+    #[test]
+    fn a_building_is_picked_within_0_7_of_its_radius_and_a_unit_within_all_of_it() {
+        let pick = |s: Sphere| nearest_on_ray(Vec3::ZERO, Vec3::X, 1000.0, [s].into_iter());
+        // 8 off the ray: a building of radius 10 reaches 7, a unit of radius 10 all 10.
+        assert_eq!(pick(sphere(1, [100.0, 8.0, 0.0], 10.0, true)), None);
+        assert_eq!(pick(sphere(1, [100.0, 6.5, 0.0], 10.0, true)), Some(1));
+        assert_eq!(pick(sphere(2, [100.0, 8.0, 0.0], 10.0, false)), Some(2));
+        // Behind the eye, holding the eye in its whole sphere, or beyond the ray's length.
+        assert_eq!(pick(sphere(2, [-100.0, 0.0, 0.0], 10.0, false)), None);
+        assert_eq!(pick(sphere(1, [9.0, 0.0, 0.0], 10.0, true)), None);
+        assert_eq!(pick(sphere(2, [1000.0, 0.0, 0.0], 10.0, false)), None);
+    }
+
+    #[test]
+    fn the_centre_nearest_the_eye_wins_and_a_tie_keeps_the_building() {
+        let pick = |s: &[Sphere]| nearest_on_ray(Vec3::ZERO, Vec3::X, 1000.0, s.iter().copied());
+        // Nearer along the ray (100) but farther from the eye (√(100² + 30²) ≈ 104.4) than a
+        // centre on the ray at 103: the straight-line distance decides.
+        let off = sphere(1, [100.0, 30.0, 0.0], 40.0, false);
+        let on = sphere(2, [103.0, 0.0, 0.0], 5.0, false);
+        assert_eq!(pick(&[off, on]), Some(2));
+        // The building walk comes first and a unit must be strictly nearer to replace it.
+        let building = sphere(3, [50.0, 0.0, 0.0], 10.0, true);
+        let tied = sphere(4, [50.0, 0.0, 0.0], 10.0, false);
+        assert_eq!(pick(&[tied, building]), Some(3));
+        let nearer = sphere(5, [40.0, 0.0, 0.0], 10.0, false);
+        assert_eq!(pick(&[building, nearer]), Some(5));
     }
 
     #[test]

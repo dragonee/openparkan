@@ -215,10 +215,58 @@ It returns a **kind**. The chooser and the click below both call it.
      ([29-weapons.md](29-weapons.md)). The point must lie inside the map with a
      margin of 0.001 of its side on every edge (`0x10035eee`).
    - **The object** comes from `0x100360f0`, which walks the world's lists of
-     object classes 3 and 4 (`0x100361a0`). It takes an object when the ray
-     passes within 0.7 of its level-0 bounding radius (class 3) or 1.0 of it
-     (class 4), after a frustum cull. A class-4 hit is kept over a class-3
-     hit. Its record is found on the unit or the building list (`0x10077450`).
+     object classes 3 and 4 (`0x100361a0`): **the buildings, then the units**
+     ([below](#the-object-pick--read)). Its record is found on the unit or the
+     building list (`0x10077450`).
+
+### The object pick — *read*
+
+**Classes 3 and 4 are the buildings and the units.** The world keeps a list per
+object class (`World3D.dll`'s queue, slot 13 at `0x10007a00`, 3000 objects to a
+class from `0x1003a75c`), and its add (`0x100055f0`) files each object under the
+class the object itself answers (its slot 11, `0x1000562a`), the class it was
+loaded as. That is the class `CreateObjectFromScheme` asks for, 3 for a building
+and 4 for a robot ([22-settings.md](22-settings.md)), and the one the add folds
+into the object's id (`0x10005636`), whose nibble 3 `iron3d.dll` hands to its
+building list and 4 to its unit list
+([29-weapons.md](29-weapons.md#how-the-ai-fires--read)).
+The name line tests the same answer: 3 is a building
+([35-hud.md](35-hud.md#name-and-status--read-and-seen)).
+
+**The walk** (`0x100361a0`, once per class) takes the ray from the eye as a
+segment, its start the camera's place and its end on the far side
+(`0x100cd6d0`), and for each object on the class's list:
+1. its slot 3 must answer non-zero, and its interface `0x16` slot 11 must not
+   answer `0xfffe` (alive). The list holds game objects (*inferred*: the add
+   reads the class from the same slot 11 docs/35's name line reads off a
+   game object), and `IGameObject` slot 3 is the object's parent
+   ([31-packages.md](31-packages.md), [39-boarding.md](39-boarding.md)), so an
+   object attached to nothing is passed over; what a placed object's parent
+   is, and whether the hero has one in command mode, was not traced;
+2. its bounding sphere (interface `0x18`, slot 9 with 2) must not lie wholly
+   behind any of the view's six planes (`0x10036280`);
+3. **the eye must not be inside the sphere**, at its whole radius
+   (`0x100362d8`);
+4. the radius is then scaled — **by 0.7 for class 3, the buildings, and 1.0
+   for class 4, the units** (`0x1003614b`, `0x10036171`) — and the ray's
+   *line* must pass within it: the quadratic's discriminant is not negative
+   (`0x100924e0`);
+5. the centre must be nearer the start than the segment is long
+   (`0x1003637f`), and ahead of it: the segment's direction dotted with the way
+   to the centre is above 0 (`0x100363a6`);
+6. of those, **the one whose centre is nearest the start, in a straight line,
+   wins**: its squared distance must be strictly below the best so far
+   (`0x100363e3`).
+
+**The two walks share one best distance**, set to `FLT_MAX` before the first
+(`0x1003615b`). The buildings are walked first, and `0x100360f0` keeps the
+units' answer when it has one (`0x10036188`). A unit is found only when it is
+strictly nearer than every building found, so **the nearest object wins, and a
+tie keeps the building** (*derived*).
+
+It differs from what this page said before on two counts: the shares were the
+other way round — a building's sphere is the shrunken one — and a class-4 hit
+is not preferred as such, only when it is the nearer.
 
 ### The kinds it answers
 
@@ -590,7 +638,8 @@ gives its orders; the others keep their points until a later `GO` erases them.
      the first building within 80, that the player knows.
    - **In the world:** the ground point under the ray, kept 0.001 × L inside
      the map, and the object whose bounding sphere the ray passes (0.7 × r for
-     units, 1.0 × r for buildings, a building preferred).
+     buildings, 1.0 × r for units; not one holding the eye), the centre nearest
+     the eye winning and a tie keeping the building.
    - Classify by the kinds table.
 5. **Valid places.** An areal must cover the point. Its first flag word must be
    non-zero unless every selected unit is a flyer (chassis type 1).
@@ -616,11 +665,20 @@ gives its orders; the others keep their points until a later `GO` erases them.
   selection may be sent~~ — **read**: it marks a walkable areal
   ([24-motion.md](24-motion.md#the-global-path--read-and-measured)). Still
   open: why the recording shows `PLACE`, not `GUARD`,
-  over the bunker's roof at 190.5 s. The object pick may miss the bunker there,
-  or the frame may lag the cursor.
-- **The object pick.** Which object classes the world's lists 3 and 4 are, and
+  over the bunker's roof at 190.5 s. Narrowed by the pick below: a building is
+  taken only where the ray passes within **0.7** of its bounding radius, so
+  over a roof's outer part the pick finds no object and a valid place gives
+  `PLACE` (*inferred*). Whether the recording's cursor stands outside that
+  0.7 there, rather than the frame lagging the cursor, was not measured.
+- ~~**The object pick.** Which object classes the world's lists 3 and 4 are, and
   the exact order and nearest-hit rule of `0x100361a0` beyond its frustum and
-  sphere tests.
+  sphere tests.~~ **Read**: class 3 is the buildings and class 4 the units,
+  walked in that order with one shared nearest distance; a building within 0.7
+  of its radius and a unit within all of it, not one holding the eye, and the
+  centre nearest the eye wins, a tie keeping the building
+  ([The object pick](#the-object-pick--read)). Still open there: the walk
+  passes over an object with no parent (`IGameObject` slot 3), and whether
+  that is what keeps the hero from the pick in command mode was not traced.
 - **The band's draw.** Whether `IDisplay` slot 3, which draws the band, fills
   it or outlines it.
 - **The pending picks not traced here.** What sets pending kind 2 and so the
