@@ -267,11 +267,14 @@ impl Play {
     /// turned `yaw`, with the builder named or not, and for a mine a found lode within 20
     /// (docs/32, "The test" and "A mine must stand on a lode").
     ///
+    /// The basement is the constrained Delaunay triangulation of the ring between the two
+    /// `.bas` rings, as `StartCheckMaxBasementAngle` builds it (`0x100150f0`: the outer ring's
+    /// edges and the inner's laid in as constraints), the outer corners on the ground and the
+    /// inner ones at their mean (docs/32, "The test").
+    ///
     /// STAND-IN: docs/32-builder.md#the-test-isplacementvalid--read -- the path search from
     /// the builder (`0x10020910`) and the hall-way vertices' areal test (step 6) are not
-    /// modelled: every site has a path and usable areals. How `StartCheckMaxBasementAngle`
-    /// triangulates the basement between its rings is not read: each corner of either ring
-    /// against the nearest corner of the other stands for a face, falling along that line.
+    /// modelled: every site has a path and usable areals.
     pub fn placement_valid(&mut self, builder: Option<usize>, type_word: u32, at: Vec3, yaw: f32) -> bool {
         if type_word == BUILDING_MINE && !self.on_lode(at) {
             return false;
@@ -891,26 +894,19 @@ impl Play {
     }
 }
 
-/// The steepest basement face's normal z between `inner` and `outer`, 1 with no face: each
-/// corner of either ring against the nearest corner of the other, the face between them
-/// taken to fall along that line.
+/// The steepest basement face's normal z between `inner` and `outer`, 1 with no face: the
+/// smallest z of the unit normals of the band's faces (`FindMinNormalZProc`,
+/// `Terrain.dll:0x1000da20`), each face wound counter-clockwise across the ground
+/// ([`crate::basement::band_faces`]).
 fn basement_steepest(inner: &[Vec3], outer: &[Vec3]) -> f32 {
-    let mut steepest: f32 = 1.0;
-    for (ring, other) in [(outer, inner), (inner, outer)] {
-        for &a in ring {
-            let Some(&b) = other.iter().min_by(|p, q| {
-                p.truncate().distance(a.truncate()).total_cmp(&q.truncate().distance(a.truncate()))
-            }) else {
-                continue;
-            };
-            let (across, up) = (a.truncate().distance(b.truncate()), (a.z - b.z).abs());
-            let length = across.hypot(up);
-            if length > 1e-6 {
-                steepest = steepest.min(across / length);
-            }
-        }
-    }
-    steepest
+    let ring = |r: &[Vec3]| r.iter().map(|p| p.to_array()).collect::<Vec<_>>();
+    crate::basement::band_faces(&ring(inner), &ring(outer))
+        .into_iter()
+        .map(|t| {
+            let [a, b, c] = t.map(Vec3::from_array);
+            (b - a).cross(c - a).normalize_or_zero().z
+        })
+        .fold(1.0, f32::min)
 }
 
 /// A building's load-group construction-sphere effects (action 5): each id and its name.

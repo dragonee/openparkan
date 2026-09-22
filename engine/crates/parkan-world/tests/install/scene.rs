@@ -373,6 +373,93 @@ fn the_large_factorys_portal_quads_are_not_drawn_so_its_doors_and_rooms_show() {
     assert!(models::portal_triangles(&hero.mesh, &hero.wear).is_empty());
 }
 
+/// Every mission directory the install ships: the single and multiplayer ones and each
+/// campaign's.
+fn every_mission(game: &std::path::Path) -> Vec<std::path::PathBuf> {
+    let root = gamedir::resolve(game, "MISSIONS").unwrap();
+    let mut dirs: Vec<std::path::PathBuf> =
+        std::fs::read_dir(&root).unwrap().flatten().map(|e| e.path()).collect();
+    let campaigns = gamedir::resolve(game, "MISSIONS/CAMPAIGN").unwrap();
+    for c in std::fs::read_dir(&campaigns).unwrap().flatten() {
+        dirs.extend(std::fs::read_dir(c.path()).into_iter().flatten().flatten().map(|e| e.path()));
+    }
+    dirs.retain(|d| gamedir::resolve(d, "data.tma").is_some());
+    dirs.sort();
+    dirs
+}
+
+#[test]
+#[ignore = "needs the game install"]
+fn every_placed_buildings_basement_tiles_the_ring_between_its_contours() {
+    use parkan_formats::{landmesh, mission};
+    use parkan_world::assembly::Assembly;
+    use parkan_world::basement;
+
+    // docs/03, "The pieces are triangles of a constrained Delaunay triangulation": the band is
+    // the ring between the outer contour, cut where it crosses the landscape's edges, and the
+    // inner ring, and nothing else.
+    let game = gamedir::find(None).expect("a Parkan install: set PARKAN_DIR");
+    let mut assembly = Assembly::new(&game).unwrap();
+    let area = |ring: &[[f32; 2]]| {
+        (0..ring.len())
+            .map(|i| {
+                let (a, b) = (ring[i], ring[(i + 1) % ring.len()]);
+                f64::from(a[0]) * f64::from(b[1]) - f64::from(b[0]) * f64::from(a[1])
+            })
+            .sum::<f64>()
+            .abs()
+            / 2.0
+    };
+    let (mut buildings, mut tiled, mut on_mean) = (0, 0, 0);
+    let mut tut_2 = Vec::new();
+    for dir in every_mission(&game) {
+        let raw = std::fs::read(gamedir::resolve(&dir, "data.tma").unwrap()).unwrap();
+        let Ok(m) = mission::parse(&raw, &dir.display().to_string()) else { continue };
+        let rings = basement::rings(&mut assembly, &m);
+        if rings.is_empty() {
+            continue;
+        }
+        let map = terrain::map_dir(&game, &m.map_path).unwrap();
+        let land = landmesh::load(&gamedir::resolve(&map, "Land.msh").unwrap()).unwrap();
+        for (inner, outer) in &rings {
+            buildings += 1;
+            let f = basement::footing(&land, inner, outer);
+            let across: f64 = f
+                .faces
+                .iter()
+                .map(|x| {
+                    let [a, b, c] = x.triangle();
+                    f64::from((b - a).truncate().perp_dot((c - a).truncate())) / 2.0
+                })
+                .sum();
+            let ring: Vec<[f32; 2]> = inner.iter().map(|p| [p[0], p[1]]).collect();
+            let want = area(&f.outline) - area(&ring);
+            if (across - want).abs() < want * 1e-4 && f.faces.iter().all(|x| x.normal().z > 0.0) {
+                tiled += 1;
+            }
+            // The building's base, its inner ring's first corner, against the mean height of
+            // its cut contour (docs/03, "A building is set down on the mean of its contour").
+            let edge = basement::contour(&land, outer, inner[0][2]);
+            let mean = edge.iter().map(|p| p[2]).sum::<f32>() / edge.len() as f32;
+            if (inner[0][2] - mean).abs() < 0.01 {
+                on_mean += 1;
+            }
+            if dir.ends_with("Mission.02") && dir.parent().is_some_and(|p| p.ends_with("CAMPAIGN.00")) {
+                tut_2.push((edge.len(), inner[0][2], mean));
+            }
+        }
+    }
+    assert_eq!((buildings, tiled), (167, 167), "every band tiles its ring");
+    // 151 of the 167 placed buildings stand on the mean of their cut contour to a centimetre;
+    // the other 16 are 8 of the 19 bridges and 8 buildings of four campaign missions. The
+    // mean of the ring's corners alone does not: Tut_2's generator stands 1.87 off it.
+    assert_eq!(on_mean, 151, "{tut_2:?}");
+    // Tut_2's Large Factory, Outpost and Generator: 29, 24 and 40 corners on the cut contour,
+    // each standing on its mean.
+    assert_eq!(tut_2.iter().map(|t| t.0).collect::<Vec<_>>(), vec![29, 24, 40], "{tut_2:?}");
+    assert!(tut_2.iter().all(|&(_, base, mean)| (base - mean).abs() < 0.01), "{tut_2:?}");
+}
+
 #[test]
 #[ignore = "needs the game install"]
 fn mission_02s_large_factory_cuts_the_ground_from_under_it_and_lets_the_hero_through_its_doorway() {

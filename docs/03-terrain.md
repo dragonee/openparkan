@@ -448,10 +448,15 @@ transcribed).
 - It triangulates what is left of the cut faces outside the contour (*"There
   were %d outside triangles"*, *"New faces in patch qty = %d"*) and writes them
   over the deleted faces' slots (*"Replacing face #%d"*, `0x100133d4`), normals
-  included.
+  included. Each cut face's triangles reach exactly to the outer contour
+  ([below](#the-pieces-are-triangles-of-a-constrained-delaunay-triangulation--read-and-measured)).
 - It builds the **basement**, the faces between the outer contour and the
   inner one (*"New basement faces qty = %d"*, `0x10011a22`; *"Final outer
-  contour and inner contour intersect"* when the two cross).
+  contour and inner contour intersect"* when the two cross): the constrained
+  Delaunay triangulation of the ring between them
+  ([below](#the-pieces-are-triangles-of-a-constrained-delaunay-triangulation--read-and-measured)).
+- It sets the building down on the mean height of its cut outer contour
+  ([below](#a-building-is-set-down-on-the-mean-of-its-contour--read-and-measured)).
 - An edge of a landscape face that now borders the basement takes
   `0x8000 | n` as its neighbour (*"OUTER LINK!!!!, #%d"*, `0x1000c8e7`), so a
   walk across the mesh can step from the landscape onto the basement.
@@ -531,10 +536,14 @@ flags and texture pair are copied into the template. The second, which names
 itself `AddBasementFaceProc()` in its assertion, is handed one object for the
 whole insertion (`[ebp−0x24]`, `0x10011ce9`). The count the insertion logs as
 *"New basement faces qty"* (`0x10011a22`) is printed before either runs, so the
-game calls both sets basement faces. **Not established**: what a piece is and
+game calls both sets basement faces. ~~**Not established**: what a piece is and
 where the band is triangulated — in the builders, which are 3972 and 3285
 bytes, or where the objects are built — and so which area each cut face's
-object covers, the part of the cut face outside the outer ring or more.
+object covers, the part of the cut face outside the outer ring or more.~~ —
+**read**: an object is a constrained Delaunay triangulation and a piece one of
+its triangles; the band is triangulated where its object is built, and a cut
+face's own triangles cover exactly the part of it outside the outer ring
+([below](#the-pieces-are-triangles-of-a-constrained-delaunay-triangulation--read-and-measured)).
 
 **Layer-1 slot 0 is the footing material, and nothing else uses it**
 (*measured*). `Land1.wea` names slot 0 `B_S0` on 32 of the 33 maps and
@@ -542,6 +551,124 @@ object covers, the part of the cut face outside the outer ring or more.
 the **275882 faces across all 33 maps, not one names layer-1 slot 0** — at
 either level of detail. The slot is reserved for the faces the engine makes,
 which is why a building in the game stands on a band of stone.
+
+### The pieces are triangles of a constrained Delaunay triangulation — *read*, and *measured*
+
+**An object is a quad-edge subdivision** (*read*). The walk at `0x10007f00`
+runs down the object's list of edges (`+8`), and an edge record is four
+sub-edges of `0x18` bytes, `0x60` in all: each sub-edge carries its rotation
+index in its first byte, a mark in its second, its next edge round its origin at
+`+4`, its origin at `+8` and a label at `+0xc`, and the record carries one more
+word at `+0x60`. For each edge and its reverse that is not marked, the walk asks
+whether the face on its left is a triangle turning counter-clockwise
+(`0x10003510`: the next edge round the origin and the next edge round the face
+share their far end, and `0x10002ef0`, an orientation test, holds), hands that
+edge and its record's `+0x60` to the callback, and marks the face's three edges
+by going round it (`0x10007e20`, which gives up after `0x2710` steps). **A piece
+is one triangle**, handed over once.
+
+**The triangulation is Delaunay, and a constraint is never swapped** (*read*).
+A site goes in with a tolerance of 0.001 (`0x10003cc0`, `0x3a83126f`); every edge
+round it is then tested and swapped by `0x10003660`, which returns at once when
+the edge's record carries `+0x60` and otherwise swaps the edge (`0x10001fe0`)
+when the in-circle test holds (`0x10002ae0`: four squared lengths, each against
+a triangle's area, summed and compared with 0) and recurses into the two edges
+beyond. `0x10004eb0` lays an edge between two points in as a constraint: it puts
+both points in as sites, forces the edge through, sets the record's `+0x60` to 1
+(`0x100057e5` and three more sites) and ORs its two label arguments into the
+edge's `+0xc` and its reverse's (`0x10004e60`). So each triangulation is the
+constrained Delaunay triangulation of its sites and constraints, and each side
+of a constraint is labelled. A label floods across the unconstrained edges
+(`0x1000b710`, which sets an edge's label and its reverse's from the first labelled
+edge of the face, and is run again until no edge is left at 0 — at most 100
+times on a cut face, `0x1001079a`, or it gives up).
+
+**A cut face keeps its triangles outside the outer ring** (*read*). Each
+landscape face of state 3 gets its own triangulation, started from its three
+corners (`0x10001a10`, `0x1000f7b0`). The outer contour is walked through the
+landscape face by face (the face under its first corner at `0x1000ee99`, then
+`0x10008880` per face, `0x1000f052` and `0x1000f59d`, which clips the contour's
+segment to the face), and each piece of it inside a face goes into
+that face's triangulation as a constraint labelled **1 on its left and 2 on its
+right** (`0x1000f8e6`–`0x1000f907`). Every `.bas` ring winds anticlockwise
+(*measured*, all 60), so 1 is inside the contour and 2 outside. After the flood,
+`CountOutsideTrianglesProc()` (`0x1000b870`) counts the triangles whose three
+edges carry 2 — *"There were %d outside triangles"* — and panics on a triangle
+of mixed labels (*"Illegal state values"*), and the first builder (`0x1000bdb0`)
+makes a face only of a triangle labelled 2 (`0x1000bdd9`). **So a cut face's
+own triangles, in the ground's own texture pair, reach exactly to the outer
+contour and no further**, and nothing of the landscape's pair is left between
+the contours.
+
+**The band is one triangulation of the ring between the contours** (*read*). Its
+object (`0x10001c30`, four corners, `0x10010be2`) starts as a box round both
+rings, the box's size again beyond them on every side, with sites along its
+sides every 160 units (`0xa0` at `0x10010b20`; a failed pass halves that, down
+to 5, `0x1001172e`). Into it go, as constraints:
+- **the final outer contour**, labelled 1 on its left and 2 on its right
+  (`0x10010ee9`–`0x10011117`): the outer ring with a corner added wherever it
+  crosses a landscape edge, each corner on the ground. It is the list the clip
+  above leaves behind, the start of each clipped piece and the last end
+  (`0x1000fac7`, `0x1000ff22`, kept at `[ebp−0x14]`);
+- **each inner ring**, labelled **2 on its left and 1 on its right**
+  (`0x10011178`–`0x100113ac`), checked against the final outer contour on the
+  way (`0x1000ada0`, *"Final outer contour and inner contour intersect"*).
+
+So 1 is the ring between the contours and 2 everything else. `0x1000bad0` counts
+the triangles labelled 1 into *"New basement faces qty"* and throws on a mixed
+one, and `AddBasementFaceProc()` (`0x1000cd40`) makes a face only of a triangle
+labelled 1 (`0x1000cd69`). Since the contours are constraints, no site outside
+the outer contour can reach across it into the band, and **the basement is the
+constrained Delaunay triangulation of the ring between the final outer contour
+and the inner ring**. Every one of its faces is the foundation's; none keeps the
+ground's pair.
+
+The inner ring's corners stand at the mean height of the final outer contour
+when `IBuilding` slot 13 (`0x10056cd0`, the dword at `CBuilding + 0xb8`) returns 1
+(`0x10011147`), and at their own height otherwise. `CBuilding`'s constructor sets
+that dword to 1 (`0x100569b4`) and a restored game state sets it from its last
+block (`0x10058993`, `CBuilding::SetObjectState`); its setter, slot 12
+(`0x10056cb0`), was not traced to a caller.
+
+`StartCheckMaxBasementAngle` (`0x100150f0`) builds the placement test's band the
+same way: a box (`0x1001539e`), the outer ring's edges labelled (1, 2)
+(`0x1001556e`) and the inner ring's (2, 1) (`0x1001575d`), then the flood; and
+`FindMinNormalZProc()` (`0x1000da20`) takes the triangles labelled 1
+([32-builder.md](32-builder.md#the-test-isplacementvalid--read)).
+
+*Measured*, with openparkan's own triangulation of the same rings (`engine`,
+`cdt.rs`): for **all 167** buildings the install's missions place, the band's
+faces tile the ring between the final outer contour and the inner ring — their
+areas across the ground sum to the one's less the other's, every face turning
+anticlockwise. The Large Factory's final outer contour on Tut_2 has **29**
+corners, its own 14 and 15 crossings; the Outpost's 24 and the generator's 40.
+
+### A building is set down on the mean of its contour — *read*, and *measured*
+
+After the band is labelled the insertion takes the difference between the first
+inner corner's height and the final outer contour's mean (`0x1001166d`), and
+when `IBuilding` slot 13 returns 1 it takes that from the building matrix's
+z translation, element 11 (`0x100147cc`–`0x100147e0`), and hands the matrix to
+the building's control and to the object (`0x1001482c`, `0x1001485c`). The mean
+runs over the contour's corners, the closing repeat left out
+(`0x10010f18`–`0x10011132`). **So a building's base ends up at the mean height of
+the ground along its cut outer contour.**
+
+*Measured*: **151 of the 167** placed buildings' bases already stand there to a
+centimetre, 145 to a millimetre, so the missions were saved with the drop made
+(the contour over the level-0 faces that are not water, as the ground search
+takes them; counting the water faces too, 150 and 143). The mean of the ring's
+own corners alone matches only **40** to a millimetre, and Tut_2's generator,
+on ground from 314.1 to 344.4, stands on the one mean to 0.000 and 1.87 off the
+other. The 16 that do not are **8 of the 19 bridges** — off by 0.2 to 5.2 — and
+8 buildings of four campaign missions: `CAMPAIGN.02/Mission.03`'s two mines,
+factory and generator (4.70, 0.33, 0.85, 1.02), `CAMPAIGN.01/Mission.01`'s
+bunker (0.14), `CAMPAIGN.03/Mission.01`'s generator and bunker (0.14, −0.07) and
+`CAMPAIGN.04/Mission.02`'s generator (0.03). One more, `CAMPAIGN.05/Mission.02`'s
+bridge, is on its mean only with the lake's own surface faces left out (0.0004
+against 0.024). What the game makes of the 16, whether the flag is 1 for them
+or the landscape under them has changed since they were placed, is **not
+established**; openparkan keeps every building at its mission height.
 
 ### For an engine
 
@@ -554,15 +681,17 @@ which is why a building in the game stands on a band of stone.
    and inner contours with basement faces wearing layer-1 slot 0 and no second
    layer, their UV laid over the world at 0.066 a unit
    ([above](#what-a-basement-face-wears--read-and-measured)).
-   The contours' own z is the building's base, and the outer contour's corners
-   drop onto the landscape (`CheckMaxBasementAngle`,
-   [32-builder.md](32-builder.md#the-test-isplacementvalid--read), builds the
-   same two rings to measure the slope).
-   STAND-IN until read: how the band is triangulated between the two rings, and
-   how far a cut face's own triangles, which keep the ground's texture pair,
-   reach in towards the outer ring; the first builder is handed one set per cut
-   face and the foundation's builder one set for the whole
-   ([above](#what-a-basement-face-wears--read-and-measured)).
+   The outer contour is cut at every landscape edge it crosses and each corner
+   dropped onto the landscape; the inner ring holds the building's base, which
+   the insertion has set down on that contour's mean
+   ([above](#a-building-is-set-down-on-the-mean-of-its-contour--read-and-measured)).
+   The band is the constrained Delaunay triangulation of the ring between the
+   two, the two rings its only constraints; a cut face keeps exactly its part
+   outside the outer contour, in its own texture pair
+   ([above](#the-pieces-are-triangles-of-a-constrained-delaunay-triangulation--read-and-measured)).
+   `CheckMaxBasementAngle`
+   ([32-builder.md](32-builder.md#the-test-isplacementvalid--read)) triangulates
+   the rings the same way to measure the slope.
 4. Inside the inner ring, the building's level-0 faces are the ground.
 
 ## What fparkan's notes add, and what they do not
@@ -1006,3 +1135,16 @@ yet reproduced (below).
   the buffering camera's `+0x280` (slot 24, `0x10083010`), and no call to
   its setter (slot 23, `0x10082fd0`) was found — searched as every call
   through slot `0x5c` in `Terrain.dll` — so it is taken as always 0.
+- ~~**What a basement builder's piece is, and where the band is
+  triangulated.**~~ — **read**: a piece is one triangle of a quad-edge
+  constrained Delaunay triangulation; the band is the triangulation of the ring
+  between the outer contour, cut at every landscape edge it crosses, and the
+  inner ring, and a cut face keeps exactly its part outside the outer contour
+  in its own texture pair
+  ([The pieces are triangles](#the-pieces-are-triangles-of-a-constrained-delaunay-triangulation--read-and-measured)).
+- **The 16 placed buildings not on their contour's mean.** The insertion sets a
+  building down on the mean height of its cut outer contour while `IBuilding`
+  slot 13 answers 1, which `CBuilding`'s constructor sets; 151 of 167 already
+  stand there, and 8 bridges and 8 buildings do not. Whether the game moves
+  them, and what calls the flag's setter (slot 12, `0x10056cb0`), is not read
+  ([A building is set down](#a-building-is-set-down-on-the-mean-of-its-contour--read-and-measured)).

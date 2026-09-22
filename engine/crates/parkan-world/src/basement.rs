@@ -1,11 +1,18 @@
 //! A building's footing: the band of ground between its two `.bas` rings that the engine
-//! stitches in when the building is let into the landscape.
+//! lets in when the building is let into the landscape.
 //!
 //! See `docs/03-terrain.md`, "Placing a building cuts the landscape". The insertion deletes
 //! every landscape face inside the outer contour, triangulates what is left of the cut faces
 //! into patch faces, and fills the ring between the outer contour and the inner one with
 //! **basement** faces. Those are what joins the building's own floor to the ground around
 //! it; without them the landscape stops at the contour and the sky shows through.
+//!
+//! How the band is triangulated is `Terrain.dll`'s own (*read*, docs/03, "The pieces are
+//! triangles of a constrained Delaunay triangulation"): the outer contour, cut at every
+//! landscape edge it crosses and each corner on the ground, and the inner ring go into one
+//! constrained Delaunay triangulation as its only constraints (`0x10010ee9`, `0x10011178`),
+//! and every triangle between them is a basement face. [`crate::cdt`] builds the same
+//! triangulation.
 //!
 //! What a basement face wears is `Terrain.dll`'s own (*read*). The basement builder
 //! (`0x1000cd40`, reached from the insertion at `0x10011ce1`) writes every face it makes the
@@ -41,12 +48,11 @@ pub const FOUNDATION_LAYER: u8 = 0;
 /// [`UV_FIXED_POINT_SCALE`] to the unit: the foundation tiles every 3.8 world units.
 pub const FOUNDATION_PER_UNIT: f32 = 0.066 * (1024.0 / UV_FIXED_POINT_SCALE);
 
-/// How far apart a contour is sampled onto the landscape, in world units.
+/// How far apart the apron's inner edge is sampled along the contour, in world units.
 ///
-/// STAND-IN: docs/03-terrain.md#for-an-engine -- the insertion cuts the contour against
-/// every landscape face it crosses and takes a corner at each crossing; this walks the
-/// contour at a fixed step instead, which follows the ground as closely wherever the
-/// landscape's faces are no smaller than the step.
+/// The band's own edge is the contour cut at every landscape edge it crosses, as the insertion
+/// cuts it ([`contour`]); the apron below is the engine's, and follows it more finely so that
+/// its rim, pushed out off the contour, keeps under the ground.
 pub const CONTOUR_STEP: f32 = 4.0;
 
 /// How far the apron's rim hangs below the landscape at its own foot.
@@ -63,14 +69,21 @@ pub const SKIRT: f32 = 1.5;
 /// of sky along it. The apron runs on past the contour, under the ground that is left, and
 /// covers them; buried, it is never seen. Its rim is sunk below the landscape at both ends of
 /// the apron, so it stays under the ground across it however the ground runs.
+///
+/// STAND-IN: docs/03-terrain.md#for-an-engine -- the insertion re-triangulates each landscape
+/// face the contour cuts and keeps exactly its part outside the contour, so its ground meets
+/// the band on the contour itself. Here the landscape is cut by a mask instead and this apron
+/// covers the mask's edge. And every building stands at its mission height, where the
+/// insertion sets it down on the mean of its cut contour, which 151 of the 167 placed ones
+/// already are.
 pub const APRON: f32 = 2.0;
 pub const APRON_SINK: f32 = 0.5;
 
 /// One building's footing in the world.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Footing {
-    /// The outer `.bas` ring across the ground, walked at [`CONTOUR_STEP`]. The landscape is
-    /// cut away inside it.
+    /// The outer `.bas` ring across the ground, cut at every landscape edge it crosses
+    /// ([`contour`]). The landscape is cut away inside it.
     pub outline: Vec<[f32; 2]>,
     /// The band between the rings, each face three corners counter-clockwise from above.
     pub faces: Vec<Facet>,
@@ -210,13 +223,19 @@ fn winding(ring: &[[f32; 3]]) -> f32 {
         .sum()
 }
 
-/// A closed ring walked counter-clockwise at no more than [`CONTOUR_STEP`] between corners,
-/// its own corners kept.
-fn walked(ring: &[[f32; 3]]) -> Vec<[f32; 3]> {
+/// `ring` wound counter-clockwise across the ground.
+fn counter_clockwise(ring: &[[f32; 3]]) -> Vec<[f32; 3]> {
     let mut ring = ring.to_vec();
     if winding(&ring) < 0.0 {
         ring.reverse();
     }
+    ring
+}
+
+/// A closed ring walked counter-clockwise at no more than [`CONTOUR_STEP`] between corners,
+/// its own corners kept.
+fn walked(ring: &[[f32; 3]]) -> Vec<[f32; 3]> {
+    let ring = counter_clockwise(ring);
     let mut out = Vec::new();
     for i in 0..ring.len() {
         let (a, b) = (ring[i], ring[(i + 1) % ring.len()]);
@@ -229,56 +248,84 @@ fn walked(ring: &[[f32; 3]]) -> Vec<[f32; 3]> {
     out
 }
 
-/// The middle of a ring's corners.
-fn middle(ring: &[[f32; 3]]) -> [f32; 2] {
-    let n = ring.len().max(1) as f32;
-    let sum = ring.iter().fold([0.0, 0.0], |m, p| [m[0] + p[0], m[1] + p[1]]);
-    [sum[0] / n, sum[1] / n]
+/// Closer than this, two corners of a contour are one.
+const SAME_CORNER: f32 = 1e-3;
+
+/// Where segment `p → q` crosses the edges of `land`'s level-0 faces: each crossing's fraction
+/// of the way along it, in order, the ends left out.
+fn crossings(land: &LandMesh, p: [f32; 3], q: [f32; 3]) -> Vec<f32> {
+    let (dx, dy) = (q[0] - p[0], q[1] - p[1]);
+    let (lo, hi) = ([p[0].min(q[0]), p[1].min(q[1])], [p[0].max(q[0]), p[1].max(q[1])]);
+    let mut out = Vec::new();
+    for face in land.faces[land.lod_faces(0)].iter().filter(|f| !f.is_water()) {
+        let corners = face.vertices.map(|v| land.positions[usize::from(v)]);
+        if corners.iter().all(|c| c[0] < lo[0]) || corners.iter().all(|c| c[0] > hi[0]) {
+            continue;
+        }
+        if corners.iter().all(|c| c[1] < lo[1]) || corners.iter().all(|c| c[1] > hi[1]) {
+            continue;
+        }
+        for e in 0..3 {
+            let (a, b) = (corners[e], corners[(e + 1) % 3]);
+            let (ex, ey) = (b[0] - a[0], b[1] - a[1]);
+            let den = dx * ey - dy * ex;
+            if den.abs() < 1e-9 {
+                continue;
+            }
+            let t = ((a[0] - p[0]) * ey - (a[1] - p[1]) * ex) / den;
+            let s = ((a[0] - p[0]) * dy - (a[1] - p[1]) * dx) / den;
+            if t > 0.0 && t < 1.0 && (0.0..=1.0).contains(&s) {
+                out.push(t);
+            }
+        }
+    }
+    out.sort_by(f32::total_cmp);
+    out
 }
 
-/// The band between `inner`, at the building's base, and `outer`, the contour dropped onto
-/// the landscape. Both are wound counter-clockwise and carry their own z.
-///
-/// STAND-IN: docs/03-terrain.md#for-an-engine -- how `Terrain.dll` triangulates the band
-/// between its two rings is not read. The rings are stitched here: the two are walked from
-/// the corners that face the same way, and each face is closed by whichever ring is the
-/// further behind in its own walk, which joins rings of different corner counts and leaves
-/// no corner out.
+/// The outer contour as the insertion lays it into the band (`0x1000fac7`, `0x1000ff22`):
+/// counter-clockwise, its own corners and a corner wherever it crosses an edge of the
+/// landscape's level-0 faces, each on the ground under it. Between two of its corners it runs
+/// within one landscape face, so it lies on the ground all the way round. Off the mesh a corner
+/// has no ground to drop onto, and holds `base` instead.
+pub fn contour(land: &LandMesh, ring: &[[f32; 3]], base: f32) -> Vec<[f32; 3]> {
+    let ring = counter_clockwise(ring);
+    let mut out: Vec<[f32; 3]> = Vec::new();
+    let mut add = |p: [f32; 3]| {
+        if out.last().is_none_or(|l: &[f32; 3]| (l[0] - p[0]).hypot(l[1] - p[1]) > SAME_CORNER) {
+            out.push(p);
+        }
+    };
+    for i in 0..ring.len() {
+        let (a, b) = (ring[i], ring[(i + 1) % ring.len()]);
+        add(a);
+        for t in crossings(land, a, b) {
+            add([0, 1, 2].map(|c| a[c] + (b[c] - a[c]) * t));
+        }
+    }
+    if out.len() > 1
+        && (out[0][0] - out[out.len() - 1][0]).hypot(out[0][1] - out[out.len() - 1][1]) <= SAME_CORNER
+    {
+        out.pop();
+    }
+    out.into_iter().map(|p| [p[0], p[1], under(land, p[0], p[1]).unwrap_or(base)]).collect()
+}
+
+/// The faces between `inner` and `outer`, as the insertion builds its basement faces: the
+/// constrained Delaunay triangulation of the ring between them, the two rings its only
+/// constraints (docs/03, "The pieces are triangles of a constrained Delaunay triangulation").
+/// Each face is three corners counter-clockwise across the ground, each with its ring's own z.
+/// Either ring may be wound either way.
+pub fn band_faces(inner: &[[f32; 3]], outer: &[[f32; 3]]) -> Vec<[[f32; 3]; 3]> {
+    let flat = |r: &[[f32; 3]]| r.iter().map(|p| [p[0], p[1]]).collect::<Vec<_>>();
+    let corners: Vec<[f32; 3]> = outer.iter().chain(inner).copied().collect();
+    crate::cdt::annulus(&flat(outer), &flat(inner)).into_iter().map(|t| t.map(|v| corners[v])).collect()
+}
+
+/// The band between `inner`, at the building's base, and `outer`, the contour on the
+/// landscape, in the foundation.
 fn band(inner: &[[f32; 3]], outer: &[[f32; 3]]) -> Vec<Facet> {
-    let (n, m) = (inner.len(), outer.len());
-    if n == 0 || m == 0 {
-        return Vec::new();
-    }
-    // The two walks start where the rings face the same way about the outer ring's middle.
-    let mid = middle(outer);
-    let turn = |p: &[f32; 3]| (p[1] - mid[1]).atan2(p[0] - mid[0]);
-    let zero = turn(&inner[0]);
-    let start = outer
-        .iter()
-        .enumerate()
-        .min_by(|a, b| {
-            let gap =
-                |p: &[f32; 3]| (turn(p) - zero).abs().min(std::f32::consts::TAU - (turn(p) - zero).abs());
-            gap(a.1).total_cmp(&gap(b.1))
-        })
-        .map_or(0, |(i, _)| i);
-    let built: Vec<Vertex> = inner.iter().chain(outer).map(|p| corner(*p)).collect();
-    let at_inner = |k: usize| built[k % n];
-    let at_outer = |k: usize| built[n + (start + k) % m];
-    let mut faces = Vec::new();
-    let (mut i, mut o) = (0usize, 0usize);
-    while i < n || o < m {
-        let ahead_i = (i + 1) as f32 / n as f32;
-        let ahead_o = (o + 1) as f32 / m as f32;
-        faces.push(facet(if o >= m || (i < n && ahead_i <= ahead_o) {
-            i += 1;
-            [at_outer(o), at_inner(i), at_inner(i - 1)]
-        } else {
-            o += 1;
-            [at_outer(o - 1), at_outer(o), at_inner(i)]
-        }));
-    }
-    faces
+    band_faces(inner, outer).into_iter().map(|t| facet(t.map(corner))).collect()
 }
 
 /// The apron: the ring between the contour and its rim, corner for corner, and the wall
@@ -305,21 +352,21 @@ fn apron(edge: &[[f32; 3]], rim: &[[f32; 3]]) -> Vec<Facet> {
 
 /// One building's footing from its two rings, already placed in the world.
 ///
-/// The band runs from the inner ring, at the building's base, out to the outer contour, whose
-/// corners drop onto the landscape, so the two meet flush there. Past the contour the apron
-/// carries on under the ground.
+/// The band runs from the inner ring's own corners, at the building's base, out to the outer
+/// contour cut where it crosses the landscape and laid on it ([`contour`]), so the two meet
+/// flush there. Past the contour the apron carries on under the ground.
 pub fn footing(land: &LandMesh, inner: &[[f32; 3]], outer: &[[f32; 3]]) -> Footing {
-    let inner = walked(inner);
-    let outer = walked(outer);
-    // Off the mesh a contour corner has no ground to drop onto, and holds the base instead.
+    let inner = counter_clockwise(inner);
     let base = inner.first().map_or(0.0, |p| p[2]);
-    let edge: Vec<[f32; 3]> =
-        outer.iter().map(|p| [p[0], p[1], under(land, p[0], p[1]).unwrap_or(base)]).collect();
-    let rim = rim(land, &edge);
+    let edge = contour(land, outer, base);
+    // The apron follows the same contour more finely, each corner on the ground under it.
+    let walk: Vec<[f32; 3]> =
+        walked(&edge).into_iter().map(|p| [p[0], p[1], under(land, p[0], p[1]).unwrap_or(base)]).collect();
+    let rim = rim(land, &walk);
     Footing {
-        outline: outer.iter().map(|p| [p[0], p[1]]).collect(),
+        outline: edge.iter().map(|p| [p[0], p[1]]).collect(),
         faces: band(&inner, &edge),
-        apron: apron(&edge, &rim),
+        apron: apron(&walk, &rim),
     }
 }
 
@@ -459,17 +506,62 @@ mod tests {
     fn the_apron_runs_past_the_contour_and_hangs_a_wall_under_its_rim() {
         let land = flat();
         let f = footing(&land, &square(10.0, 0.0), &square(20.0, 0.0));
-        assert_eq!(f.apron.len(), f.outline.len() * 4);
+        // The apron follows the contour at the step, four faces a step.
+        let steps = walked(&contour(&land, &square(20.0, 0.0), 0.0)).len();
+        assert_eq!(f.apron.len(), steps * 4);
         let (level, walls): (Vec<&Facet>, Vec<&Facet>) =
             f.apron.iter().partition(|x| x.normal().z.abs() > 0.5);
         // Two faces of each four carry the contour's height out to the rim, sunk under the
         // ground; two hang a wall under the rim.
-        assert_eq!((level.len(), walls.len()), (f.outline.len() * 2, f.outline.len() * 2));
+        assert_eq!((level.len(), walls.len()), (steps * 2, steps * 2));
         for face in walls {
             let n = face.normal();
             let mid = face.triangle().iter().sum::<Vec3>() / 3.0;
             assert!(n.truncate().dot(mid.truncate()) > 0.0, "facing out: {n:?} at {mid:?}");
             assert!(face.corners.iter().any(|c| c.position[2] == -APRON_SINK - SKIRT));
         }
+    }
+
+    #[test]
+    fn the_contour_takes_a_corner_where_it_crosses_a_landscape_edge() {
+        // The flat quad's diagonal runs from (-100, -100) to (100, 100): a ring 40 by 20 about
+        // the middle crosses it twice, at (-10, -10) and (10, 10).
+        let land = flat();
+        let ring = vec![[-20.0, -10.0, 5.0], [20.0, -10.0, 5.0], [20.0, 10.0, 5.0], [-20.0, 10.0, 5.0]];
+        let edge = contour(&land, &ring, 0.0);
+        let xy: Vec<[f32; 2]> = edge.iter().map(|p| [p[0], p[1]]).collect();
+        assert_eq!(
+            xy,
+            vec![[-20.0, -10.0], [-10.0, -10.0], [20.0, -10.0], [20.0, 10.0], [10.0, 10.0], [-20.0, 10.0]]
+        );
+        // Every corner is on the ground, whatever z the ring came with.
+        assert!(edge.iter().all(|p| p[2] == 0.0));
+    }
+
+    #[test]
+    fn the_band_is_the_ring_between_the_contours_and_nothing_else() {
+        // An L-shaped inner ring in a rectangle: the footing's faces tile the ring between the
+        // two exactly, their areas across the ground summing to the outer's less the inner's.
+        let land = flat();
+        let inner = vec![
+            [-8.0, -6.0, -4.0],
+            [12.0, -6.0, -4.0],
+            [12.0, 0.0, -4.0],
+            [0.0, 0.0, -4.0],
+            [0.0, 6.0, -4.0],
+            [-8.0, 6.0, -4.0],
+        ];
+        let outer = vec![[-20.0, -10.0, 0.0], [20.0, -10.0, 0.0], [20.0, 10.0, 0.0], [-20.0, 10.0, 0.0]];
+        let f = footing(&land, &inner, &outer);
+        let across: f32 = f
+            .faces
+            .iter()
+            .map(|x| {
+                let [a, b, c] = x.triangle();
+                (b - a).truncate().perp_dot((c - a).truncate()) / 2.0
+            })
+            .sum();
+        assert!((across - (800.0 - 168.0)).abs() < 1e-2, "{across}");
+        assert!(f.faces.iter().all(|x| x.normal().z > 0.0));
     }
 }

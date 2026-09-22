@@ -10155,6 +10155,56 @@ def _floor_flood(heights, start, goal, rise: float, cell: float) -> tuple[float,
     return None
 
 
+def _dword_at(at, va: int) -> int:
+    return struct.unpack("<I", at(va, 4))[0]
+
+
+def _call_target(at, site: int) -> int:
+    """Where the `call rel32` at ``site`` goes."""
+    return (struct.unpack("<i", at(site + 1, 4))[0] + site + 5) & 0xFFFFFFFF
+
+
+def check_basement_triangulation(check, game: Path) -> None:
+    """The insertion's pieces are triangles of a constrained Delaunay triangulation, labelled
+    by the side of the contours they lie on.
+
+    docs/03-terrain.md, "The pieces are triangles of a constrained Delaunay triangulation" and
+    "A building is set down on the mean of its contour".
+    """
+    path = game / "Terrain.dll"
+    if not path.exists():
+        return
+    t_at = _image_at(path.read_bytes())
+    call_to = _call_target
+
+    # 1. The swap leaves a constraint alone and tests the circle; a constraint is flagged; each
+    #    builder takes its own label; the contours' labels; the drop onto the mean.
+    swap = (t_at(0x10003677, 3) == bytes.fromhex("8b4260")
+            and call_to(t_at, 0x100037BA) == 0x10002AE0)
+    flagged = t_at(0x100057E5, 7) == bytes.fromhex("c7426001000000")
+    outside = t_at(0x1000BDD9, 7) == bytes.fromhex("83bd90feffff02")
+    band = t_at(0x1000CD69, 7) == bytes.fromhex("83bd1cffffff01")
+    labels = [t_at(va, 2)[1] for va in (0x1000F8E6, 0x1000F8E8, 0x10011102, 0x10011104,
+                                         0x10011397, 0x10011399)]
+    drop = (t_at(0x100147CC, 6) == bytes.fromhex("ff503483f801")
+            and t_at(0x100147DA, 6) == bytes.fromhex("d8a594f8ffff")
+            and t_at(0x100569B4, 10) == bytes.fromhex("c782b800000001000000"))
+    fortif = NResArchive.open(game / "fortif.rlb")
+    rings = [ring for entry in fortif if entry.name.lower().endswith(".bas")
+             for ring in objects.parse_base(fortif.read(entry), entry.name)]
+    anticlockwise = sum(1 for ring in rings if ring.area > 0)
+    check("Terrain.dll: a building's faces come from a constrained Delaunay triangulation, "
+          "by the side of the contours they lie on",
+          swap and flagged and outside and band and labels == [2, 1, 2, 1, 1, 2] and drop
+          and (len(rings), anticlockwise) == (60, 60),
+          f"the swap returns on a record's +0x60 and tests the circle at 0x10002ae0; a constraint "
+          f"sets +0x60 to 1 (0x100057e5); the cut face's builder takes label 2 and the band's "
+          f"label 1; the contours are pushed right-then-left as {labels} (a cut face's piece and "
+          f"the outer contour 1 left of 2, the inner ring 2 left of 1); the insertion drops the "
+          f"building to the mean while IBuilding slot 13 is 1, which the constructor sets; "
+          f"{anticlockwise} of the {len(rings)} .bas rings wind anticlockwise")
+
+
 def check_building_ground(check, game: Path) -> None:
     """The ground inside a building: the landscape cut from under it, the collision
     query's filter, its doorways, its hall way's frame and the way down to its pod."""
@@ -24539,7 +24589,7 @@ def run(game: Path) -> int:
         check_batch_word_and_collision_flags,
         check_capture, check_building_entry, check_pod_zone, check_door_shot,
         check_building_lighting,
-        check_building_ground,
+        check_basement_triangulation, check_building_ground,
         check_building_route, check_mission_03_ways,
         check_unit_capture, check_capture_voice, check_mission_04_capture,
         check_repair,

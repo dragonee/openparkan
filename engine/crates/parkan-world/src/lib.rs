@@ -6,6 +6,7 @@ pub mod building_fx;
 pub mod buildings;
 pub mod camera;
 pub mod capture;
+pub mod cdt;
 pub mod cockpit;
 pub mod command;
 pub mod construction;

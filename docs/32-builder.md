@@ -202,7 +202,13 @@ stops it (`0x1000ba17`, `0x1000ba45`). For the query:
    (`StartCheckMaxBasementAngle`'s) has its normal taken
    (`0x1000da20`). The smallest normal z must be at least the slope limit: else
    *"Ugly Basement"*, 0. So no basement face may be steeper than 28.4° with a
-   builder (acos 0.88), 36.9° without.
+   builder (acos 0.88), 36.9° without. The basement here is the constrained
+   Delaunay triangulation of the ring between the two `.bas` rings as they
+   stand, the outer one's own corners only (`StartCheckMaxBasementAngle`,
+   `0x100150f0`: a box, the outer ring's edges labelled 1 inside and 2 outside,
+   the inner ring's 2 inside and 1 outside, and `FindMinNormalZProc()` taking the
+   triangles labelled 1), the same triangulation the insertion lets in
+   ([03-terrain.md](03-terrain.md#the-pieces-are-triangles-of-a-constrained-delaunay-triangulation--read-and-measured)).
 8. Otherwise *"Place OK"*, 1.
 
 **The query is the model's alone** (*read*, with a byte search). Its only
@@ -713,3 +719,8 @@ laser (`e_gun_lc_03`, `e_gun_mc_20`).
 - Whether holding `,` or `.` turns the model again on the key's repeats.
 - What the site shows of an unfinished building before the dome: the recording's
   views of the mine are distant or behind it.
+- ~~How `StartCheckMaxBasementAngle` triangulates the basement between its
+  rings.~~ — **read**: as the constrained Delaunay triangulation of the ring
+  between the two `.bas` rings, their edges its only constraints, the faces
+  between them labelled 1 and measured (`0x100150f0`,
+  [The test](#the-test-isplacementvalid--read)).
