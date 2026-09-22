@@ -3591,7 +3591,27 @@ impl Play {
                     Some(end) => {
                         let start = hall.last().copied().unwrap_or(at);
                         let cut = flight_leg(start, end);
-                        cut.into_iter().map(|p| p.with_z(self.flight_height(p.x, p.y, animal))).collect()
+                        // STAND-IN: docs/24-motion.md#a-flyers-walk-points--read-and-measured -- the
+                        // walker stands an animal's points 30 to 80 m higher still
+                        // (`0x10040f52`-`0x10040f7c`, [`Play::flight_height`]), which carries
+                        // Mission 02's grazing medusas 5.6 m up in two minutes, and a fought one
+                        // 30 to 50 m up to graze on in the air, the Wizard's descent fitting no
+                        // moving state; the player remembers the game's staying where they hover
+                        // until provoked, never flying (2026-09-22), and what holds them is not
+                        // read. An animal's points keep the walk's own height, at least 15 over
+                        // the ground under them, as every flyer's did before the read.
+                        cut.into_iter()
+                            .map(|p| {
+                                let z = if animal {
+                                    let floor =
+                                        self.ground.below(p.x, p.y, 10_000.0).map_or(p.z, |h| h.point.z);
+                                    p.z.max(floor + FLIGHT_CLEARANCE)
+                                } else {
+                                    self.flight_height(p.x, p.y, animal)
+                                };
+                                p.with_z(z)
+                            })
+                            .collect()
                     }
                     None => Vec::new(),
                 };

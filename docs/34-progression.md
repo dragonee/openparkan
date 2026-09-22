@@ -551,6 +551,20 @@ before it, from 193 to 194.5 s, a dark domed shape hangs low over the valley
 floor ahead of the hero, under its sight; that it is a medusa grazing is not
 established.
 
+**Remembered by the player** (2026-09-22): the game's medusas *"usually stay in
+one place until provoked by attacking them"*, and are not remembered flying.
+That agrees with the hover above, and not with the walker's heights: driven as
+read, with each point 45 to 95 m over the ground, a grazing medusa in
+openparkan's engine creeps 5.6 m up in two minutes, and one that has fought goes
+30 to 50 m up and grazes on there, since the Wizard's descent fits no moving
+anchor either. The engine keeps an animal's points at the walk's own height
+instead, at least 15 over the ground — a stand-in
+([24-motion.md](24-motion.md#a-flyers-walk-points--read-and-measured)) — under
+which Mission 02's medusas graze within 2 m of where they hover and a fight
+takes them no more than 10 m up. What holds the game's medusas low is not
+established, and the recording's flight *"high over the ground"* from 195 s,
+read before the player's account, wants its frames looked at again.
+
 **Destroying both** empties `Anml`'s count, which completes the bonus
 objective with `T02_I04`. How a dead unit leaves the count is not read; the
 recording below shows it happen.

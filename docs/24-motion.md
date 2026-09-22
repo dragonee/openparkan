@@ -3237,6 +3237,14 @@ it, spread across the 50.
   (`Control.dll:0x1000531a`). Over 40 s one moves 1.8 m across the ground and
   1.7 m up.
 
+**The engine departs from the read for an animal** (a stand-in). Driven as read,
+Mission 02's grazing medusas creep 5.6 m up in two minutes and a fought one ends
+30 to 50 m up; the player remembers the game's staying where they hover until
+provoked, never flying ([34-progression.md](34-progression.md#the-medusas--read-and-measured)).
+An animal's points keep the walk's own height, at least 15 over the ground under
+them, as every flyer's did before this was read; what holds the game's medusas
+low is not established.
+
 ### The global path — *read*, and *measured*
 
 **The areal map links only walkable areals** (`ArealMap.dll:0x10023240`,

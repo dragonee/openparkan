@@ -185,11 +185,11 @@ fn mission_02s_hero_walks_in_by_the_factorys_west_door_down_to_its_pod_and_captu
 /// `Anml`'s two zones, the same for both — and is sent to a point off its centre's +x, +y side.
 ///
 /// How far they get is the motion's, not the task's: the walk asks for the medusa's live top
-/// speed, 13 m/s forward, `Speed_MaximumFactor` being 1 for every behaviour, and an animal's
-/// walk points stand 45 to 95 m over the ground (`Behavior.dll:0x10040f20`), so the Wizard
-/// writes a climb of more than 5.5 m/s. No moving anchor state of `a_a_l3.ctl` takes a forward
-/// speed past 10 or a climb past 5.5, and with none to go to the planner keeps the one it is in
-/// (`Control.dll:0x1000531a`): the machine holds its hover (docs/34, "The medusas").
+/// speed, 13 m/s forward, `Speed_MaximumFactor` being 1 for every behaviour, and no moving
+/// anchor state of `a_a_l3.ctl` takes a forward speed past 10, so with none to go to the planner
+/// keeps the one it is in (`Control.dll:0x1000531a`): the machine holds its hover (docs/34, "The
+/// medusas"). The walker's own heights for an animal's points, 45 to 95 m over the ground
+/// (`Behavior.dll:0x10040f20`), are a stand-in's in the engine, which keeps the walk's height.
 #[test]
 #[ignore = "needs the game install"]
 fn mission_02s_medusas_migrate_over_their_clans_one_pasture() {
@@ -226,6 +226,56 @@ fn mission_02s_medusas_migrate_over_their_clans_one_pasture() {
         assert!(!robot.wizard.idle(robot.time_ms), "medusa {r} has been sent to a point");
         assert_eq!(play.robots[r].1.fire_target, None, "a grazing medusa aims at nothing");
     }
+}
+
+/// Mission 02's medusas as the player remembers the game's (2026-09-22): "they usually stay in one
+/// place until provoked by attacking them", and never flying. Two minutes grazing, neither leaves
+/// the height it hovers at; shot, the one hit turns on the hero, and neither the fight nor the
+/// grazing after it takes it more than 10 m up (docs/24, "A flyer's walk points").
+#[test]
+#[ignore = "needs the game install"]
+fn mission_02s_medusas_stay_where_they_hover_until_provoked_and_no_fight_takes_them_up() {
+    use parkan_sim::behaviour::Task;
+    use parkan_world::play::CLASS_ANIMAL;
+
+    let (mut play, _) = mission_02_play();
+    let medusas: Vec<usize> = (0..play.robots.len())
+        .filter(|&r| play.units[play.robots[r].0].type_word & CLASS_ANIMAL != 0)
+        .collect();
+    let height = |play: &parkan_world::play::Play, r: usize| play.robots[r].1.walker.body.position.z;
+    let start: Vec<f32> = medusas.iter().map(|&r| height(&play, r)).collect();
+    let run = |play: &mut parkan_world::play::Play, seconds: usize| {
+        for _ in 0..seconds * 60 {
+            play.tick(1000.0 / 60.0, [0.0; 2]);
+        }
+    };
+    run(&mut play, 120);
+    for (&r, &z) in medusas.iter().zip(&start) {
+        let rose = height(&play, r) - z;
+        assert!(rose.abs() < 3.0, "a grazing medusa stays in one place: it rose {rose} m in 120 s");
+    }
+
+    // Shot from 60 m, it turns on the hero; a minute on it grazes again, low as it was.
+    let (r, medusa) = (medusas[0], play.robots[medusas[0]].0);
+    let at = play.battle.combat.targets[medusa].position;
+    assert!(play.stand_at(at.x + 60.0, at.y, 0.0));
+    run(&mut play, 1);
+    let kinds = &play.battle.combat.kinds;
+    let kind =
+        play.hero.rounds.iter().flatten().copied().find(|&k| kinds[k].name.starts_with("bl_")).unwrap();
+    let from = play.hero.collision_centre() + glam::Vec3::Z * 2.0;
+    let centre = play.battle.combat.targets[medusa].centre;
+    play.battle.combat.fire(kind, None, from, centre - from, glam::Vec3::ZERO, 1.0, None);
+    let z0 = height(&play, r);
+    let (mut turned, mut highest) = (false, z0);
+    for _ in 0..60 * 60 {
+        play.tick(1000.0 / 60.0, [0.0; 2]);
+        turned |= matches!(play.robots[r].1.behaviour.task(), Task::Attack { target: Some(id), .. } if id == play.hero_id);
+        highest = highest.max(height(&play, r));
+    }
+    assert!(turned, "provoked, it attacks the hero");
+    assert!(matches!(play.robots[r].1.behaviour.task(), Task::Migrate { .. }), "grazing again");
+    assert!(highest - z0 < 10.0, "the fight or the grazing after it takes it {} m up", highest - z0);
 }
 
 /// Mission 02's L-2f, the design the recording builds, spawned beside the hero at its start and
