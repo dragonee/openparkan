@@ -526,8 +526,9 @@ impl Play {
     /// target test refuses one ("dead, enemy or fully upgraded building").
     ///
     /// STAND-IN: docs/32-builder.md#upgrading-a-building--read -- the builder's invulnerability
-    /// (property 162) while it works is modelled against its building's kill alone, which
-    /// passes it over ([`Play::kill_inside`]): anything else hurts it as it always does.
+    /// (property 162) while it works is modelled against its life system's kill alone, its
+    /// building's and *Explode!*'s, which pass it over ([`Play::invulnerable`]): anything else
+    /// hurts it as it always does.
     fn start_upgrade(&mut self, builder: usize, id: i32, now: f64) {
         let clan = self.units.get(builder).and_then(|u| u.clan);
         let building = self.units.iter().position(|u| {
@@ -1018,13 +1019,7 @@ impl Play {
     /// sphere is not read: every live robot, the hero, tree or stone whose origin lies inside.
     fn kill_inside(&mut self, building: usize, centre: Vec3, radius: f32) -> Vec<Event> {
         let mut events = Vec::new();
-        let upgrading: Vec<usize> = self
-            .robots
-            .iter()
-            .filter(|(_, r)| matches!(r.behaviour.task(), Task::Upgrade { state: UpgradeState::Working, .. }))
-            .map(|(t, _)| *t)
-            .collect();
-        let robots = self.robots.iter().map(|(t, _)| *t).filter(|t| !upgrading.contains(t));
+        let robots = self.robots.iter().map(|(t, _)| *t).filter(|&t| !self.invulnerable(t));
         let scenery = (0..self.units.len())
             .filter(|&t| matches!(self.units[t].kind, mission::KIND_VEGETATION | mission::KIND_ROCK));
         let inside: Vec<usize> = robots
@@ -1048,6 +1043,14 @@ impl Play {
             parkan_sim::damage::share_loss(&mut lives, f32::MAX / 4.0);
         }
         events
+    }
+
+    /// Whether target `t`'s life system refuses its kill, slot 7: its invulnerability byte
+    /// (`Control.dll:0x1000eb76`), which property 162 sets on a builder working at an upgrade.
+    pub(crate) fn invulnerable(&self, t: usize) -> bool {
+        self.robots.iter().any(|(rt, r)| {
+            *rt == t && matches!(r.behaviour.task(), Task::Upgrade { state: UpgradeState::Working, .. })
+        })
     }
 }
 

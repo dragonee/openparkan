@@ -819,6 +819,26 @@ impl Combat {
         events
     }
 
+    /// `ILifeSystem` slot 7, the kill (`Control.dll:0x1000eb70`): node 0 loses the object's
+    /// whole maximum, every node's summed, through `0x10010f30` past the armour, so the object
+    /// dies and the stages that rise play their explosions at the next takt. The slot does
+    /// nothing to an object whose invulnerability byte (`+0x5ac`) is set; the caller asks that.
+    pub fn life_kill(&mut self, t: usize) -> Vec<Event> {
+        let mut events = Vec::new();
+        let Some(target) = self.target_mut(t).filter(|t| t.alive) else { return events };
+        let whole: f32 = target.parts.iter().filter_map(|p| p.life.as_ref()).map(Life::full).sum();
+        let Some(life) = target.parts.first_mut().and_then(|p| p.life.as_mut()) else { return events };
+        let was_dead = life.dead;
+        let destroyed = life.lose(0, whole);
+        let now_dead = life.dead;
+        events.push(Event::Damaged { target: t, part: 0, node: 0, damage: whole, destroyed });
+        if now_dead && !was_dead {
+            kill(target);
+            events.push(Event::Killed { target: t });
+        }
+        events
+    }
+
     /// Every target's lives after the tick's hits, at `now_ms` ([`Life::takt`]): the stages
     /// that rose, the nodes hidden and the parts knocked off, as events.
     pub fn takt_lives(&mut self, now_ms: f64) -> Vec<Event> {
@@ -1023,6 +1043,22 @@ mod tests {
         c.targets[0].parts[2].life.as_mut().unwrap().hit(1, 150.0);
         c.takt_lives(0.0);
         assert!(life(&c, 1).nodes.iter().all(|n| !n.destroyed));
+    }
+
+    #[test]
+    fn the_life_systems_kill_takes_node_0_past_the_armour_and_the_unit_with_it() {
+        let mut c = Combat::default();
+        c.targets.push(turret_unit());
+        // Armour that would leave a hit next to nothing.
+        c.targets[0].parts[0].life.as_mut().unwrap().armour = Some((1.0e6, 1.0e6));
+        let events = c.life_kill(0);
+        assert_eq!(damage_of(&events), vec![1073.0], "every node's maximum, summed");
+        assert!(events.contains(&Event::Killed { target: 0 }));
+        assert!(!c.targets[0].alive);
+        let body = c.targets[0].parts[0].life.clone().unwrap();
+        assert!(body.dead && body.nodes[0].destroyed);
+        assert!(c.targets[0].parts.iter().all(|p| p.life.as_ref().unwrap().nodes[0].destroyed));
+        assert!(c.life_kill(0).is_empty(), "a dead unit is not killed again");
     }
 
     #[test]

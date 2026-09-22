@@ -283,7 +283,7 @@ selected units, and none unless the game's `+0x08` is 4):
   | B | (84, 88) | `botscreen_autogunner_icon` | 1519 *Gunner* | as A | the same at level 1 |
   | C | (108, 88) | `botscreen_autodriver_icon` | 1518 *Automatic* | as A | the same at level 2 |
   | D, only for Type `0x1010000` | (138, 88) | `buildscreen_direct_icon` | 1517 *Strategic control* | `IsHQ` ([30-turrets.md](30-turrets.md#an-hq-unit-in-play--read)) | mode 3 with it, page 0 |
-  | E | (324, 88), a 32 × 21 `long_button_frame_off`, `_on` while pending | `self_destruction_icon` (30 × 15) at (326, 90) | 6244 *Explode!* | nothing is pending (`+0x135` clear) | set `+0x135` and stamp the time (`0x10075fa0`); 0.6 s later the unit record's takt calls its object's slot 7 (`0x100756dc`, not followed) |
+  | E | (324, 88), a 32 × 21 `long_button_frame_off`, `_on` while pending | `self_destruction_icon` (30 × 15) at (326, 90) | 6244 *Explode!* | nothing is pending (`+0x135` clear) | set `+0x135` and stamp the time (`0x10075fa0`); 0.6 s later the unit record's takt kills the unit ([below](#explode--read)) |
 
   A click hits a button's icon rectangle grown by 2 on each side. The levels are
   the auto-driver's ([35-hud.md](35-hud.md#the-indicators--read-and-seen),
@@ -294,6 +294,30 @@ selected units, and none unless the game's `+0x08` is 4):
 115); the icons at (60, 28) and (79, 28), red; the name from x 100 at y 30; the
 lines from x 122, 8 apart, starting at y 38; A, B and C at 63, 84 and 108 and E
 at 323–355, all lit.
+
+### Explode! — *read*
+
+The click takes the first selected unit's record (`0x10076e70`,
+`0x10084735`–`0x10084741`) and, when its `+0x135` is clear, sets it and stamps
+the time of `services.dll`'s `getTimer` (slot 2) into `+0x12c`
+(`0x10084857`–`0x10084861`, `0x10075fa0`). A second click while it is pending
+does nothing. Whether that timer pauses with the game is
+[35-hud.md](35-hud.md#not-established)'s open question.
+
+**The unit record's takt** (`0x10075680`) first skips a record whose cached
+owner word `+0x24` is `0xfffe`, a dead unit's (`0x100756a8`). Then, while
+`+0x135` is set, it asks the timer how long it is since the stamp (slot 3) and, once
+that is **more than 0.6 s** (the float at `0x100e64ec`, `0x100756c9`–`0x100756e7`),
+clears `+0x135`, calls slot 7 of the object at `+0x48`, and ends the takt
+there (`0x100756e9`–`0x1007570b`). `+0x48` is the unit's `ILifeSystem`
+([27-ownership.md](27-ownership.md#the-37-compares-in-iron3ddll--read)), and
+slot 7 is its **kill** (`Control.dll:0x1000eb70`), the one action 17 and the
+construction sphere use: unless the invulnerability byte `+0x5ac` is set, node 0
+loses the object's whole maximum (`+0x58c`) through `0x10010f30` with no armour
+([26-damage.md](26-damage.md)). Node 0 at 0 is destroyed, the object dies, and
+the stage that rises plays node 0's `.exp`. So **Explode! blows the unit up 0.6 s
+after the click**, and a builder working at an upgrade, invulnerable, stands
+through it ([32-builder.md](32-builder.md#the-construction-sphere--read-and-measured)).
 
 ### The rows
 
@@ -768,7 +792,10 @@ Mission 04, on the Enhanced Research Center's pod
   1 to 5 for a building) and a unit's property `0x207`. The stand-in reading of
   `+0x30` as the chassis's size class is [31-packages.md](31-packages.md#not-established)'s;
   the recording's player units and bunker all read red, which is 2.
-- What slot 7 of a unit's object does 0.6 s after *Explode!*.
+- ~~What slot 7 of a unit's object does 0.6 s after *Explode!*.~~ — **read**:
+  the object is the unit's `ILifeSystem`, and slot 7 is its kill: node 0 loses
+  the object's whole maximum, past the armour, unless the unit is invulnerable
+  ([Explode!](#explode--read)).
 - ~~What `0x10034230` accepts for an upgrade row, and what `0x80000200`, the Type
   given its own building icon, is.~~ — **read**: a building of the clan, not of
   five refused Types, not in its sphere, alive, below the top of its scheme,

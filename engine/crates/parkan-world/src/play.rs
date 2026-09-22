@@ -118,6 +118,8 @@ pub const VOICE_SELECTED: &str = "VOICE_SELECTED";
 /// A produced unit's object number: past every mission's objects, so no mission object is
 /// taken for it.
 pub const SPAWNED_OBJECTS: usize = 1 << 20;
+/// How long a pressed *Explode!* waits before the unit's takt kills it (`[0x100e64ec]`, 0.6 s).
+pub const EXPLODE_DELAY_MS: f64 = 600.0;
 /// God mode's multipliers ([`Play::god_mode`]): the hero's speed, its hit points and its
 /// rounds' damage.
 pub const GOD_SPEED: f32 = 2.5;
@@ -327,6 +329,9 @@ pub struct Play {
     anchors: HashMap<u64, (Option<usize>, [f64; 3])>,
     /// Dead units and when each is deleted; and each target deleted.
     pub deaths: Vec<(usize, f64)>,
+    /// The units whose *Explode!* is pending, each with when it was pressed: the unit
+    /// record's `+0x135` and `+0x12c` (docs/41, "Explode!").
+    pub exploding: Vec<(usize, f64)>,
     pub deleted: Vec<bool>,
     /// What the game says, not yet shown or played.
     pub says: Vec<Say>,
@@ -1016,6 +1021,7 @@ impl Play {
             spent: Vec::new(),
             anchors: HashMap::new(),
             deaths: Vec::new(),
+            exploding: Vec::new(),
             deleted: vec![false; target_count],
             robots,
             emplacements,
@@ -1709,6 +1715,7 @@ impl Play {
             self.check_research();
         }
         let mut events = self.ground_damage(now);
+        events.extend(self.tick_explosions(now));
         if !self.paused {
             events.extend(self.tick_construction(now));
         }
@@ -2503,6 +2510,42 @@ impl Play {
             && target.alive
             && turret_alive(robot, target)
             && robot.order.is_none_or(|o| o.code != ORDER_UPGRADE)
+    }
+
+    /// *Explode!* on unit `t` (`0x10075fa0`): unless one is pending, the press is stamped, and
+    /// 0.6 s later the unit's takt kills it ([`Play::tick_explosions`]).
+    pub fn explode(&mut self, t: usize) -> bool {
+        if self.explode_pending(t) {
+            return false;
+        }
+        self.exploding.push((t, self.hero.time_ms));
+        true
+    }
+
+    /// Whether unit `t`'s *Explode!* is pending: its button is `_on` and its icon grey
+    /// meanwhile (`0x10085890`).
+    pub fn explode_pending(&self, t: usize) -> bool {
+        self.exploding.iter().any(|&(e, _)| e == t)
+    }
+
+    /// Each pending *Explode!* more than 0.6 s old, at the top of its unit record's takt
+    /// (`0x100756bf`–`0x100756f6`): the mark cleared and the unit killed through its life
+    /// system's slot 7 ([`parkan_sim::combat::Combat::life_kill`]), which refuses an invulnerable
+    /// one ([`Play::invulnerable`]).
+    ///
+    /// STAND-IN: docs/41-commander.md#explode--read -- whether `getTimer`, which times the
+    /// 0.6 s, runs on a clock or on `timeGetTime` is not read: game time.
+    fn tick_explosions(&mut self, now: f64) -> Vec<Event> {
+        let (due, waiting): (Vec<_>, Vec<_>) =
+            self.exploding.iter().partition(|&&(_, at)| now - at > EXPLODE_DELAY_MS);
+        self.exploding = waiting;
+        let mut events = Vec::new();
+        for (t, _) in due {
+            if !self.invulnerable(t) {
+                events.extend(self.battle.combat.life_kill(t));
+            }
+        }
+        events
     }
 
     /// Mode 2 → 4 (`0x10063f30`): the unit let go, the selection cleared, and the camera held

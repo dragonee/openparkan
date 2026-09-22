@@ -445,6 +445,12 @@ impl Panel {
                 self.page = 0;
                 return Click::Taken;
             }
+            // Explode! (`0x10084827`–`0x10084861`), unless one is pending.
+            let [x, y, ..] = EXPLODE_BUTTON;
+            if inside([x, y, x + 34.0, y + 19.0], at) {
+                play.explode(t);
+                return Click::Taken;
+            }
         }
         let top = UNIT_ROWS_TOP + ROW_STEP * list.len() as f32;
         for (j, &command) in self.visible_rows(top).iter().enumerate() {
@@ -836,9 +842,13 @@ fn unit_box(cockpit: &mut Cockpit, ink: &mut Ink, play: &Play, t: usize) {
             lit,
         );
     }
+    // Explode!, `_on` with its icon grey while one is pending.
+    let pending = play.explode_pending(t);
     let [ex0, ey0, ex1, ey1] = EXPLODE_BUTTON;
-    put(cockpit, ink, "long_button_frame_off", [ex0, ey0, ex1, ey1], WHITE);
-    put(cockpit, ink, "self_destruction_icon", [ex0 + 2.0, ey0 + 2.0, ex0 + 32.0, ey0 + 17.0], WHITE);
+    let frame = if pending { "long_button_frame_on" } else { "long_button_frame_off" };
+    put(cockpit, ink, frame, [ex0, ey0, ex1, ey1], WHITE);
+    let lit = if pending { GREY } else { WHITE };
+    put(cockpit, ink, "self_destruction_icon", [ex0 + 2.0, ey0 + 2.0, ex0 + 32.0, ey0 + 17.0], lit);
 }
 
 /// A row's bar over its unit's or building's life (`0x1009a380`, `0x1007e980`).

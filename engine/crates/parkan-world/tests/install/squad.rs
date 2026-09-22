@@ -985,6 +985,59 @@ fn telepresence_takes_a_warbot_from_command_mode_and_esc_returns_to_the_camera_w
     assert!(play.selected_units().is_empty());
 }
 
+/// *Explode!* in the battle units' box (docs/41, "The box"): the press is stamped, a second
+/// press while it is pending does nothing, and past 0.6 s the unit's takt kills it through its
+/// life system: node 0 loses the whole, and its stage rises to play its explosion.
+#[test]
+#[ignore = "needs the game install"]
+fn explode_in_the_unit_box_blows_the_warbot_up_six_tenths_of_a_second_later() {
+    use parkan_sim::combat::Event;
+    use parkan_world::cockpit::Cockpit;
+    use parkan_world::cockpit::commander::{Click, EXPLODE_BUTTON};
+    use parkan_world::hud::Pages;
+
+    let game = gamedir::find(None).expect("a Parkan install: set PARKAN_DIR");
+    let (mut play, m) = mission_03_play();
+    let bunker = object_target(&play, &m, "sbunk01.dat");
+    play.units[bunker].clan = Some(play.player_clan);
+    play.enter_command(bunker);
+    let project = play.factories[0].projects[0].clone();
+    let at = play.battle.combat.targets[bunker].position + glam::Vec3::new(40.0, 0.0, 0.0);
+    let bot = play.spawn(&project, play.player_clan, at, 0.0).expect("the prebuilt design is a robot");
+    play.tick(1000.0 / 60.0, [0.0; 2]);
+    let pages = Pages::open(&game).unwrap();
+    let mut cockpit = Cockpit::open(&game, &pages, &play).unwrap();
+    let now = play.hero.time_ms;
+    cockpit.update(&mut play, now);
+    cockpit.commander.turn(&mut play, 1, now);
+    play.select_unit_alone(bot);
+    assert!(play.battle.explosions[bot][0][0].is_some(), "node 0 names an explosion");
+
+    let [x, y, ..] = EXPLODE_BUTTON;
+    let button = [x + 17.0, y + 10.0];
+    let mut click = |play: &mut parkan_world::play::Play| {
+        let now = play.hero.time_ms;
+        cockpit.commander.click(play, &mut cockpit.map, button, button, now)
+    };
+    assert_eq!(click(&mut play), Click::Taken);
+    assert!(play.explode_pending(bot));
+    let pressed = play.exploding.clone();
+    play.tick(1000.0 / 60.0, [0.0; 2]);
+    assert_eq!(click(&mut play), Click::Taken);
+    assert_eq!(play.exploding, pressed, "pending: the second press is not stamped");
+
+    let mut events = Vec::new();
+    while play.battle.combat.targets[bot].alive {
+        assert!(play.hero.time_ms - pressed[0].1 < 700.0, "still alive 0.7 s on");
+        events.extend(play.tick(1000.0 / 60.0, [0.0; 2]));
+    }
+    let waited = play.hero.time_ms - pressed[0].1;
+    assert!(waited > 600.0, "killed {waited} ms after the press");
+    assert!(!play.explode_pending(bot));
+    assert!(events.contains(&Event::Killed { target: bot }));
+    assert!(events.contains(&Event::Staged { target: bot, part: 0, node: 0 }), "{events:?}");
+}
+
 /// Telepresence at auto-driver level 1 leaves the unit's walk to its AI and at 0 does not
 /// (`iron3d.dll:0x10074ff0`: level 1 gives the Wizard's unit word, the behaviour's movement
 /// flag `0x10`, to the AI, and keeps the turret and guns the player's).
