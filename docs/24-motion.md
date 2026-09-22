@@ -1030,16 +1030,58 @@ and that group picks the step by surface
        ([28-chassis.md](28-chassis.md#the-order-parts-load-in-and-what-a-slot-keeps--read-and-measured));
      - message 20 (`0x10007285`, after `0x1000aa70`), which the agent's part
        removal (`0x10003c40`) sends with the part's id once it has dropped the
-       part from its list; the agent's handler runs that removal on a sub-code
-       of 20 (`0x1000155d`), and who sends it in play is not traced.
+       part from its list (76-byte records at `+0x6e4`, the id at `+0x48`). The
+       removal has one caller, the agent's `IGameObject` slot 13
+       (`0x10001370`, at `0x10020208` in the vtable at `0x100201d4`), on
+       message 6 with sub-code 20 (`0x100013ae` → `0x1000155d`); nothing else
+       branches there. **Only the designer sends it**, below.
 
      It first runs the pose walk (`0x10008b30`), so the nodes' boxes are taken
      at the frames the mesh holds then. The mesh's constructor (`0x100068a0`)
      leaves both frames and the blend between them at 0 (`+0x1e4`, `+0x1e8`,
      `+0x1f4`) and sets the two bytes the walk tests (`+0x1fc`, `+0x1fd`), so
      at the attach and through the assembly the nodes stand at **frame 0**,
-     the rest pose; a part removed in play is measured at whatever pose the
-     machine is in. No frame's own step calls it.
+     the rest pose. No frame's own step calls it.
+
+     **Who takes a part out of an agent** (*read*). Every call through
+     `IGameObject` slot 13 (`+0x34`) in the 18 shipped binaries was read for
+     its message and sub-code, the pushed arguments recovered past the calls
+     nested among them: 376 calls. **Five** pass message 6 with 20, and all
+     five are `iron3d.dll`'s designer taking a part off its own project, the
+     model at its `+0xbc90`'s `+0x74`: the removal `0x10053a50` (`0x10053bab`,
+     `0x10053c2e`, `0x10053c94`), a turret off `0x10053df0` (`0x100540ff`) and
+     a gun off `0x10054210` (`0x100543ba`)
+     ([38-designs.md](38-designs.md#fitting--read-and-measured)). The control
+     is the part load beside it: the same sweep finds the **seven** sends of
+     message 6 with `0x80000020` — the designer's five, the unit build in play
+     (`Behavior.dll:0x1001ce5b`,
+     [28-chassis.md](28-chassis.md#the-order-parts-load-in-and-what-a-slot-keeps--read-and-measured))
+     and `ArealMap.dll:0x10014cab`, beside its "SubItem has … child items" log —
+     and 21 of message 6 with 7, the mode setter
+     ([31-packages.md](31-packages.md#the-escape--read)).
+     - **The calls that forward a message or sub-code they were handed** were
+       each followed. `Terrain.dll:0x1007d7e0` hands every object of two kinds
+       its caller's sub-code, which is 23 or 24 (`0x1007e796`). `World3D.dll`'s
+       queue takt sends 1 and `0x1c` (`0x10006c6f`, `0x10006ce1`), and its
+       consumer (slot 8, `0x10006460`) hands a record of any type but 9 on as
+       message, sub-code and argument (`0x10006a80`). A record reaches that
+       consumer by the queue's post (slot 7, `0x10006090`), its two sends
+       (slot 15 to an object, slot 18 to the host), a direct delivery or the
+       network. The same sweep over those four slots, in every binary, finds
+       no call that names type 6: the deliveries `World3D.dll` makes itself
+       carry 9 (13 of them) or pass on a record as it came, and nothing calls
+       the post with a type it names. The network packet builder is called with 9 or with the
+       type of a record it relays (`World3D.dll:0x10007690`, from
+       `0x100062ef`, `0x10006f6b`, `0x10006af6`).
+     - **So no unit in play has a part taken out of its list.** A part shot to
+       nothing is knocked off and hidden where it hangs, and the agent keeps
+       its record
+       ([26-damage.md](26-damage.md#what-a-damaged-node-a-destroyed-part-and-a-dead-unit-draw--read-and-measured)).
+       The two spheres are worked out as the unit is attached and as each part
+       loads, both at frame 0, and never again in play: the L-2f whose turret
+       body `e_tur_bb_01` is shot off keeps the spheres it was built with. Only
+       the designer's project has them worked out again, at whatever pose its
+       model then holds.
 
    So **the contact holds the body by the agent's sphere's radius about the
    node sphere's centre** (*read*). An earlier reading took both from the

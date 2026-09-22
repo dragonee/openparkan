@@ -291,8 +291,11 @@ fn join_spheres(spheres: &[(Vec3, f32)]) -> (Vec3, f32) {
 /// 0 answers as the whole object and adds nothing; a node with no level-0 slot is a point at
 /// its origin.
 ///
-/// STAND-IN: docs/24-motion.md#finding-the-ground--read -- not read: when `0x10009510` works
-/// the agent's and node spheres out again, and at which pose. Both are worked out once, at rest.
+/// Worked out once, at the rest pose, as the game works it out for every unit in play:
+/// `0x10009510` runs at the attach and at each part's load, both at frame 0, and again only
+/// after a part is taken out of the agent's list, which the designer alone asks of its own
+/// project (`iron3d.dll:0x10053a50`, `0x10053df0`, `0x10054210`; docs/24, "Finding the
+/// ground").
 pub fn node_sphere(assembly: &mut Assembly, parts: &[Part]) -> (Vec3, f32) {
     let f = |v: [f64; 3]| Vec3::new(v[0] as f32, v[1] as f32, v[2] as f32);
     let mut spheres = Vec::new();
