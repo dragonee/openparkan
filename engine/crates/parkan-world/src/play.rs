@@ -118,6 +118,12 @@ pub const VOICE_SELECTED: &str = "VOICE_SELECTED";
 /// A produced unit's object number: past every mission's objects, so no mission object is
 /// taken for it.
 pub const SPAWNED_OBJECTS: usize = 1 << 20;
+/// God mode's multipliers ([`Play::god_mode`]): the hero's speed, its hit points and its
+/// rounds' damage.
+pub const GOD_SPEED: f32 = 2.5;
+pub const GOD_LIFE: f32 = 10.0;
+pub const GOD_DAMAGE: f32 = 10.0;
+
 /// `CLASS_ROBOT`: a Type word with this bit is a robot, which holds one of its clan's minds
 /// (docs/23, "The bot limit is the clan's mind count").
 pub const CLASS_ROBOT: u32 = 0x0100_0000;
@@ -309,6 +315,8 @@ pub struct Play {
     /// Whether a building's guns hold their fire on a target below the lowest its turret's
     /// sight looks; off, as the game's.
     pub building_fire_floor: bool,
+    /// God mode, a cheat the game does not have ([`Play::god_mode`]).
+    pub god: bool,
     /// Knocked-off parts in flight.
     pub flights: Vec<Flight>,
     /// Rounds whose flight is over, where each stopped, and when each goes: a round stays its
@@ -1003,6 +1011,7 @@ impl Play {
             voice_pick: VoicePick::default(),
             capture_standby: false,
             building_fire_floor: false,
+            god: false,
             flights: Vec::new(),
             spent: Vec::new(),
             anchors: HashMap::new(),
@@ -3796,11 +3805,28 @@ impl Play {
         robot.behaviour.order(&leave);
     }
 
+    /// God mode, the engine's own cheat: the hero walks [`GOD_SPEED`] times as fast, has
+    /// [`GOD_LIFE`] times the hit points on every node, and its rounds do [`GOD_DAMAGE`] times
+    /// the damage.
+    pub fn god_mode(&mut self) {
+        if self.god {
+            return;
+        }
+        self.god = true;
+        self.hero.walker.stride_scale = GOD_SPEED;
+        for node in self.hero.lives.iter_mut().flatten().flat_map(|l| l.nodes.iter_mut()) {
+            node.life *= GOD_LIFE;
+            node.max *= GOD_LIFE;
+        }
+    }
+
     /// Rounds leaving their barrels: each round, and its load group's flight effects.
     fn launch(&mut self, launched: Vec<Launch>, now: f64) {
         for l in launched {
+            // The hero's own guns launch with no owner.
+            let ratio = if self.god && l.owner.is_none() { GOD_DAMAGE } else { 1.0 };
             if let Some(id) =
-                self.battle.combat.fire(l.kind, l.owner, l.muzzle, l.direction, l.velocity, 1.0, l.target)
+                self.battle.combat.fire(l.kind, l.owner, l.muzzle, l.direction, l.velocity, ratio, l.target)
             {
                 // The round's load group creates its flight effects at spawn, and the gun hands its
                 // effect manager the muzzle on the shooter's node 0 (`Control.dll:0x1002a56d`).

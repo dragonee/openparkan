@@ -265,6 +265,9 @@ pub struct Walker {
     /// What the Wizard writes, when the AI drives: the velocity is taken as the machine's
     /// own, and the hull turns toward the heading.
     pub drive: Option<Drive>,
+    /// What each step's move is multiplied by: 1, but for a god mode's hero. The states still
+    /// play at the machine's own speed, so the one that applies is the one that would.
+    pub stride_scale: f32,
 }
 
 impl Walker {
@@ -360,6 +363,7 @@ impl Walker {
             landed: Vec::new(),
             placed: Vec::new(),
             drive: None,
+            stride_scale: 1.0,
         }
     }
 
@@ -537,7 +541,7 @@ impl Walker {
             let q = self.machine.q;
             self.body.to_world(stride.a * (1.0 - q) + stride.b * q)
         };
-        self.body.position += moved;
+        self.body.position += moved * self.stride_scale;
         self.hold(ground, &state, step);
         self.land(self.machine.current, &state);
     }

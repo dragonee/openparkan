@@ -233,6 +233,9 @@ pub fn play(game: &Path, loaded: &Loaded, args: &crate::Args) -> Result<Option<P
         p.hero.steady = !args.sway;
         p.capture_standby = !args.capture_idle;
         p.building_fire_floor = !args.fire_below;
+        if args.god_mode {
+            p.god_mode();
+        }
         if let Err(e) = p.load_progression(game, &loaded.dir, &loaded.mission) {
             eprintln!("no mission progression: {e:#}");
         }

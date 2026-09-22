@@ -6,7 +6,7 @@
 //! parkan [--game DIR] [--mission MISSIONS/…] [--fly]
 //!        [--screenshot OUT.png] [--size WxH] [--top-down] [--look X,Y,Z,TX,TY,TZ]
 //!        [--headless] [--ticks N] [--hold SCAN_W,SCAN_A] [--press N] [--release N] [--mouse DX,DY] [--trace] [--sway]
-//!        [--capture-idle] [--stretch-hud] [--save-to-game] [--outcome won|lost] [--text "…"] [--face NAME,DISTANCE] [--at X,Y,YAW[,Z]] [--pod NAME] [--drive PATH] [--hq] [--take NAME] [--designer] [--design PART,…]
+//!        [--capture-idle] [--god-mode] [--stretch-hud] [--save-to-game] [--outcome won|lost] [--text "…"] [--face NAME,DISTANCE] [--at X,Y,YAW[,Z]] [--pod NAME] [--drive PATH] [--hq] [--take NAME] [--designer] [--design PART,…]
 //!        [--skip-briefing] [--briefing-at SECONDS] [--objectives] [--map]
 //! ```
 //!
@@ -32,6 +32,9 @@
 //!
 //! The hero's view holds the heading it moves along; `--sway` lets it swing with the
 //! gait, ten degrees each way on a run, as the game's does.
+//!
+//! `--god-mode` is a cheat of the engine's own: the hero walks 2.5 times as fast, has 10 times
+//! the hit points and its rounds do 10 times the damage.
 //!
 //! A captured bot stands by until it is given an order; `--capture-idle` leaves it with
 //! none, as the game's capture does, so it engages a hostile within 500 on its own.
@@ -100,6 +103,8 @@ struct Args {
     sway: bool,
     /// `--capture-idle`: a captured bot is given no order, as the game's capture gives none.
     capture_idle: bool,
+    /// `--god-mode`: the hero is 2.5× as fast, has 10× the hit points and does 10× the damage.
+    god_mode: bool,
     /// `--fire-below`: a building's guns fire on a target below the lowest its turret looks, as
     /// the game's do.
     fire_below: bool,
@@ -182,6 +187,7 @@ fn args() -> Result<Args> {
         sway: false,
         capture_idle: false,
         fire_below: false,
+        god_mode: false,
         stretch_hud: false,
         save_to_game: false,
         outcome: None,
@@ -227,6 +233,7 @@ fn args() -> Result<Args> {
             "--sway" => out.sway = true,
             "--capture-idle" => out.capture_idle = true,
             "--fire-below" => out.fire_below = true,
+            "--god-mode" => out.god_mode = true,
             "--stretch-hud" => out.stretch_hud = true,
             "--save-to-game" => out.save_to_game = true,
             "--outcome" => out.outcome = Some(value()? == "won"),

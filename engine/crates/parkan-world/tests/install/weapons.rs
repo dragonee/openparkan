@@ -970,3 +970,46 @@ fn a_strike_on_mission_01s_bridge_plays_the_machine_surface_a_strike_on_a_unit_d
         "every strike on the bridge is the machine surface: {classes:?}"
     );
 }
+
+#[test]
+#[ignore = "needs the game install"]
+fn god_mode_makes_the_hero_two_and_a_half_times_as_fast_ten_times_as_tough_and_its_rounds_ten_times_as_strong() {
+    use parkan_formats::mission;
+    use parkan_world::play::{GOD_DAMAGE, GOD_LIFE, GOD_SPEED, Play};
+
+    let game = gamedir::find(None).expect("a Parkan install: set PARKAN_DIR");
+    let dir = gamedir::resolve(&game, gamedir::MISSION_01).unwrap();
+    let m = mission::parse(&std::fs::read(dir.join("data.tma")).unwrap(), "Mission.01").unwrap();
+    // Three seconds with W held, across the ground.
+    let walked = |god: bool| {
+        let mut play = Play::load(&game, &m).unwrap().unwrap();
+        if god {
+            play.god_mode();
+        }
+        let from = play.hero.walker.body.position;
+        play.hero.key("SCAN_W", true);
+        for _ in 0..180 {
+            play.tick(1000.0 / 60.0, [0.0; 2]);
+        }
+        (play.hero.walker.body.position - from).truncate().length()
+    };
+    let (plain, god) = (walked(false), walked(true));
+    assert!(plain > 20.0, "{plain}");
+    assert!((god / plain - GOD_SPEED).abs() < 0.2, "{plain} then {god}");
+
+    let mut play = Play::load(&game, &m).unwrap().expect("Mission 01 has a hero");
+    let full = |play: &Play| -> f32 { play.hero.lives.iter().flatten().map(|l| l.total()).sum() };
+    let before = full(&play);
+    play.god_mode();
+    play.god_mode();
+    assert!((full(&play) - before * GOD_LIFE).abs() < 1e-3 * before, "once, however often it is asked");
+    // The hero's rounds, which carry no owner, leave at ten times the ratio.
+    let mut ratios = Vec::new();
+    play.hero.key("SCAN_LMOUSE", true);
+    for _ in 0..120 {
+        play.tick(1000.0 / 60.0, [0.0; 2]);
+        ratios.extend(play.battle.combat.rounds.iter().filter(|r| r.owner.is_none()).map(|r| r.ratio));
+    }
+    assert!(!ratios.is_empty(), "the hero fires");
+    assert!(ratios.iter().all(|&r| r == GOD_DAMAGE), "{ratios:?}");
+}
