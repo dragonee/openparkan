@@ -68,6 +68,12 @@ pub const ROWS: [Row; 22] = [
 pub const BUILD_TYPES: [u32; 7] =
     [0x8000_0004, 0x8000_0008, 0x8000_0010, 0x8000_0040, 0x8000_0400, 0x8010_0000, 0x8020_0000];
 
+/// The building Types `0x10034230` accepts for no upgrade, whatever their ladder
+/// (`iron3d.dll:0x10034282`-`0x100342b5`): the generator, the hangar (the Outpost), the main
+/// teleport, the bridge and the ruin (`varset.var`'s `BUILDING_GENERATOR`, `_HANGAR`,
+/// `_MAINTELEPORT`, `_BRIDGE`, `_RUINE`).
+pub const NEVER_UPGRADED: [u32; 5] = [0x8000_0002, 0x8000_0040, 0x8000_0200, 0x8000_1000, 0x8000_2000];
+
 /// A type lies within a mask when the mask holds all its bits: `(mask & type) == type`.
 pub fn within(type_word: u32, mask: u32) -> bool {
     type_word != 0 && mask & type_word == type_word
@@ -108,12 +114,9 @@ pub fn offered(types: &[u32], situation: &Situation) -> Vec<u8> {
     out
 }
 
-/// The row test (`0x1007bbb0`).
-///
-/// STAND-IN: docs/41-commander.md#not-established -- what `0x10034230` accepts for one of the
-/// clan's buildings is not followed: the test the upgrade task itself makes of its target
-/// (`0x100332e0`, docs/32, "Upgrading a building") stands in for it -- a live building of that
-/// Type whose level + 1 is still inside its scheme.
+/// The row test (`0x1007bbb0`). An Upgrade row asks for a builder that can build and one of
+/// the clan's buildings of its Type that `0x10034230` accepts, which the play reads into
+/// [`Situation::upgradable`] (docs/41, "Which rows it offers").
 fn test(command: u8, s: &Situation) -> bool {
     match command {
         2 => matches!(s.first_class, 1 | 2),
@@ -176,6 +179,15 @@ mod tests {
         let cannot = Situation { can_build: false, ..s };
         assert_eq!(offered(&[BUILDER], &cannot), vec![0, 1, 2, 3, 6, 7]);
         assert_eq!(offered(&[WARRIOR], &s), vec![0, 1, 2, 3, 6, 7], "no Upgrade row off the mask");
+    }
+
+    #[test]
+    fn of_the_seven_upgrade_rows_only_the_outposts_type_is_refused_outright() {
+        // `0x10034230` turns the hangar away before it looks at a ladder, so row 20, Upgrade
+        // Outpost, is never offered; the other six Types go on to the ladder and the tree.
+        let refused: Vec<u8> =
+            (17..=23).filter(|c| NEVER_UPGRADED.contains(&BUILD_TYPES[usize::from(c - 17)])).collect();
+        assert_eq!(refused, vec![20]);
     }
 
     #[test]

@@ -223,30 +223,52 @@ impl Play {
         hq::offered(&types, &situation)
     }
 
-    /// The building an Upgrade row names: the clan's first live building of `type_word` whose
-    /// level -- its place in its scheme's ladder -- has another entry above it, and whose next
-    /// entry the clan's tree has researched whole.
-    ///
-    /// STAND-IN: docs/41-commander.md#not-established -- what `0x10034230` accepts is not
-    /// followed. The upgrade task's own target test (`0x100332e0`, docs/32) gives the first
-    /// half; the second is *derived* from the recording of Mission 03, where the builder is
-    /// offered no Upgrade Warehouse although the clan's Small Warehouse stands at the foot of
-    /// its scheme -- the Medium Warehouse's `fr_m_store` is not researched in `tut3_pl.trf` --
-    /// so the row asks for the next building's parts as a Build row asks for the first's.
-    pub fn upgrade_target(&mut self, type_word: u32) -> Option<usize> {
+    /// The player's clan's buildings of `type_word` an upgrade would take, in the level's order
+    /// (`0x10072a80`), each as `0x10034230` accepts it: not of a Type it refuses
+    /// ([`hq::NEVER_UPGRADED`]), not building itself (property `0x20c`) and alive; its level --
+    /// its place in its scheme's ladder -- with another entry above it; and that entry's parts
+    /// all researched in the clan's tree (`0x1008b130`), as a Build row asks of the first.
+    pub fn upgradable(&mut self, type_word: u32) -> Vec<usize> {
+        if hq::NEVER_UPGRADED.contains(&type_word) {
+            return Vec::new();
+        }
         let owned: Vec<usize> = self
             .own_buildings_within(type_word)
             .into_iter()
             .filter(|&b| self.units[b].type_word == type_word)
             .collect();
         if owned.is_empty() {
-            return None;
+            return owned;
         }
         let game = self.assembly.game.clone();
         let catalogue = self.catalogue();
-        owned.into_iter().find(|&b| {
-            self.upgrade_model(b).is_some_and(|next| researched_building(&game, catalogue.as_ref(), &next))
-        })
+        owned
+            .into_iter()
+            .filter(|&b| {
+                self.upgrade_model(b)
+                    .is_some_and(|next| researched_building(&game, catalogue.as_ref(), &next))
+            })
+            .collect()
+    }
+
+    /// The building an Upgrade row is offered for: the first [`Play::upgradable`] one (the row
+    /// test stops at it, `0x1007bd72`).
+    pub fn upgrade_target(&mut self, type_word: u32) -> Option<usize> {
+        self.upgradable(type_word).first().copied()
+    }
+
+    /// The building a click on an Upgrade row sends unit `t` to (`0x10078f60`): of the
+    /// [`Play::upgradable`] ones, the nearest to it across the ground; the first of equals.
+    pub fn upgrade_target_for(&mut self, type_word: u32, t: usize) -> Option<usize> {
+        let at = self.battle.combat.targets.get(t)?.position.truncate();
+        let mut best: Option<(usize, f32)> = None;
+        for b in self.upgradable(type_word) {
+            let d = self.battle.combat.targets[b].position.truncate().distance(at);
+            if best.is_none_or(|(_, n)| d < n) {
+                best = Some((b, d));
+            }
+        }
+        best.map(|(b, _)| b)
     }
 
     /// The `.dat` building `b` would become: the entry after its own in its Type's scheme
@@ -261,29 +283,28 @@ impl Play {
     }
 
     /// Row `command` clicked (`0x1007b740`): an order goes to every selected robot at once,
-    /// replacing its queue (`0x10079230`). An Upgrade row names the building itself
-    /// (`0x10078f60`): the order carries its logic id and the Type as its parameter. Returns
-    /// what the row does, so the caller can open the picks the others start.
+    /// replacing its queue (`0x10079230`). An Upgrade row names a building for each robot
+    /// (`0x10078f60`), the nearest it would take, and gives a robot with none no order: the
+    /// order carries the building's logic id and the Type as its parameter. Returns what the
+    /// row does, so the caller can open the picks the others start.
     pub fn hq_command(&mut self, command: u8) -> Option<hq::Act> {
         let act = hq::act(command)?;
-        let order = match act {
-            hq::Act::Order(order) => Some(order),
-            hq::Act::Upgrade(kind) => {
-                let b = self.upgrade_target(kind)?;
-                Some(parkan_sim::orders::Order {
-                    code: parkan_sim::orders::UPGRADE,
-                    parameter: kind as i32,
-                    target: parkan_sim::orders::Target::LogicId(self.units[b].logical_id),
-                })
-            }
-            _ => None,
-        };
-        if let Some(order) = order {
-            for t in self.selected_units() {
-                if let Some((_, robot)) = self.robots.iter_mut().find(|(rt, _)| *rt == t) {
-                    robot.order = Some(order);
-                    robot.behaviour.order(&order);
+        for t in self.selected_units() {
+            let order = match act {
+                hq::Act::Order(order) => order,
+                hq::Act::Upgrade(kind) => {
+                    let Some(b) = self.upgrade_target_for(kind, t) else { continue };
+                    parkan_sim::orders::Order {
+                        code: parkan_sim::orders::UPGRADE,
+                        parameter: kind as i32,
+                        target: parkan_sim::orders::Target::LogicId(self.units[b].logical_id),
+                    }
                 }
+                _ => break,
+            };
+            if let Some((_, robot)) = self.robots.iter_mut().find(|(rt, _)| *rt == t) {
+                robot.order = Some(order);
+                robot.behaviour.order(&order);
             }
         }
         Some(act)

@@ -365,7 +365,7 @@ duplicates dropped, `0x1007aef9`–`0x1007af92`), whatever order the units come 
 | 2 Search and capture | the first selected unit's `+0x30` is 1 or 2 |
 | 9 Search minerals | a lode of the map is not yet found (`0x10081b50`: the lode's found word is not 1) |
 | 10–16 Build … | below |
-| 17–23 Upgrade … | the first unit can build (`0x10076da0`) and the clan has a building of that Type that `0x10034230` accepts (not followed) |
+| 17–23 Upgrade … | the first unit can build (`0x10076da0`) and the clan has a building of that Type that `0x10034230` accepts (below) |
 
 **A build row** (Mine `0x80000004`, Warehouse `…08`, Factory `…10`, Outpost `…40`,
 Res. Center `…400`, Light Tower `0x80100000`, Heavy Tower `0x80200000`) is
@@ -387,14 +387,49 @@ So **a clan builds one building of each kind** from the menu. *Derived*: once a
 builder has been sent to build a mine, the row goes, and once the mine stands, it
 does not come back.
 
-**What an Upgrade row asks of a building** (`0x10034230`) is *not established*,
-but Mission 03 bounds it — *derived*. The upgrade task's own target test
-(`0x100332e0`, [32-builder.md](32-builder.md#upgrading-a-building--read)) takes a
-building of the clan whose level + 1 is still inside its scheme, and the player's
-Small Warehouse there is exactly that; yet the recording's builder is offered no
-Upgrade Warehouse (below). The Medium Warehouse's `fr_m_store` is unresearched in
-`tut3_pl.trf`, so the row plausibly asks for the parts of the entry **above** the
-building, as condition 5 asks for the scheme's first.
+**What an Upgrade row asks of a building** (*read*). The row test walks the
+clan's buildings of the row's Type (`0x1007bd4d`–`0x1007bd9a`): `0x10072a80`
+gives each building record on the level's list (`+0x71c`) whose clan (`+0x24`)
+is the player's (`+0xad0`) and whose Type (`+0x2c`) is the row's, in the list's
+order. The row is offered at the first that `0x10034230` accepts, given the
+record's logic id (`+0x34`) and a word for why it refused. The game's `+0xae8`
+object, which condition 5 above takes the first `.dat` from, answers the logic
+id with the building (its slot 21). `0x10034230` accepts the building when all
+of these hold, and writes why at steps 1, 2, 6 and 7:
+
+1. the `+0xae8` object is there, else 1;
+2. **its Type is none of five** (`0x10034282`–`0x100342b5`), else 2: the
+   generator `0x80000002`, the hangar `0x80000040`, the main teleport
+   `0x80000200`, the bridge `0x80001000` and the ruin `0x80002000`;
+3. its property `0x20c` reads 0 — no construction sphere running
+   ([32-builder.md](32-builder.md#upgrading-a-building--read));
+4. its owner word, `IGameObject` slot 17 (`0x100342d1`), is not `0xfffe`,
+   destroyed;
+5. **its level, property `0x209`, is below the count of its Type's scheme less
+   one** (`0x100342e2`–`0x10034303`: the object's slot 59 gives the count);
+6. the object's slot 58 names the scheme's `.dat` at level + 1 for the player's
+   clan, else 1;
+7. **every part of that `.dat` is researched** in the player's clan's tree
+   (the clan record at `+0x724` + 0x68 × clan, its `+0x50`): the same
+   unresearched-parts count as condition 5 of a Build row, `0x1008b130`, must
+   be 0 (`0x100343b3`–`0x100343d6`), else 6.
+
+So **an upgrade asks for the next building's parts as a build asks for the
+first's**, which is what Mission 03 had been read to imply: its Small
+Warehouse's next entry, the Medium Warehouse, has `fr_m_store` unresearched in
+`tut3_pl.trf`, and no Upgrade Warehouse is offered (below). **Upgrade Outpost,
+row 20, is never offered**: the hangar is refused at step 2 whatever its ladder,
+and its scheme holds one building anyway
+([32-builder.md](32-builder.md#what-gets-built)). The generator is refused too,
+though its scheme has two entries, but no row names it.
+
+**The click** (`0x1007bb14` → `0x10078b60` with command 32 and the Type,
+dispatched per selected unit to `0x10078f60`) runs the same test over the
+clan's buildings within the Type (`0x1007df50`) and sends each unit to **the
+accepted building nearest it** across the ground (`0x10079078`–`0x100790b3`):
+order 24, `ORDER_ROBOT_UPGRADE`, target `0x201` with that building's logic id.
+A unit with no accepted building gets no order (`0x1007914a`). So two builders
+selected together may go to two buildings.
 
 **Mission 03** (*measured*, taking a part as researched when the item that
 researches it is in the tree and researched, the constructor's rule of
@@ -438,8 +473,8 @@ the factory panel at (51, 171 + 20*i*), and only with the column
 - `lamp_text_ending`, lit while the building is selected;
 - its icon (`0x100344e0`), 15 × 15 on `ui_menu`: storage (81, 110), mine
   (129, 126), generator (113, 126), plant (129, 94), Outpost (97, 126), institute
-  (49, 126), any bunker (65, 126), either tower (81, 126); `0x80000200` takes
-  `ui_menu3` (148, 27). It is tinted by the record's `+0x30`: 1 white,
+  (49, 126), any bunker (65, 126), either tower (81, 126); the main teleport,
+  `0x80000200`, takes `ui_menu3` (148, 27). It is tinted by the record's `+0x30`: 1 white,
   2 `0xffff0000`, 3 `0xff00ff00`, 4 `0xff0000ff`;
 - a separator;
 - **for a bunker** (`0x80010000`, `…20000`, `…40000`): a 35-wide button with
@@ -694,7 +729,11 @@ Mission 04, on the Enhanced Research Center's pod
    clan owns no building of the Type (and has owned none since the menu last
    opened), no builder of the clan is heading off to build one, and the scheme's
    first building's parts are all researched. On Mission 03 that is the mine
-   alone.
+   alone. **Upgrade rows**: offer one to a living builder with its beam while
+   the clan has a building of the Type, not a generator, hangar, main teleport,
+   bridge or ruin, not in its construction sphere and alive, with an entry
+   above its own in its scheme whose parts are all researched. A click sends
+   each selected unit to the nearest such building, and a unit with none stays.
 10. **Building rows** on pages 5–8: lamp, icon, the Strategic control button for a
     bunker, the Manual button for a bunker or tower, the name over its life;
     Strategic control moves command mode to that bunker, Manual takes its turret.
@@ -730,8 +769,14 @@ Mission 04, on the Enhanced Research Center's pod
   `+0x30` as the chassis's size class is [31-packages.md](31-packages.md#not-established)'s;
   the recording's player units and bunker all read red, which is 2.
 - What slot 7 of a unit's object does 0.6 s after *Explode!*.
-- What `0x10034230` accepts for an upgrade row, and what `0x80000200`, the Type
-  given its own building icon, is.
+- ~~What `0x10034230` accepts for an upgrade row, and what `0x80000200`, the Type
+  given its own building icon, is.~~ — **read**: a building of the clan, not of
+  five refused Types, not in its sphere, alive, below the top of its scheme,
+  whose next `.dat` is researched whole (`0x10034282`–`0x100343d6`), in
+  [Which rows it offers](#which-rows-it-offers); the research requirement is
+  read, no longer derived from Mission 03. `0x80000200` is
+  `BUILDING_MAINTELEPORT` (`MISSIONS/SCRIPTS/varset.var`, line 169), the main
+  teleport, which the test refuses outright.
 - ~~The research panel's contents and controls~~ — **read**, above.
 - **The research panel's text colours.** The box's name is drawn in `GAME_FONT`'s
   current colour, set by whatever drew before it. It reads white in the

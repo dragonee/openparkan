@@ -610,6 +610,46 @@ fn c03_m01s_builder_upgrades_the_captured_factory_to_the_medium_one_its_clan_has
     assert!(!panel.menu.contains(&19), "no Upgrade Factory left: {:?}", panel.menu);
 }
 
+/// A click on an Upgrade row sends each builder to the nearest building of the row's Type it
+/// would take (`iron3d.dll:0x10078f60`), not to the first the row test found.
+#[test]
+#[ignore = "needs the game install"]
+fn an_upgrade_row_sends_each_builder_to_the_nearest_building_it_would_take() {
+    use parkan_formats::mission::{KIND_BUILDING, KIND_UNIT};
+
+    let mut play = campaign_play("MISSIONS/Single.01");
+    play.progression = None;
+    let player = play.player_clan;
+    let stores: Vec<usize> = (0..play.units.len())
+        .filter(|&t| {
+            play.units[t].kind == KIND_BUILDING
+                && play.commander.paths[t].to_ascii_lowercase().contains("sstore01")
+        })
+        .collect();
+    assert_eq!(stores.len(), 2, "Single.01's two Small Warehouses");
+    for &t in &stores {
+        play.units[t].clan = Some(player);
+    }
+    let kind = play.units[stores[0]].type_word;
+    // Neither's Medium Warehouse is researched in this mission's tree, so no row is offered.
+    assert_eq!(play.upgradable(kind), Vec::<usize>::new(), "the entry above is researched whole, or nothing");
+    // With `FULL_RESEARCH_TREE` every part is offered.
+    play.research.full = true;
+    assert_eq!(play.upgradable(kind), stores, "both would be taken, in the level's order");
+    assert_eq!(play.upgrade_target(kind), Some(stores[0]), "the row is offered on the first");
+    // A builder of the player's beside the second.
+    let builder = (0..play.units.len())
+        .find(|&t| play.units[t].kind == KIND_UNIT && play.units[t].type_word == 0x0100_4000)
+        .expect("a builder");
+    play.units[builder].clan = Some(player);
+    let near = play.battle.combat.targets[stores[1]].position + glam::Vec3::new(10.0, 0.0, 0.0);
+    play.battle.combat.targets[builder].position = near;
+    assert_eq!(play.upgrade_target_for(kind, builder), Some(stores[1]));
+    let far = play.battle.combat.targets[stores[0]].position + glam::Vec3::new(10.0, 0.0, 0.0);
+    play.battle.combat.targets[builder].position = far;
+    assert_eq!(play.upgrade_target_for(kind, builder), Some(stores[0]));
+}
+
 #[test]
 #[ignore = "needs the game install"]
 fn mission_03s_builders_page_selects_the_builder_and_offers_build_mine_and_standby_stands_it_by() {
