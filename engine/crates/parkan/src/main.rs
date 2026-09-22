@@ -1167,6 +1167,10 @@ impl App {
                 let pick = play.pick(aim);
                 match cockpit.commander.click(play, &mut cockpit.map, left, right, now) {
                     Click::Factory(t, parkan_world::cockpit::factory::Click::Constructor) => {
+                        // The rest of this press is the designer's. Left down, it would grow a
+                        // band while the designer is up, and the band let go over the designer's
+                        // exit would select across the screen and turn the factory's page to 0.
+                        self.left_down = None;
                         if let Err(e) = cockpit.designer.open(play, t, &cockpit.strings) {
                             eprintln!("cannot open the designer: {e:#}");
                         }
