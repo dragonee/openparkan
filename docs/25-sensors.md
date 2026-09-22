@@ -649,13 +649,16 @@ holds decides:
     `ui_tex9.tex`, cut by the HUD's loader `0x100433a0`. One stands to the left
     of the unit's projected centre and one, mirrored, to its right, 28 tall
     about the centre. The gap either side is 44 × a figure the record answers
-    for the camera distance (`0x1007dff0`, its slot 5, not read).
-  - **Signs**, for a clan of type 1 or 2: a sprite the clan record's `+0x14`
-    indexes, and a class icon by `Type` (transport `0x1002000`, builder
-    `0x1004000`, anything else).
+    for the camera distance ([below](#the-unit-markers-layout--read-and-measured)).
+  - **Signs**, for a clan of type 1 or 2: the clan's sign, which the clan
+    record's `+0x14` indexes, and a class icon by `Type` (transport
+    `0x1002000`, builder `0x1004000`, anything else).
   - **Bars** below: page9's 27 × 16 bar frame tinted blue, then a green
     (30, 180, 80) and an orange (255, 130, 50) bar. A unit of the player's
     clan is also named in green.
+
+  Where each stands, and what the figure, the frame and the signs are, is
+  [below](#the-unit-markers-layout--read-and-measured).
 
   **Only two units get one.**
   - A unit **selected** in the commander's view: its record's `+0x80` is 1.
@@ -697,6 +700,67 @@ So **a first-person target shows three ways**: as its radar mark's outline, as
 the target panel's frame, and, for a guided gun, as the lock's corners. The
 first two take the rule's colour.
 
+### The unit marker's layout — *read*, and *measured*
+
+`0x10077d80` works about the unit's projected centre (cx, cy) in the 640 × 480
+layout, which `0x1007dff0` gives only while it lies on the screen
+(0 ≤ x ≤ width, 0 ≤ y ≤ height, `0x1007e079`–`0x1007e0bd`).
+
+**The gap g** either side of the centre is 44 × the figure the record's slot 5
+answers for the distance d from the camera's place to the unit's bounding
+centre (`0x1007e0e2`–`0x1007e136`, `0x10077e4c`). A unit record's slot 5
+(`0x10075650`, vtable `0x100e64d0`) answers 2 ÷ d × 30 = **60 ÷ d, never less
+than 0.3**. So g = 44 at 60 m, and at 200 m or more it stays 13.2; nearer than
+60 m it grows past 44 with nothing to hold it. A building record's slot 5
+(`0x10033800`) is 2 ÷ d × 300, never less than 0.2, for the building marker
+`0x10034900`, which is not read further here.
+
+With L = cx − g − 14, the left bracket's left edge, each piece stands at:
+
+| piece | from | to | art | tint |
+|---|---|---|---|---|
+| left bracket | (L, cy − 14) | (cx − g, cy + 14) | page9 (55, 0) 14 × 28 | the rule's |
+| right bracket, mirrored | (cx + g + 14, cy − 14) | (cx + g, cy + 14) | the same | the rule's |
+| the clan's sign | (cx + g + 14, cy − 14) | (cx + g + 30, cy + 2) | `icons` (32 i, 224) 32 × 32 | the rule's |
+| the class icon | (cx + g + 30, cy − 14) | (cx + g + 46, cy + 2) | `icons` (24, 0), (48, 0) or (72, 0), 24 × 24 | the rule's |
+| the bar frame | (L, cy + 16) | (L + 27, cy + 32) | page9 (0, 0) 27 × 16 | `0xff0000ff`, blue |
+| the life bar | (L + 1, cy + 18) | (L + 1 + p ÷ 4, cy + 21) | a fill | `0xff1eb450` |
+| the battery bar | (L + 1, cy + 22) | (L + 1 + 25 f, cy + 25) | a fill | `0xffff8232` |
+| the name | (L + 6, cy − 14 − H) | | `GAME_FONT` | `0xff00ff00` |
+
+- **The frame** is the HUD's first sprite, cut from page9 at (0, 0), 27 × 16
+  (`0x100434e1`), the bracket's neighbour: two empty slots, one over the other,
+  that the bars fill.
+- **The bars.** p is the life percentage (`0x1007e980`, the nearest whole
+  number to 100 × property `0x31`), so a whole life is 25 wide. f is property
+  `0x73`, the batteries' fill
+  ([35-hud.md](35-hud.md#battery-the-orange-arc--read)); a unit with no
+  battery draws none.
+- **The signs, the icon and the name need a clan of neither type 0 nor 3**
+  (the clan record's `+0xc`, `0x10077f46`–`0x10077f4f`): nature's and a
+  neutral clan's units get brackets and bars only.
+  - **The clan's sign** is one of eight 32 × 32 cells along y 224 of `ui/ui.lib`'s
+    `icons.tex`, cut by `0x10065230` into the screens' `+0x20` and indexed by
+    the clan record's `+0x14`. As a mission loads, a single-player game gives
+    clan *i* sign *i* (`0x100a2407`); a network game takes each clan's from the
+    session's table (`0x100a23e1`). *Measured*: the most clans a shipped mission
+    has is 6, and every one of the eight cells has ink; they are round emblems
+    (*seen*).
+  - **The class icon** is one of the 24 × 24 cells `0x10064fd7` cuts along y 0
+    of `icons`: (48, 0) the stacked crates for a transport, (72, 0) the crane
+    for a builder, and (24, 0) the crossed swords for anything else (*seen*).
+  - **The name**, the behaviour's (`+0x44` slot 41), only for a unit of the
+    player's clan, is indented 6 from L and stands H above the bracket's top:
+    H = (the font's height + 2) ÷ the display's vertical scale, the height
+    being `GAME_FONT`'s header word, its slot 3 (`Ngi32.dll:0x10010d50`,
+    `+0x103c`).
+
+The recording's builder at 186.5 s
+([42-selection.md](42-selection.md#the-selection--read), *seen*) shows the
+pieces the table places: blue brackets, "SWB-2 Builder" in green, its class
+icon, and its green and orange bars. Its frame was not measured against the
+offsets above.
+
 ## Not established
 
 - ~~How the mission file's 0/1 relation words become the runtime's 0 and 2.~~
@@ -711,7 +775,11 @@ first two take the rule's colour.
   - ~~the radar mark's shape (`0x10075f70`)~~, answered in
     [35-hud.md](35-hud.md#the-radar--read-and-seen);
   - ~~the target panel frame's scale~~, answered in [35-hud.md](35-hud.md);
-  - the unit marker's gap (the record's slot 5);
+  - ~~the unit marker's gap (the record's slot 5)~~ — **read**: 44 × max(60 ÷ d,
+    0.3) for the camera d from the unit; with it the bar frame (page9's (0, 0)
+    27 × 16, tinted blue), the clan's sign (clan *i*'s is `icons`' 32 × 32 cell
+    *i* along y 224) and where the name, sign, icon and bars stand
+    ([The unit marker's layout](#the-unit-markers-layout--read-and-measured));
   - ~~what fills the clan record's list at `+0x54`, which decides which other
     clans' units get a marker~~ — **read**: the clan's units' radar contacts,
     rebuilt on each pass of the run loop
