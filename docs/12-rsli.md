@@ -426,6 +426,5 @@ Nothing converts out of display space anywhere along that path ([05](05-engine.m
 fparkan's [RsLi reference](https://fparkan.popov.link/reference/rsli/) named
 the format and gave the entry layout and the list of storage methods, which is
 what turned a high-entropy blob into a specific question. The keystream is not
-in it; that came out of `Ngi32.dll`. As always with fparkan: documentation
-only, never source, and everything checked against the shipped data — see
-[09-method.md](09-method.md).
+in it; that came out of `Ngi32.dll`. As always with fparkan, everything was
+checked against the shipped data — see [09-method.md](09-method.md).

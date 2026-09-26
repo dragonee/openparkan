@@ -5,6 +5,16 @@ engine.
 
 This repository contains **no game assets**. Point it at your own installation.
 
+## Disclaimer
+
+- All of this project was engineered with AI tools, and the quality of the
+  code may vary.
+- At this stage the goal is not a 100% functional replica of the original
+  game, so some differences from it are to be expected.
+- Status: the first two campaigns — the training campaign and *Tricky
+  Tellus* — are playable; the others are in testing.
+- Tested only against an install of the English Steam version of the game.
+
 ## The engine
 
 **[`engine/`](engine/README.md) is the project.** It is a Rust workspace —
@@ -287,7 +297,10 @@ tests/          unit tests, no game data needed
 analysis/       disassembly scaffolding (not part of the library)
 ```
 
-## Prior art
+## Acknowledgements
+
+I'd like to acknowledge the people who deciphered parts of the game before
+this project and published what they found. Thank you.
 
 - [valentineus/fparkan](https://github.com/valentineus/fparkan) — a Rust
   monorepo covering NRes and RsLi archives, static MSH geometry, `Texm`,
@@ -303,10 +316,7 @@ analysis/       disassembly scaffolding (not part of the library)
   itself is not in their reference; that came out of `Ngi32.dll`. Everything
   borrowed is checked against the shipped data before it is used: the slot
   layout accounts for stream 2 exactly on all 434 meshes, and every one of the
-  26 RsLi members unpacks to the size its decrypted entry declares. fparkan is
-  GPL-2.0-only and this project is GPL-3.0 — terms that do not combine in
-  either direction — so only its documentation was read, never its source; a
-  file format is a fact, an implementation of one is not.
+  26 RsLi members unpacks to the size its decrypted entry declares.
 - [AlexKimov/parkan-file-formats](https://github.com/AlexKimov/parkan-file-formats)
   — 010Editor templates and QuickBMS scripts, mostly for Parkan 1's `.lib`.
 
