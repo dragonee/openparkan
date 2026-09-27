@@ -779,11 +779,35 @@ function 19.
 the running SuperAI's own unit list (`+0x8c`). It counts the entries whose type
 equals the argument and whose logical id is set (`0x10009cbb`, `0x10009cd2`).
 **A building is on that list.** SuperAI slot 4's event 2 (`0x10001880`) files
-it, and also counts it by type, a mine at `+0x3e0` (`0x10001974`). The capture
-sends that event with the new clan (`iron3d.dll:0x10032ffa`); which call sends
-it for a building a builder puts up is not traced. The recording shows the mine
-counted while it is still going up (below). "= 1" is exact, so a second mine
-before the handler's next run would miss the test (*derived*).
+it, and also counts it by type, a mine at `+0x3e0` (`0x10001974`). "= 1" is exact,
+so a second mine before the handler's next run would miss the test (*derived*).
+
+**A builder's building is filed as it is made** (*read*, with a search). Only
+`iron3d.dll` reads the level's clan table at `+0x774`, where each clan's SuperAI is
+kept; the same sweep over the other twelve modules finds nothing. Of its reads, those
+followed by a call through slot 4 are:
+
+| site | event | what sends it |
+|---|---:|---|
+| `0x10032ffa` | 2 | a capture: the object's new clan (`0x10032fd0`), the control |
+| `0x10033d01` | 2 | the loader's building creation (`0x10033cb0`), in single play (`0x100a40ee`) |
+| `0x10060418` | 2 | game message 1 for a class-3 id, a building just added to the game — but not in single play with the parameter block's `+0x154` set, as it is on a fresh start ([21-briefing.md](21-briefing.md#when-it-runs--read)) |
+| `0x100333f6` | 2 | a building record's first pass through the game frame (`0x10033020`, once, behind its byte `+0xa4`) |
+| `0x10077511` | 1 | a placed unit's record at the load |
+| `0x1006058d` | 1 | game message 1 for a class-4 id, in a network game |
+| `0x100334f5`, `0x1007204d` | 1 | a building's message-2 handler (`0x10033490`), and `0x10071cd0`, not followed |
+
+A builder's building comes through the third and fourth. `CreateObjectFromScheme`
+hands the new object to `World3D.dll`'s `AddObjectToGame`, which ends by sending the
+game message 1 with its id (`World3D.dll:0x100082ea`); the class-3 case makes the
+building's record and puts it on the level's building list (`0x1007d960`), and in a
+fresh single-player mission leaves the filing to that record's first step, which the
+game frame runs for every record on the list (`0x1005eaa0` → `0x1007db30`). So the
+building is on its clan's list, and counted by type, **from the frame after it is
+made**, 40 s before it is finished
+([32-builder.md](32-builder.md#building-a-building-tick-by-tick--read-and-seen)). The
+recording agrees: the mine appears between 194.5 and 195.0 s and objective 2 is
+reported at 196 s, 40 s before the mine stands at 236 s.
 
 ### Seen in a recording
 

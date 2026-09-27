@@ -844,6 +844,10 @@ impl Play {
             s.present = false;
         }
         self.construction.placements.insert(t, (at, yaw));
+        // On its clan's SuperAI list at once: `AddObjectToGame`'s game message 1 makes its
+        // record, and message 1's building case or the record's first pass through the frame
+        // files it as slot 4's event 2 (`iron3d.dll:0x10060418`, `0x100333f6`; docs/34, "A
+        // builder's building is filed as it is made").
         if let Some(p) = self.progression.as_mut() {
             p.progress.place_building(logical_id, clan, type_word, at);
         }

@@ -531,6 +531,26 @@ For the order a placement gives, target kind `0x206`:
    The building's order 18 sends it out when the sphere's second phase clears the
    area ([The construction sphere](#the-construction-sphere--read-and-measured)).
 
+**The building joins its clan's list as it is made** (*read*). `ArealMap.dll`'s
+`CreateObjectFromScheme` (`0x10014fd0`) makes the object and hands it to
+`World3D.dll`'s `AddObjectToGame` (`ArealMap.dll:0x10015dd0`), whose last act is to
+send the game message 1 with the new object's id (`World3D.dll:0x100082ea`, as
+`AddNewObjectToGame` does at `0x100087c1`). `iron3d.dll` routes it on the id's class
+(`0x1006016b`): class 3, a building, makes a building record and puts it on the
+level's building list `+0x71c` (`0x1007d960`; a bridge, `0x80001000`, gets none) and
+files the building with its clan's SuperAI as slot 4's event 2 (`0x10060418`) — but
+not in single play with the parameter block's `+0x154` set (`0x100603e3`), as it is
+on a fresh mission start ([21-briefing.md](21-briefing.md#when-it-runs--read)). Then
+the record's first pass through the game frame files it: the frame walks the
+building list (`0x1005eaa0` → `0x1007db30`) and runs each record's step
+`0x10033020`, whose first run, and only
+that, ends with event 2 (`0x100333f6`, behind the byte `+0xa4` that the record's
+base constructor clears, `0x1007e2b9`, and the step sets, `0x1003308b`). So
+**function 34 counts a builder's building from the frame after it is made**, 40 s
+before it is finished, whichever path files it; the insert is add-if-absent, so both
+filing it does no harm ([34-progression.md](34-progression.md#what-the-scripts-ask--read-and-measured-1)).
+In a network game the walk runs only the local clan's records (`0x1007db57`).
+
 **Mission 03's mine** (*measured*, and *derived*). `tut3_b`, an SWB-2 on the
 S-31 wheel chassis, carries 200 of its 2,000 ore and stands 85.3 from the
 mission's one lode, (1026.1, 942.7), which starts found. No building stands
@@ -587,6 +607,8 @@ it. Unplaced, the site shows both, as the recording does.
    The builder goes out with everyone else when the clearing phase starts.
 4. Hide the lode's plume from the moment the building exists
    ([A mine must stand on a lode](#a-mine-must-stand-on-a-lode)).
+5. Put the building on its clan's list as it is made, so that a count by type sees it
+   at once.
 
 ## Upgrading a building — *read*
 

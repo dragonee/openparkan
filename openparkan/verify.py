@@ -15869,6 +15869,25 @@ def check_construction(check, game: Path) -> None:
               f"{', '.join(f'{k} {v:.1f}' for k, v in others.items())} from the other clans' "
               f"bases, and the recording's mine there is green, so single play never applies it")
 
+        # 8. a builder's building is on its clan's SuperAI list from the frame after it is made
+        filed = (iron(0x100333F0, 9) == bytes.fromhex("8b17506a0257ff5210")
+                 and iron(0x10060415, 6) == bytes.fromhex("6a0257ff5610")
+                 and iron(0x10032FF6, 7) == bytes.fromhex("526a0250ff5110")
+                 and iron(0x1005EAA0, 5) == bytes.fromhex("e88bf00100")
+                 and iron(0x1007DB66, 5) == bytes.fromhex("e8b554fbff")
+                 and iron(0x100603E6, 6) == bytes.fromhex("8a8854010000")
+                 and iron(0x1003307B, 8) == bytes.fromhex("84c00f8576030000"))
+        world = game / "World3D.dll"
+        added = world.exists() and _image_at(world.read_bytes())(0x100082EA, 5) == bytes.fromhex(
+            "6a0153ffd0")
+        check("iron3d.dll: a building made in play joins its clan's SuperAI list as it is made",
+              filed and added,
+              "AddObjectToGame sends game message 1 with the new id (World3D.dll:0x100082ea); "
+              "the class-3 case files it as slot 4's event 2 (0x10060418) unless +0x154 is set "
+              "in single play, and the building record's first step in the frame walk "
+              "(0x1005eaa0 -> 0x1007db30 -> 0x10033020) files it (0x100333f6); control: the "
+              "capture's event 2 (0x10032ffa)")
+
 
 def check_controls(check, game: Path) -> None:
     """The input layer: ScanCode.dsc, Command.dsc, the .man bindings, the .tbl tables."""
