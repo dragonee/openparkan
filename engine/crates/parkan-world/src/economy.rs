@@ -28,13 +28,15 @@ pub const BUNKERS: [u32; 3] = [0x8001_0000, 0x8002_0000, 0x8004_0000];
 /// themselves (`Behavior.dll:0x100194db`).
 pub const TRANSPORT: u32 = 0x0100_2000;
 pub const BUILDER: u32 = 0x0100_4000;
-/// The power tick's shift register's seed.
+/// The power tick's shift register's seed. The game seeds its two words once, as `Control.dll`
+/// loads, from `ngiGetClocks` (`0x1000dc34`; `Ngi32.dll` ordinal 52, the processor's cycle
+/// counter), so no two of its runs share one; a fixed seed keeps the engine's runs repeatable
+/// (docs/23, "How often, and where it settles").
 ///
-/// STAND-IN: docs/23-economy.md#how-often-and-where-it-settles--read-with-a-derived-settle-point
-/// -- `Control.dll` seeds its two words from an `Ngi32.dll` import by ordinal as it loads
-/// (`0x1000dc34`), which is not followed: a fixed dword. And `Behavior.dll`'s `rand()` is one
-/// stream for the whole module, which 65 other call sites draw on between two steps; the
-/// engine's step draws on it alone.
+/// The distribution step's `rand()` is likewise the engine's alone. In the game 111 other sites
+/// draw on `Behavior.dll`'s one stream, a building's own takt every 64 to 127 ms among them, so
+/// between two steps it moves on by a count that frame timing sets: only the spread of the
+/// step's 0 to 63 ms is the game's to keep, and one stream keeps it.
 pub const JITTER_SEED: u32 = 0x2545_f491;
 /// The efficiency component, `CICLS_` 26 (docs/23, "Efficiency is a building's size").
 pub const EFFICIENCY_TYPE: i32 = 26;

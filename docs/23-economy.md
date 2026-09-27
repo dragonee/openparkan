@@ -489,16 +489,67 @@ Neither timer is in any data file.
   2531011, bits 16 to 30 returned. The timer (`0x1004c569`) takes the draw's
   low byte times its one unit of 64 ms over 256. The state (`0x10063c1c`) is
   written by `rand()` alone and starts at 1: nothing in the module seeds it.
-  It is one stream for the whole module, and 65 other call sites draw on it.
-- **The power tick's jitter is a 16-bit shift register** that the whole of
-  `Control.dll` shares, two words at `0x10043228` and `0x1004322a`, stepped on
-  every controller's tick, a unit's as much as a building's. The first becomes
-  itself doubled crossed (xor) with the second; the second, itself halved
-  crossed with the new first; and the second over 65,536 moves the 250 ms by a
-  quarter of it about centre (`0x1000c756`–`0x1000c7b5`), so 218.75 to 281.25
-  ms. The 250 is a float stored into `0x10042480` at `0x10006364`, and both words
-  are seeded from one dword an `Ngi32.dll` import by ordinal returns
-  (`0x1000dc34`) — which import was not followed.
+  It is one stream for the whole module, and 111 other sites draw on it
+  ([below](#what-else-draws-on-the-steps-stream--read-and-counted)).
+- **The power tick's jitter is a 16-bit shift register**, two words at
+  `0x10043228` and `0x1004322a` that only the controller tick reads and writes
+  (`0x1000c74a`–`0x1000c799`), so it is stepped on every controller's tick, a
+  unit's as much as a building's. The first becomes itself doubled crossed (xor)
+  with the second; the second, itself halved crossed with the new first; and the
+  second over 65,536 moves the 250 ms by a quarter of it about centre
+  (`0x1000c756`–`0x1000c7b5`), so 218.75 to 281.25 ms. The 250 is a float stored
+  into `0x10042480` at `0x10006364`. It is the same generator
+  [24-motion.md](24-motion.md#the-jitter-draws-from-a-pair-of-16-bit-words--read)
+  reads as the life update's jitter.
+- **The register's seed is the processor's clock** (*read*). Both words are
+  written at once from the dword `Ngi32.dll`'s ordinal 52 returns (`0x1000dc34`,
+  through `0x10032d7a`). Ordinal 52 is the named export **`ngiGetClocks`**
+  (`0x100045b0`): the low half of the time-stamp counter (`rdtsc`) when
+  `Ngi32.dll`'s feature word carries `0x20000`, and of `QueryPerformanceCounter`
+  otherwise. The bit is set when `GetSystemInfo` reports processor type 586
+  (`0x10015ac8`–`0x10015acf`), which is what Windows reports for the Pentium and
+  every x86 processor since. The seeding stub `0x1000dc20` is a static
+  initialiser, the pointer at `0x1003e324` in the table `0x1003e000`–`0x1003ed78`
+  that `_initterm` walks as the module loads (`0x10034166`). So **no two runs of
+  the game share a seed**, and there is no one sequence of power ticks to
+  reproduce. The module holds 39 such stubs, one per source file, each seeding a
+  copy of its own; this is the only one whose copy the tick reads.
+
+#### What else draws on the step's stream — *read*, and counted
+
+`Behavior.dll` calls `rand()` from 66 places. Two are inside its randomised
+timer: the restart (`0x1004c500`) and the test (`0x1004c550`), which draws only
+when the timer has run out and it restarts it — next = now + 64 ms × its first
+word + 64 ms × its second × the draw's low byte ÷ 256. Forty-nine places call
+those two, and the distribution step is two of them (`0x1001add7`,
+`0x1001adf4`). That leaves **111 other sites**, 64 calling `rand()` itself and
+47 a timer, in 41 functions:
+
+| what runs them | sites | when |
+|---|---:|---|
+| every object's behaviour takt, on timers | 15 | always: the takt's own (`0x10005024`), a unit's takt (3) or a building's (1), the radar module (2), the fight module (3, one of them as an AI gun's timer runs out) and its reset (1), the target selector (1), a building's places (2), the tactical report (1) |
+| a task | 61 | while a unit runs it: attack 19, leave 10, migrate 9, patrol 8, follow 5, search 3, a self-given task 2, transport 2, upgrade 2, refit 1 |
+| the walker | 7 | a path search, once for every link it expands (`0x10042e0b`); leaving a non-walkable areal (5); an animal's flight height (1) |
+| no name in the ledger | 28 | 12 functions |
+
+**On Mission 03 the step never takes two draws of the stream in a row**
+(*read*, with the count *derived*). A building's takt tests its timer `+0x930`
+every frame (`0x100054d4`), and the behaviour's constructor gives that timer
+the words 1 and 1 (`0x10003995`–`0x1000399c`), so it runs out every 64 to 127
+ms and draws each time. The behaviour takt calls a building's takt for any Type
+with the top bit (`0x10005089`–`0x100050a2`), so each building whose takt runs
+draws at least once between two distribution steps, 192 to 255 ms apart.
+Mission 03 stands four buildings from the start and a fifth once the mine is
+built. On top of those come each unit's takt timers (`+0x938` and `+0x948`,
+0.45 to 0.9 s; `+0x958`, 0.96 to 1.9 s), the behaviour takt's own (`+0x950`,
+0.96 to 2.9 s), each AI shot, the transport's round, and one draw for every link
+a walk's path search expands. How many fall between two steps turns on the
+frame rate and on what the units are doing, so even from its fixed start of 1
+the step lands on a different place in the stream each run. What holds from run
+to run is the spread: the low byte of a draw is bits 16 to 23 of the state,
+which run through every value alike in each 2^24 draws, so 0 to 63 ms come
+evenly whatever else has drawn (*derived*). A stream of the step's own keeps
+that, and the engine's does.
 
 **The top-up never overshoots**: a building receives at most `capacity × (1 −
 fill)`, and a clan's surplus is simply not drawn. Full buildings ask for
@@ -1289,10 +1340,19 @@ construction slows research.
   ([A building's batteries](#a-buildings-batteries-are-the-parts-fitted-into-its-slots--read-and-measured)).
 - ~~The random sources of the economy's two timers.~~ **Read**: the
   distribution step's is `Behavior.dll`'s own `rand()`, unseeded and shared by
-  the module; the power tick's a 16-bit shift register all of `Control.dll`
-  shares ([How often](#how-often-and-where-it-settles--read-with-a-derived-settle-point)).
-  Still open: the `Ngi32.dll` import that seeds the register
-  (`Control.dll:0x1000dc34`).
+  the module; the power tick's a 16-bit shift register every controller's tick
+  steps ([How often](#how-often-and-where-it-settles--read-with-a-derived-settle-point)).
+  ~~Still open: the `Ngi32.dll` import that seeds the register
+  (`Control.dll:0x1000dc34`), and the 65 other callers of `Behavior.dll`'s
+  `rand()` between two distribution steps.~~ **Read**: ordinal 52 is
+  `ngiGetClocks` (`Ngi32.dll:0x100045b0`), the processor's time-stamp counter,
+  called by a static initialiser as the module loads, so no two runs share a
+  seed. The other callers are 111 sites in 41 functions, 15 of them on the
+  timers every object's takt runs; a building's takt alone draws every 64 to 127
+  ms, so on Mission 03 at least one draw per building falls between any two
+  steps, a count the frame rate sets. Only the draws' spread holds from run to
+  run, and one stream of the step's own keeps it
+  ([What else draws on the step's stream](#what-else-draws-on-the-steps-stream--read-and-counted)).
 - ~~Whether a building's parts are attached as a robot's are: the part loop
   (`Behavior.dll:0x1001cd40`) was not followed for a building, and the building
   batteries — 16 to 32 held and 1,000 to 2,000 a second on 53 of 76 assemblies —

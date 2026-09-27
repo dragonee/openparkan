@@ -9436,6 +9436,46 @@ doc = "docs/23-economy.md"
 read = true
 
 [[entry]]
+module = "Control.dll"
+at = "0x1000dc20"
+kind = "function"
+name = "static initialiser: the controller tick's jitter words 0x10043228 seeded from ngiGetClocks (one of 39 such stubs)"
+doc = "docs/23-economy.md"
+read = true
+
+[[entry]]
+module = "Ngi32.dll"
+at = "0x100045b0"
+kind = "function"
+name = "ngiGetClocks (ordinal 52): rdtsc when the feature word has 0x20000, else QueryPerformanceCounter"
+doc = "docs/23-economy.md"
+read = true
+
+[[entry]]
+module = "Ngi32.dll"
+at = "0x10015acf"
+kind = "site"
+name = "CPU features: 0x20000 when GetSystemInfo reports processor type 586"
+doc = "docs/23-economy.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10003995"
+kind = "site"
+name = "MBehaviour ctor: timer words (64 ms units) +0x934 1,1; +0x93c 7,7; +0x944 0x1f,0x2e; +0x94c 7,7; +0x954 15,31; +0x95c 15,15"
+doc = "docs/23-economy.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x100054d4"
+kind = "site"
+name = "building takt: timer +0x930 runs out every 64-127 ms, each time drawing rand()"
+doc = "docs/23-economy.md"
+read = true
+
+[[entry]]
 module = "AniMesh.dll"
 at = "0x10003775"
 kind = "site"
