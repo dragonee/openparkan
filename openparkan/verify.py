@@ -15834,6 +15834,71 @@ def check_construction(check, game: Path) -> None:
             at = listed.get(part.lower(), at / part)
         return at
 
+    # 5. class 2 is a WPNS agent, and no object of the shipped game is one
+    wpns = library.by_tag("WPNS")
+    members = {e.name.lower() for e in weapon}
+    loadable = [r.name for r in wpns if r.mesh and r.mesh.member.lower() in members]
+    roots = Counter()
+    placed = 0
+    for mission_dir in gamedir.missions(game):
+        m = mission.load(mission_dir / "data.tma")
+        for o in m.objects:
+            placed += 1
+            if o.is_static:
+                record = library.get(o.path)
+            else:
+                try:
+                    unit = objects.load_unit(resolve_case(game, o.path))
+                    root = unit.components[0].ref.member if unit.components else ""
+                except (OSError, objects.ObjectFormatError):
+                    continue
+                record = library.get(root) or library.get(root.rsplit(".", 1)[0])
+            roots[record.tag if record else None] += 1
+    named = [n for n in ("ws_al_01", "ws_al_02", "ws_fl_01", "ws_hm_01", "ws_hm_02")
+             if any(n.encode() in (game / f).read_bytes().lower()
+                    for f in ("guns.rlb", "turrets.rlb", "parts.rlb", "fortif.rlb"))]
+    control_named = b"bld_l_01" in (game / "guns.rlb").read_bytes().lower()
+    ani = game / "AniMesh.dll"
+    tagged = False
+    if ani.exists():
+        at = _image_at(ani.read_bytes())
+        tagged = (at(0x10002FD0, 7) == bytes.fromhex("8b81d8060000c3")
+                  and at(0x100031AB, 17) == bytes.fromhex("3d57504e53750cc785d806000002000000"))
+    check("objects.rlb: world class 2 is a WPNS agent, and nothing loads or places one",
+          len(wpns) == 5 and not loadable and not named and control_named and tagged
+          and placed == 864 and roots.get("WPNS", 0) == 0,
+          f"an agent's slot 11 answers +0x6d8, which its load stores from the tag, WPNS 2 "
+          f"(AniMesh.dll:0x100031ab); the {len(wpns)} WPNS records' weapon.rlb meshes are "
+          f"absent ({len(loadable)} of {len(members)} members), no archive of parts names them; "
+          f"the {placed} placed objects' roots are {dict(roots)}; control: bld_l_01 is named "
+          f"in guns.rlb: {control_named}")
+
+    # 6. the kill takes what its own sphere meets; slot 19 only stores the code; actions 1
+    #    and 2 hide and show the building through IAnimation slot 8's node flag 1
+    paths = {name: game / name for name in ("Control.dll", "Terrain.dll", "AniMesh.dll")}
+    if all(p.exists() for p in paths.values()):
+        ctl, ter, ani_at = (_image_at(paths[n].read_bytes())
+                            for n in ("Control.dll", "Terrain.dll", "AniMesh.dll"))
+        store_only = ctl(0x10004800, 0x28) == bytes.fromhex(
+            "8b4424048b4c24083988ac01000074158988ac0100008b881c06000080cd0189881c060000c20800")
+        hide_show = ctl(0x10002936, 0x1E) == bytes.fromhex(
+            "8b45203bc70f84260c00008b106a0168000200005750ff5220e9130c0000")
+        slot8 = (ani_at(0x1002059C, 4) == struct.pack("<I", 0x10005500)
+                 and ani_at(0x10005520, 2) == bytes.fromhex("a801")
+                 and ani_at(0x100055A6, 8) == bytes.fromhex("8b5c2418f6c70274")
+                 and ani_at(0x10014E57, 4) == bytes.fromhex("f6471401"))
+        overlap = (ter(0x1009A63C, 4) == struct.pack("<I", 0x10025F40)
+                   and ter(0x10025D7B, 14) == bytes.fromhex("6a028b55f08b028b4df051ff5024")
+                   and ter(0x10025DF8, 7) == bytes.fromhex("ded9dfe0f6c441"))
+        check("Control.dll: a code waits for the controller's next step; actions 1 and 2 hide "
+              "and show; the kill takes what its own sphere meets",
+              store_only and hide_show and slot8 and overlap,
+              "IControl slot 19 (0x10004800) stores +0x1ac and sets +0x61c bit 0x100, nothing "
+              "more; action 1 calls +0x20 slot 8 with (0, 0x200, 1), which sets node flag 1 "
+              "down the tree (AniMesh.dll:0x10005500) and the draw skips (0x10014e57); IWorld "
+              "slot 3 (Terrain.dll:0x10025f40) takes an object when |c - c'|^2 <= (r + r')^2 "
+              "with its sphere from interface 0x18 slot 9 with 2 (0x10025d7b)")
+
     # 7. the network game's 400 about another clan's base point, which single play never sets
     iron_path = game / "iron3d.dll"
     mis_path = game / "MisLoad.dll"

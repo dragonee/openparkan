@@ -3,7 +3,8 @@
 //! sphere the new building runs for 41 s. See `docs/32-builder.md`, "Placing a building",
 //! "Building a building, tick by tick" and "The construction sphere".
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::rc::Rc;
 
 use glam::Vec3;
 use parkan_formats::controls::BuildScheme;
@@ -11,6 +12,7 @@ use parkan_formats::mission::{self, KIND_BUILDING, Mission, Value};
 use parkan_formats::{basement, control, gamedir, hallway};
 use parkan_sim::behaviour::{BuildState, Task, UpgradeState};
 use parkan_sim::combat::Event;
+use parkan_sim::economy::{POWER_TICK_MS, ShiftJitter};
 use parkan_sim::effects::Frame;
 use parkan_sim::orders::{self, Order, Target};
 use parkan_sim::solid::Solid;
@@ -42,8 +44,6 @@ pub const MINE_SPHERE_EXTRA: f32 = 15.0;
 /// change (`Behavior.dll:0x10031680`).
 pub const CLEAR_ON_START: f32 = 15.0;
 pub const CLEAR_ON_CHANGE: f32 = 20.0;
-/// A kill state takes itself again every 250 ms (docs/32, "The kill repeats").
-pub const KILL_STEP_MS: f64 = 250.0;
 /// The construction sphere's effect ids: the sign, the ray and the dome (docs/32, "What the
 /// building's controller does with the codes").
 pub const SIGN: i32 = 9002;
@@ -56,6 +56,14 @@ pub const TIME_LOOP: u32 = 2;
 pub const TIME_REVERSE: u32 = 3;
 /// The construction sphere's action, filed in a building's load group.
 pub const ACT_SPHERE_EFFECT: i32 = 5;
+/// The actions a building's construction states run besides the effects' (docs/13, "The
+/// section-5 record"): hide the building and show it (`IAnimation` slot 8 setting and clearing
+/// flag 1 on every node, `Control.dll:0x10002936`, `0x10002954`), place it in the landscape
+/// (`0x1000352e`) and kill in its sphere (`0x100033e6`).
+pub const ACT_HIDE: i32 = 1;
+pub const ACT_SHOW: i32 = 2;
+pub const ACT_PLACE: i32 = 20;
+pub const ACT_KILL_IN_SPHERE: i32 = 21;
 /// The takt after a builder arrives: `now − +0x128 ≥ 1000 ms`, `+0x128` only ever zero
 /// (`0x10028e89`), so at once.
 pub const BUILD_WAIT_MS: f64 = 1000.0;
@@ -122,13 +130,135 @@ pub struct Sphere {
     pub phases: &'static [Phase],
     pub phase: usize,
     pub phase_ms: f64,
-    /// The code the building's controller holds: 0 from its constructor until a phase sends
-    /// another (`Control.dll:0x10006ecf`).
-    pub code: i32,
-    /// When its kill state next takes itself, while the code holds one.
-    pub next_kill_ms: Option<f64>,
     /// The load group's sphere effects by id: its name.
     pub effects: Vec<(i32, String)>,
+}
+
+/// A building's controller as the construction sphere drives it: the code `IControl` slot 19
+/// hands it, and its states played one step at a time on the controller's own clock, each
+/// state's action group run as the state is taken off the queue (`Control.dll:0x1000c2a5`–
+/// `0x1000c38c`; docs/24, "Playing a state"). Slot 19 only stores the code
+/// (`Control.dll:0x10004800`), so a code takes effect at the controller's next step, when the
+/// anchor it stands on no longer applies and the planner queues the way to the one that does
+/// (docs/32, "What the building's controller does with the codes").
+#[derive(Clone, Debug, PartialEq)]
+pub struct CodeMachine {
+    controller: Rc<control::Controller>,
+    /// The transition costs as the loader scales them (`0x10001790`).
+    costs: Rc<Vec<f32>>,
+    /// The state being played. `None` is the constructor's record, a zeroed copy whose use
+    /// count stops it applying, so the first plan runs from index 0 (docs/24, "The state a
+    /// machine starts in").
+    current: Option<usize>,
+    queue: VecDeque<usize>,
+    /// `+0xdc`: when the next step is due, in game ms. The load sets it to the time the object
+    /// is made (`0x10007aaf`).
+    pub clock_ms: f64,
+    /// `+0x1ac`: the code the controller holds, 0 from its constructor (`0x10006ecf`).
+    pub code: i32,
+    /// The construction sphere its kill asks the world about (action 21's `+0x38` slot 12).
+    pub sphere: (Vec3, f32),
+    /// The step jitter's generator (`0x100057de`). The game's is one pair of words the whole
+    /// module shares, seeded from the clock at load (`0x10006330`); each machine here keeps its
+    /// own, from a fixed seed, as the walkers do.
+    jitter: ShiftJitter,
+}
+
+/// A state the machine took: when its step began, and the records its action group ran.
+pub type Taken = (f64, Vec<[i32; 9]>);
+
+/// Steps one advance may run before it gives the clock up to the caller's time.
+const MAX_CODE_STEPS: usize = 4000;
+
+impl CodeMachine {
+    /// The machine the controller's constructor and load leave: on the constructor's record,
+    /// holding code 0, its clock at `made_ms`.
+    pub fn new(controller: control::Controller, made_ms: f64, sphere: (Vec3, f32)) -> Self {
+        let costs = Rc::new(controller.live_costs());
+        CodeMachine {
+            controller: Rc::new(controller),
+            costs,
+            current: None,
+            queue: VecDeque::new(),
+            clock_ms: made_ms,
+            code: control::FIRST_REQUEST,
+            sphere,
+            jitter: ShiftJitter::seeded(0x2545_F491),
+        }
+    }
+
+    /// The state being played, `None` before the first plan.
+    pub fn current(&self) -> Option<usize> {
+        self.current
+    }
+
+    /// Whether the state being played is the anchor code `code` opens.
+    pub fn on_anchor(&self, code: i32) -> bool {
+        self.current.is_some_and(|c| {
+            let s = &self.controller.states[c];
+            s.anchor() && s.request == code
+        })
+    }
+
+    /// Every step due by `now`, as the machine tick runs them while its clock is not ahead of
+    /// the game's (`0x1000c2a5`, `0x1000c717`): an anchor plans, the next state comes off the
+    /// queue and its group runs, and the clock moves on by the state's step. A building's
+    /// states carry no condition, so every record of a group runs.
+    pub fn advance(&mut self, now: f64) -> Vec<Taken> {
+        let mut taken = Vec::new();
+        let mut steps = 0;
+        while now >= self.clock_ms && steps < MAX_CODE_STEPS {
+            if self.current.is_none_or(|c| self.controller.states[c].anchor()) {
+                self.plan();
+            }
+            if let Some(next) = self.queue.pop_front() {
+                self.current = Some(next);
+            }
+            let Some(c) = self.current else { break };
+            let state = &self.controller.states[c];
+            let group = self.controller.group_at(state.actions);
+            let ran =
+                control::run_group(&group, &[false; control::CONDITIONS]).iter().map(|r| r.values).collect();
+            taken.push((self.clock_ms, ran));
+            // `0x10005370`: a fixed step, jittered by up to ±12.5% when the state asks
+            // (`0x100057de`: step × 0.25 × (r − 0.5), which is step ÷ 250 × the power tick's
+            // own draw), and held to 0.01–5 s (`0x100057d6`).
+            let mut step = f64::from(state.length);
+            if state.mode & control::STATE_JITTER != 0 {
+                step += step * self.jitter.next_ms() / POWER_TICK_MS;
+            }
+            self.clock_ms += step.clamp(10.0, 5000.0);
+            steps += 1;
+        }
+        if steps == MAX_CODE_STEPS {
+            self.clock_ms = now;
+        }
+        taken
+    }
+
+    /// `0x100051c0`: an anchor that still applies queues the cheapest cycle back to itself;
+    /// otherwise the way to the cheapest other anchor that applies. A building stands still, so
+    /// its states' boxes see no velocity and no spin; every building state's use count is
+    /// unlimited (docs/24, "A state's use count and its request code").
+    fn plan(&mut self) {
+        let states = &self.controller.states;
+        let applies = |j: usize| states[j].applies([0.0; 3], [0.0; 3], self.code);
+        if let Some(c) = self.current
+            && applies(c)
+            && let Some((path, _)) = self.controller.path_by(&self.costs, c, c)
+        {
+            self.queue = path.into();
+            return;
+        }
+        let from = self.current.unwrap_or(0);
+        let best = (0..states.len())
+            .filter(|&j| j != from && states[j].anchor() && applies(j))
+            .filter_map(|j| self.controller.path_by(&self.costs, from, j))
+            .min_by(|a, b| a.1.total_cmp(&b.1));
+        if let Some((path, _)) = best {
+            self.queue = path.into();
+        }
+    }
 }
 
 /// A building's ground plan as its `.bas` gives it: the inner ring and the outer contour, in
@@ -190,14 +320,20 @@ pub struct Construction {
     /// The buildings made in play that their controller has not yet placed in the landscape
     /// (action 20), by target: what placing them lets in.
     pub unplaced: HashMap<usize, Unplaced>,
+    /// Each building's controller once a construction sphere has driven it, by target: it
+    /// goes on stepping after the sphere's task ends, as the code-0 anchor does every 5 s.
+    pub machines: HashMap<usize, CodeMachine>,
+    /// The buildings their controller has hidden (action 1) and not shown again (action 2).
+    pub hidden: HashSet<usize>,
 }
 
 /// A building made in play, not yet placed in the landscape (action 20,
-/// `CLandscape::PlaceBuilding`): not drawn, not in the world's faces, not struck and not in
-/// the way of a sight ray, the landscape not cut under it and its load group's effects not
-/// shown. *Seen*: in the recording of *The Field
-/// Base* the site shows only the sign, then the ray and the dome, until the dome plays back
-/// out and the building stands (docs/32, "Mission 03's mine").
+/// `CLandscape::PlaceBuilding`): not in the world's faces, not struck and not in the way of a
+/// sight ray, the landscape not cut under it and its load group's effects not shown. Whether it
+/// is drawn is the controller's actions 1 and 2 ([`Construction::hidden`]): a builder's building
+/// hides itself as its sign starts and shows itself in the state that places it. *Seen*: in the
+/// recording of *The Field Base* the site shows only the sign, then the ray and the dome, until
+/// the dome plays back out and the building stands (docs/32, "Mission 03's mine").
 #[derive(Clone, Debug, Default)]
 pub struct Unplaced {
     /// The cut its footing makes in the landscape.
@@ -651,6 +787,8 @@ impl Play {
         self.emplacements.retain(|(t, _)| *t != b);
         self.construction.spheres.retain(|s| s.target != b);
         self.construction.unplaced.remove(&b);
+        self.construction.machines.remove(&b);
+        self.construction.hidden.remove(&b);
         self.battle.combat.absent.remove(&b);
         self.construction.placements.remove(&b);
         self.economy.sites.retain(|s| s.target != b);
@@ -665,9 +803,17 @@ impl Play {
     /// Sphere `phases` started on building `t`, round its outer contour, 15 wider on a mine.
     /// The building's load group has made the three effects already (action 5), idle in their
     /// header's time mode 0 until a code starts them.
+    ///
+    /// The building's controller takes the first phase's code before it first plans: a
+    /// building made in play has its controller's clock at the moment it is made, and plays the
+    /// way from its constructor's record to the anchor that code opens at once, which is how
+    /// the new building hides itself and shows the sign (docs/32, "What the building's
+    /// controller does with the codes"). A mission's building has stood on its code-0 anchor
+    /// since the load, its 5 s steps counted from there.
     fn start_sphere(&mut self, t: usize, phases: &'static [Phase], now: f64) {
         let path = self.commander.paths.get(t).cloned().unwrap_or_default();
-        let effects = sphere_effects(&mut self.assembly, &path);
+        let controller = building_controller(&mut self.assembly, &path);
+        let effects = controller.as_ref().map(sphere_effects).unwrap_or_default();
         let Some((position, radius)) =
             self.battle.combat.targets.get(t).map(|target| (target.position, target.radius))
         else {
@@ -683,6 +829,18 @@ impl Play {
                 self.fx.start(owner, name, frame, 1.0, now, None);
             }
         }
+        if let Some(controller) = controller {
+            let made = self.construction.unplaced.contains_key(&t);
+            let machine = self.construction.machines.entry(t).or_insert_with(|| {
+                let mut m = CodeMachine::new(controller, if made { now } else { 0.0 }, (centre, radius));
+                if !made {
+                    // What it played at the load, placing itself, ran long ago.
+                    m.advance(now);
+                }
+                m
+            });
+            machine.sphere = (centre, radius);
+        }
         self.construction.spheres.retain(|s| s.target != t);
         self.construction.spheres.push(Sphere {
             target: t,
@@ -691,11 +849,10 @@ impl Play {
             phases,
             phase: 0,
             phase_ms: now,
-            code: 0,
-            next_kill_ms: None,
             effects,
         });
-        self.start_phase(self.construction.spheres.len() - 1, now, true);
+        self.start_phase(self.construction.spheres.len() - 1, true);
+        self.run_machine(t, now);
     }
 
     /// Make a building of `type_word` for `clan` at `at` turned `yaw`
@@ -898,11 +1055,11 @@ impl Play {
     ///
     /// Every unit within the sphere's radius + 15 (as the task starts) or + 20 (on a later
     /// phase) is ordered out, unless it is leaving already or upgrading (`0x10031680`).
-    fn start_phase(&mut self, s: usize, now: f64, first: bool) {
+    fn start_phase(&mut self, s: usize, first: bool) {
         let sphere = self.construction.spheres[s].clone();
         let Some(phase) = sphere.phases.get(sphere.phase) else { return };
         if let Some(code) = phase.code.filter(|&c| c != CODE_UPGRADING) {
-            self.enter_code(s, code, now);
+            self.enter_code(s, code);
         }
         if phase.clear {
             let reach = sphere.radius + if first { CLEAR_ON_START } else { CLEAR_ON_CHANGE };
@@ -920,72 +1077,70 @@ impl Play {
         }
     }
 
-    /// The building's controller taking `code` (`IControl` slot 19): the path its planner
-    /// takes to the anchor that code opens, each state's action group run as it plays
-    /// (docs/32, "What the building's controller does with the codes"). *Measured* on all 30
-    /// `fortif.rlb` controllers, whose construction states have one shape:
+    /// The building's controller taking `code` (`IControl` slot 19, `Control.dll:0x10004800`):
+    /// it stores the code, and nothing else. The anchor the controller stands on stops applying,
+    /// and at its next step the planner queues the way to the anchor the code opens
+    /// ([`CodeMachine::advance`]).
+    fn enter_code(&mut self, s: usize, code: i32) {
+        let t = self.construction.spheres[s].target;
+        if let Some(machine) = self.construction.machines.get_mut(&t) {
+            machine.code = code;
+        }
+    }
+
+    /// Building `t`'s controller played up to `now`: each state it takes runs its action
+    /// group, at the moment its step begins (docs/32, "What the building's controller does
+    /// with the codes"). *Measured* on all 30 `fortif.rlb` controllers, whose construction
+    /// states have one shape, every step 250 ms but the code-0 anchor's:
     ///
-    /// | code | from | the states' groups |
+    /// | the code changes | the states it plays, and their groups | then, on the anchor |
     /// |---|---|---|
-    /// | 1 | 0 | start the sign in mode 2 |
-    /// | 2 | 1 | start the dome and the ray in mode 1, switch the sign off, kill; then kill every 250 ms |
-    /// | 0 | 2 | switch the ray off, place the building; then start the dome in mode 3 |
-    /// | 8 | 0 | start the dome in mode 1; then kill every 250 ms |
-    /// | 10 | 0 | start the dome in mode 3, place the building; then kill every 250 ms |
-    /// | 0 | 10 | nothing |
+    /// | first plan → 1 | action 1, start the sign in mode 2 | nothing, every 250 ms |
+    /// | 1 → 2 | start the dome and the ray in mode 1, the sign off, kill | kill every 250 ms |
+    /// | 2 → 0 | the ray off, place, action 2 · start the dome in mode 3 | nothing, 5 s ± 12.5% |
+    /// | 0 → 8 | start the dome in mode 1 (on the factories, their smoke off) | kill every 250 ms |
+    /// | first plan → 10 | start the dome in mode 3 · place | kill every 250 ms |
+    /// | 10 → 0 | — | nothing, 5 s ± 12.5% |
     ///
-    /// Each state plays for 250 ms, so a kill anchor's first kill comes one or two states
-    /// after the code. Action 20 places the building in the landscape (`CLandscape::PlaceBuilding`):
-    /// until then it is not drawn, has no faces and has cut nothing ([`Unplaced`]).
-    ///
-    /// STAND-IN: docs/32-builder.md#the-construction-sphere--read-and-measured -- a state's
-    /// action group runs as the code arrives rather than at the controller's next 250 ms
-    /// step, and the states the path passes through play at once; action 1 and 2's properties
-    /// `0x200` and `0x201`, and the plants' smoke switched off on code 8, are not followed.
-    fn enter_code(&mut self, s: usize, code: i32, now: f64) {
-        let sphere = self.construction.spheres[s].clone();
-        let t = sphere.target;
-        let start =
-            |play: &mut Play, id: i32, mode: u32| play.fx.restart(Owner::Building(t, id), now, Some(mode));
-        let kill_after = match (sphere.code, code) {
-            (_, 1) => {
-                start(self, SIGN, TIME_LOOP);
-                None
+    /// Actions 1 and 2 are `IAnimation` slot 8 on node 0 with mode `0x200` and `0x201`, flag
+    /// 1: they set and clear the node's flag 1 through the whole node tree, and the mesh's draw
+    /// passes over a node that carries it (`AniMesh.dll:0x10005500`, `0x10014e57`). So action 1
+    /// hides the building and action 2 shows it. Action 20 places it in the landscape
+    /// (`CLandscape::PlaceBuilding`): until then it has no faces and has cut nothing
+    /// ([`Unplaced`]).
+    fn run_machine(&mut self, t: usize, now: f64) -> Vec<Event> {
+        let Some(machine) = self.construction.machines.get_mut(&t) else { return Vec::new() };
+        let taken = machine.advance(now);
+        let (centre, radius) = machine.sphere;
+        let mut events = Vec::new();
+        for (at, records) in taken {
+            for values in records {
+                let [_, _, _, action, v4, v5, ..] = values;
+                let owner = Owner::Building(t, v4);
+                match action {
+                    ACT_HIDE => {
+                        self.construction.hidden.insert(t);
+                    }
+                    ACT_SHOW => {
+                        self.construction.hidden.remove(&t);
+                    }
+                    control::ACT_START_EFFECT => self.fx.restart(owner, at, u32::try_from(v5).ok()),
+                    control::ACT_EFFECT_ON => self.fx.switch(owner, true),
+                    control::ACT_EFFECT_OFF => self.fx.switch(owner, false),
+                    ACT_PLACE => self.place_in_landscape(t, at),
+                    ACT_KILL_IN_SPHERE => events.extend(self.kill_inside(t, centre, radius)),
+                    _ => {}
+                }
             }
-            (_, 2) => {
-                start(self, DOME, TIME_ONCE);
-                start(self, RAY, TIME_ONCE);
-                self.fx.switch(Owner::Building(t, SIGN), false);
-                Some(0.0)
-            }
-            (2, 0) => {
-                self.fx.switch(Owner::Building(t, RAY), false);
-                self.place_in_landscape(t, now);
-                start(self, DOME, TIME_REVERSE);
-                None
-            }
-            (_, 8) => {
-                start(self, DOME, TIME_ONCE);
-                Some(KILL_STEP_MS)
-            }
-            (_, 10) => {
-                start(self, DOME, TIME_REVERSE);
-                self.place_in_landscape(t, now);
-                Some(2.0 * KILL_STEP_MS)
-            }
-            _ => None,
-        };
-        let sphere = &mut self.construction.spheres[s];
-        sphere.code = code;
-        sphere.next_kill_ms = kill_after.map(|after| now + after);
+        }
+        events
     }
 
     /// Every construction sphere's step at `now` (`0x10031680`): the next phase once one runs
-    /// out, the kill every 250 ms while the controller holds a kill code, and the task's end.
-    /// The effects outlive the task: the controller stays on its code-0 state, and the dome
-    /// plays itself back out there.
+    /// out, its code handed to the controller, and the task's end; then every building's
+    /// controller played to `now`. The controller outlives the task: it stays on its code-0
+    /// anchor, and the dome plays itself back out there.
     fn step_spheres(&mut self, now: f64) -> Vec<Event> {
-        let mut events = Vec::new();
         let mut s = 0;
         while s < self.construction.spheres.len() {
             let sphere = &mut self.construction.spheres[s];
@@ -1003,50 +1158,48 @@ impl Play {
                     }
                     continue;
                 }
-                self.start_phase(s, now, false);
-            }
-            let sphere = self.construction.spheres[s].clone();
-            if let Some(due) = sphere.next_kill_ms
-                && now >= due
-            {
-                self.construction.spheres[s].next_kill_ms = Some(now + KILL_STEP_MS);
-                events.extend(self.kill_inside(sphere.target, sphere.centre, sphere.radius));
+                self.start_phase(s, false);
             }
             s += 1;
         }
-        events
+        let mut machines: Vec<usize> = self.construction.machines.keys().copied().collect();
+        machines.sort_unstable();
+        machines.into_iter().flat_map(|t| self.run_machine(t, now)).collect()
+    }
+
+    /// Whether building `t` is drawn: every building but one its controller has hidden
+    /// (action 1) and not yet shown again (action 2).
+    pub fn shown(&self, t: usize) -> bool {
+        !self.construction.hidden.contains(&t)
     }
 
     /// The kill (action 21, `Control.dll:0x100033e6`): the world's objects of classes 2, 4 and
-    /// 10 inside the building's construction sphere — the mask `0x414`, bits `1 << class` from
+    /// 10 that meet the building's construction sphere — the mask `0x414`, bits `1 << class` from
     /// the table at `0x1003b1a0` — each through its life system's slot 7, which does nothing to
     /// an invulnerable one (`0x1000eb76`, the byte property 162 sets). Class 4 is a unit and 10
     /// a tree or a stone (docs/30, "A class is slot 11"); a builder upgrading is invulnerable.
+    /// Class 2 is an agent loaded from a `WPNS` record, and nothing in the install makes one
+    /// (docs/32, "The kill").
     ///
-    /// STAND-IN: docs/32-builder.md#the-construction-sphere--read-and-measured -- what answers
-    /// class 2 is not established, and how the world's query decides an object is inside the
-    /// sphere is not read: every live robot, the hero, tree or stone whose origin lies inside.
+    /// The world's query (`Terrain.dll` `IWorld` slot 3, `0x10025f40`) walks its object tree from
+    /// the landscape and takes an object whose class is in the mask when its own bounding sphere
+    /// (interface `0x18` slot 9 with 2) and the construction sphere meet: the distance between
+    /// their centres, in three dimensions, no more than the two radii together (`0x10025d10`).
     fn kill_inside(&mut self, building: usize, centre: Vec3, radius: f32) -> Vec<Event> {
         let mut events = Vec::new();
         let robots = self.robots.iter().map(|(t, _)| *t).filter(|&t| !self.invulnerable(t));
         let scenery = (0..self.units.len())
             .filter(|&t| matches!(self.units[t].kind, mission::KIND_VEGETATION | mission::KIND_ROCK));
+        let meets = |x: &parkan_sim::combat::Target| x.centre.distance(centre) <= x.radius + radius;
         let inside: Vec<usize> = robots
             .chain(scenery)
             .filter(|&t| t != building)
-            .filter(|&t| {
-                self.battle
-                    .combat
-                    .targets
-                    .get(t)
-                    .is_some_and(|x| x.alive && x.position.distance(centre) <= radius)
-            })
+            .filter(|&t| self.battle.combat.targets.get(t).is_some_and(|x| x.alive && meets(x)))
             .collect();
         for t in inside {
             events.extend(self.battle.combat.ground_loss(t, f32::MAX / 4.0));
         }
-        if !self.hero.dead() && !self.hero_away() && self.hero.walker.body.position.distance(centre) <= radius
-        {
+        if !self.hero.dead() && !self.hero_away() && self.battle.combat.hero.as_ref().is_some_and(meets) {
             let mut lives: Vec<&mut parkan_sim::damage::Life> =
                 self.hero.lives.iter_mut().flatten().collect();
             parkan_sim::damage::share_loss(&mut lives, f32::MAX / 4.0);
@@ -1088,20 +1241,19 @@ fn basement_steepest(inner: &[Vec3], outer: &[Vec3]) -> f32 {
         .fold(1.0, f32::min)
 }
 
-/// A building's load-group construction-sphere effects (action 5): each id and its name.
-fn sphere_effects(assembly: &mut crate::assembly::Assembly, path: &str) -> Vec<(i32, String)> {
+/// The controller of the building at `path`: its root record's `.ctl`.
+fn building_controller(assembly: &mut crate::assembly::Assembly, path: &str) -> Option<control::Controller> {
     let parts = assembly.parts(KIND_BUILDING, path);
-    let Some(root) = parts.iter().find(|p| p.host == -1) else { return Vec::new() };
-    let Some(slot) = assembly.library.record_slot(assembly.library.get(&root.record), "ctl", 0) else {
-        return Vec::new();
-    };
-    let Some(controller) = assembly
+    let root = parts.iter().find(|p| p.host == -1)?;
+    let slot = assembly.library.record_slot(assembly.library.get(&root.record), "ctl", 0)?;
+    assembly
         .archive(&slot.library)
         .and_then(|a| a.read_name(&slot.member).ok())
         .and_then(|data| control::parse(data, &slot.member).ok())
-    else {
-        return Vec::new();
-    };
+}
+
+/// A building's load-group construction-sphere effects (action 5): each id and its name.
+fn sphere_effects(controller: &control::Controller) -> Vec<(i32, String)> {
     controller
         .group(control::ENTRY_LOAD)
         .iter()
@@ -1159,5 +1311,100 @@ mod tests {
         let total: f64 = NEW_BUILDING.iter().map(|p| p.seconds).sum();
         assert_eq!(total, 41.0);
         assert_eq!(NEW_BUILDING.iter().filter(|p| p.clear).map(|p| p.seconds).sum::<f64>(), 30.0);
+    }
+
+    /// A controller of the construction states' shape (docs/32, "What the building's
+    /// controller does with the codes"): 0 the source; 1 hide and start the sign, into the
+    /// code-1 anchor 2; 3 start the dome and the ray, the sign off, kill, into the code-2 anchor
+    /// 4, which kills; 5 the ray off, place, show, and 6 the dome backward, into the code-0
+    /// anchor 7, 5 s and jittered. Every step but the last anchor's is 250 ms.
+    fn construction_states() -> control::Controller {
+        use control::{ANY_REQUEST, NO_EDGE, Reference, STATE_ANCHOR, STATE_FIXED, STATE_JITTER, State};
+        let state = |request: i32, anchor: bool, group: i32, length: f32, jitter: bool| State {
+            request,
+            actions: group,
+            length,
+            mode: STATE_FIXED | if anchor { STATE_ANCHOR } else { 0 } | if jitter { STATE_JITTER } else { 0 },
+            ..State::default()
+        };
+        let states = vec![
+            state(ANY_REQUEST, false, -1, 250.0, false),
+            state(ANY_REQUEST, false, 0, 250.0, false),
+            state(1, true, -1, 250.0, false),
+            state(ANY_REQUEST, false, 1, 250.0, false),
+            state(2, true, 2, 250.0, false),
+            state(ANY_REQUEST, false, 3, 250.0, false),
+            state(ANY_REQUEST, false, 4, 250.0, false),
+            state(0, true, -1, 5000.0, true),
+        ];
+        let n = states.len();
+        let mut costs = vec![NO_EDGE; n * n];
+        for (from, to) in [(0, 1), (1, 2), (2, 2), (2, 3), (3, 4), (4, 4), (4, 5), (5, 6), (6, 7), (7, 7)] {
+            costs[to * n + from] = 1.0;
+        }
+        let record = |group: usize, action: i32, v4: i32, v5: i32| Reference {
+            resource: Default::default(),
+            values: [0, 0, 0, action, v4, v5, 0, 0, 0],
+            group,
+        };
+        let references = vec![
+            record(0, ACT_HIDE, 0, 0),
+            record(0, control::ACT_START_EFFECT, SIGN, TIME_LOOP as i32),
+            record(1, control::ACT_START_EFFECT, DOME, TIME_ONCE as i32),
+            record(1, control::ACT_START_EFFECT, RAY, TIME_ONCE as i32),
+            record(1, control::ACT_EFFECT_OFF, SIGN, 0),
+            record(1, ACT_KILL_IN_SPHERE, 0, 0),
+            record(2, ACT_KILL_IN_SPHERE, 0, 0),
+            record(3, control::ACT_EFFECT_OFF, RAY, 0),
+            record(3, ACT_PLACE, 0, 0),
+            record(3, ACT_SHOW, 0, 0),
+            record(4, control::ACT_START_EFFECT, DOME, TIME_REVERSE as i32),
+        ];
+        control::Controller { states, costs, references, ..control::Controller::default() }
+    }
+
+    fn actions(taken: &[Taken]) -> Vec<(f64, Vec<i32>)> {
+        taken.iter().map(|(at, records)| (*at, records.iter().map(|v| v[3]).collect())).collect()
+    }
+
+    #[test]
+    fn a_code_takes_effect_at_the_controllers_next_step_and_each_state_on_the_way_plays_a_step() {
+        let mut m = CodeMachine::new(construction_states(), 1000.0, (Vec3::ZERO, 10.0));
+        // The first code comes before the first plan: from the constructor's record the way to
+        // code 1's anchor, its first state hiding the building and starting the sign at once.
+        m.code = 1;
+        assert_eq!(actions(&m.advance(1000.0)), vec![(1000.0, vec![ACT_HIDE, control::ACT_START_EFFECT])]);
+        assert_eq!(actions(&m.advance(1600.0)), vec![(1250.0, vec![]), (1500.0, vec![])]);
+        assert!(m.on_anchor(1));
+        // Slot 19 stores code 2 at 1.6 s; nothing runs until the anchor's step ends at 1.75 s.
+        m.code = 2;
+        assert!(m.advance(1700.0).is_empty(), "not as the code arrives");
+        let kill = vec![ACT_KILL_IN_SPHERE];
+        let start = vec![
+            control::ACT_START_EFFECT,
+            control::ACT_START_EFFECT,
+            control::ACT_EFFECT_OFF,
+            ACT_KILL_IN_SPHERE,
+        ];
+        assert_eq!(
+            actions(&m.advance(2250.0)),
+            vec![(1750.0, start), (2000.0, kill.clone()), (2250.0, kill)]
+        );
+        // Code 0 from the kill anchor: the state that places and shows, and a step later the one
+        // that turns the dome back, then the 5 s anchor.
+        m.code = 0;
+        let taken = actions(&m.advance(3100.0));
+        assert_eq!(taken[0], (2500.0, vec![control::ACT_EFFECT_OFF, ACT_PLACE, ACT_SHOW]));
+        assert_eq!(taken[1], (2750.0, vec![control::ACT_START_EFFECT]));
+        assert_eq!(taken[2], (3000.0, vec![]));
+        assert!(m.on_anchor(0));
+        // Its step is 5 s less up to 12.5%, and held to 5 s at most.
+        let mut last = 3000.0;
+        for (at, _) in actions(&m.advance(3000.0 + 500_000.0)) {
+            if at > 3000.0 {
+                assert!((4375.0..=5000.0).contains(&(at - last)), "{}", at - last);
+            }
+            last = at;
+        }
     }
 }

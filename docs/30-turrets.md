@@ -724,10 +724,13 @@ classes 1, 3, 4 and 10 where a round visits 1, 2, 3, 4 and 10.
     fall to the default at `0x10060779`. That one does not settle it by itself — it
     leaves out class 10, which the camera does visit — but it names no 2 either.
 
-  So **what answers class 2 is still not established**, and the negative is now a
-  controlled one: no shipped code compares a class against 2 and no installed slot 11
-  answers it. Whatever it is, the camera's line is the only thing in the install that
-  treats it differently from a round's, and nothing the engine models answers it
+  So no shipped code compares a class against 2 and no installed slot 11 *returns* it.
+  It is **stored**: an agent's slot 11 answers its `+0x6d8` (`AniMesh.dll:0x10002fd0`),
+  which the load sets from the `objects.rlb` tag, `WPNS` 2 (`0x100031b2`), and no object
+  of the shipped game is a `WPNS` agent
+  ([32-builder.md](32-builder.md#what-the-buildings-controller-does-with-the-codes--read-and-measured)).
+  The camera's line is the only thing in the install that treats class 2 differently
+  from a round's, and it has nothing to drop
   ([42-selection.md](42-selection.md#not-established) has the pick's own classes).
 
 **The vector at `+8` is the face's own normal** — *read*, end to end. IWorld slot 6
@@ -1183,13 +1186,14 @@ listed are `r_t_01`–`02`, `r_l_01`–`07`, `r_m_01`–`04`, `r_b_01`–`04`,
   the face's three `int16` into. So the camera stands 0.75 m off the face along its
   normal ([What the outer camera's line meets](#what-the-outer-cameras-line-meets--read)).
   Read for the landscape; the same field on a mesh object was not traced.
-- **Which objects answer world class 2**, the one class the camera drops from a
-  round's mask, is still not established — but the negative is now controlled:
-  68 comparison sites over 21 modules name classes 1, 3, 4, 5, 6, 7, 9, 10 and 11
-  and never 2, and of the 71 `return N < 16` stubs in the install the 7 that sit at
-  slot 11 of an installed vtable answer 1, 3, 5, 7 and 11
-  ([What the outer camera's line meets](#what-the-outer-cameras-line-meets--read)).
-  It is [42-selection.md](42-selection.md#not-established)'s question too.
+- ~~**Which objects answer world class 2**, the one class the camera drops from a
+  round's mask.~~ — **read**: an agent answers its `+0x6d8` at slot 11
+  (`AniMesh.dll:0x10002fd0`), a field its load **stores** from the `objects.rlb` tag —
+  `WPNS` 2 (`0x100031b2`) — which is why neither a comparison sweep nor a stub sweep
+  could see it. No object of the shipped game is a `WPNS` agent: the five records
+  name `weapon.rlb` members that are not there and are named nowhere else, and 0 of
+  the 864 placed objects is one
+  ([32-builder.md](32-builder.md#what-the-buildings-controller-does-with-the-codes--read-and-measured)).
 - ~~What the outer view's flag `0x20` copied from the main view is~~ — **read**:
   the camera's **infrared**, carried over so the outer shot keeps the night sight
   the cockpit had ([The outer camera](#the-outer-camera--read-and-measured),

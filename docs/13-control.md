@@ -555,7 +555,7 @@ The actions (*read*; counts *measured* across the 2925 records):
 | action | records | does |
 |---:|---:|---|
 | 0 | 202 | **stop the body**: its command, velocity, spin and step velocity go to zero (`0x10014400`); first in every round group |
-| 1, 2 | 80, 30 | property `0x200` / `0x201` on the object |
+| 1, 2 | 80, 30 | **hide / show the object**: `IAnimation` (`+0x20`) slot 8 with node 0, mode `0x200` / `0x201` and flag 1, which sets / clears node flag 1 down the whole node tree, and the draw passes over a flagged node ([32-builder.md](32-builder.md#actions-1-and-2-hide-and-show-the-building--read)) |
 | 3 | 217 | **an effect** by name on **node** v4, id v7 (`0x10002972`): v4 is rebased by the part's first node through `AniMesh` slot 14, as action 14's is (`0x100029bb`) |
 | 4 | 1203 | **an effect** by name on three control points v4..v6, at their centroid, id v7 (`0x10002a8d`); the three directions become the rows of the matrix the effect hangs on ([11-effects.md](11-effects.md#a-sprite-is-drawn-through-its-frame--read)) |
 | 5 | 72 | **an effect** by name in the world at the sphere `+0x38` gives — a building's construction sphere — scaled by its radius, id v7 (`0x10002e0e`); `fortif.rlb` only |

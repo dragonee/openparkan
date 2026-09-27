@@ -1259,7 +1259,9 @@ Two differences carry the answer.
 - **Its class mask is narrower than a round's**: `0x40a` drops class 2, which
   `0x41e` holds, and far narrower than the sight ray's `0xfff`. It still admits the
   landscape (1), buildings (3), units (4) and scenery (10), so everything a glow can
-  stand behind is tested. What class 2 is is not established here.
+  stand behind is tested. Class 2 is an agent loaded from a `WPNS` record, and no
+  object of the shipped game is one, so dropping it changes nothing
+  ([32-builder.md](32-builder.md#what-the-buildings-controller-does-with-the-codes--read-and-measured)).
 
 ### A beacon light's glow — *read*, and *measured*
 

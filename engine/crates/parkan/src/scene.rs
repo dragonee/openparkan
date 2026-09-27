@@ -955,7 +955,7 @@ pub fn place_own_view(
             None => variant == 0,
         };
         let visible =
-            shown && !play.deleted.get(t).copied().unwrap_or(false) && play.placed(t) && Some(t) != driven;
+            shown && !play.deleted.get(t).copied().unwrap_or(false) && play.shown(t) && Some(t) != driven;
         let matrix = models::pose_matrix(&part.nodes[node]) * glam::Mat4::from_scale(Vec3::splat(part.scale));
         // A tracked chassis's belt runs with the track under it, not with the world clock:
         // its device plays the material (docs/28, "The belt is a material a channel plays").

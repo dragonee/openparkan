@@ -588,8 +588,11 @@ shown** (*seen*): at 230–234 s the camera stands close on the site, and it sho
 builder, the sign's rings, the ray and the rising dome over bare ground; the mine
 stands only from 237 s, as the dome plays back out. That is the controller's code-0
 state placing it in the landscape (action 20, `CLandscape::PlaceBuilding`,
-[13-control.md](13-control.md)), at 40 s. How the unplaced building is kept out of the
-draw is not read. It matters to the sign: `B_Sphere_Sign` carries header flag
+[13-control.md](13-control.md)) and showing it again (action 2), at 40 s. **It is kept
+out of the draw by its controller** (*read*): the first state code 1 plays hides it
+(action 1), the same moment the sign starts
+([Actions 1 and 2 hide and show the building](#actions-1-and-2-hide-and-show-the-building--read)).
+It matters to the sign: `B_Sphere_Sign` carries header flag
 0x400 and draws nothing while its tested point, the sphere's centre, is hidden
 ([11-effects.md](11-effects.md#a-beacon-lights-glow--read-and-measured)), so a
 building drawn over that centre takes the sign's ball and its ring of points with
@@ -678,7 +681,10 @@ What a phase does when it starts:
   own code starts at **0**, the constructor's (`0x10006ecf`)
   ([24-motion.md](24-motion.md#a-states-use-count-and-its-request-code--read-and-measured)).
   Entering a state runs the state's **action group** (`+0x90`, section 5;
-  `Control.dll:0x1000c37c`, interpreter `0x10002800`).
+  `Control.dll:0x1000c37c`, interpreter `0x10002800`). Slot 19 does no more than
+  store the code and mark it changed (`+0x61c` bit `0x100`), so **a code takes effect
+  at the controller's next step**
+  ([below](#a-code-takes-effect-at-the-controllers-next-step--read-and-measured)).
 - **Clearing the area.** Every unit within the sphere's radius + 15 (on start)
   or + 20 (on a phase change) is ordered `ORDER_ROBOT_LEAVE` to radius + 20
   from the building, unless it is already leaving or upgrading. A leaving unit
@@ -709,12 +715,16 @@ and `fr_l_mtp`'s code-0 anchor steps at 50 ms rather than 5,000):
 
 | the code changes | the states it plays, and their groups | then, on the anchor |
 |---|---|---|
-| 0 → 1 | action 1; **start the sign** in time mode 2 | nothing, every 250 ms |
+| 0 → 1 | **hide the building** (action 1); **start the sign** in time mode 2 | nothing, every 250 ms |
 | 1 → 2 | **start the dome** and **the ray** in mode 1, switch the sign off, **kill** | **kill** every 250 ms |
-| 2 → 0 | switch the ray off, place the building (action 20), action 2 · **start the dome in mode 3** | nothing, every 5 s |
+| 2 → 0 | switch the ray off, place the building (action 20), **show it** (action 2) · **start the dome in mode 3** | nothing, every 5 s less up to 12.5% |
 | 0 → 8 | **start the dome** in mode 1 | **kill** every 250 ms |
 | 0 → 10 | **start the dome in mode 3** · place the building | **kill** every 250 ms |
-| 10 → 0 | — | nothing |
+| 10 → 0 | — | nothing, every 5 s less up to 12.5% |
+
+"0 →" in the first, fifth and sixth rows is the way from the constructor's record, a
+building's first plan; from the code-0 anchor itself there is no way to code 1's or
+code 10's anchor, and from code 8's none back to code 0's (*measured*, all 30).
 
 The effects are the sign, 9002 (`B_Sphere_Sign`: glow, `build_sign.wav`), the ray,
 9001 (`B_Sphere_Start`: plasma, lightning, `build_ray.wav`; `B_Sphere_Start_BT` on
@@ -725,6 +735,51 @@ effect's own header mode ([11-effects.md](11-effects.md#how-an-effect-runs--read
 controller and in no phase. A new building's controller has made no move when its
 first code arrives, and plans from state 0; from the code-0 anchor there is no way
 to code 1's, so the order matters.
+
+#### A code takes effect at the controller's next step — *read*, and *measured*
+
+The machine tick (`Control.dll:0x1000bcf0`) runs its states while the controller's
+clock `+0xdc` is not ahead of the game's time (`0x1000c2a5`, and again at
+`0x1000c717` after each step): an anchor plans, the next state comes off the queue
+and its group runs, and the step moves the clock on. The clock starts at the time
+the object is made (`0x10007aaf`). Nothing else reads the code, so a code sent
+between steps waits for the step the controller is in to end, and the states on the
+way to its anchor then play **one step apart**, each group as its state is taken.
+
+*Measured*, on the 30 controllers: every state on these paths is fixed at 250 ms
+but the code-0 anchor, which is 5,000 ms and jittered on 29 (`fr_l_mtp`'s: 50 ms).
+A jittered step gains up to ±12.5% and is then held to 5 s at most
+([24-motion.md](24-motion.md#playing-a-state--read-and-measured)), so it runs 4.375
+to 5 s. What follows, *derived*:
+
+- **A new building** is made with its clock at that moment and takes code 1 before
+  it first plans, so the sign starts, and the building hides, as it is made. The
+  phases are whole multiples of 250 ms from there, so code 2 at 35 s and code 0 at
+  40 s each fall on a step: the first kill at 35 s, the building placed and shown
+  at 40 s, and **the dome turned back a step later, at 40.25 s**.
+- **The building an upgrade takes** stands on its code-0 anchor. Code 8, sent 26 s
+  in, waits for that anchor's next step, **0 to 5 s**: the dome and the first
+  kill come between 26 and 31.25 s, as the anchor's clock falls.
+- **The building an upgrade makes** is new: code 10 at once, placed 250 ms in, its
+  first kill at 500 ms.
+
+#### Actions 1 and 2 hide and show the building — *read*
+
+Action 1 calls the controller's `+0x20`, interface `0xb`, `IAnimation`, slot 8
+with node 0, mode `0x200` and flag 1; action 2 the same with mode `0x201`
+(`Control.dll:0x10002936`, `0x10002954`, the interface fetched at `0x10007912`).
+They are **not** properties `0x200` and `0x201`, as this page and
+[13-control.md](13-control.md) had them. Slot 8 (`AniMesh.dll:0x10005500`) sets the
+flag in the node's flag word `+0x14`, or clears it when the mode has bit 0, and with
+mode bit `0x200` does the same to every node whose parent is that node, and so down
+the whole tree. The mesh's draw, interface `0x18` slot 11 (`0x10014b30`), passes
+over a node whose word has bit 1 (`0x10014e57`, `0x100150a2`). So **action 1 hides
+the building and action 2 shows it**: a new building is hidden from its first
+plan until the code-0 state that places it. An upgrade's two buildings are never
+hidden. A sweep for `test [reg + 0x14], 1` finds the bit tested in seven other
+routines of the module, interface `0x20`'s slots 6 and 10 among them (`0x10010251`,
+`0x10010dcd`); which of them read node records, and what they leave a hidden node
+out of, is not followed.
 
 **Where an action-5 effect stands** (*read*). The building's load group makes the
 three at load (action 5, `Control.dll:0x10002e0e`), each an instance under its own
@@ -753,8 +808,21 @@ under the class mask `[0x1003b1c8] | [0x1003b1a8] | [0x1003b1b0]` — entries 10
 and 4 of a table at `0x1003b1a0` whose entry k is `1 << k` — so **`0x414`, classes 2,
 4 and 10**, which the old reading had as the classes `0x4`, `0x10` and `0x400`.
 Class 4 is a unit and 10 a tree or a stone
-([30-turrets.md](30-turrets.md#not-established)); what answers class 2 is not
-established there either. Each is killed through `ILifeSystem` slot 7
+([30-turrets.md](30-turrets.md#not-established)). **Class 2 is a `WPNS` agent, and
+there is none** (*read*, and *measured*): an agent's class is its `+0x6d8`, which its
+slot 11 answers (`AniMesh.dll:0x10002fd0`) and its load sets from its `objects.rlb`
+tag — the parent's class when it hangs on one (`0x10003174`), else `BTLU` 4, `BULL` 9,
+`WPNS` 2 and `STAT` 10 (`0x1000317f`–`0x100031c5`,
+[26-damage.md](26-damage.md#the-hit-test--read-and-measured)). The five `WPNS`
+records, `ws_al_01`, `ws_al_02`, `ws_fl_01`, `ws_hm_01` and `ws_hm_02`, name
+`weapon.rlb` members that are not there — none of its 466 members starts `ws` — and
+no file of the install names any of them but `objects.rlb`, and no module either.
+Over the 29 missions' 864 placed objects the roots are 296 `BTLU`, 167 `FORT` and 401
+`STAT`, and over the 458 assemblies' components none is a `WPNS`. The control: the
+same byte search for a `BULL` record, `bld_l_01`, finds it in `guns.rlb`, where the
+beam's controller emits it, and in two saves. So nothing in the shipped game answers
+class 2, and the kill's bit for it takes nothing. Each object taken is killed through
+`ILifeSystem` slot 7
 (`0x1000eb70`), which takes the object's whole total as a loss **unless its
 invulnerability byte is set** — `+0x5ac` of the life system (`0x1000eb76`), the byte
 action 17 clears before it calls the same slot (`0x100033d7`), which is control
@@ -762,6 +830,21 @@ action 17 clears before it calls the same slot (`0x100033d7`), which is control
 life system ([26-damage.md](26-damage.md#vegetation-and-rock-carry-node-life--read-and-measured)).
 So **the sphere fells the trees and stones inside it** as it kills the units, and
 **a builder upgrading, invulnerable, stands through its own building's kill**.
+
+**What counts as inside is the object's own sphere meeting it** (*read*). The
+world's slot 3 is `Terrain.dll:0x10025f40`: it takes the world's root, the landscape
+(the root's slot 12, as the sight ray does), and walks the tree from there
+(`0x10025d10`). An object whose `1 << class` meets the mask is asked for its
+bounding sphere, interface `0x18` slot 9 with 2 — the agent's sphere, its parts'
+header spheres joined, centred in the world
+([24-motion.md](24-motion.md#finding-the-ground--read)) — and taken when the squared
+distance between the two centres, in three dimensions, is no more than the square of
+the two radii together (`0x10025d89`–`0x10025dff`). Every object, taken or not, then
+hands the walk its children near the query through its slot 15 with the sphere's
+centre and radius (`0x10025ef4`), and each is tested the same way. So a unit or a
+tree whose origin stands outside the sphere dies when its own sphere reaches in, and
+one of another class — a building — is passed over while what hangs on it is still
+walked.
 
 **The kill repeats every 250 ms while the code is held** (*read*, and
 *measured*). The controller runs its action group each time it takes a state
@@ -780,27 +863,30 @@ self-edge included.
 
 So while the building's code stays 2, 8 or 10, the state takes itself again
 every step and kills inside the sphere four times a second:
-- about 20 times in a new building's 5-second code-2 phase, the state before it
-  killing once more as it passes;
-- for the rest of the upgrade on the old building, from 26.25 s until it is
-  replaced at 50 s;
-- about 10 times in the new building's 3-second code-10 phase, from 0.5 s.
+- 20 times in a new building's 5-second code-2 phase, at 35 s and every 250 ms to
+  39.75 s, the state before the anchor killing once as it passes;
+- for the rest of the upgrade on the old building, from a step after its code-0
+  anchor's next step past 26 s — between 26.25 and 31.25 s — until it is replaced at
+  50 s;
+- 10 times in the new building's 3-second code-10 phase, from 0.5 s to 2.75 s.
 
 **The sphere** is `CBuilding`'s construction sphere (`Terrain.dll:0x1005bd70`):
 built round the building's outer contours ("Illegal placement" without them),
 with 15 more radius on a mine (`0x1005c50c`).
 
-So a **new building**, made the moment the builder arrives but placed in the
-landscape only by its code-0 state, shows the sign from the start; after 5 s it sends everyone out for 30 s, the sign still up
+So a **new building**, made the moment the builder arrives but hidden, and placed in
+the landscape only by its code-0 state, shows the sign from the start; after 5 s it sends everyone out for 30 s, the sign still up
 and the dome's obstacle up for the last 5; then the sign goes, the ray and the dome
-play through while the kill comes on for 5 s, the ray is switched off, and the dome
-plays itself back out over its next 4 s — a second into that the task ends and the
+play through while the kill comes on for 5 s, the ray is switched off and the building
+placed and shown, and a step later the dome plays itself back out over its next 4 s —
+three quarters of a second into that the task ends and the
 building is done, 41 s. The dome, 6 s long, shows its first shells only from a third
 of the way through, so it rises 2 s after the ray starts and has just reached its
-second pair when code 0 turns it round. An **upgrade** sends everyone but the builder
-out of the old building's sphere as it starts, and 26 s in raises the dome with its
-kill (code 8); at 50 s the upgrade replaces the building, and the new one comes up
-under its dome playing backward, kills again (code 10) and finishes in 4 s.
+second pair when it is turned round. An **upgrade** sends everyone but the builder
+out of the old building's sphere as it starts, and 26 to 31 s in raises the dome with
+its kill (code 8, at the old building's next 5 s step); at 50 s the upgrade replaces
+the building, and the new one comes up under its dome playing backward, kills again
+(code 10) and finishes in 4 s.
 *Measured*: 24 of 30 controllers name the three sphere effects; the 5 bunkers and
 towers use `B_Sphere_Start_BT` for the ray; the six without are the ruins and main
 teleports, which nothing builds.
@@ -817,9 +903,9 @@ seconds named:
   237.0 s a translucent one over the finished mine; by 237.5 s it is gone. That is
   the read's backward dome: its last pair of shells draws at full strength, and the
   first pair fades as its progress to the power 10 (the fade (0, 1, 10) at `+20`), so
-  played backward it is all but gone about 1.5 s after code 0 — which, the ray first
-  seen at 231.5 s, came at about 235.7 s. Rising, the same fade has it a faint shimmer
-  at 234 s.
+  played backward it is all but gone about 1.5 s after it turns, a step after code 0 —
+  which, the ray first seen at 231.5 s, came at about 235.5 s. Rising, the same fade
+  has it a faint shimmer at 234 s.
 
 ### The beam — *read*, and *measured*
 
@@ -955,13 +1041,42 @@ laser (`e_gun_lc_03`, `e_gun_mc_20`).
   up, the sphere's radius long; and the kill takes classes 2, 4 and 10 — units, trees
   and stones — sparing the invulnerable
   ([What the building's controller does with the codes](#what-the-buildings-controller-does-with-the-codes--read-and-measured)).
-- How the world's query (the controller's `+0x44` slot 3) decides that an object lies
-  inside the kill's sphere — by its origin, its bounding sphere or its nodes.
-- What the game's `+0xe4` byte is (`0x10033d36`), under which a placement within
-  400 of one of the level's `+0x728` records turns red.
-- Whether holding `,` or `.` turns the model again on the key's repeats.
-- What the site shows of an unfinished building before the dome: the recording's
-  views of the mine are distant or behind it.
+- ~~How the world's query (the controller's `+0x44` slot 3) decides that an object lies
+  inside the kill's sphere — by its origin, its bounding sphere or its nodes.~~ —
+  **read**: by its bounding sphere. `IWorld` slot 3 (`Terrain.dll:0x10025f40`) walks
+  the object tree from the landscape and takes an object of a masked class when its own
+  sphere (interface `0x18` slot 9) and the construction sphere meet in three
+  dimensions (`0x10025d10`); what answers class 2 is a `WPNS` agent, and none of the
+  five `WPNS` records can be loaded or is named anywhere but `objects.rlb` — 0 of the
+  864 placed objects, against a control that finds a `BULL` record in `guns.rlb`
+  ([The kill](#what-the-buildings-controller-does-with-the-codes--read-and-measured)).
+- ~~When a code's groups run, and what actions 1 and 2 do.~~ — **read**: at the
+  controller's next step, since `IControl` slot 19 only stores the code
+  (`Control.dll:0x10004800`); the states on the way play one step apart, 250 ms, and
+  the code-0 anchor's step is 4.375–5 s, so an upgrade's code 8 waits up to 5 s.
+  Actions 1 and 2 hide and show the building through `IAnimation` slot 8's node flag 1,
+  which the mesh's draw passes over
+  ([A code takes effect at the controller's next step](#a-code-takes-effect-at-the-controllers-next-step--read-and-measured),
+  [Actions 1 and 2](#actions-1-and-2-hide-and-show-the-building--read)).
+- ~~What the game's `+0xe4` byte is (`0x10033d36`), under which a placement within
+  400 of one of the level's `+0x728` records turns red.~~ — **read**: the network
+  game's, set only from parameter mode 2, which the menus write only on the way to
+  `multi_login`; the records are the clans' base points from `data.tma`, and the walk
+  passes over the builder's own clan and any whose byte `+0x64` is set, which only
+  *"%s joined the game"* sets. Single play never applies it: Mission 03's lode lies
+  65.1 from the neutral clan's base, and the recording's mine there is green
+  ([Its colour](#the-model-under-the-cursor)).
+- ~~Whether holding `,` or `.` turns the model again on the key's repeats.~~ — **read**:
+  it does, a step a repeat ([Turning it](#turning-it)).
+- ~~What the site shows of an unfinished building before the dome: the recording's
+  views of the mine are distant or behind it.~~ — **seen**: nothing of it, until code 0
+  places it ([Building a building, tick by tick](#building-a-building-tick-by-tick--read-and-seen)).
+- What the seven other routines of `AniMesh.dll` that test bit 1 at `+0x14` leave out
+  of, and so whether a hidden building still stops a ray or is struck
+  ([Actions 1 and 2](#actions-1-and-2-hide-and-show-the-building--read)).
+- Why a clan whose byte `+0x64` is set — only *"%s joined the game"* sets it — no
+  longer keeps a network placement 400 from its base point, while one no player has
+  joined does (`0x10033de4`); the byte's other readers are not followed.
 - ~~How `StartCheckMaxBasementAngle` triangulates the basement between its
   rings.~~ — **read**: as the constrained Delaunay triangulation of the ring
   between the two `.bas` rings, their edges its only constraints, the faces

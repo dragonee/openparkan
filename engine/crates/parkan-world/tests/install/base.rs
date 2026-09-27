@@ -966,6 +966,89 @@ fn mission_03s_mine_stands_only_once_its_controller_places_it_as_the_dome_turns_
 
 #[test]
 #[ignore = "needs the game install"]
+fn mission_03s_mine_hides_itself_with_its_sign_and_turns_its_dome_back_a_step_after_code_0() {
+    use parkan_world::construction::{BUILDING_MINE, DOME, TIME_ONCE, TIME_REVERSE};
+    use parkan_world::fx::Owner;
+
+    let (mut play, _) = mission_03_play();
+    let player = play.player_clan;
+    let lode = glam::Vec3::new(1026.1, 942.7, 0.0);
+    let at = lode.with_z(play.ground.below(lode.x, lode.y, 1.0e5).unwrap().point.z);
+    let now = play.hero.time_ms;
+    let mine = play.create_building(player, BUILDING_MINE, at, 0.0, now).expect("the mine stands");
+    let dome =
+        |play: &mut parkan_world::play::Play| play.fx.owned(Owner::Building(mine, DOME)).next().unwrap().mode;
+    // Its controller takes code 1 before it first plans, and the first state on the way hides
+    // it (action 1, `IAnimation` slot 8 with flag 1 through its node tree) as the sign starts.
+    assert!(!play.shown(mine), "hidden from the moment it is made");
+    play_for(&mut play, 39.9, |_| {});
+    assert!(!play.shown(mine) && !play.placed(mine), "through code 2");
+    assert_eq!(dome(&mut play), TIME_ONCE);
+    // Code 0 at 40 s, on the kill anchor's step: the ray off, the building placed (action 20)
+    // and shown (action 2) in one state; the dome turns back in the next, 250 ms on.
+    play_for(&mut play, 0.2, |_| {});
+    assert!(play.shown(mine) && play.placed(mine));
+    assert_eq!(dome(&mut play), TIME_ONCE, "not as the code arrives");
+    play_for(&mut play, 0.3, |_| {});
+    assert_eq!(dome(&mut play), TIME_REVERSE);
+}
+
+#[test]
+#[ignore = "needs the game install"]
+fn a_new_buildings_sphere_kills_the_scenery_whose_own_sphere_meets_it_from_35_seconds() {
+    use parkan_formats::mission::{KIND_ROCK, KIND_VEGETATION};
+    const STORAGE: u32 = 0x8000_0008;
+
+    // Mission 01 has 22 trees and stones (Mission 03 none).
+    let mut play = campaign_play(gamedir::MISSION_01);
+    let player = play.player_clan;
+    let ground = |play: &parkan_world::play::Play, x: f32, y: f32| {
+        glam::Vec3::new(x, y, play.ground.below(x, y, 1.0e5).unwrap().point.z)
+    };
+    let scenery: Vec<usize> = (0..play.units.len())
+        .filter(|&t| matches!(play.units[t].kind, KIND_VEGETATION | KIND_ROCK))
+        .filter(|&t| play.battle.combat.targets[t].alive)
+        .collect();
+    // A storage in a far corner gives the sphere's radius and where its centre sits from the
+    // placement.
+    let now = play.hero.time_ms;
+    let probe_at = ground(&play, 60.0, 60.0);
+    let probe = play.create_building(player, STORAGE, probe_at, 0.0, now).expect("a storage in the corner");
+    let probe = play.construction.spheres.iter().find(|s| s.target == probe).unwrap().clone();
+    let (offset, radius) = (probe.centre - probe_at, probe.radius);
+    let meets = |play: &parkan_world::play::Play, centre: glam::Vec3, t: usize| {
+        let x = &play.battle.combat.targets[t];
+        x.centre.distance(centre) <= x.radius + radius
+    };
+    // A site on a tree or stone with one whose own sphere reaches in from outside.
+    let (at, met, rim) = scenery
+        .iter()
+        .find_map(|&s| {
+            let p = play.battle.combat.targets[s].position;
+            let at = ground(&play, p.x + 1.0, p.y + 1.0);
+            let centre = at + offset;
+            let met: Vec<usize> = scenery.iter().copied().filter(|&t| meets(&play, centre, t)).collect();
+            let rim: Vec<usize> = met
+                .iter()
+                .copied()
+                .filter(|&t| play.battle.combat.targets[t].position.distance(centre) > radius)
+                .collect();
+            (!rim.is_empty()).then_some((at, met, rim))
+        })
+        .expect("a site with scenery on its sphere's rim");
+    let site = play.create_building(player, STORAGE, at, 0.0, now).expect("the storage stands");
+    eprintln!("storage {site} at {at}: r {radius}; met {met:?}, from outside {rim:?}");
+    play_for(&mut play, 34.9, |_| {});
+    assert!(met.iter().all(|&t| play.battle.combat.targets[t].alive), "no kill before code 2");
+    play_for(&mut play, 0.2, |_| {});
+    // Code 2's first state kills: every one whose own sphere meets the construction sphere,
+    // those whose origin stands outside it too (`Terrain.dll:0x10025d10`), and no other.
+    assert!(met.iter().all(|&t| !play.battle.combat.targets[t].alive), "{met:?}");
+    assert!(scenery.iter().filter(|t| !met.contains(t)).all(|&t| play.battle.combat.targets[t].alive));
+}
+
+#[test]
+#[ignore = "needs the game install"]
 fn mission_03s_large_factory_waits_on_ore_and_builds_an_ssw_x_in_25_seconds_once_the_mine_digs() {
     use parkan_world::construction::BUILDING_MINE;
 
