@@ -1310,9 +1310,10 @@ assembled nowhere, so "in the tree" and "assembled" are detected apart.
   19 shipped assemblies — the fixed towers and the targets — are authored under
   it ([How the AI fires](#how-the-ai-fires--read)). The nibble is the object
   id's **class**, 3 being a building and 4 a unit, so a winged SSM is held for
-  buildings ([above](#how-the-ai-fires--read)). Which object answers class 2,
-  the one bit an outer camera's query drops from a round's, is still open
-  ([30-turrets.md](30-turrets.md#not-established)).
+  buildings ([above](#how-the-ai-fires--read)). Class 2, the one bit an outer
+  camera's query drops from a round's, is an agent loaded from a `WPNS` record,
+  and no object of the shipped game is one
+  ([30-turrets.md](30-turrets.md#what-the-outer-cameras-line-meets--read)).
 - ~~Which fight-module bar a building's guns must clear. With the walker's 0.85
   the Small Bunker's flamers only fire at a unit close to its own ground level,
   never at hovering flyers, so the warbots do the fighting.~~ **Read**: a

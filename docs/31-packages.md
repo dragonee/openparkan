@@ -364,16 +364,21 @@ readers were not traced, that is marked.
   ([24-motion.md](24-motion.md#how-the-ai-drives-a-machine--read-and-measured)).
   The go task will not be
   interrupted by reasons 0–2 or 5, only 3 and 4 (`0x1002b390`).
-  **Route does not chain waypoints** (*read*, as a search). The dispatcher's
-  case for Route (`iron3d.dll:0x10079230`) first empties the unit record's list
-  of points (`+0xc0`, 8-byte x/y records, `0x1007c0a0`), then gives one `GO` to
-  the picked place, replacing. The unit record's constructor (`0x10074af0`)
-  builds that list. Another path (`0x10079f40`) gives a `PATROL` of
-  radius 300, replacing, on one of two units the record names or on the list's
-  *first* point, and empties the list. Nothing fills the list: every
-  store to an `+0xc4` field in `iron3d.dll`, the list's end, is one of these
-  emptyings or belongs to a panel layout. The go task holds one place, and a
-  later `GO` replaces it.
+  **The Route row does chain waypoints** (*read*, in
+  [42-selection.md](42-selection.md#an-order-row-leaves-a-pick-open--read)).
+  This paragraph once said it does not, from a search that swept only the
+  stores to an `+0xc4` field, the list's end, and so missed the pick's appends.
+  The dispatcher's case for Route (`iron3d.dll:0x10079230`) first empties the
+  unit record's list of points (`+0xc0`, 8-byte x/y records, `0x1007c0a0`),
+  then gives one `GO` to the picked place, replacing. The unit record's
+  constructor (`0x10074af0`) builds that list. The Guard row's pick
+  (`0x10079f40`) gives a `PATROL` of radius 300, replacing, on one of two units
+  the record names or on the list's *first* point, and empties the list. The
+  list **is** filled: a place clicked in the Route or the Guard pick joins every
+  selected unit's list (click kinds 12 and 8), and the Route pick
+  (`0x10079750`) then gives the pending unit a `GO` to each point in turn, the
+  first replacing its queue and the rest appending. The go task holds one place
+  and the queue the rest.
 - **Seek and destroy — search, no target.** `SetTarget` (`0x10030110`) sets
   the task's enemy mode for a target of `0x204`. Each plan picks **the nearest
   hostile warrior, builder or transport the clan knows of, within 3,000**, and

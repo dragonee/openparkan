@@ -2325,9 +2325,9 @@ impl Play {
         if !self.outer_shows() {
             return own;
         }
-        // STAND-IN: docs/30-turrets.md#not-established -- which classes and faces the outer
-        // camera's line meets (mask `0x41a`, `0x208`) is not followed: the ground, and every live
-        // target but the unit looked at, passing what a round passes.
+        // The outer camera's line (mask `0x41a`, `0x208`) meets what a round's (`0x41e`, `0x208`)
+        // does but class 2, a `WPNS` agent, which no shipped object is (docs/30, "What the outer
+        // camera's line meets"): the ground, and every live target but the unit looked at.
         let unit = self.outer.unit.flatten();
         let meets = |from, to| {
             self.battle

@@ -129,6 +129,15 @@ find.
   sweep for shifts by the bit's index, across all the modules at once, is short
   enough to read: by `0x15` it returns seven sites, six of them one statically
   linked CRT routine.
+- **Looking for a value that is stored, not compared or returned.** World class 2
+  was hunted for two rounds by every `GetClass` reader that compares against a
+  constant, and every stub whose body is `return N`: neither can see a class a
+  getter reads out of a field. An agent's slot 11 answers its `+0x6d8`
+  (`AniMesh.dll:0x10002fd0`), which the loader stores from the `objects.rlb` tag,
+  `WPNS` 2 (`0x100031b2`)
+  ([30-turrets.md](30-turrets.md#what-the-outer-cameras-line-meets--read)). When
+  both sweeps come back empty, look at what the getter returns before concluding
+  that nothing answers the value.
 
 
 ## Reading other people's work

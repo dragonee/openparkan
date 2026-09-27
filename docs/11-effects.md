@@ -1237,7 +1237,7 @@ four written by the helper at `0x10008e90` and four beside it at
 
 | | effect's test | a round's ground query (`Control.dll:0x1001d9d0`) | a sight ray (`Control.dll:0x1002a68e`) |
 |---|---|---|---|
-| +0 class mask | **`0x40a`** (`0x1001e628`, `0x1001e610`, `0x1001e60c`, `0x1001e604` ORed: classes 1, 3, 4, 10) | `0x41e` (classes 1, 2, 3, 4, 10) | `0xfff`, every class |
+| +0 class mask | **`0x41a`** (`0x1001e628`, `0x1001e610`, `0x1001e60c`, `0x1001e604` ORed: classes 1, 3, 4, 10) | `0x41e` (classes 1, 2, 3, 4, 10) | `0xfff`, every class |
 | +4..+0x10 | 0 | 0 | 0 |
 | +0x14 excluded world flags | **`8`** | `0x208` | 0 |
 | +0x18 | 0 | 0 | 0 |
@@ -1256,7 +1256,7 @@ Two differences carry the answer.
   becomes the landscape flags word's `0x20`, which is on **0 of the 275882**, so that
   exclusion does nothing against the ground either. This is the shape the answer was
   expected to take, and it came out on the sight ray's side of the two.
-- **Its class mask is narrower than a round's**: `0x40a` drops class 2, which
+- **Its class mask is narrower than a round's**: `0x41a` drops class 2, which
   `0x41e` holds, and far narrower than the sight ray's `0xfff`. It still admits the
   landscape (1), buildings (3), units (4) and scenery (10), so everything a glow can
   stand behind is tested. Class 2 is an agent loaded from a `WPNS` record, and no
@@ -1516,7 +1516,7 @@ Read one slot either way, none of the seven name witnesses agrees.
   meets.**~~ Answered: once per manager tick — the interval the next-test time is
   built from, `Effect.dll:0x10026a7c`, is 0 and nothing in the module writes it —
   and the ray goes into `IWorld` slot 7, the sight ray's own entry, with the query
-  `[0x40a, 0, 0, 0, 0, 8, 0, 0]`, which excludes **no face class**, so the water
+  `[0x41a, 0, 0, 0, 0, 8, 0, 0]`, which excludes **no face class**, so the water
   sheet a round's excluded class `0x24` lets it through stops the effect's ray
   ([How often the point is tested](#how-often-the-point-is-tested-and-what-the-ray-meets--read)).
 - ~~**What a building answers for a strike's material, and a node's wear base.**~~
