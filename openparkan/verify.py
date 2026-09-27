@@ -23051,7 +23051,8 @@ def check_command_mode(check, game: Path) -> None:
         bat = _image_at(behavior.read_bytes())
         ai = (bat(0x100050AA, 7) == hexes("f686040a000010")             # the takt wants 0x10
               # the mode setter ignores a component: anything but -1 returns (0x10007009)
-              and bat(0x100067B0, 23) == hexes("8b442408 81ecf0020000 53 83cbff 3bc3 55 0f8542080000")
+              and bat(0x100067B0, 23) == hexes("8b442408 81ecf0020000 53 83cbff"
+                                               " 3bc3 55 0f8542080000")
               # the device manager sends on a change, through +0x68 slot 6
               and bat(0x10019A89, 6) == hexes("3887af000000")
               and bat(0x10019ABD, 20) == hexes("8b4068 52 8b97a4000000 8b08 8b14b2 52 50 ff5118")
@@ -24448,7 +24449,8 @@ def _check_commander_icons(check, game: Path, at, u32) -> None:
     cells = []
     for i in range(4):
         body = at(u32(0x100773FC + 4 * i), 22)
-        m = re.match(rb"\x55\x68\x00\x00\x70\x41\x68\x00\x00\x70\x41\x68(.{4})\x68(.{4})", body, re.S)
+        m = re.match(rb"\x55\x68\x00\x00\x70\x41\x68\x00\x00\x70\x41"
+                     rb"\x68(.{4})\x68(.{4})", body, re.S)
         cells.append(tuple(struct.unpack("<f", m.group(g))[0] for g in (2, 1)) if m else None)
     gates = (at(0x1007715E, 8) == bytes.fromhex("8d46ff83f8037725")          # +0x30 - 1 <= 3
              and at(0x10077147, 5) == b"\x68\x07\x02\x00\x00"                   # property 0x207
@@ -24512,7 +24514,8 @@ def _check_commander_map(check, at, strings) -> None:
               and at(0x1009A2B4, 5) == bytes.fromhex("bd808080ff"))
     close = (at(0x10084362, 6) == bytes.fromhex("8d8830020000")
              and at(0x1008437D, 1) == b"\xe8"
-             and (0x1008437D + 5 + struct.unpack("<i", at(0x1008437E, 4))[0]) & 0xFFFFFFFF == 0x10074100)
+             and (0x1008437D + 5 + struct.unpack("<i", at(0x1008437E, 4))[0]) & 0xFFFFFFFF
+             == 0x10074100)
     tooltip = at(0x10073196, 5) == b"\xba\x19\x18\x00\x00" and strings.get(6169) == "Close"
     check("iron3d.dll: the commander's map title bar, and the exit button its +0x230 closes on",
           bar and rect and button and close and tooltip,
