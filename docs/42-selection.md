@@ -53,7 +53,8 @@ lets a drag become a band (`0x10071476`). So state 2 is the commander's view
 2. With the game menu on the mode stack's front (mode 7), the interface's
    handler `0x1008d690` takes the click at once.
 3. Otherwise nothing happens:
-   - while the game is paused (game `+0xe5`);
+   - in the auto-demo (game `+0xe5`, `0x10071597`;
+     [34-progression.md](34-progression.md#the-parameter-blocks-modes--read));
    - in view state 1 with a driven unit (`+0xa2`, the cockpit);
    - in view state 6 with a building.
 4. Otherwise `0x1008d690` gets the click at its layout point. If it does not
@@ -104,8 +105,8 @@ one, `0x1007dd30` clears the list, and `0x1007ddf0` answers the current one
 
 **Selecting a unit** (`0x1007d0a0`, with the list, the unit and a replace flag):
 1. It does nothing without a unit, or for a hero (Type `0x1020000`).
-2. For a unit not selected before, and the game not paused, it says
-   `VOICE_SELECTED`.
+2. For a unit not selected before, and the game not the auto-demo (`+0xe5`,
+   `0x1007d0f9`), it says `VOICE_SELECTED`.
 3. It sets the pick mode `0x1010c388` to 0 (below) and clears the building
    selection.
 4. With the replace flag it deselects every other unit. If the kind was 1, the
@@ -170,7 +171,8 @@ start has already acted, on the way down.
    layout (`0x1007dff0`, which also answers whether the unit is in view) lies
    inside the band.
 4. It selects each one (`+0x80` 1, `+0x84` −1) and counts them.
-5. If it took any and the game is not paused, it says `VOICE_SELECTED` once.
+5. If it took any and the game is not the auto-demo (`+0xe5`, `0x10076c61`), it
+   says `VOICE_SELECTED` once.
 
 **A right click during the band** cancels it: the cursor goes to state 1
 (`0x1008fb46`).
@@ -212,8 +214,11 @@ It returns a **kind**. The chooser and the click below both call it.
 4. **In the world:**
    - **The world point** comes from a ray from the camera through the cursor
      (`0x10035e40`). The ray goes into `IWorld` slot 7, the sight ray's query
-     ([29-weapons.md](29-weapons.md)). The point must lie inside the map with a
-     margin of 0.001 of its side on every edge (`0x10035eee`).
+     ([29-weapons.md](29-weapons.md)), with a record of its own that asks for the
+     ground and the buildings only
+     ([below](#what-stops-the-cursors-ray--read-and-measured)). The point must lie
+     inside the map with a margin of 0.001 of its side on every edge
+     (`0x10035eee`).
    - **The object** comes from `0x100360f0`, which walks the world's lists of
      object classes 3 and 4 (`0x100361a0`): **the buildings, then the units**
      ([below](#the-object-pick--read)). Its record is found on the unit or the
@@ -241,8 +246,9 @@ segment, its start the camera's place and its end on the far side
    reads the class from the same slot 11 docs/35's name line reads off a
    game object), and `IGameObject` slot 3 is the object's parent
    ([31-packages.md](31-packages.md), [39-boarding.md](39-boarding.md)), so an
-   object attached to nothing is passed over; what a placed object's parent
-   is, and whether the hero has one in command mode, was not traced;
+   object attached to nothing is passed over. Every placed object has one,
+   and the hero loses its own only aboard a bot
+   ([below](#the-hero-keeps-its-parent-until-it-boards--read));
 2. its bounding sphere (interface `0x18`, slot 9 with 2) must not lie wholly
    behind any of the view's six planes (`0x10036280`);
 3. **the eye must not be inside the sphere**, at its whole radius
@@ -267,6 +273,96 @@ tie keeps the building** (*derived*).
 It differs from what this page said before on two counts: the shares were the
 other way round — a building's sphere is the shrunken one — and a class-4 hit
 is not preferred as such, only when it is the nearer.
+
+### The hero keeps its parent until it boards — *read*
+
+**Slot 3 is `CGameObject`'s parent.** The agent's `IGameObject` vtable
+(`AniMesh.dll:0x100201d4`) holds `SetParent` in slot 2 (`0x10017510`, which
+stores the parent at `+8` and the joint at `+0xc`), the read-back in slot 3
+(`0x10017570`: `[this + 8]`), `AttachChild` in slot 4 (`0x10017580`) and the
+detach in slot 5 (`0x10001f80` → `0x10017680`). The walk's step 1 calls that
+slot 3 (`0x100361f6`).
+
+**Every placed object has a parent.** A new object is added under the level's
+`+0xae0` ([39-boarding.md](39-boarding.md#leaving--read)), and the placement
+then hangs a machine on whatever it stands on, the landscape or a building or
+bridge, taking it off the old parent and handing it to the new at once
+(`Terrain.dll:0x10025fc0`, [24-motion.md](24-motion.md#finding-the-ground--read)).
+So a warbot on the ground answers the landscape, and one on a building's floor
+the building. A building's own parent was not traced past its add.
+
+**Only boarding takes the hero off.**
+- The mode 0 → 1 handler detaches it: the hero record's `+0x3c` object asked
+  for its parent, the parent told to let it go (`0x100637ed`–`0x100637fa`).
+  Leaving the bot attaches it again under `+0xae0` (`0x1006391f`–`0x1006392b`).
+- **Nothing on the way into a bunker's command view touches it.** The mode
+  0 → 4 handler (`0x10063ca0`) makes no call through an object's vtable at all,
+  and the let-go it calls (`0x10074ff0` with 0) none at slots 3 to 5. Scanned to
+  its padding, each of the 36 handlers in the table at `0x10104b18` calls slot
+  3, 4 or 5 only in two: the boarding detach and the leaving attach, the pair
+  the scan must find. So telepresence (4 → 2, 2 → 4, 2 → 3) and the moves
+  between command views leave the hero where it hangs.
+- **The sweep, and its control.** Over `iron3d.dll`, a call at slot 5 on what a
+  call at slot 3 answered, within six instructions, finds three sites: the
+  boarding detach — the one the sweep must find — and two `IDisplay` scale
+  reads (`0x10070752`, `0x10074782`). The level's `+0xae0` is read for two
+  attaches (the leaving one, and a game message's re-attach of a parentless
+  player's object at `0x1006045a`) and for no detach.
+- `World3D.dll`'s `SetStateForGameObjects` re-attaches a parentless hero, but
+  it is called once, as the level is set up (`0x100a3cd2`).
+
+**So in a bunker's command view the hero is a unit the object pick can take**
+(*derived*): it stands in the pod on foot, attached, alive and of class 4.
+Its record is on the unit list, so the pick answers kind 7 with nothing
+selected — the `PICK` cursor — and 9 in the Guard pick. A click on it selects
+nothing, since selecting refuses a hero (`0x1007d0d4`), and turns no page, since
+its Type `0x1020000` is none the click's page switch names (`0x10090207`); it
+only lets a selected building go (`0x100901dc`). The Guard pick takes it, and
+the pending unit patrols about the hero
+([below](#the-guard-rows-pick--read)).
+
+**Aboard a bot it is passed over**: in an HQ's command view reached from
+aboard the HQ (1 → 3), and in a bunker's reached from there (3 → 4), the hero
+has no parent. On the satellite map there is no such test: the unit walk
+there (`0x10072b70`) passes over a dead record and nothing else, so the hero's
+record is taken within 40 of the point like any unit's.
+
+### What stops the cursor's ray — *read*, and *measured*
+
+**The query record** is the eight dwords of
+[26-damage.md](26-damage.md#the-query-record-and-what-a-round-excludes--read-and-measured),
+on `0x10035e40`'s stack: `+0x00` is `0xa` (`0x10035e82`), and the other seven
+are 0 (`0x10035e8a`–`0x10035ea2`).
+- **`0xa` is classes 1 and 3.** The world's walk (`Terrain.dll:0x100250c0`)
+  tests an object only when `1 << class` meets the first word (`0x1002510f`),
+  so it tests **the landscape and the buildings**, and passes every unit, tree
+  and stone over. It still walks their children (`0x100254e4`).
+- **Nothing is excluded**: no object word, no batch or face flag, no triangle
+  or face class. So a lake stops the cursor on its sheet, as it stops the sight
+  ray ([29-weapons.md](29-weapons.md#where-the-round-leaves-and-which-way)).
+- **Only the point is kept.** The hit's place (`+0x14`–`+0x1c` of the result)
+  goes to the cursor object (`0x10035ec9`–`0x10035eda`); which object it struck
+  is not read. The object under the cursor is the object pick's, above.
+
+**So a unit, a tree or a stone does not stop the cursor's ray.** Through a unit
+the world point is the ground behind it; over a building it is on the
+building's walls or roof. The building ghost stands on the same point
+([32-builder.md](32-builder.md#the-model-under-the-cursor)): on the ground or a
+building, never on a unit.
+
+**The control** is the one other `IWorld` slot 7 call in `iron3d.dll`. A sweep of
+every `GetWorld` call followed within 25 instructions by a slot-7 call finds
+two: this one and the outer camera's line (`0x10038699`), whose record asks for
+`0x41a`, classes 1, 3, 4 and 10
+([30-turrets.md](30-turrets.md#what-the-outer-cameras-line-meets--read)). That
+line and a round's (`0x41e`) hold bit 4, and both stop on units.
+
+*Measured*, over the 29 missions: all 167 placed buildings have the Type's top
+bit set and all 296 placed units have it clear, so `CreateObjectFromScheme`
+makes them class 3 and class 4 ([22-settings.md](22-settings.md)); the 303
+trees and 98 stones are scenery, class 10. On Mission 03 the ray stops on the
+ground and on the 4 buildings (bunker, plant, storage and generator). It passes
+the 6 units, the hero among them. `Tut_3` has no water.
 
 ### The kinds it answers
 
@@ -322,6 +418,9 @@ test `0x10076770` passes ([below](#a-valid-place--read-and-measured)).
 
 They are not docs/31's table column "pick mode" (4, 3, 2 there), which the
 executor translates ([below](#an-order-row-leaves-a-pick-open--read)).
+**Modes 1 and 2 are never entered** in the shipped game, so kind 16 and the
+building mode's kind 4 are never answered
+([below](#what-opens-them-and-what-never-does--read)).
 
 ### A valid place — *read*, and *measured*
 
@@ -485,13 +584,13 @@ gives the order ([below](#an-order-row-leaves-a-pick-open--read)).
 |---:|---|
 | 1 | **Go**: the place, rounded to whole units, to the dispatcher's case 2 (`0x10078b60` with 2) |
 | 3 | **Attack** the unit or building: case 5 (`0x10078820` or `0x100789c0` with 5) |
-| 4 | **Capture**. In the building pick mode: each selected unit's `+0x133` set and `+0xe4` the building, and the mode to 0. Otherwise case 6. |
-| 7 | **Select** it. A unit: the building selection cleared, the unit selected. If a page is open (`+0x5f0`), the panel turns to the unit's page: builder (`0x1004000`) 3, transport (`0x1002000`) 2, warrior (`0x1008000`) or HQ (`0x1010000`) 1. A building: the unit selection cleared (`0x1007d270`), the building selected. |
+| 4 | **Capture**. In the building pick mode: each selected unit's `+0x133` set and `+0xe4` the building, and the mode to 0 — never, since that mode is never entered. Otherwise case 6. |
+| 7 | **Select** it. A unit: the building selection cleared (`0x100901dc`), the unit selected. If a page is open (`+0x5f0`), the panel turns to the unit's page: builder (`0x1004000`) 3, transport (`0x1002000`) 2, warrior (`0x1008000`) or HQ (`0x1010000`) 1; any other Type, none. The hero is refused by the select (`0x1007d0d4`) and its Type turns no page, so a click on it only lets the building go. A building: the unit selection cleared (`0x1007d270`), the building selected. |
 | 8 | the place joins each selected unit's point list `+0xc0`, and `+0x131` is set; the mode goes to 0 |
-| 9 | in the guard mode: each unit's `+0x132` set and `+0xe8` the object, and the mode to 0. Otherwise **Guard** it, case 7. |
-| 10 | in the guard mode: `+0x133` and `+0xe4`, and the mode to 0. Otherwise **Guard** the building, case 7. |
+| 9 | **a unit only** (`0x10090337`; a building does nothing). In the guard mode: each unit's `+0x132` set and `+0xe8` the unit, and the mode to 0. Otherwise **Guard** it, case 7 — never, since only the guard mode answers 9. |
+| 10 | in the guard mode: `+0x133` and `+0xe4`, and the mode to 0 — never, since only the free mode answers 10. Otherwise **Guard** the building, case 7. |
 | 12 | the place joins every selected unit's point list `+0xc0`. The mode stays **Route**, so each click adds a point. |
-| 16 | a unit: `+0x132` and `+0xe8`; a building: `+0x133` and `+0xe4`; the mode goes to 0 |
+| 16 | a unit: `+0x132` and `+0xe8`; a building: `+0x133` and `+0xe4`; the mode goes to 0 — never, since the attack-target mode is never entered |
 | 17 | **Open its page** (`0x10083c20`, then `0x10084d80`). Units: by the clicked unit's Type as for kind 7. A building by its Type: the bunkers `0x80010000`, `0x80020000`, `0x80040000` page 7; the towers `0x80100000`, `0x80200000` page 6; the plant `0x80000010` page 5; the institute `0x80000400` page 4; any other page 8. |
 | 0, 2, 5, 6, 11, 13–15 | nothing |
 
@@ -504,9 +603,9 @@ order, replacing its queue (insert 3; [31-packages.md](31-packages.md)):
 | 2 | `GO` (2), after erasing the unit's point list | `0x202`, the place `0x1010c030`, `0x1010c034` | |
 | 3 | `SEARCH` (5) | `0x203` | `0x8017365e` |
 | 4 | `SEARCH` (5) | `0x204` | −1 |
-| 5 | `0x10078ce0`, the attack | | |
+| 5 | `ATTACK` (3), `0x10078ce0` | `0x201`, the first target unit's logic id, else the first target building's | |
 | 6 | `SEARCH` (5) | `0x201`, the first target building's logic id (`+0x34`) | `0x8017365e` |
-| 7 | `0x10078df0`, the guard | | |
+| 7 | `PATROL` (4), `0x10078df0` | `0x201`, the first target unit's logic id, else the first target building's; else `0x202`, the place | **100**, the patrol's radius; 150 in the auto-demo (`+0xe5`; the floats at `0x100e4374` and `0x100e5f44`) |
 | 8 | `RELOAD` (8) | `0x204` | |
 | 10 | `FOLLOW` (22) | `0x201`, the logic id in `0x1010c030` | 50 |
 | 20 | `TRANSPORT` (6) | `0x204` | −1 |
@@ -556,10 +655,10 @@ id to the executor `0x1007b740` (jump table `0x1007bb48`; the rows are
 | row | the executor |
 |---|---|
 | 0 Standby, 2 Search and capture, 3 Seek and destroy, 7 Refit, 8 Transport minerals, 9 Search minerals | dispatcher cases 1, 3, 4, 8, 20, 30 |
-| 4 Attack | dispatcher case 5 |
+| 4 Attack | dispatcher case 5 — never reached ([below](#what-opens-them-and-what-never-does--read)) |
 | 1 Route | pending pick 1 |
 | 6 Guard | pending pick 4 |
-| 5 Capture building | pending pick 5 |
+| 5 Capture building | pending pick 5 — never reached |
 | 10–16 Build | pending pick 3, with the building Type in `+0xb0`: mine `0x80000004`, warehouse `0x80000008`, factory `0x80000010`, outpost `0x80000040`, research centre `0x80000400`, light tower `0x80100000`, heavy tower `0x80200000` |
 | 17–23 Upgrade | `0x10078b60` with the Type and case 32 |
 
@@ -575,18 +674,30 @@ id to the executor `0x1007b740` (jump table `0x1007bb48`; the rows are
 | `+0xc0` | the unit's point list |
 
 **The unit's update** runs `0x10079700` while `+0xa8` is set (`0x10075d2b`). Its
-kind picks a routine, and each one first sets the pick mode:
+kind picks a routine (jump table `0x10079734`). Each one's stage 0 sets the
+pick mode and clears the flags it waits on. Stage 1 then waits for the clicks
+above to set them, and gives the order. The last three columns are *read*
+from each routine:
 
-| kind | routine | pick mode |
-|---:|---|---|
-| 1 | `0x10079750` | 5, Route |
-| 2 | `0x10079a10` | from `eax`, not traced |
-| 3 | `0x10079c40` | 4 or 6 (from `edx`) |
-| 4 | `0x10079f40` | 3, guard target |
-| 5 | `0x1007a1f0` | 2, building |
+| kind | routine | pick mode | waits for | then gives |
+|---:|---|---|---|---|
+| 1 | `0x10079750` | 5, Route | `+0x130`, the right button | a `GO` to each point (below) |
+| 2 | `0x10079a10` | 1, attack target (`0x10079c0a`) | `+0x132` **and** `+0x133` | `ATTACK` (3), `0x201`, the logic id of the unit at `+0xe8` |
+| 3 | `0x10079c40` | 6 for a mine, 4 otherwise | `+0x131`, the ghost committed | `ORDER_ROBOT_BUILD` (7), `0x206` ([32-builder.md](32-builder.md)) |
+| 4 | `0x10079f40` | 3, guard target (`0x1007a1a2`) | `+0x132`, `+0x133` or `+0x131`, once the mode is 0 | `PATROL` (4), **radius 300**: `0x201` the unit at `+0xe8`, else the building at `+0xe4`; else `0x202`, the first point of the list |
+| 5 | `0x1007a1f0` | 2, building (`0x1007a3ce`) | `+0x133` | `ORDER_ROBOT_CAPTURE` (17), `0x201`, the logic id of the building at `+0xe4` |
 
-It then waits for the clicks above to set the unit's `+0x130`–`+0x133`, and
-gives the order.
+- **What each order is given to.** The pending unit alone, through its record's
+  `+0x44` slot 3 with insert 3, replacing. The player's unit then says its
+  acknowledgement by its size class (`0x1008e840`), and its point list is
+  emptied.
+- **When a pick is dropped.** Kinds 2, 4 and 5 drop it, with no order, when the
+  mode has gone back to 0 with their flags clear. Selecting a unit zeroes the
+  mode, so selecting one drops the pick. Kind 4 also drops it when `+0x131` is
+  set on an empty list (`0x1007a17e`).
+- **Kind 2 wants both flags**, a unit's and a building's (`0x10079a98`–`0x10079ac4`).
+  A click sets only one of them, so even opened it would give nothing
+  (*derived*).
 
 **Route** (`0x10079750`) is the one read through:
 1. **Stage 0** shows the satellite map (`0x100740f0`). It sets the mode to
@@ -603,6 +714,64 @@ gives the order.
 **So a route goes to the first selected unit only** (*derived*). Clicks add
 their points to every selected unit's list (kind 12), but only the pending unit
 gives its orders; the others keep their points until a later `GO` erases them.
+
+### What opens them, and what never does — *read*
+
+**Kind 2 is never opened, so the attack-target mode is never entered.**
+- A pending kind is written to a unit record's `+0xac` only by the executor:
+  1, 5, 4 and 3 (`0x1007b7ea`, `0x1007b8e8`, `0x1007b90b`, `0x1007baae`).
+- A sweep of every store to a `+0xa8` or `+0xac` field in `iron3d.dll`, through
+  any register but `esp` and `ebp`, finds 10. They are those four, the pending
+  byte at `0x1007bad5`, and five stores into objects that are not unit records
+  (`0x1006bfd8`–`0x1006c19b`, `0x100b735f`). The four known writers are the
+  control. None writes 2.
+- Pick mode 1 has one writer, kind 2's stage 0 (`0x10079c0f`). Of the 15 stores
+  to `0x1010c388`, the others write 5 (Route, `0x10079998`), 4 or 6 (Build,
+  `0x10079e6e`), 3 (Guard, `0x1007a1a2`), 2 (kind 5, `0x1007a3ce`) and 0.
+
+**Kind 5 is never opened, so the building mode is never entered.**
+- Only the executor opens kind 5, for command 5, Capture building.
+- The executor has one caller, the order row's click (`0x1007b65e` in
+  `0x1007b510`), and that has one, the commander panel's click (`0x100849de`).
+- The panel's rows are the HQ table's. Its 22 rows carry commands 0–3 and 6–23,
+  never 4 or 5 (*measured*,
+  [31-packages.md](31-packages.md#the-commanders-menus--measured-and-read)).
+- Attack and Capture building are the wingman menu's rows. It gives them at once
+  through the dispatcher, on the driven unit's target (`0x1006df80`), and never
+  reaches the executor. So the executor's case for Attack is dead as well.
+
+So of the five pending picks, **Route, Build and Guard are the live ones**.
+Attack and Capture building in command mode are the clicks' kinds 3 and 4,
+through the dispatcher, on the object under the cursor.
+
+### The Guard row's pick — *read*
+
+1. **Stage 0** sets mode 3 and clears `+0x131`–`+0x133`. It does not empty the
+   point list.
+2. **Clicks.**
+   - A unit, the player's or another clan's, the hero among them, answers
+     kind 9. It sets `+0x132` and `+0xe8` on every selected unit and closes the
+     mode.
+   - A valid place answers kind 8. It appends the place to every selected unit's
+     list, sets `+0x131` and closes the mode.
+   - **A building answers 9 as well, and does nothing**: kind 9 acts on a unit
+     only (`0x10090337`). The pick stays open and the cursor stays `GUARD`.
+     Kind 10's own branch for this mode, which would set `+0x133` and `+0xe4`
+     (`0x100903f5`), is never reached: only the free mode answers 10.
+3. **The order**, once the mode is 0: `PATROL` with parameter **300**
+   (`0x1007a08c`). The patrol takes a parameter that is neither 0 nor −1 as its
+   radius ([31-packages.md](31-packages.md#setting-the-target-slot-3-0x1002d520)),
+   so the patrol's radius is 300, where the default for a unit or a place is 60.
+   - A unit is patrolled by its logic id.
+   - A place is the **first** point of the pending unit's list, x and y. The
+     place clicked lands there only on an empty list. A unit that kept a
+     route's points, having been selected beside the pending unit of that
+     route, patrols about the first of those instead (*derived*).
+
+**A guard given outside the pick** is the free mode's kind 10, an own building
+under the cursor. It goes to every selected unit through the dispatcher's case 7,
+radius **100** (above). So the Guard row patrols a unit or a place, never a
+building. The click patrols an own building, never a unit.
 
 ## Seen in the recording
 
@@ -635,12 +804,16 @@ gives its orders; the others keep their points until a later `GO` erases them.
      unit's projected point, or on the open map its world position.
 4. **The pick**, each frame and on each click:
    - **On the map:** (u, v) × L ÷ 256, then the first unit within 40, or else
-     the first building within 80, that the player knows.
-   - **In the world:** the ground point under the ray, kept 0.001 × L inside
-     the map, and the object whose bounding sphere the ray passes (0.7 × r for
+     the first building within 80, that the player knows. The hero is a unit
+     here like any other.
+   - **In the world:** the first point of the ground or a building under the
+     ray — a unit, a tree or a stone does not stop it, a lake's sheet does —
+     kept 0.001 × L inside the map. The ghost stands on the same point.
+   - **And the object** whose bounding sphere the ray passes (0.7 × r for
      buildings, 1.0 × r for units; not one holding the eye), the centre nearest
-     the eye winning and a tie keeping the building.
-   - Classify by the kinds table.
+     the eye winning and a tie keeping the building. The hero is among the
+     units unless it is aboard a bot.
+   - Classify by the kinds table. A click on the hero selects nothing.
 5. **Valid places.** An areal must cover the point. Its first flag word must be
    non-zero unless every selected unit is a flyer (chassis type 1).
 6. **The cursor.** Kind → state → `cursor.cfg` object, as tabled.
@@ -654,7 +827,12 @@ gives its orders; the others keep their points until a later `GO` erases them.
    unit.
    - **Route:** points collect on clicks, a right click gives them as a chain
      of `GO`s.
-   - **Guard, Capture building and Build:** take the next valid click.
+   - **Guard:** a unit or a valid place closes it with a `PATROL` of radius
+     300; a building leaves it open. A guard clicked outside it, on an own
+     building, has radius 100 and goes to every selected unit.
+   - **Build:** takes the next good site.
+   - **Attack and Capture building** open no pick in command mode: no row the
+     panel offers opens them.
    - **Cancel:** a right click on a placement, or Esc, says string 6207.
 9. **The right button** undoes the most specific thing open, in the table's
    order.
@@ -676,14 +854,29 @@ gives its orders; the others keep their points until a later `GO` erases them.
   walked in that order with one shared nearest distance; a building within 0.7
   of its radius and a unit within all of it, not one holding the eye, and the
   centre nearest the eye wins, a tie keeping the building
-  ([The object pick](#the-object-pick--read)). Still open there: the walk
+  ([The object pick](#the-object-pick--read)). ~~Still open there: the walk
   passes over an object with no parent (`IGameObject` slot 3), and whether
-  that is what keeps the hero from the pick in command mode was not traced.
+  that is what keeps the hero from the pick in command mode was not traced.~~
+  **Read**: nothing keeps the hero from it in a bunker's command view. Slot 3
+  is `CGameObject`'s parent (`AniMesh.dll:0x10017570`). The hero loses its
+  parent only by boarding (`0x100637fa`) and gets it back on leaving
+  (`0x1006392b`), the only slot 3–5 calls in the 36 mode handlers. So on foot
+  in the pod it is picked like any unit, kind 7, and a click on it selects
+  nothing. Aboard, in an HQ's view, it is passed over
+  ([The hero keeps its parent until it boards](#the-hero-keeps-its-parent-until-it-boards--read)).
 - **The band's draw.** Whether `IDisplay` slot 3, which draws the band, fills
   it or outlines it.
-- **The pending picks not traced here.** What sets pending kind 2 and so the
+- ~~**The pending picks not traced here.** What sets pending kind 2 and so the
   attack-target mode, and the orders kinds 2 to 5 give, read here only in
-  outline (their `+0x131`–`+0x133` flags and targets). The Build row's own pick
+  outline (their `+0x131`–`+0x133` flags and targets).~~ **Read**: nothing sets
+  kind 2, so the attack-target mode is never entered. The only writers of a
+  unit record's `+0xac` store 1, 3, 4 and 5, and pick mode 1's one writer is
+  kind 2's own stage 0 (`0x10079c0f`). Kind 5 is opened only by the executor's
+  command 5, which no row of the commander's panel carries. Kind 2 would give
+  `ATTACK` (3) and kind 5 `ORDER_ROBOT_CAPTURE` (17), both by logic id. The live
+  Guard pick (kind 4) gives `PATROL` (4) of radius 300 to a unit or a place,
+  never a building ([What opens them](#what-opens-them-and-what-never-does--read),
+  [The Guard row's pick](#the-guard-rows-pick--read)). The Build row's own pick
   is [32-builder.md](32-builder.md)'s: mode 6 for a mine and 4 for any other
   building, and a good click gives `ORDER_ROBOT_BUILD` with target `0x206`.
 - **Double clicks.** World3D's message-to-scan converter (`0x10011330`) maps

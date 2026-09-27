@@ -1310,7 +1310,8 @@ impl App {
         play.update_ghost(aim);
         let panel = &mut hud.cockpit.commander;
         let pick = play.pick(aim);
-        panel.hovered = pick.object;
+        // The markers are never drawn over the hero, which the pick can take (docs/42).
+        panel.hovered = pick.object.filter(|&t| !play.is_hero(t));
         panel.cursor_state = if play.commander.ghost.is_some() {
             8
         } else if panel.band.is_some() {

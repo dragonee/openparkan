@@ -130,8 +130,12 @@ cursor kind is 8, `0x100585b0`):
 - **The pick.** A ray from the camera through the cursor
   (`0x10035e40`) goes into `Terrain.dll!GetWorld`'s segment query, slot 7
   ([29-weapons.md](29-weapons.md#where-the-round-leaves-and-which-way)), with a
-  query record of its own whose first word is `0xa` (`0x10035e82`); what that
-  record asks for is not established. The hit counts only strictly inside the
+  query record of its own whose first word is `0xa` (`0x10035e82`); ~~what that
+  record asks for is not established~~ — **read**: classes 1 and 3, the
+  landscape and the buildings, excluding nothing, so the model stands on the
+  ground, a lake's sheet or a building's shell, never on a unit, a tree or a
+  stone ([42-selection.md](42-selection.md#what-stops-the-cursors-ray--read-and-measured)).
+  The hit counts only strictly inside the
   map, a margin of 0.001 of its size in from each side.
 - **A pick that misses** leaves the model where it was. The first miss after a
   hit says `VOICE_POINT_LAND` (`vc_003.wav`, *measured*) when the sound server's
@@ -876,8 +880,14 @@ laser (`e_gun_lc_03`, `e_gun_mc_20`).
   comes off `ToMine`, and all 15 placed mines sit on 999,999 or more, so no
   shipped lode runs out
   ([23-economy.md](23-economy.md#a-mine-digs-to-500-and-then-a-draw-does-not-empty-it--read)).
-- What the pick's query record (first word `0xa`, `iron3d.dll:0x10035e82`) asks
-  the world's segment query for, so which objects stop the cursor's ray.
+- ~~What the pick's query record (first word `0xa`, `iron3d.dll:0x10035e82`) asks
+  the world's segment query for, so which objects stop the cursor's ray.~~ —
+  **read**: `[0xa, 0, 0, 0, 0, 0, 0, 0]`, classes 1 and 3, the landscape and the
+  buildings, with nothing excluded. A unit, a tree or a stone does not stop the
+  ray; a building's shell and a lake's sheet do. On Mission 03 that is the ground
+  and its 4 buildings, and not its 6 units; the outer camera's `0x41a`, the one
+  other slot-7 query in `iron3d.dll`, is the control
+  ([42-selection.md](42-selection.md#what-stops-the-cursors-ray--read-and-measured)).
 - ~~That interface `0x303` is the hall way and what its vertex bit 1 marks, which
   `IsPlacementValid` tests against the system areal map's `+0x20`; and what its path
   search asks.~~ — **read**: `0x303` is the hall way the agent build files at `+0x180`

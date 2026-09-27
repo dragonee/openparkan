@@ -13,6 +13,7 @@ mod mission_03;
 mod mission_04;
 mod motion;
 mod scene;
+mod selection;
 mod squad;
 mod view;
 mod weapons;

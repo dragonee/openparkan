@@ -24892,6 +24892,92 @@ def check_selection(check, game: Path) -> None:
           "8 RELOAD, 10 FOLLOW 50, 20 TRANSPORT; rows Route, Guard, Capture building and Build "
           "open picks (modes 5, 3, 2)")
 
+    # The cursor's ray asks for classes 1 and 3 and excludes nothing; the outer camera's line,
+    # the one other slot-7 query here, asks for 0x41a.
+    getworld = iron(base + u32(0x100E41B0) + 2, 12).split(b"\0")[0]
+    ray = (iron(0x10035E82, 8) == b"\xc7\x44\x24\x24" + ptr(0xA)
+           and all(iron(0x10035E8A + 4 * i, 4) == bytes([0x89, 0x44, 0x24, 0x28 + 4 * i])
+                   for i in range(7))
+           and called(0x10035EA6) == 0x100CD0AE
+           and iron(0x100CD0AE, 6) == b"\xff\x25" + ptr(0x100E41B0)
+           and getworld == b"GetWorld" and iron(0x10035EC2, 3) == b"\xff\x57\x1c"
+           and iron(0x10038656, 5) == b"\x68" + ptr(0x41A)
+           and iron(0x10038699, 3) == b"\xff\x57\x1c")
+    check("iron3d.dll: the cursor's ray asks the world for classes 1 and 3 only",
+          ray, "record [0xa, 0 x 7] into IWorld slot 7 (0x10035e82): the landscape and the "
+          "buildings, nothing excluded; the outer camera's 0x41a is the control")
+
+    # The hero's parent: IGameObject slot 3, which the object pick asks; only boarding and
+    # leaving call slots 3-5 among the mode handlers, and entering a bunker's view calls none.
+    def slot_calls(lo: int, hi: int) -> list[int]:
+        body = iron(lo, hi - lo)
+        return [lo + i for i in range(len(body) - 2)
+                if body[i] == 0xFF and 0x50 <= body[i + 1] <= 0x57
+                and body[i + 2] in (0xC, 0x10, 0x14)]
+
+    handlers = {"0->1": slot_calls(0x100637C0, 0x100638B3),
+                "1->0": slot_calls(0x100638C0, 0x10063A18),
+                "0->4": slot_calls(0x10063CA0, 0x10063D54),
+                "let go": slot_calls(0x10074FF0, 0x10075153)}
+    vtable = ()
+    if (game / "AniMesh.dll").exists():
+        animesh = _image_at((game / "AniMesh.dll").read_bytes())
+        vtable = struct.unpack("<4I", animesh(0x100201DC, 16))
+        vtable += (animesh(0x10017570, 10) == bytes.fromhex("8b4424048b4008c20400"),)
+    check("iron3d.dll: the hero keeps its parent until it boards, so the pick can take it",
+          vtable == (0x10017510, 0x10017570, 0x10017580, 0x10001F80, True)
+          and iron(0x100361F6, 3) == b"\xff\x52\x0c"
+          and handlers == {"0->1": [0x100637F3, 0x100637FA], "1->0": [0x1006392B], "0->4": [],
+                           "let go": []}
+          and iron(0x1007D0D4, 7) == b"\x81\x79\x2c" + ptr(0x1020000),
+          "slots 2-5 SetParent, parent [+8], attach, detach; slot 3/4/5 calls "
+          f"{ {k: [hex(v) for v in vs] for k, vs in handlers.items()} }; "
+          "selecting refuses Type 0x1020000")
+
+    # What the pending picks give, and what opens them.
+    sections, _ = resources._sections(image)
+    text_va, text_size, text_raw = sections[0]
+    text = image[text_raw:text_raw + text_size]
+    callers: dict[int, list[int]] = {0x1007B740: [], 0x1007B510: []}
+    for i in range(len(text) - 4):
+        if text[i] == 0xE8:
+            to = (base + text_va + i + 5 + struct.unpack_from("<i", text, i + 1)[0]) & 0xFFFFFFFF
+            if to in callers:
+                callers[to].append(base + text_va + i)
+    gives = (iron(0x10079C0A, 10) == b"\xb8" + ptr(1) + b"\xa3" + ptr(0x1010C388)
+             and iron(0x10079ACA, 8) == b"\xc7\x44\x24\x20" + ptr(3)
+             and iron(0x1007A084, 8) == b"\xc7\x44\x24\x24" + ptr(4)
+             and iron(0x1007A08C, 8) == b"\xc7\x44\x24\x28" + ptr(300)
+             and iron(0x1007A2B4, 8) == b"\xc7\x44\x24\x20" + ptr(0x11)
+             and iron(0x10078E5F, 8) == b"\xc7\x44\x24\x14" + ptr(4)
+             and iron(0x10078E7D, 6) == b"\xd9\x05" + ptr(0x100E5F44) and f32(0x100E5F44) == 150.0
+             and iron(0x10078E85, 6) == b"\xd9\x05" + ptr(0x100E4374) and f32(0x100E4374) == 100.0
+             and iron(0x10090337, 8) == b"\x8b\x4c\x24\x18\x85\xc9\x0f\x84")
+    check("iron3d.dll: the pending picks' orders; kinds 2 and 5 have no opener",
+          gives and callers == {0x1007B740: [0x1007B65E], 0x1007B510: [0x100849DE]},
+          "kind 2 mode 1 then ATTACK 3, kind 4 PATROL radius 300, kind 5 CAPTURE 17; "
+          "a click's guard PATROL 100 (150 in the demo); kind 9 wants a unit; the executor's "
+          f"one caller {[hex(c) for c in callers[0x1007B740]]}, the row click's "
+          f"{[hex(c) for c in callers[0x1007B510]]}")
+
+    # Which placed objects the ray stops on: buildings (class 3) and not units (4).
+    tops: Counter = Counter()
+    for d in gamedir.missions(game):
+        for obj in mission.load(d / "data.tma").objects:
+            if obj.kind in (mission.KIND_BUILDING, mission.KIND_UNIT) and obj.type_id is not None:
+                tops[(obj.kind_name, bool(obj.type_id & 0x80000000))] += 1
+    m03 = game / "MISSIONS" / "CAMPAIGN" / "CAMPAIGN.00" / "Mission.03" / "data.tma"
+    kinds = Counter(o.kind_name for o in mission.load(m03).objects) if m03.exists() else Counter()
+    tut3 = game / "DATA" / "MAPS" / "Tut_3" / "Land.msh"
+    wet = -1
+    if tut3.exists():
+        land_msh = landmesh.load(tut3)
+        wet = sum(1 for i in range(land_msh.face_count) if land_msh.is_water(i))
+    check("missions: the cursor's ray stops on the buildings, class 3, and passes the units",
+          tops == Counter({("building", True): 167, ("unit", False): 296})
+          and kinds == Counter({"building": 4, "unit": 6}) and wet == 0,
+          f"Type top bit by kind {dict(tops)}; Mission 03 {dict(kinds)}, Tut_3 water faces {wet}")
+
     # Tut_3's areals: the first flag word decides where a walker may be sent.
     land = game / "DATA" / "MAPS" / "Tut_3" / "Land.map"
     tma = game / "MISSIONS" / "CAMPAIGN" / "CAMPAIGN.00" / "Mission.03" / "data.tma"

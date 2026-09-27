@@ -4,6 +4,7 @@
 
 use glam::{Mat4, Vec3};
 use parkan_formats::mission::{KIND_BUILDING, KIND_UNIT};
+use parkan_sim::hit::{SIGHT_SKIPS_FACE, swept_spheres};
 use parkan_sim::hq;
 use parkan_sim::orders::{self, Order, Target};
 
@@ -97,6 +98,13 @@ pub const BAND_LEAST_PIXELS: f32 = 10.0;
 pub const BAND_COLOUR: u32 = 0xff19_b419;
 /// What a placement cancelled says (`0x1008fe08`).
 pub const STRING_BUILDING_CANCELLED: u32 = 6207;
+/// The classes the cursor's ray asks the world for, `1 << class`: the query record's first
+/// word (`0x10035e82`, `[0xa, 0, 0, 0, 0, 0, 0, 0]`), the landscape (1) and the buildings (3).
+pub const CURSOR_RAY_CLASSES: u32 = 0xa;
+/// The patrol radius the Guard row's pick gives (`0x1007a08c`), and the one a click's guard
+/// gives outside it (`0x10078e85`; 150 in the auto-demo).
+pub const GUARD_PICK_RADIUS: i32 = 300;
+pub const GUARD_CLICK_RADIUS: i32 = 100;
 
 /// The buildings a unit's capture pick refuses: a main teleport, a bridge, a ruin.
 const UNTAKEABLE: [u32; 3] = [0x8000_0200, 0x8000_1000, 0x8000_2000];
@@ -191,8 +199,9 @@ impl Play {
             Aim::Ray { eye, direction } => self.ray_pick(eye, direction),
         };
         let mut pick = Pick { kind: 0, object, point };
+        let is_building = |t: usize| self.units.get(t).is_some_and(|u| u.kind == KIND_BUILDING);
         // A building building itself is dropped, and the hero never takes orders.
-        if object.is_some_and(|t| self.units[t].kind == KIND_BUILDING && self.building_itself(t)) {
+        if object.is_some_and(|t| is_building(t) && self.building_itself(t)) {
             pick.object = None;
             pick.kind = 2;
             return pick;
@@ -207,8 +216,8 @@ impl Play {
             pick.kind = if valid { 12 } else { 2 };
             return pick;
         }
-        let own = |t: usize| self.units[t].clan == Some(self.player_clan);
-        let is_building = |t: usize| self.units[t].kind == KIND_BUILDING;
+        // The hero, which has no record here beside the others', is the player's own unit.
+        let own = |t: usize| self.is_hero(t) || self.units[t].clan == Some(self.player_clan);
         pick.kind = match self.selection_kind() {
             0 => match object {
                 Some(t) if own(t) => 7,
@@ -256,6 +265,20 @@ impl Play {
         pick
     }
 
+    /// Whether target `t` is the hero's, the one after every other target
+    /// ([`parkan_sim::combat::Combat::hero_index`]), which has no entry in `units`.
+    pub fn is_hero(&self, t: usize) -> bool {
+        t == self.battle.combat.hero_index()
+    }
+
+    /// Whether the hero's object hangs on a parent, without which the world's object pick
+    /// passes it over (`IGameObject` slot 3, `0x100361f6`). Only boarding a bot takes it off
+    /// (`0x100637f3`–`0x100637fa`), and leaving puts it back (`0x1006391f`); entering a
+    /// bunker's command view from on foot leaves it where it stands (`0x10063ca0`).
+    pub fn hero_in_world(&self) -> bool {
+        self.aboard().is_none()
+    }
+
     /// On the open satellite map: the place, and the first live unit within 40 of it in the
     /// level's order, or else the first building within 80 (`0x10072b70`, `0x100728e0`), of
     /// those the player knows (`0x1007e660`, docs/42, "On the open satellite map").
@@ -263,43 +286,84 @@ impl Play {
     /// What the map marks is what it picks, so a mark is the object it stands for: a click on
     /// another clan's building sends the selection at it, to capture or to attack by the kinds
     /// table, as a click on the building in the world does.
+    ///
+    /// The unit walk (`0x10072b70`) passes over a dead record and nothing else: the hero is
+    /// one of the level's units, the player's own, its place among them the mission's order
+    /// (docs/42, "The hero keeps its parent until it boards"). It is taken at
+    /// [`Play::hero_place`]; that its record stands there aboard a bot too is *inferred*.
     fn map_pick(&self, [x, y]: [f32; 2]) -> (Option<Vec3>, Option<usize>) {
         let z = self.ground.below(x, y, 1.0e5).map_or(0.0, |h| h.point.z);
         let point = Vec3::new(x, y, z);
         let known = crate::cockpit::map::known_to_player(self);
+        let within = |at: Vec3, reach: f32| at.truncate().distance(point.truncate()) <= reach;
         let near = |kind: u32, reach: f32| {
             (0..self.units.len()).find(|&t| {
                 self.units[t].kind == kind
                     && known.get(t).copied().unwrap_or(false)
                     && self.units[t].logical_id != self.hero_id
-                    && self.battle.combat.targets.get(t).is_some_and(|x| x.alive)
-                    && self.battle.combat.targets[t].position.truncate().distance(point.truncate()) <= reach
+                    && self.battle.combat.targets.get(t).is_some_and(|x| x.alive && within(x.position, reach))
             })
         };
-        (Some(point), near(KIND_UNIT, MAP_UNIT_REACH).or_else(|| near(KIND_BUILDING, MAP_BUILDING_REACH)))
+        let hero = (!self.hero.dead() && within(self.hero_place(), MAP_UNIT_REACH))
+            .then_some(self.battle.combat.hero_index());
+        let unit = match (hero, near(KIND_UNIT, MAP_UNIT_REACH)) {
+            (Some(_), Some(t)) if self.battle.objects[t] < self.hero.object => Some(t),
+            (Some(h), _) => Some(h),
+            (None, t) => t,
+        };
+        (Some(point), unit.or_else(|| near(KIND_BUILDING, MAP_BUILDING_REACH)))
     }
 
-    /// In the world: where the ray first meets the ground or an object, kept inside the map,
-    /// and the object whose bounding sphere the ray passes (`0x10035e40`, `0x100360f0`):
-    /// the buildings at 0.7 of their radius, then the units at all of it, the nearest centre
-    /// to the eye winning ([`nearest_on_ray`]).
+    /// Where the cursor's ray from `eye` along `direction` first meets the world, kept
+    /// strictly inside the map by 0.001 of its side (`0x10035e40`, `0x10035eee`). The ray goes
+    /// into `IWorld` slot 7 with a query record of its own, `[0xa, 0, 0, 0, 0, 0, 0, 0]`
+    /// ([`CURSOR_RAY_CLASSES`]): the world's walk tests only an object whose `1 << class`
+    /// meets `0xa`, the landscape (class 1) and the buildings (class 3), and excludes no face.
+    /// So a unit, a tree or a stone does not stop it, and the ground behind is where it points;
+    /// a building's walls and roof do; and a lake stops it on its sheet, as the sight ray's
+    /// empty exclusions do (docs/29).
+    pub fn cursor_point(&self, eye: Vec3, direction: Vec3) -> Option<Vec3> {
+        let (lo, hi) = self.ground.world_box();
+        let (p0, p1) = (eye, eye + direction * ((hi - lo).length() + 200.0));
+        let mut best = self.ground.segment_including_water(p0, p1);
+        for (t, target) in self.battle.combat.every() {
+            let building = self.units.get(t).is_some_and(|u| u.kind == KIND_BUILDING);
+            if !building
+                || !target.alive
+                || self.deleted.get(t).copied().unwrap_or(false)
+                || swept_spheres((target.centre, target.centre), target.radius, (p0, p1), 0.0).is_none()
+            {
+                continue;
+            }
+            for part in &target.parts {
+                if let Some(s) = part.segment(p0, p1, SIGHT_SKIPS_FACE)
+                    && best.as_ref().is_none_or(|b| s.d2 < b.d2)
+                {
+                    best = Some(s);
+                }
+            }
+        }
+        let margin = side(self) * MAP_MARGIN_SHARE;
+        best.map(|s| s.point).filter(|p| {
+            p.x > lo.x + margin && p.y > lo.y + margin && p.x < hi.x - margin && p.y < hi.y - margin
+        })
+    }
+
+    /// In the world: where the cursor's ray meets the world ([`Play::cursor_point`]), and the
+    /// object whose bounding sphere the ray passes (`0x100360f0`): the buildings at 0.7 of
+    /// their radius, then the units at all of it, the nearest centre to the eye winning
+    /// ([`nearest_on_ray`]).
     ///
     /// The frustum test each object passes first (`0x10036280`) is left out: a sphere the
     /// cursor's ray passes ahead of the eye is in view.
     ///
-    /// STAND-IN: docs/42-selection.md#not-established -- the walk passes over an object whose
-    /// `IGameObject` slot 3, its parent, answers none; whether the hero has one in command
-    /// mode is not traced, and the hero is never picked.
+    /// The walk passes over an object whose `IGameObject` slot 3, its parent, answers none. The
+    /// hero's is set unless it has boarded a bot ([`Play::hero_in_world`]), so in a bunker's
+    /// command view the hero is a unit the ray can take.
     fn ray_pick(&self, eye: Vec3, direction: Vec3) -> (Option<Vec3>, Option<usize>) {
         let (lo, hi) = self.ground.world_box();
         let length = (hi - lo).length() + 200.0;
-        let end = eye + direction * length;
-        let side = side(self);
-        let margin = side * MAP_MARGIN_SHARE;
-        let point =
-            self.battle.combat.first_hit(&self.ground, None, eye, end, 0.0).map(|(s, _, _)| s.point).filter(
-                |p| p.x > lo.x + margin && p.y > lo.y + margin && p.x < hi.x - margin && p.y < hi.y - margin,
-            );
+        let point = self.cursor_point(eye, direction);
         let spheres = self.battle.combat.targets.iter().enumerate().filter_map(|(t, target)| {
             let kind = self.units.get(t).map_or(u32::MAX, |u| u.kind);
             let pickable = target.alive
@@ -313,15 +377,34 @@ impl Play {
                 building: kind == KIND_BUILDING,
             })
         });
-        (point, nearest_on_ray(eye, direction, length, spheres))
+        let hero =
+            self.battle.combat.hero.as_ref().filter(|_| !self.hero.dead() && self.hero_in_world()).map(|h| {
+                Sphere {
+                    index: self.battle.combat.hero_index(),
+                    centre: h.centre,
+                    radius: h.radius,
+                    building: false,
+                }
+            });
+        (point, nearest_on_ray(eye, direction, length, spheres.chain(hero)))
     }
 
     /// A left click in the world or on the map (`0x1008fe80`, table `0x10090758`). Returns
     /// the page the panel turns to: a selected unit's only while a page is open, a clicked
     /// selection's own always.
+    ///
+    /// A click on the hero (kind 7) lets a building go and does nothing else: selecting a unit
+    /// refuses a hero (`0x1007d0d4`), and no page answers its Type (`0x10090207`).
+    ///
+    /// The Guard row's pick (mode 3) is closed by a unit (kind 9, `0x10090337`) or a place
+    /// (kind 8); a building under the cursor also answers 9, and kind 9 wants a unit, so the
+    /// click does nothing and the pick stays open. Its patrol has radius 300; a guard clicked
+    /// outside it, on an own building (kind 10), is the dispatcher's, radius 100.
     pub fn click_world(&mut self, pick: Pick) -> Option<(u8, bool)> {
         let place = pick.point.map(|p| Target::Place([p.x.round(), p.y.round(), p.z]));
-        let target_id = pick.object.map(|t| self.units[t].logical_id);
+        let hero = self.battle.combat.hero_index();
+        let target_id = pick.object.map(|t| if t == hero { self.hero_id } else { self.units[t].logical_id });
+        let unit = pick.object.filter(|&t| t == hero || self.units[t].kind != KIND_BUILDING);
         match pick.kind {
             1 => self.dispatch(Order { code: hq::GO, parameter: 0, target: place? }),
             3 => self.dispatch(Order {
@@ -337,27 +420,40 @@ impl Play {
             }),
             7 => {
                 let t = pick.object?;
-                if self.units[t].kind == KIND_BUILDING {
+                if t == hero {
+                    self.selected.clear();
+                } else if self.units[t].kind == KIND_BUILDING {
                     self.select_building(t);
                 } else {
                     self.select_unit_alone(t);
                     self.commander.pick_mode = PickMode::Free;
-                    return Some((unit_page(self.units[t].type_word), false));
+                    return match unit_page(self.units[t].type_word) {
+                        0 => None,
+                        page => Some((page, false)),
+                    };
                 }
             }
-            8..=10 if self.commander.pick_mode == PickMode::Guard => {
+            8 if self.commander.pick_mode == PickMode::Guard => {
+                let p = pick.point?;
                 self.commander.pick_mode = PickMode::Free;
-                let order = match pick.object {
-                    Some(_) => {
-                        Order { code: orders::PATROL, parameter: 0, target: Target::LogicId(target_id?) }
-                    }
-                    None => Order { code: orders::PATROL, parameter: 0, target: place? },
-                };
-                self.give_pending(order);
+                self.give_pending(Order {
+                    code: orders::PATROL,
+                    parameter: GUARD_PICK_RADIUS,
+                    target: Target::Place(p.to_array()),
+                });
+            }
+            9 if self.commander.pick_mode == PickMode::Guard => {
+                unit?;
+                self.commander.pick_mode = PickMode::Free;
+                self.give_pending(Order {
+                    code: orders::PATROL,
+                    parameter: GUARD_PICK_RADIUS,
+                    target: Target::LogicId(target_id?),
+                });
             }
             9 | 10 => self.dispatch(Order {
                 code: orders::PATROL,
-                parameter: 0,
+                parameter: GUARD_CLICK_RADIUS,
                 target: Target::LogicId(target_id?),
             }),
             12 => {
@@ -482,7 +578,8 @@ impl Play {
     }
 
     /// The ghost this frame, the cursor's ray being `aim`: it stands where the ray meets the
-    /// world strictly inside the map, and a miss leaves it where it was.
+    /// ground or a building strictly inside the map ([`Play::cursor_point`], the same
+    /// `0x10035e40`), and a miss leaves it where it was.
     pub fn update_ghost(&mut self, aim: Aim) {
         let Some(Pending { kind: PendingKind::Build(type_word), unit, .. }) = self.commander.pending.clone()
         else {
@@ -495,15 +592,7 @@ impl Play {
                 Some(Ghost { type_word, path, at: Vec3::ZERO, yaw: 0.0, valid: false, placed: false });
         }
         let hit = match aim {
-            Aim::Ray { eye, direction } => {
-                let (lo, hi) = self.ground.world_box();
-                let end = eye + direction * ((hi - lo).length() + 200.0);
-                self.battle
-                    .combat
-                    .first_hit(&self.ground, None, eye, end, 0.0)
-                    .map(|(s, _, _)| s.point)
-                    .filter(|p| p.x > lo.x && p.y > lo.y && p.x < hi.x && p.y < hi.y)
-            }
+            Aim::Ray { eye, direction } => self.cursor_point(eye, direction),
             _ => None,
         };
         let Some(at) = hit else {
@@ -678,6 +767,12 @@ mod tests {
         assert_eq!([0, 1, 2, 3, 4, 7, 9, 12, 13, 17].map(cursor_state), [1, 3, 9, 4, 6, 2, 5, 3, 1, 1]);
         assert_eq!(cursor_object(3), Some(([192.0, 16.0], [8.0, 8.0])));
         assert_eq!(cursor_object(8), None);
+    }
+
+    #[test]
+    fn the_cursors_ray_asks_for_the_landscape_and_the_buildings_only() {
+        let classes: Vec<u32> = (0..16).filter(|c| CURSOR_RAY_CLASSES & (1 << c) != 0).collect();
+        assert_eq!(classes, [1, 3]);
     }
 
     #[test]
