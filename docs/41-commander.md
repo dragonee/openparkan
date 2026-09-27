@@ -186,7 +186,11 @@ The update (`0x10083c60`) sets them afresh every frame:
 The panel's click (`0x100841a0`) tries, in order:
 1. **the lock**, as above;
 2. **the satellite map's rectangle at its `+0x230`**, while the map is open:
-   close the map (`0x10074100`) — what that rectangle is was not followed;
+   close the map (`0x10074100`, `0x10084343`–`0x1008437d`). The rectangle is
+   the exit button on the commander's map's title bar, (605, 43)–(640, 63),
+   which the commander's variant stores as it draws
+   ([35-hud.md](35-hud.md#the-commanders-variant--read-and-seen)). The test is
+   made in any mode but 5, whatever the column and the page;
 3. **with the column open and the `CState` mode 3 or 4**, the buttons, each only
    when enabled and hit:
    - **hero** — roll the `CState` back to mode 0 (`0x10062ce0` with 0, 0,
@@ -786,8 +790,12 @@ Mission 04, on the Enhanced Research Center's pod
 
 ## Not established
 
-- What the satellite map's `+0x230` rectangle is, which the column's click tests
-  before the buttons.
+- ~~What the satellite map's `+0x230` rectangle is, which the column's click tests
+  before the buttons.~~ — **read**: the exit button at the right end of the
+  commander's map's title bar, (605, 43)–(640, 63), stored by the draw from the
+  pen after the title (`0x10073968`–`0x1007399b`); a click in it closes the map
+  ([What a click on the column does](#what-a-click-on-the-column-does),
+  [35-hud.md](35-hud.md#the-commanders-variant--read-and-seen)).
 - The record words the icons are tinted and picked by: `+0x30` (1 to 4 for a unit,
   1 to 5 for a building) and a unit's property `0x207`. The stand-in reading of
   `+0x30` as the chassis's size class is [31-packages.md](31-packages.md#not-established)'s;

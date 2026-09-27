@@ -24304,6 +24304,40 @@ def check_commander_panel(check, game: Path) -> None:
           f"{len(m.lodes)} lode, found; with the generator and bunker taken the column enables "
           f"{sorted(hex(k) for k, v in derived.items() if v)} as the recording shows")
 
+    _check_commander_map(check, at, strings)
+
+
+def _check_commander_map(check, at, strings) -> None:
+    """The commander's satellite map's title bar (docs/35, "The commander's variant"): the pen
+    from (374, 43), a 226-wide box in #37ff37, a mirrored end, and the exit button whose
+    rectangle, the map's +0x230, the column's click closes the map on."""
+    bar = (at(0x1007390C, 16) == bytes.fromhex("c744241476010000c74424182b000000")
+           and at(0x10073921, 5) == b"\x68\x37\xff\x37\xff"
+           and at(0x1007392D, 5) == b"\x68\xe2\x00\x00\x00"
+           and at(0x1007393F, 5) == b"\xba\x01\x00\x00\x00"                     # right to left
+           and at(0x1007394B, 5) == bytes.fromhex("8344241005"))                # pen 5 on
+    rect = (at(0x10073970, 6) == bytes.fromhex("8d4814 8d6a23")                 # y + 20, x + 35
+            and at(0x10073976, 6) == bytes.fromhex("89863c020000")
+            and at(0x1007397C, 6) == bytes.fromhex("898e48020000")
+            and at(0x1007398B, 6) == bytes.fromhex("899638020000")
+            and at(0x1007399B, 6) == bytes.fromhex("89ae44020000")
+            and at(0x10073991, 2) == b"\x6a\x01"                                # variant 1
+            and at(0x10073128, 10) == bytes.fromhex("c78530020000f0420e10"))
+    button = (at(0x1009A2AD, 5) == bytes.fromhex("bdf0f0f0ff")                  # variant 1 tint
+              and at(0x1009A2B4, 5) == bytes.fromhex("bd808080ff"))
+    close = (at(0x10084362, 6) == bytes.fromhex("8d8830020000")
+             and at(0x1008437D, 1) == b"\xe8"
+             and (0x1008437D + 5 + struct.unpack("<i", at(0x1008437E, 4))[0]) & 0xFFFFFFFF == 0x10074100)
+    tooltip = at(0x10073196, 5) == b"\xba\x19\x18\x00\x00" and strings.get(6169) == "Close"
+    check("iron3d.dll: the commander's map title bar, and the exit button its +0x230 closes on",
+          bar and rect and button and close and tooltip,
+          f"from (374, 43) an end, a 226-wide box in #37ff37 and a mirrored end: {bar}; the "
+          f"exit button stored at +0x230 as (605, 43)-(640, 63), variant 1: {rect}; its icon "
+          f"0xfff0f0f0: {button}; the column's click closes the map in it: {close}; tooltip "
+          f"6169 {strings.get(6169)!r}: {tooltip}")
+
+
+
 
 #: tut4_pl.trf's starting categories: out of the tree, granted, open.
 M04_TREE_STATE = {0: 341, 7: 26, 5: 1}

@@ -1038,6 +1038,35 @@ fn explode_in_the_unit_box_blows_the_warbot_up_six_tenths_of_a_second_later() {
     assert!(events.contains(&Event::Staged { target: bot, part: 0, node: 0 }), "{events:?}");
 }
 
+/// The commander's map closes on its title bar's exit button, the map's `+0x230` rectangle
+/// (605, 43)-(640, 63), which the column's click tests right after the lock
+/// (`0x10084343`-`0x1008437d`); the rest of the title bar takes a click and does nothing.
+#[test]
+#[ignore = "needs the game install"]
+fn the_commanders_map_closes_on_its_title_bars_exit_button() {
+    use parkan_world::cockpit::Cockpit;
+    use parkan_world::cockpit::commander::Click;
+    use parkan_world::cockpit::map::EXIT;
+    use parkan_world::hud::Pages;
+
+    let game = gamedir::find(None).expect("a Parkan install: set PARKAN_DIR");
+    let (mut play, m) = mission_03_play();
+    let bunker = object_target(&play, &m, "sbunk01.dat");
+    play.units[bunker].clan = Some(play.player_clan);
+    play.enter_command(bunker);
+    let pages = Pages::open(&game).unwrap();
+    let mut cockpit = Cockpit::open(&game, &pages, &play).unwrap();
+    let now = play.hero.time_ms;
+    cockpit.update(&mut play, now);
+    cockpit.map.toggle();
+    let title = [500.0, 50.0];
+    let click = cockpit.commander.click(&mut play, &mut cockpit.map, title, title, now);
+    assert!(cockpit.map.open, "the title itself closes nothing ({click:?})");
+    let exit = [(EXIT[0] + EXIT[2]) / 2.0, (EXIT[1] + EXIT[3]) / 2.0];
+    assert_eq!(cockpit.commander.click(&mut play, &mut cockpit.map, exit, exit, now), Click::Taken);
+    assert!(!cockpit.map.open, "the exit closes the map");
+}
+
 /// Telepresence at auto-driver level 1 leaves the unit's walk to its AI and at 0 does not
 /// (`iron3d.dll:0x10074ff0`: level 1 gives the Wizard's unit word, the behaviour's movement
 /// flag `0x10`, to the AI, and keeps the turret and guns the player's).

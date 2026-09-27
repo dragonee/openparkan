@@ -96,12 +96,68 @@ pub fn draw(cockpit: &mut Cockpit, ink: &mut Ink, play: &Play, now_ms: f64) {
     draw_in(cockpit, ink, play, now_ms, PANEL, false);
 }
 
+/// Where the commander's variant starts its title bar's pen (`0x1007390c`, `0x10073914`), the
+/// text box's width after the left `ending_text` (`0x1007392d`), and the title's colour
+/// (`0x10073921`).
+pub const TITLE_AT: [f32; 2] = [374.0, 43.0];
+pub const TITLE_BOX: f32 = 226.0;
+pub const TITLE_COLOUR: u32 = 0xff37_ff37;
+/// The compound pieces' widths the title bar steps the pen by, and their height, from
+/// `ui/compaund.cfg`: `ending_text` 5, `exit_button_*` 35, all 19 tall.
+pub const ENDING: f32 = 5.0;
+pub const EXIT_WIDE: f32 = 35.0;
+pub const PIECE_TALL: f32 = 19.0;
+/// The exit button's rectangle, the object's `+0x230` (`+0x238`-`+0x248`), which the draw
+/// stores from the pen after the title (`0x10073968`-`0x1007399b`): 35 wide and 20 tall. A
+/// click in it closes the map (the column's click, `0x10084362`-`0x1008437d`), and the cursor
+/// on it shows the tooltip 6169 *Close* (`+0x24c`).
+pub const EXIT: [f32; 4] = [
+    TITLE_AT[0] + ENDING + TITLE_BOX,
+    TITLE_AT[1],
+    TITLE_AT[0] + ENDING + TITLE_BOX + EXIT_WIDE,
+    TITLE_AT[1] + 20.0,
+];
+/// The exit button's variant 1, `exit_button_normal`, tints its icon so (`0x1009a2ad`); the
+/// icon stands 15 in and 3 down (`0x1009a33d`-`0x1009a34c`).
+pub const EXIT_ICON_TINT: u32 = 0xfff0_f0f0;
+pub const EXIT_ICON_AT: [f32; 2] = [15.0, 3.0];
+
+/// The commander's title bar (`0x10073830`, before the panel): from (374, 43) `ending_text`,
+/// a `body_text` box 226 wide with 5074 *Satellite map* centred in `#37ff37`, a second
+/// `ending_text` mirrored, drawn right to left from 5 past the box's end so that it caps the
+/// box, and the exit button at the pen, the box's end, in its `normal` variant with
+/// `exit_icon`. Each piece is the pen primitive's: the ends `0x10099a30`, the box
+/// `0x10099f60`, the button `0x1009a260`.
+fn title_bar(cockpit: &Cockpit, ink: &mut Ink) {
+    let put = |ink: &mut Ink, name: &str, rect: [f32; 4], colour: u32| {
+        if let Some(p) = cockpit.skin.get(name) {
+            ink.painter.piece(p, rect, argb(colour));
+        }
+    };
+    let [x, y] = TITLE_AT;
+    let bottom = y + PIECE_TALL;
+    put(ink, "ccres_ending_text", [x, y, x + ENDING, bottom], super::WHITE);
+    let box_left = x + ENDING;
+    put(ink, "ccres_body_text", [box_left, y, box_left + TITLE_BOX, bottom], super::WHITE);
+    let title = cockpit.string(5074).to_owned();
+    let down = ((PIECE_TALL - ink.font.line_height.round()) / 2.0).floor();
+    ink.centred(&title, box_left, TITLE_BOX, y + down, TITLE_COLOUR);
+    // Direction 1: the pen moves 5 on, and the end runs back from it, mirrored.
+    let pen = box_left + TITLE_BOX + ENDING;
+    put(ink, "ccres_ending_text", [pen, y, pen - ENDING - 1.0, bottom], super::WHITE);
+    let [x0, y0, x1, _] = EXIT;
+    put(ink, "ccres_exit_button_normal", [x0, y0, x1, y0 + PIECE_TALL], super::WHITE);
+    let [ix, iy] = [x0 + EXIT_ICON_AT[0], y0 + EXIT_ICON_AT[1]];
+    put(ink, "exit_icon", [ix, iy, ix + 13.0, iy + 13.0], EXIT_ICON_TINT);
+}
+
 /// The map in `panel`: the cockpit's, or with `commander` the commander's, under its title
-/// bar and with the camera marked in yellow (`0x10073830`, docs/35, "The satellite map").
+/// bar ([`title_bar`]) and with the camera marked in yellow (`0x10073830`, docs/35, "The
+/// satellite map").
 ///
-/// STAND-IN: docs/35-hud.md#not-established-4 -- the commander's title bar is read only as a
-/// place, (374, 43): drawn as a page header, the title 5074 over `ccres_body_text` and the
-/// exit button, 20 tall.
+/// STAND-IN: docs/35-hud.md#the-commanders-variant--read-and-seen -- the line the
+/// commander's variant draws under the map at (374, 330), naming what the cursor points at on
+/// the map, is not drawn: its clan piece (the game's `+0x2c` table at `+0x20`) is not read.
 pub fn draw_in(
     cockpit: &mut Cockpit,
     ink: &mut Ink,
@@ -119,19 +175,7 @@ pub fn draw_in(
     let shift = [x0 - PANEL[0], y0 - PANEL[1]];
     let at = |p: [f32; 2]| [p[0] + shift[0], p[1] + shift[1]];
     if commander {
-        let top = y0 - 20.0;
-        let put = |ink: &mut Ink, name: &str, rect: [f32; 4]| {
-            if let Some(p) = cockpit.skin.get(name) {
-                ink.painter.piece(p, rect, [1.0; 4]);
-            }
-        };
-        put(ink, "ccres_ending_text", [x0, top, x0 + 5.0, top + 19.0]);
-        put(ink, "ccres_body_text", [x0 + 5.0, top, x1 - 35.0, top + 19.0]);
-        put(ink, "ccres_exit_button_pressed", [x1 - 35.0, top, x1, top + 19.0]);
-        put(ink, "exit_icon", [x1 - 20.0, top + 3.0, x1 - 7.0, top + 16.0]);
-        let title = cockpit.string(5074).to_owned();
-        let down = ((19.0 - ink.font.line_height.round()) / 2.0).floor();
-        ink.centred(&title, x0 + 5.0, x1 - 40.0 - x0, top + down, super::WHITE);
+        title_bar(cockpit, ink);
     }
     messages::frame(cockpit, ink, panel);
     let map = &cockpit.map;
@@ -211,13 +255,13 @@ pub fn draw_in(
     // The hero, a walker, always outlined and with its heading line, green unselected.
     let hero = play.driven();
     let colour = play.mark_colour(Some(play.player_clan)).map(|v| f32::from(v) / 255.0);
-    let yaw = hero.walker.body.yaw;
+    let forward = hero.walker.body.forward();
     unit_mark(
         ink,
         at(map_point(hero.walker.body.position, side)),
         false,
         [colour[0], colour[1], colour[2], 1.0],
-        Some([-yaw.sin(), -yaw.cos()]),
+        Some([forward.x, -forward.y]),
         [sx, sy],
         px,
     );
@@ -301,10 +345,10 @@ pub fn known_to_player(play: &Play) -> Vec<bool> {
 }
 
 /// A unit's mark at `at`: a cross for a flyer, else a square, in screen pixels about the
-/// point; with `heading`, the outline and the heading line in the hero's green.
-///
-/// STAND-IN: docs/35-hud.md#not-established-4 -- that the unit record's `+0xd8` and `+0xdc`
-/// the line runs along are its heading is not read; the line runs along the hero's facing.
+/// point; with `heading`, the outline and the heading line in the hero's green. The line runs
+/// along the record's (`+0xd8`, −`+0xdc`): the x and y of its world matrix's second column
+/// (`+4`, `+0x14`), which the unit record's takt copies each takt
+/// (`0x10075761`-`0x1007576d`) -- its forward axis, local +y, in the world.
 fn unit_mark(
     ink: &mut Ink,
     at: [f32; 2],
@@ -366,5 +410,14 @@ mod tests {
             m.step_alpha(false, 0.0);
         }
         assert_eq!(m.alpha, 30);
+    }
+
+    #[test]
+    fn the_commanders_title_bar_ends_in_an_exit_button_at_the_maps_right_edge() {
+        // The pen from (374, 43) past a 5-wide end and the 226-wide box: the exit button, the
+        // `+0x230` rectangle, from 605 to the map's right edge, 20 tall down to the map's top.
+        assert_eq!(EXIT, [605.0, 43.0, 640.0, 63.0]);
+        assert_eq!(EXIT[2], PANEL[2]);
+        assert_eq!(EXIT[3], crate::cockpit::commander::MAP_PANEL[1]);
     }
 }

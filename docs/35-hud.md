@@ -1312,7 +1312,9 @@ shipped `Iron_3D.ini` says 128.
   ([The weapons list](#the-weapons-list--read-and-measured)).
 - It is also opened and closed from the commander's screens (`0x1002c778`,
   `0x10079993`, `0x10084630`, `0x1008437d`, `0x1008fd18`), and closed by Esc in
-  view state 2 (`0x10071027`); none of these was followed.
+  view state 2 (`0x10071027`). `0x1008437d` is the title bar's exit button
+  ([The commander's variant](#the-commanders-variant--read-and-seen)) and
+  `0x10084630` the column's map button; the rest were not followed.
 
 ### The panel in the cockpit — *read*, and *seen*
 
@@ -1416,7 +1418,11 @@ units, goes to (x₀ + 5 + round(256 x ÷ L), y₁ − 5 − round(256 y ÷ L)).
      - a white outline, from 2 px left of and above the mark to 2 px (the
        cross) or 1 px (the square) beyond it;
      - a white line from the mark's centre, 1.8 × its size along the record's
-       (`+0xd8`, −`+0xdc`);
+       (`+0xd8`, −`+0xdc`). Those are the x and y of the second column of the
+       unit's world matrix (`+4`, `+0x14` of interface `+0x3c` slot 8, kind 2),
+       its local +y axis, which is its forward. The record's bind copies them
+       (`0x10074e27`–`0x10074e33`), and so does its takt each time it runs
+       (`0x10075761`–`0x1007576d`), with the position beside them;
      - its route, lines in `0xff64c864` with 3 × 3 squares in `0xffc8c864` at
        the points, starting from the unit.
    - **The hero** (`Type` `0x1020000`), when it is not a flyer, gets the
@@ -1487,15 +1493,97 @@ variants:
 - **The teleport's arrow** appears in grey at 382 s, once the walking hero has
   come near.
 
+### The commander's variant — *read*, and *seen*
+
+In view state 2, the command camera's (any state but the cockpit's 1, 3, 4 and
+6), the map is `0x10073830`'s: a title bar, the panel on
+`+0x1f8`, (374, 63)–(640, 329), with its marks and the camera, and a line under
+it. The pieces are the pen primitives'
+([Everything is drawn on a 640 × 480 screen](#everything-is-drawn-on-a-640--480-screen--read)),
+and their sizes `ui/compaund.cfg`'s: `ending_text` 5 × 19, the exit buttons
+35 × 19.
+
+**The title bar**, the pen from (374, 43) (`0x1007390c`, `0x10073914`):
+
+| x | piece | what |
+|---|---|---|
+| 374–379 | `ending_text` (`0x10099a30`) | |
+| 379–605 | a text box 226 wide (`0x10099f60`) | 5074 *Satellite map* centred in `GAME_FONT`, in `#37ff37` (`0x10073921`) |
+| 604–610 | `ending_text` again, mirrored | the pen turned right to left (`0x100999b0` with 1), moved 5 on, and the end drawn back from 610; then turned back (`0x1007393f`–`0x10073963`) |
+| 605–640 | the exit button (`0x1009a260`), variant 1 | `exit_button_normal`, and `exit_icon` 13 × 13 at (+15, +3), (620, 46)–(633, 59), tinted `0xfff0f0f0` |
+
+- **The exit button's rectangle is the map's `+0x230`.** The draw stores it
+  from the pen as it reaches the button (`0x10073968`–`0x1007399b`): x from
+  605, y from 43, to 35 right and 20 down, (605, 43)–(640, 63). Its fields are
+  `+0x238`, `+0x23c`, `+0x244` and `+0x248` of an object whose vtable
+  (`0x100e42f0`) the constructor sets at `+0x230` (`0x10073128`).
+  - **A click in it closes the map.** The commander's column click tests it
+    second, after the lock, while the map is open (`+0x261`), with the
+    object's half-open rectangle test (`0x10035bd0`), and closes the map
+    (`0x10074100`, `0x10084343`–`0x1008437d`,
+    [41-commander.md](41-commander.md#what-a-click-on-the-column-does)).
+  - **The cursor on it shows *Close***: the draw hands the tooltip manager
+    (`0x1009bbc0`) the map's `+0x24c` (`0x100739a6`–`0x100739d9`), a tooltip
+    the constructor made with 6169 *Close* (`0x10073196`–`0x100731bc`).
+  - In the map's own code (`0x10072f90`–`0x10074a00`) the draw is the only
+    writer of its corners, so the click can answer only once the commander's
+    variant has drawn (*derived*).
+- **The mirrored end caps the box.** The button is drawn after it, over all
+  but its first column (*derived*).
+- **The button's variant sets its lamp and its icon's tint.** The primitive
+  tints the icon `0xff808080` for variant 0, `0xfff0f0f0` for 1, white for 2
+  (`0x1009a29b`–`0x1009a2bb`). A page's header draws the same button with
+  variant 2, `_pressed` and a white icon, and no mirrored end: its box runs
+  straight into the button ([36-factory.md](36-factory.md#the-page-header)).
+
+**The line under the map**, the pen from (374, 330) (`0x10073a1e`, `0x10073c38`,
+`0x10073e15`). It names **the object under the cursor, when the cursor's pick
+came from the map**: the cursor object at game `+0x24` with its `+0x1c` set
+([42-selection.md](42-selection.md#the-pick-under-the-cursor--read)). Its
+colour for the clan is **red `0xffff0000`** when `0x10039440` answers for the
+object's clan on the player's clan record, else **`0xff808080`** when
+`0x10039460` answers, else **`0xff8080ff`** (`0x10073a3a`–`0x10073a65`); which
+relations the two answer was not followed.
+
+| the object | pieces, left to right |
+|---|---|
+| a building (node kind 3), not the ruin `0x80002000` | `ending_text`; an icon piece (`0x1009a7a0`) holding the clan's sprite, entry `+0x14` of the clan's record × 0x8c in the table at the game's `+0x2c` → `+0x20`, in the clan colour; an icon piece with the building's icon, tinted by its size class (`0x100344e0`, [41-commander.md](41-commander.md#the-building-pages-5-to-8--read-and-seen)); an empty text box 19 wide; the mirrored end; `ray_emitter_off`; a bar 183 wide with its name (interface `0x10` slot 41) over its life (`0x1007e980`); `ray_ending` |
+| a unit, not an animal | the same, with its two icons (`0x10077120`) in place of the building's and no empty box, and in the bar `"%s [%s]"` of its name and its head order's status (`0x10076f90`) |
+| nothing, an animal or a ruin | `ending_text`, an empty text box 57 wide, the mirrored end, `ray_emitter_off`, an empty bar 183 wide, `ray_ending` |
+
+So the line is not the selection's. It is a readout of what the pointer rests
+on over the map (*derived*).
+
+*Seen*, Mission 04's recording at 84 s, on 960 × 720 divided by 1.5, with the
+map open over the Battle units page:
+- **The title.** *Satellite map* in green over x 458.7–524.0: its middle is
+  491.3 against the box's 492. It sits on a black box that ends at about 606.
+- **The exit button.** A green lamp at about 612–615, and the icon's white at
+  621–630.
+- **The page header's exit** at 340–352 has a white lamp: the pressed variant.
+- **The line under the map** is the empty one. A dark box runs from 375 to
+  433, the mirrored end to about 437, the emitter to 446, and an empty bar from
+  446. Nothing lies under the cursor on the map.
+
 ### Not established
 
 - What the level's `+0x700` list holds. ~~The player clan record's `+0x54`
   list~~ — **read**: the ids on its units' contact lists this frame
   ([The panel in the cockpit](#the-panel-in-the-cockpit--read-and-seen)).
-- That `+0xd8` and `+0xdc` are the unit's heading (*guess*, from the line's
-  use).
-- The commander's variant (`0x10073830`): its title bar at (374, 43), its exit
-  icon and the selected unit's line at y 330, beyond their places.
+- ~~That `+0xd8` and `+0xdc` are the unit's heading (*guess*, from the line's
+  use).~~ — **read**: the x and y of its world matrix's second column, its
+  forward axis, copied by the record's bind and each takt
+  (`0x10074e27`, `0x10075761`–`0x1007576d`,
+  [The marks](#the-panel-in-the-cockpit--read-and-seen)).
+- ~~The commander's variant (`0x10073830`): its title bar at (374, 43), its exit
+  icon and the selected unit's line at y 330, beyond their places.~~ —
+  **read**: an `ending_text`, a 226-wide box with 5074 in `#37ff37`, a mirrored
+  end and the exit button in its `normal` variant, whose rectangle (605, 43)–(640,
+  63) is the `+0x230` the column's click closes the map on. The line at y 330
+  names what the cursor points at on the map, not the selection
+  ([The commander's variant](#the-commanders-variant--read-and-seen)). Still
+  open: the clan sprite table the line draws from (the game's `+0x2c` →
+  `+0x20`), and the relations `0x10039440` and `0x10039460` answer.
 - The blinking square of game mode 8 (`0x10074430`), and the game's `+0xea`
   byte.
 - The map's other openers and closers.

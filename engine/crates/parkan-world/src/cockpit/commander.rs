@@ -347,6 +347,12 @@ impl Panel {
             self.slide(-1, now_ms, play);
             return Click::Taken;
         }
+        // The map's exit, its `+0x230` rectangle, while it is open: the map closes
+        // (`0x10084343`-`0x1008437d`), whatever the column and the page.
+        if map.open && inside(map::EXIT, right) {
+            map.toggle();
+            return Click::Taken;
+        }
         // The column's buttons, while it is out.
         if self.steps == SLIDE_STEPS {
             for (i, item) in COLUMN.iter().enumerate() {
