@@ -1148,10 +1148,15 @@ fn mission_03s_transport_carries_2000_ore_from_the_mine_to_the_small_warehouse()
 /// A building's batteries are its root controller's slots with its `i_pws_f_*` parts fitted
 /// into them, 8 held and 500 a second each (docs/23, "A power shortage lowers efficiency"):
 /// Mission 03's Large Factory holds 32, not its root's 20, and its Small Storage 16; the
-/// generator still reads full, and efficiency is the root's class-26 value.
+/// generator still reads full, and efficiency is the root's class-26 value. Both ways a
+/// building is made attach its parts as a robot's are (docs/23, "A building's batteries are
+/// the parts fitted into its slots"): the mission's through `ArealMap.dll`'s part loop, and a
+/// builder's through `Behavior.dll`'s, so the Small Mine the player builds holds 16 too.
 #[test]
 #[ignore = "needs the game install"]
 fn mission_03s_buildings_run_on_the_batteries_fitted_into_their_slots() {
+    use parkan_world::construction::BUILDING_MINE;
+
     let (mut play, m) = mission_03_play();
     play_for(&mut play, 0.1, |_| {});
     let site = |play: &parkan_world::play::Play, name: &str| {
@@ -1164,6 +1169,16 @@ fn mission_03s_buildings_run_on_the_batteries_fitted_into_their_slots() {
     assert_eq!((store.battery.capacity, store.battery.output, store.efficiency), (16.0, 1000.0, 1.0));
     assert_eq!((store.on_board, store.off_board), (20.0, 1.0));
     assert!(site(&play, "gener01.dat").battery.capacity < 0.0, "a generator reads full");
+
+    // A built Small Mine: its root's two battery slots hold two `i_pws_f_*` parts, 8 and 500 each.
+    let player = play.player_clan;
+    let lode = glam::Vec3::new(1026.1, 942.7, 0.0);
+    let at = lode.with_z(play.ground.below(lode.x, lode.y, 1.0e5).unwrap().point.z);
+    let now = play.hero.time_ms;
+    let mine = play.create_building(player, BUILDING_MINE, at, 0.0, now).expect("the mine stands");
+    play_for(&mut play, 0.1, |_| {});
+    let mine = play.economy.site(mine).cloned().expect("the built mine joined");
+    assert_eq!((mine.battery.capacity, mine.battery.output, mine.efficiency), (16.0, 1000.0, 1.0));
 }
 
 /// The ore a place moves by itself (docs/23, "The ore a place moves by itself"): a transport

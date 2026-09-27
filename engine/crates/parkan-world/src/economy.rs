@@ -223,11 +223,10 @@ impl Economy {
     /// internal part re-parses the slot its attach field names (docs/28, "A fitted part takes
     /// over its slot"), so a building's `i_pws_f_*` parts, 8 held and 500 a second each, stand
     /// in its root's 5 to 10 held and 13 to 25 a second (docs/23, "A power shortage lowers
-    /// efficiency").
-    ///
-    /// STAND-IN: docs/23-economy.md#a-power-shortage-lowers-efficiency-once-the-batteries-run-down--read-and-measured
-    /// -- that a building's parts are attached as a robot's are is inferred: the part loop
-    /// (`Behavior.dll:0x1001cd40`) was not followed for a building.
+    /// efficiency"). A building's parts go through a robot's part loop whichever way it is made,
+    /// the mission's through `ArealMap.dll`'s copy and a builder's through `Behavior.dll`'s, and
+    /// its object hands the part message on to the agent it wraps (docs/23, "A building's
+    /// batteries are the parts fitted into its slots").
     pub fn join_building(&mut self, assembly: &mut Assembly, t: usize, type_word: u32, path: &str, now: f64) {
         if self.site(t).is_some() {
             return;

@@ -417,10 +417,45 @@ figures.
 The internal parts' slots are the parts' own class on all but 4 of the 3,832
 internal parts in `UNITS`, buildings' among them
 ([28-chassis.md](28-chassis.md#a-fitted-part-takes-over-its-slot--read-and-measured)).
-That a building's parts go through the same attaching as a robot's is
-*inferred*: the part loop (`Behavior.dll:0x1001cd40`, called from `0x1001cec5`
-and `0x1001da86`) was not followed for a building; that buildings carry
-external parts the game draws is what says their parts are attached at all.
+**A building's parts go through a robot's part loop, whichever way it is made**
+(*read*). This page once had it only *inferred*; followed from both places a
+building comes from, the loop runs for a building as for a robot:
+
+- **A placed building** is made by `ArealMap.dll`'s own copy of
+  `CreateObjectFromScheme`. The mission placer (`iron3d.dll:0x100a3ea0`) files a
+  kind-0 record in its building list (jump table `0x100a47e4`, case
+  `0x100a3fbe`) and makes each through `0x10033cb0` (`0x100a411d`), which calls
+  the import (`0x10033cdb`): the export `0x10014fd0`, whose worker is
+  `0x10015290` (`0x1001523c`).
+- **A built building** is made by `Behavior.dll`'s copy, `0x1001d440`, from the
+  builder's `CreateBuilding` (`0x10029286`,
+  [32-builder.md](32-builder.md)).
+- **The two workers are one routine twice.** Each asks for class 3 or 4 by the
+  Type's top bit (`ArealMap.dll:0x1001552a`, `Behavior.dll:0x1001d6da`). The one
+  thing a building does apart is the sphere test against the buildings already
+  standing (`ArealMap.dll:0x100155b7`–`0x10015734`,
+  `Behavior.dll:0x1001d767`–`0x1001d8de`), which on a hit deletes the object
+  (`DeleteGameObject`) and returns. Past it a building falls through to
+  *"Chassis created"* (`0x1001573b`, `0x1001d8eb`) and the loop over the root's
+  children a robot runs, 0x78 bytes a child, each sent through the part loop
+  (`ArealMap.dll:0x10014b90` from `0x100158d6`, `Behavior.dll:0x1001cd40` from
+  `0x1001da86`) as message 6 with `0x80000020` (`0x10014cab`, `0x1001ce5b`).
+- **A building hands that message to its agent.** `CreateObject` answers with
+  the new object's interface 6 (`World3D.dll:0x10007bf2`), which a `CBuilding`
+  answers with itself, vtable `0x1009b59c` (`Terrain.dll:0x10057c4e`). Its slot
+  13 (`0x10057b30`) sends every interface-6 message on to its `+0x30`
+  (`0x10057b55`): the agent's `IGameObject`, which its constructor asks the agent
+  for (`0x10055ea0`–`0x10055ebd`, *"Could not obtain IGameObject"*). That is the
+  slot a robot's part message reaches (`AniMesh.dll:0x10001370`), whose
+  `0x80000020` case is the attach (`0x10001468` → `0x10003760`). The building
+  then hands messages 1, `0x80000020` and `0x14` to its own `SendMsg`
+  (`0x10057550`), where a part load re-takes its doors and computers
+  (`0x100580b0`) and touches no battery.
+
+So a building's internal parts re-parse the slots their attach fields name as a
+robot's do, and its batteries are its root's slots holding the parts' figures.
+The engine's buildings stand on this, a placed Large Factory holding 32 and a
+Small Mine the player builds 16.
 
 That is how a short clan slows its work. The distribution step refills every
 building's batteries by `Available / Total` of what they lack; a working
@@ -1258,6 +1293,17 @@ construction slows research.
   shares ([How often](#how-often-and-where-it-settles--read-with-a-derived-settle-point)).
   Still open: the `Ngi32.dll` import that seeds the register
   (`Control.dll:0x1000dc34`).
+- ~~Whether a building's parts are attached as a robot's are: the part loop
+  (`Behavior.dll:0x1001cd40`) was not followed for a building, and the building
+  batteries — 16 to 32 held and 1,000 to 2,000 a second on 53 of 76 assemblies —
+  stand on it.~~ **Read**: they are. A placed building is made by
+  `ArealMap.dll`'s copy of `CreateObjectFromScheme` and a built one by
+  `Behavior.dll`'s, and both run a building through the same child loop and part
+  loop as a robot (`ArealMap.dll:0x100158d6`, `Behavior.dll:0x1001da86`); the
+  building's object sends the part message on to the agent it wraps
+  (`Terrain.dll:0x10057b55`), whose attach is a robot's
+  (`AniMesh.dll:0x10001468`)
+  ([A building's batteries](#a-buildings-batteries-are-the-parts-fitted-into-its-slots--read-and-measured)).
 - **The 13 s a recorded transport round takes** beyond two walks at full speed:
   its held speed on Tut_3's slopes and the distance between its two places are
   not measured.

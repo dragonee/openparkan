@@ -9404,6 +9404,38 @@ doc = "docs/28-chassis.md"
 read = true
 
 [[entry]]
+module = "Behavior.dll"
+at = "0x1001da86"
+kind = "site"
+name = "CreateObjectFromScheme: each child of the root (0x78 bytes) through the part loop, a building's as a robot's"
+doc = "docs/23-economy.md"
+read = true
+
+[[entry]]
+module = "ArealMap.dll"
+at = "0x10014b90"
+kind = "function"
+name = "part loop, ArealMap's copy: \"Trying to add Sub Item\", message 6 with 0x80000020 (0x10014cab), recurse with the id read back"
+doc = "docs/23-economy.md"
+read = true
+
+[[entry]]
+module = "ArealMap.dll"
+at = "0x100158d6"
+kind = "site"
+name = "CreateObjectFromScheme worker: each child of the root through the part loop; a building only passes the sphere test first"
+doc = "docs/23-economy.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1009b59c"
+kind = "datum"
+name = "CBuilding vtable at +0, the interface 6 its inner QI answers (0x10057c4e): slot 0 QI 0x10057d50, slot 13 0x10057b30"
+doc = "docs/23-economy.md"
+read = true
+
+[[entry]]
 module = "AniMesh.dll"
 at = "0x10003775"
 kind = "site"
