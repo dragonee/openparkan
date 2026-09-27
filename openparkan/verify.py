@@ -15826,6 +15826,49 @@ def check_construction(check, game: Path) -> None:
           f"{', '.join(f'{k} {hp:g} HP' for k, (hp, _) in sorted(beams.items()))}, no "
           f".exp; control: {armed} other rounds carry one")
 
+    # A path in the install, matched without regard to case.
+    def resolve_case(root: Path, relative: str) -> Path:
+        at = root
+        for part in relative.replace("\\", "/").split("/"):
+            listed = {x.name.lower(): x for x in at.iterdir()} if at.is_dir() else {}
+            at = listed.get(part.lower(), at / part)
+        return at
+
+    # 7. the network game's 400 about another clan's base point, which single play never sets
+    iron_path = game / "iron3d.dll"
+    mis_path = game / "MisLoad.dll"
+    if iron_path.exists() and mis_path.exists():
+        iron, mis = _image_at(iron_path.read_bytes()), _image_at(mis_path.read_bytes())
+        strings = resources.strings(iron_path.read_bytes())
+        network = (iron(0x1005C748, 12) == bytes.fromhex("8338020f94c1888ee4000000")
+                   and iron(0x10033D36, 6) == bytes.fromhex("8a88e4000000")
+                   and iron(0x10029073, 8) == bytes.fromhex("6a1ec70002000000")
+                   and iron(0x1000806C, 8) == bytes.fromhex("c744241c1e000000")
+                   and iron(0x10008046, 5) == bytes.fromhex("e885410000")
+                   and iron(0x1000C215, 5) == bytes.fromhex("bfa42b1010")
+                   and iron(0x10102BA4, 12) == b"multi_login\0")
+        bases = (iron(0x10033DD4, 6) == bytes.fromhex("8db028070000")
+                 and iron(0x10033DE4, 3) == bytes.fromhex("8a4660")
+                 and iron(0x10033E0E, 6) == bytes.fromhex("d81d745c0e10")
+                 and struct.unpack("<f", iron(0x100E5C74, 4))[0] == 400.0
+                 and mis(0x1000E104, 4) == struct.pack("<I", 0x10001320)
+                 and mis(0x1000133D, 12) == bytes.fromhex("8b50308951048b5034895108")
+                 and iron(0x1005FCCC, 8) == bytes.fromhex("c684018807000001")
+                 and iron(0x1005FCE3, 5) == bytes.fromhex("681e180000")
+                 and strings.get(6174) == "%s joined the game")
+        tut3 = mission.load(resolve_case(game, "MISSIONS/CAMPAIGN/CAMPAIGN.00/Mission.03/data.tma"))
+        lode = tut3.lodes[0].position
+        others = {c.name: math.hypot(lode[0] - c.base[0], lode[1] - c.base[1])
+                  for c in tut3.clans if c.type != 1}
+        check("iron3d.dll: only a network game keeps a site 400 from another clan's base point",
+              network and bases and others.get("Ntrl", 1e9) < 400.0,
+              f"+0xe4 is set only from parameter mode 2 (0x1005c748), which the menus write on "
+              f"the way to multi_login (0x10029075); 0x10033d80 walks the clans' base points "
+              f"(IMission slot 7: data.tma's +0x30/+0x34), passing over one '%s joined the game' "
+              f"marked; Mission 03's lode stands "
+              f"{', '.join(f'{k} {v:.1f}' for k, v in others.items())} from the other clans' "
+              f"bases, and the recording's mine there is green, so single play never applies it")
+
 
 def check_controls(check, game: Path) -> None:
     """The input layer: ScanCode.dsc, Command.dsc, the .man bindings, the .tbl tables."""

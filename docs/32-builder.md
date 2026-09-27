@@ -159,9 +159,37 @@ answer colours it (`0x10058239`–`0x10058264`):
 
 In pick mode 6 a **mine off a lode** is red whatever the answer
 (`0x10058268`, below). The query returns only 0 or 1 (below), so the model is
-red or green. When the game's `+0xe4` byte is set (`0x10033d36`, not followed),
-an answer of 1 or 2 also turns to 0 within 400 across the ground of any of the
-level's `+0x728` records (`0x10033d80`).
+red or green.
+
+**In a network game a site near another clan's base is red** (*read*, and
+*measured*). When the game's `+0xe4` byte is set (`0x10033d36`), an answer of 1
+or 2 turns to 0 within 400 across the ground of another clan's **base point**
+(`0x10033d80`–`0x10033e2b`):
+- **The records are the clans'.** The level keeps a 0x68-byte record per clan
+  from `+0x724`, as many as `+0xacc` counts, and `+0x728` is the first one's
+  `+4`. The load fills each from `IMission` slot 7 (`iron3d.dll:0x10038ea0`),
+  which hands out `data.tma`'s clan record with its base x and y at `+4` and
+  `+8` (`MisLoad.dll:0x10001320`, from the record's `+0x30` and `+0x34`,
+  [04-missions.md](04-missions.md#clan)). The walk skips the builder's own clan
+  and any clan whose byte `+0x64` is set. Only game message 5 sets that byte
+  (`0x1005fccc`), the message that puts up string 6174, *"%s joined the game"*
+  (*measured*); a sweep of every access through a clan index (`imul …, 0x68`)
+  finds no other writer.
+- **`+0xe4` is the network game's byte.** It belongs to the one game object
+  `createGame` makes (0xf0 bytes, `0x1005b640`), the object `getIGame`
+  (`0x1005b580`) returns. It has two writers: the constructor's 0
+  (`0x1005c500`), and `Run`'s `mode == 2` (`0x1005c74e`,
+  [34-progression.md](34-progression.md#the-parameter-blocks-modes--read)). The
+  one menu write of mode 2 (`0x10029075`) is the button that goes on to screen
+  30, which the shell files the `multi_login` screen under (`0x1000806c`,
+  constructor `0x1000c1d0`); the executable writes only 0 and 1
+  (`iron_3d.exe:0x401005`, `0x4012b0`).
+- **So single play never applies it.** *Measured* against the recording:
+  Mission 03's lode lies **65.1** across the ground from the neutral clan's base
+  point, (1075.4, 900.2), inside 400, and the mine on it shows green at 184 s.
+  On the six `Multi` maps the 16 player clans' base points lie 57 to 264 from
+  their own nearest placed building, so the rule keeps a building out of the
+  ground round another player's start.
 
 **How it is drawn** (`0x10035f50`): in one flat colour, its red, green and blue
 each 1 or 0 by the colour word's bytes, with alpha 1. The camera is put in mode

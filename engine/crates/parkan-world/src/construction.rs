@@ -353,6 +353,11 @@ impl Play {
     /// through its node (`MHallWay` slot 4 → slot 5), must stand on an areal of the system map
     /// whose first flag word is set: *"HallVertex … is out of map"* or *"… is in Non-Reachable
     /// Areal"* else (`0x1000bf4a`–`0x1000bfa9`).
+    ///
+    /// The wrapper's own rule is left out on purpose: within 400 of another clan's base point
+    /// a site is red only in a network game, the game's `+0xe4`, which single play never sets
+    /// (`iron3d.dll:0x10033d36`, `0x1005c74e`; docs/32, "In a network game a site near another
+    /// clan's base is red").
     pub fn placement_valid(&mut self, builder: Option<usize>, type_word: u32, at: Vec3, yaw: f32) -> bool {
         if type_word == BUILDING_MINE && !self.on_lode(at) {
             return false;

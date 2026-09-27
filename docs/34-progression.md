@@ -1172,8 +1172,9 @@ panel switches on the word for a title and up to four lines:
 | 3 | 5083 *"Exiting..."* | green | — |
 
 - **The lines are grey**, `#f0f0f0`.
-- **In a network game** (the game's `+0xe4`, parameter mode 2, *derived* from what
-  it drops) lines 3075 and 3076 are cleared. On the session's server (`+0xe7`) a
+- **In a network game** (the game's `+0xe4`, parameter mode 2, *read*: [The
+  parameter block's modes](#the-parameter-blocks-modes--read)) lines 3075 and 3076
+  are cleared. On the session's server (`+0xe7`) a
   fourth line is added in red, 3077 *"WARNING! YOU`RE THE SERVER. IF YOU KILL THE
   GAME YOU'LL KILL OTHER PLAYERS."*, and the lines are spaced 15 wider.
 - **Fonts.** The title is in `MENU_FONT` (the game's `+0x14`, set at `0x1005f9df`)
@@ -1338,6 +1339,16 @@ place (`0x1005c748`–`0x1005c766`):
   writes 1 (`0x10028f42`). That is why the shell's case 2 accepts code 1 in
   mode 1 *or* 4: a training mission and a campaign mission come back the same
   way.
+- **Mode 2 is the network game** (*read*). The one menu write of 2
+  (`0x10029075`) is the third button of the screen whose second writes the
+  single-mission 1, and it goes on to screen 30, which the shell files
+  `multi_login` under (`0x1000806c`, its constructor `0x1000c1d0`); the executable
+  writes only 0 and 1 (`iron_3d.exe:0x401005`, `0x4012b0`). `+0xe4` has no other
+  writer than `Run` and the constructor's 0 (`0x1005c500`), and what reads it is the
+  network's: it clears the R and L lines above, runs only the local clan's building
+  records in the frame (`0x1007db57`), makes the placed buildings without their
+  mission ids (`0x100a40ee`), and keeps a new building 400 from another clan's base
+  point ([32-builder.md](32-builder.md#the-model-under-the-cursor)).
 
 ### Who sends the game message 3 — *read*
 
