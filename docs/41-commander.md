@@ -265,14 +265,38 @@ selected units, and none unless the game's `+0x08` is 4):
 
 **One unit** (`0x10085890` at (51, 20)):
 - **two icons** 15 × 15 at (60, 27) and (77, 27) (`0x10077120`, from `ui_menu`,
-  *measured* with ink):
-  - the first by Type: a builder (65, 110), a transport (81, 110), a warrior, HQ
-    or hero (49, 110);
-  - the second by the unit's property `0x207`, 1 to 4: (97, 94), (49, 94),
-    (65, 94), (81, 94);
-  - both tinted by the record's `+0x30`: 1 `0xffffe7ff`, 2 `0xffff8080`,
-    3 `0xff80ff80`, 4 `0xff8080ff`. *Seen*: the Mission 03 builder's and warriors'
-    icons are red.
+  *measured* with ink), *read*:
+  - **the first by Type**, compared whole (`0x10077241`–`0x100772be`): a builder
+    `0x1004000` (65, 110), a transport `0x1002000` (81, 110), a warrior
+    `0x1008000`, an HQ `0x1010000` or the hero `0x1020000` (49, 110). Any other
+    Type gets no first icon;
+  - **the second by the unit's property `0x207`**, which the record's `+0x44`
+    (the behaviour, interface `0x10`) answers through its slot 26
+    (`0x10077147`–`0x1007715a`). It is the chassis profile's `ChassisType`
+    ([35-hud.md](35-hud.md#name-and-status--read-and-seen)). By the table at
+    `0x100773fc`: 1 flying (97, 94), 2 walking (49, 94), 3 wheeled (65, 94),
+    4 tracked (81, 94). Any other value gets no second icon;
+  - **both tinted by the record's `+0x30`**, the size class the record's bind
+    stores from property `0x201` (`0x1007e538`–`0x1007e549`,
+    [38-designs.md](38-designs.md#the-catalogue--read-and-measured)). By the
+    table at `0x100773ec`: 1, tiny, `0xffffe7ff`; 2, small, `0xffff8080`;
+    3, medium, `0xff80ff80`; 4, large, `0xff8080ff`. Any other value leaves the
+    caller's colour;
+  - **a walking warrior whose record's `+0x64` answers its query 2** (slot 4,
+    `edx` 2) with 0 or less gets the towers' building cell (81, 126) for its
+    first icon and a blank second (`0x10077342`–`0x100773d1`). The same query
+    names a robot *Tiny Tower* (`0x10075e17`,
+    [35-hud.md](35-hud.md#name-and-status--read-and-seen)); which robots answer
+    so is not read;
+  - *measured*, over the 296 units the 29 missions place: size classes 1 to 4,
+    13, 140, 75 and 68 of them, and `ChassisType` 1 to 4, 58 flying,
+    127 walking, 58 wheeled and 53 tracked. None falls outside the tables. The
+    320 robot assemblies under `UNITS/UNITS` agree: sizes 21, 138, 75 and 86,
+    types 73, 104, 75 and 68;
+  - *seen*: the Mission 03 builder's and warriors' icons are red, all small
+    (`r_l_*`). At 84 s in Mission 04's recording the HQ's row reads blue with
+    the wheeled icon, large and wheeled (`r_b_03`), and the helicopter's reads
+    pale with the flying one, tiny and flying (`r_t_02`).
 - **its name and status**, `"%s [%s]"` — the unit's name and its head order's
   status line (`0x10076f90`, [31-packages.md](31-packages.md#the-orders--measured))
   — in yellow `0xffffff00` at (101, 30);
@@ -502,8 +526,14 @@ the factory panel at (51, 171 + 20*i*), and only with the column
 - its icon (`0x100344e0`), 15 × 15 on `ui_menu`: storage (81, 110), mine
   (129, 126), generator (113, 126), plant (129, 94), Outpost (97, 126), institute
   (49, 126), any bunker (65, 126), either tower (81, 126); the main teleport,
-  `0x80000200`, takes `ui_menu3` (148, 27). It is tinted by the record's `+0x30`: 1 white,
-  2 `0xffff0000`, 3 `0xff00ff00`, 4 `0xff0000ff`;
+  `0x80000200`, takes `ui_menu3` (148, 27). It is tinted by the record's `+0x30`
+  (`0x100344fc`, table `0x100347dc`): 1 white, 2 `0xffff0000`, 3 `0xff00ff00`,
+  4 and 5 `0xff0000ff`; any other value leaves the caller's colour. `+0x30` is
+  the building's size class, from its root's fourth letter (`l` 2, `m` 3, `b` 4,
+  `e` 5), which the same bind as a unit's stores
+  ([38-designs.md](38-designs.md#the-catalogue--read-and-measured)). *Measured*:
+  of the 167 buildings the missions place, 107 are small, 27 medium, 25 large
+  and 8 enhanced, so a row reads red, green or blue and never white;
 - a separator;
 - **for a bunker** (`0x80010000`, `…20000`, `…40000`): a 35-wide button with
   `buildscreen_direct_icon`, tooltip 1517 *Strategic control*;
@@ -796,10 +826,17 @@ Mission 04, on the Enhanced Research Center's pod
   pen after the title (`0x10073968`–`0x1007399b`); a click in it closes the map
   ([What a click on the column does](#what-a-click-on-the-column-does),
   [35-hud.md](35-hud.md#the-commanders-variant--read-and-seen)).
-- The record words the icons are tinted and picked by: `+0x30` (1 to 4 for a unit,
-  1 to 5 for a building) and a unit's property `0x207`. The stand-in reading of
-  `+0x30` as the chassis's size class is [31-packages.md](31-packages.md#not-established)'s;
-  the recording's player units and bunker all read red, which is 2.
+- ~~The record words the icons are tinted and picked by: `+0x30` (1 to 4 for a unit,
+  1 to 5 for a building) and a unit's property `0x207`.~~ — **read**: `+0x30`
+  is the size class the bind stores from property `0x201` for a unit's record
+  and a building's alike (`0x1007e549`), tinting a unit's icons by the table at
+  `0x100773ec` and a building's by `0x100347dc`. Property `0x207` is the
+  behaviour's answer, the chassis profile's `ChassisType`, which picks the
+  second icon by `0x100773fc`. All 296 placed units read 1 to 4 on both, and
+  all 167 placed buildings 2 to 5 ([The box](#the-box),
+  [The building pages](#the-building-pages-5-to-8--read-and-seen)). Still
+  open: the caller's colour a value outside the tables would keep, which no
+  shipped object reaches.
 - ~~What slot 7 of a unit's object does 0.6 s after *Explode!*.~~ — **read**:
   the object is the unit's `ILifeSystem`, and slot 7 is its kill: node 0 loses
   the object's whole maximum, past the armour, unless the unit is invulnerable

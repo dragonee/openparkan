@@ -67,7 +67,9 @@ pub fn draw(cockpit: &Cockpit, ink: &mut Ink, play: &Play) {
         let tint = if dim { halved(tint) } else { tint };
         for cell in cells {
             let x = step(cockpit, ink, "ccres_body_text", pen, y, ICON_PIECE);
-            icon(cockpit, ink, cell, [x + 2.0, y + 2.0], tint);
+            if let Some(cell) = cell {
+                icon(cockpit, ink, cell, [x + 2.0, y + 2.0], tint);
+            }
         }
         step(cockpit, ink, "ccres_separator_left_text", pen, y, 5.0);
         step(cockpit, ink, EMITTERS[emitter], pen, y, 10.0);

@@ -24304,7 +24304,65 @@ def check_commander_panel(check, game: Path) -> None:
           f"{len(m.lodes)} lode, found; with the generator and bunker taken the column enables "
           f"{sorted(hex(k) for k, v in derived.items() if v)} as the recording shows")
 
+    _check_commander_icons(check, game, at, u32)
     _check_commander_map(check, at, strings)
+
+
+def _check_commander_icons(check, game: Path, at, u32) -> None:
+    """The panel's icons (docs/41, "The box"): a unit's two picked by its Type and its property
+    0x207, both tinted by its record's +0x30; a building's tinted by its own +0x30. Every
+    placed unit and building lands in the tables."""
+    def colour(target: int, reg: int) -> int | None:
+        body = at(target, 6)
+        return struct.unpack_from("<I", body, 2)[0] if body[:2] == bytes([0xC7, reg]) else None
+
+    unit_tints = [colour(u32(0x100773EC + 4 * i), 0x07) for i in range(4)]
+    building_tints = [colour(u32(0x100347DC + 4 * i), 0x02) for i in range(5)]
+    cells = []
+    for i in range(4):
+        body = at(u32(0x100773FC + 4 * i), 22)
+        m = re.match(rb"\x55\x68\x00\x00\x70\x41\x68\x00\x00\x70\x41\x68(.{4})\x68(.{4})", body, re.S)
+        cells.append(tuple(struct.unpack("<f", m.group(g))[0] for g in (2, 1)) if m else None)
+    gates = (at(0x1007715E, 8) == bytes.fromhex("8d46ff83f8037725")          # +0x30 - 1 <= 3
+             and at(0x10077147, 5) == b"\x68\x07\x02\x00\x00"                   # property 0x207
+             and at(0x100344FC, 8) == bytes.fromhex("8b45304883f80456"))        # a building's +0x30
+    tables = (unit_tints == [0xFFFFE7FF, 0xFFFF8080, 0xFF80FF80, 0xFF8080FF]
+              and building_tints == [0xFFFFFFFF, 0xFFFF0000, 0xFF00FF00, 0xFF0000FF, 0xFF0000FF]
+              and cells == [(97.0, 94.0), (49.0, 94.0), (65.0, 94.0), (81.0, 94.0)] and gates)
+
+    lib = objects.ObjectLibrary(game / "objects.rlb")
+    held = profiles.load(game)
+    index: dict[str, Path] = {}
+    for f in game.glob("UNITS/**/*.dat"):
+        index.setdefault(f.name.lower(), f)
+    sizes: Counter[int] = Counter()
+    kinds: Counter[int] = Counter()
+    building_sizes: Counter[int] = Counter()
+    for d in gamedir.missions(game):
+        for o in mission.load(d / "data.tma").objects:
+            found = index.get(o.path.replace("\\", "/").split("/")[-1].lower())
+            if found is None or o.kind not in (mission.KIND_UNIT, mission.KIND_BUILDING):
+                continue
+            unit = objects.load_unit(found)
+            root = unit.components[0].ref.member.lower() if unit.components else ""
+            if o.kind == mission.KIND_BUILDING:
+                building_sizes[profiles.BUILDING_SIZE.get(root[3:4], 0)] += 1
+                continue
+            record = lib.get(root)
+            sizes[profiles.CHASSIS_SIZE.get(root[2:3], 0)] += 1
+            kinds[int(held[record.profile]["ChassisType"].value)
+                  if record is not None and record.profile in held else 0] += 1
+    placed = (sum(sizes.values()) == 296 and set(sizes) == {1, 2, 3, 4}
+              and set(kinds) == {1, 2, 3, 4} and sum(building_sizes.values()) == 167
+              and set(building_sizes) == {2, 3, 4, 5})
+    check("iron3d.dll: a unit's icons by its Type and ChassisType, tinted by its size class",
+          tables and placed,
+          f"0x10077120 tints +0x30 1-4 {[hex(c) for c in unit_tints if c]} and picks 0x207 1-4 "
+          f"{cells}; 0x100344e0 tints a building's +0x30 1-5 "
+          f"{[hex(c) for c in building_tints if c]}; the missions place "
+          f"{sum(sizes.values())} units of size {dict(sorted(sizes.items()))} and ChassisType "
+          f"{dict(sorted(kinds.items()))}, and {sum(building_sizes.values())} buildings of size "
+          f"{dict(sorted(building_sizes.items()))}")
 
 
 def _check_commander_map(check, at, strings) -> None:
@@ -24335,8 +24393,6 @@ def _check_commander_map(check, at, strings) -> None:
           f"exit button stored at +0x230 as (605, 43)-(640, 63), variant 1: {rect}; its icon "
           f"0xfff0f0f0: {button}; the column's click closes the map in it: {close}; tooltip "
           f"6169 {strings.get(6169)!r}: {tooltip}")
-
-
 
 
 #: tut4_pl.trf's starting categories: out of the tree, granted, open.

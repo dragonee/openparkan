@@ -680,27 +680,74 @@ fn column(cockpit: &Cockpit, ink: &mut Ink, now_ms: f64) {
     }
 }
 
-/// A unit's two icons' cells (`0x10077120`): by its Type, and by its property `0x207`; and
-/// their tint by its record `+0x30`.
+/// A unit's two icons' cells (`0x10077120`) and their tint: [`unit_cells`] by its Type and its
+/// property `0x207`, [`unit_tint`] by its record's `+0x30`.
 ///
-/// STAND-IN: docs/41-commander.md#not-established -- a unit's property `0x207` is not read:
-/// its second icon is the cell for 1.
-pub(super) fn unit_icons(play: &Play, t: usize) -> ([[f32; 2]; 2], u32) {
-    let type_word = play.units[t].type_word;
-    let first = if hq::within(type_word, BUILDERS) {
-        [65.0, 110.0]
-    } else if hq::within(type_word, TRANSPORTS) {
-        [81.0, 110.0]
-    } else {
-        [49.0, 110.0]
+/// STAND-IN: docs/41-commander.md#the-box -- a *Tiny Tower*, a walking warrior whose record's
+/// `+0x64` answers its query 2 with 0 or less, shows the towers' cell (81, 126) for its first
+/// icon and a blank second (`0x10077342`-`0x100773d1`); which robots answer so is not read,
+/// and none is told apart.
+pub(super) fn unit_icons(play: &Play, t: usize) -> ([Option<[f32; 2]>; 2], u32) {
+    let u = &play.units[t];
+    (unit_cells(u.type_word, u.designation.chassis_type), unit_tint(play.record_class(t)))
+}
+
+/// A unit's two icons' cells on `ui_menu` (`0x10077120`). The first by its Type, compared
+/// whole: a builder's (65, 110), a transport's (81, 110), a warrior's, an HQ's or the hero's
+/// (49, 110), and none for any other. The second by its property `0x207`, its chassis
+/// profile's `ChassisType` (table `0x100773fc`): flying (97, 94), walking (49, 94), wheeled
+/// (65, 94), tracked (81, 94), and none past 4 (docs/41, "The box").
+pub fn unit_cells(type_word: u32, chassis_type: u8) -> [Option<[f32; 2]>; 2] {
+    use super::panels::{TYPE_BUILDER, TYPE_HQ, TYPE_TRANSPORT, TYPE_WARRIOR};
+    let first = match type_word {
+        TYPE_BUILDER => Some([65.0, 110.0]),
+        TYPE_TRANSPORT => Some([81.0, 110.0]),
+        TYPE_WARRIOR | TYPE_HQ | crate::play::ROBOT_HERO => Some([49.0, 110.0]),
+        _ => None,
     };
-    let tint = match play.record_class(t) {
+    let second = match chassis_type {
+        1 => Some([97.0, 94.0]),
+        2 => Some([49.0, 94.0]),
+        3 => Some([65.0, 94.0]),
+        4 => Some([81.0, 94.0]),
+        _ => None,
+    };
+    [first, second]
+}
+
+/// A unit's icons' tint by its record's `+0x30` (table `0x100773ec`), the size class its bind
+/// stores from property `0x201` (`0x1007e538`-`0x1007e549`): tiny a pale pink, small red,
+/// medium green, large blue. Any other leaves the caller's colour, which no shipped unit
+/// reaches -- all 296 placed ones are 1 to 4 (docs/41, "The box"); white here.
+pub fn unit_tint(size_class: u8) -> u32 {
+    match size_class {
         1 => 0xffff_e7ff,
         2 => 0xffff_8080,
         3 => 0xff80_ff80,
-        _ => 0xff80_80ff,
-    };
-    ([first, [97.0, 94.0]], tint)
+        4 => 0xff80_80ff,
+        _ => WHITE,
+    }
+}
+
+/// A building's icon's tint by its record's `+0x30` (`0x100344fc`, table `0x100347dc`), the
+/// size class its root's fourth letter gives: 1 white, small red, medium green, large and
+/// enhanced blue. Any other leaves the caller's colour, which no shipped building reaches --
+/// every root's fourth letter is `l`, `m`, `b` or `e` (docs/41, "The building pages"); white
+/// here.
+pub fn building_tint(size_class: u32) -> u32 {
+    match size_class {
+        2 => 0xffff_0000,
+        3 => 0xff00_ff00,
+        4 | 5 => 0xff00_00ff,
+        _ => WHITE,
+    }
+}
+
+/// Building target `t`'s size class, its record's `+0x30`: the fourth letter of its root
+/// record ([`crate::selection::building_size`]).
+fn building_class(play: &Play, t: usize) -> u32 {
+    let root = play.assembly.records(play.commander.paths.get(t).map_or("", String::as_str));
+    root.first().map_or(0, |r| crate::selection::building_size(r))
 }
 
 /// A unit's name and status, `"%s [%s]"` (docs/31, "The orders").
@@ -747,7 +794,9 @@ fn unit_page(cockpit: &mut Cockpit, ink: &mut Ink, play: &Play, mask: u32, now_m
         let (cells, tint) = unit_icons(play, t);
         for cell in cells {
             put(cockpit, ink, "ccres_body_text", [pen, y, pen + ICON_PIECE, y + ROW_HEIGHT], WHITE);
-            icon(cockpit, ink, cell, [(pen + 2.0).round(), y + 2.0], tint);
+            if let Some(cell) = cell {
+                icon(cockpit, ink, cell, [(pen + 2.0).round(), y + 2.0], tint);
+            }
             pen += ICON_PIECE;
         }
         put(cockpit, ink, "ccres_separator_left_text", [pen, y, pen + 5.0, y + ROW_HEIGHT], WHITE);
@@ -804,7 +853,9 @@ fn unit_page(cockpit: &mut Cockpit, ink: &mut Ink, play: &Play, mask: u32, now_m
 fn unit_box(cockpit: &mut Cockpit, ink: &mut Ink, play: &Play, t: usize) {
     let (cells, tint) = unit_icons(play, t);
     for (cell, at) in cells.into_iter().zip(UNIT_ICONS) {
-        icon(cockpit, ink, cell, at, tint);
+        if let Some(cell) = cell {
+            icon(cockpit, ink, cell, at, tint);
+        }
     }
     let text = name_status(cockpit, play, t);
     ink.text(&text, UNIT_NAME, YELLOW);
@@ -904,9 +955,8 @@ fn building_rows(cockpit: &mut Cockpit, ink: &mut Ink, play: &Play, mask: u32, t
         );
         pen += 10.0;
         put(cockpit, ink, "ccres_body_text", [pen, y, pen + 20.0, y + ROW_HEIGHT], WHITE);
-        // STAND-IN: docs/41-commander.md#not-established -- a building's record `+0x30` is
-        // not read: 2, red, as the recording's rows show.
-        icon(cockpit, ink, building_icon(type_word), [pen + 2.0, y + 2.0], 0xffff_0000);
+        let tint = building_tint(building_class(play, t));
+        icon(cockpit, ink, building_icon(type_word), [pen + 2.0, y + 2.0], tint);
         pen += 20.0;
         put(cockpit, ink, "ccres_separator_left_text", [pen, y, pen + 5.0, y + ROW_HEIGHT], WHITE);
         pen += 5.0;
@@ -957,5 +1007,33 @@ fn building_rows(cockpit: &mut Cockpit, ink: &mut Ink, play: &Play, mask: u32, t
             [BUILDING_BAR_END, y, BUILDING_BAR_END + 6.0, y + ROW_HEIGHT],
             WHITE,
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_units_icons_are_picked_by_its_type_and_its_chassis_type_and_tinted_by_its_size() {
+        // `0x10077120`: the first by the Type compared whole, the second by property `0x207`
+        // through the table at `0x100773fc`, the tint by `+0x30` through `0x100773ec`.
+        let builder = unit_cells(0x0100_4000, 3);
+        assert_eq!(builder, [Some([65.0, 110.0]), Some([65.0, 94.0])]);
+        assert_eq!(unit_cells(0x0100_2000, 4), [Some([81.0, 110.0]), Some([81.0, 94.0])]);
+        for warrior in [0x0100_8000, 0x0101_0000, 0x0102_0000] {
+            assert_eq!(unit_cells(warrior, 1), [Some([49.0, 110.0]), Some([97.0, 94.0])]);
+        }
+        assert_eq!(unit_cells(0x0100_8000, 2)[1], Some([49.0, 94.0]));
+        assert_eq!(unit_cells(0x2000_0000, 5), [None, None], "an animal's Type and a ChassisType past 4");
+        let tints: Vec<u32> = (1..=4).map(unit_tint).collect();
+        assert_eq!(tints, [0xffff_e7ff, 0xffff_8080, 0xff80_ff80, 0xff80_80ff]);
+    }
+
+    #[test]
+    fn a_buildings_icon_is_tinted_by_its_size_class() {
+        // `0x100344fc`, table `0x100347dc`: 1 white, 2 red, 3 green, 4 and 5 blue.
+        let tints: Vec<u32> = (1..=5).map(building_tint).collect();
+        assert_eq!(tints, [WHITE, 0xffff_0000, 0xff00_ff00, 0xff00_00ff, 0xff00_00ff]);
     }
 }
