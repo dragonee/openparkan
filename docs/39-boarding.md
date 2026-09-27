@@ -163,7 +163,10 @@ bot (*measured* binding in `ui/game_resources.cfg`).
 [31-packages.md](31-packages.md#the-escape--read)). A unit record bound to its
 object starts at **0** in single play (`0x10074dcf`: 2 only in parameter mode
 3), so the player gets its movement, turret and guns, the wizard goes to the
-player's mode, and `+0xa2` is set.
+player's mode, and `+0xa2` is set. **The level is the record's, not the
+boarding's**: the handler writes none, so a bot a unit page's drive button or
+the Y key left at 1 or 2, and that was let go since, is boarded at that level
+([40-command-mode.md](40-command-mode.md#where-the-level-is-kept--read)).
 
 **What becomes of the hero**:
 - detached from the world's object tree, it is not met by what walks the tree:
@@ -516,8 +519,9 @@ would read 9.
    collided with or listed), but keep its behaviour's takt, and every frame put
    its place at the bot's with the y less the bot's node-sphere radius: the
    routes take it from there; select the bot and play
-   `VOICE_SELECTED_B`; give the player the bot at auto-driver level 0 (the bot's
-   AI off); make it the driven unit for the eye, the cockpit (fifth slots) and
+   `VOICE_SELECTED_B`; give the player the bot at the auto-driver level its
+   record holds, 0 unless a unit page or Y left another (at 0 the bot's AI is
+   off); make it the driven unit for the eye, the cockpit (fifth slots) and
    the whole HUD; drop every held key; in the training campaign, if the bot
    flies, play the mission's message 100. Cut, no transition.
 4. **Drive with the chassis's table** (`objects.rlb` slot 6): `m2.tbl` for a

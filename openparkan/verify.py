@@ -22888,6 +22888,57 @@ def check_command_mode(check, game: Path) -> None:
           f"push 2: {buttons}; 4>2 takes the unit, view state 1; 2>4 lets it go, the camera "
           f"back on, view state 2: {telepresence}")
 
+    # Where the level lives: every store through a register (not the stack) at +0x9c.
+    sections, _ = resources._sections(iron)
+    text_va, text_size, text_raw = sections[0]
+    modrm = b"".join(re.escape(bytes([m])) for m in range(0x80, 0xC0) if m & 7 != 4)
+    store = re.compile(rb"(?:\x89[" + modrm + rb"]|\xc7[\x80-\x83\x85-\x87])\x9c\x00\x00\x00", re.S)
+    stores = [off - text_raw + text_va + _image_base(iron)
+              for off in (m.start() for m in store.finditer(iron, text_raw, text_raw + text_size))]
+    unit_writers = {0x1007E2BF, 0x10074DD2, 0x1005E7F8, 0x1008495A, 0x10075FD3, 0x10075FE5,
+                    0x10075FF5, 0x10063B20}
+    kept = (set(stores) == unit_writers | {0x10032F27, 0x100B7308}
+            # the bind: 0, or 2 while the game's +0xe5 is set, after the base bind
+            and at(0x10074DC5, 19) == hexes("8a82e5000000 f6d8 1bc0 83e002 89869c000000")
+            and called(0x10074D68) == 0x1007E3C0
+            # the take reads it; letting go writes every word 1 and not the level
+            and at(0x10075027, 6) == hexes("8b879c000000")
+            and b"\x9c\x00\x00\x00" not in at(0x1007510C, 0x43)
+            # boarding (0 > 1) takes the bot and writes no level
+            and handler(0, 1) == 0x100637C0 and called(0x10063851) == 0x10074FF0
+            and b"\x9c\x00\x00\x00" not in at(0x100637C0, 0x100)
+            # Y: only with mode 1 or 2 at the front, on the driven unit
+            and at(0x1007263D, 19) == hexes("85c0 0f8e80000000 83f802 7f7b 8b8fec0a0000")
+            and called(0x10072650) == 0x10075FC0)
+    check("iron3d.dll: a unit's auto-driver level lives on its record, and boarding takes it there",
+          kept,
+          f"{len(stores)} register stores at +0x9c, {len(unit_writers)} on a unit record "
+          f"(constructor 2, bind 0, briefing's end, the panel, Y's three, HQ 3>1 0) and the "
+          f"building record's and a string table's besides; the take reads it, letting go and "
+          f"0>1 write none, Y steps the driven unit in modes 1-2 alone: {kept}")
+
+    # At levels 1 and 2 the unit's takt runs: the repair switch and a hit go through no word
+    # of the Wizard's.
+    behavior = game / "Behavior.dll"
+    if behavior.exists():
+        bat = _image_at(behavior.read_bytes())
+        ai = (bat(0x100050AA, 7) == hexes("f686040a000010")             # the takt wants 0x10
+              # the mode setter ignores a component: anything but -1 returns (0x10007009)
+              and bat(0x100067B0, 23) == hexes("8b442408 81ecf0020000 53 83cbff 3bc3 55 0f8542080000")
+              # the device manager sends on a change, through +0x68 slot 6
+              and bat(0x10019A89, 6) == hexes("3887af000000")
+              and bat(0x10019ABD, 20) == hexes("8b4068 52 8b97a4000000 8b08 8b14b2 52 50 ff5118")
+              # the hit handler: the network bit, property 0x208 and the building bit alone
+              and bat(0x100064F2, 45) == hexes(
+                  "f686040a000004 0f8598000000 8b86640a0000 85c0 0f858a000000"
+                  "8b8efc0a0000 81e100000080 81f900000080"))
+        check("Behavior.dll: at auto-driver levels 1 and 2 the repair decision and a hit act",
+              ai,
+              f"the unit takt tests flag 0x10 (0x100050aa); the mode setter returns for a "
+              f"component (0x100067c1), so the device manager's switch (0x10019a80, +0xaf, "
+              f"+0x68 slot 6) meets no Wizard word; slot 67 tests +0xa04 & 4, +0xa64 and the "
+              f"building bit and nothing a take sets: {ai}")
+
     # Mission 03's bunker, and the lode the camera's box nearly reaches.
     tma = game / "MISSIONS" / "CAMPAIGN" / "CAMPAIGN.00" / "Mission.03" / "data.tma"
     if not tma.exists():

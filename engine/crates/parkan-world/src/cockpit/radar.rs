@@ -232,11 +232,10 @@ pub fn draw(cockpit: &mut Cockpit, ink: &mut Ink, play: &Play, water_level: f32)
 /// The eight indicators (`0x1003f270`): a lamp dark, lit or red, and an icon grey, white or red.
 ///
 /// STAND-IN: docs/35-hud.md#the-indicators--read-and-seen -- the interface's `CState` and the
-/// landing warning are not built: the figure is lit and the warning grey; and the auto-driver
-/// level is the hero's, which nothing steps.
+/// landing warning are not built: the figure is lit and the warning grey.
 fn indicators(ink: &mut Ink, play: &Play, page6: u16, ui_menu: u16, ui_menu3: u16) {
     let switches = play.driving.as_ref().map_or(play.hero.pilot.switches, |d| d.pilot.switches);
-    let level = play.auto_driver;
+    let level = play.auto_driver();
     let states = [
         u8::from(switches.repair),
         u8::from(switches.infrared),

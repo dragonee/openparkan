@@ -156,18 +156,26 @@ pub enum Reach {
     /// Level 1: all but the unit's own rows, whose word goes to the AI and with it the
     /// behaviour's movement flag `0x10`. The turret, guns, camera and the rest stay the player's.
     Weapons,
+    /// Level 2 with the two words its take leaves alone still the player's: the camera, radar
+    /// and seeker (group 2, `+0x210`) and group 0 with the repair system (`+0x214`), which a take
+    /// at level 1 wrote 3 into and the key's step to 2 kept (docs/40, "Telepresence"). The rest
+    /// is [`Reach::Nothing`]'s.
+    Sensors,
     /// Level 2: nothing. The AI has the movement, the turret and guns (group 4) with its fight
     /// module (flags `0x20`, `0x40`), the shields and armour (group 5), and by message 7 with 0
-    /// every group left to follow the mode.
+    /// every group left to follow the mode -- the sensors and group 0 too, since a letting-go
+    /// wrote them 1.
     Nothing,
 }
 
 impl Reach {
-    /// The reach of auto-driver level `level`, which the game steps 0, 1, 2 and round.
-    pub fn of(level: u8) -> Reach {
+    /// The reach of auto-driver level `level`, which the game steps 0, 1, 2 and round, over a
+    /// unit whose sensor words are the player's when `sensors` holds ([`Robot::sensors_taken`]).
+    pub fn of(level: u8, sensors: bool) -> Reach {
         match level {
             0 => Reach::Whole,
             1 => Reach::Weapons,
+            _ if sensors => Reach::Sensors,
             _ => Reach::Nothing,
         }
     }
@@ -179,22 +187,51 @@ impl Reach {
 
     /// Whether its fight module aims and fires: flags `0x20` and `0x40` on, at level 2.
     pub fn ai_fights(self) -> bool {
-        self == Reach::Nothing
+        matches!(self, Reach::Sensors | Reach::Nothing)
+    }
+
+    /// Whether the player's rows reach the camera, radar and seeker (group 2) and group 0, the
+    /// repair system's: all but a level 2 over words a letting-go gave the AI.
+    pub fn sensors(self) -> bool {
+        self != Reach::Nothing
+    }
+
+    /// Whether they reach the shields and armour (group 5), the detection shield's camouflage
+    /// among them: levels 0 and 1.
+    pub fn shields(self) -> bool {
+        matches!(self, Reach::Whole | Reach::Weapons)
     }
 }
 
 /// `f` given the unit's hands, what `reach` keeps from the player swapped for scratch copies:
-/// the pilot's held keys and mouse stay its own and move nothing they do not reach.
-fn reached<R>(robot: &mut Robot, reach: Reach, f: impl FnOnce(&mut Hands) -> R) -> R {
+/// the pilot's held keys and mouse stay its own and move nothing they do not reach. The
+/// switches its state rows turn are handed back where their group is not the player's:
+/// the repair system's (group 0) and the camera's infrared (group 2) with the sensors, the
+/// detection shield's camouflage (group 5) with the shields.
+fn reached<R>(
+    robot: &mut Robot,
+    pilot: &mut Pilot,
+    reach: Reach,
+    f: impl FnOnce(&mut Pilot, &mut Hands) -> R,
+) -> R {
     let mut body = robot.walker.body;
     let mut turret = robot.rig.aim;
     let mut camera = robot.rig.look;
     let hands = &mut Hands {
         body: if reach == Reach::Whole { &mut robot.walker.body } else { &mut body },
-        turret: if reach == Reach::Nothing { &mut turret } else { &mut robot.rig.aim },
-        camera: if reach == Reach::Nothing { &mut camera } else { &mut robot.rig.look },
+        turret: if reach.ai_fights() { &mut turret } else { &mut robot.rig.aim },
+        camera: if reach.sensors() { &mut robot.rig.look } else { &mut camera },
     };
-    f(hands)
+    let before = pilot.switches;
+    let out = f(pilot, hands);
+    if !reach.sensors() {
+        pilot.switches.repair = before.repair;
+        pilot.switches.infrared = before.infrared;
+    }
+    if !reach.shields() {
+        pilot.switches.camouflage = before.camouflage;
+    }
+    out
 }
 
 /// One tick of a unit driven from `pilot`: the mouse counts since the last, then the
@@ -210,9 +247,9 @@ pub fn drive(
     ground: &Ground,
     reach: Reach,
 ) -> Vec<(usize, Shot)> {
-    reached(robot, reach, |hands| pilot.mouse(mouse, hands));
+    reached(robot, pilot, reach, |pilot, hands| pilot.mouse(mouse, hands));
     robot.advance(dt_ms, ground);
-    if reach == Reach::Nothing {
+    if reach.ai_fights() {
         pilot.selects.clear();
         return robot.takt(dt_ms);
     }
@@ -251,14 +288,14 @@ pub fn drive(
 
 /// A key to a unit driven from `pilot`, as far as `reach` goes.
 pub fn drive_key(robot: &mut Robot, pilot: &mut Pilot, scan: &str, pressed: bool, reach: Reach) {
-    reached(robot, reach, |hands| pilot.key(scan, pressed, hands));
+    reached(robot, pilot, reach, |pilot, hands| pilot.key(scan, pressed, hands));
 }
 
 /// The input update of a unit driven from `pilot` as far as `reach` goes, or every key
 /// coming up.
 pub fn drive_input(robot: &mut Robot, pilot: &mut Pilot, release: bool, reach: Reach) {
     let now = robot.time_ms;
-    reached(robot, reach, |hands| {
+    reached(robot, pilot, reach, |pilot, hands| {
         if release {
             pilot.release_all(hands);
         } else {
@@ -275,9 +312,28 @@ mod tests {
     fn level_1_gives_the_ai_the_walk_and_level_2_the_fight_as_well() {
         // `iron3d.dll:0x10074ff0`: level 1 hands the Wizard's unit word to the AI, level 2 the
         // guns' and shields' words too, and message 7 with 0.
-        let of = |l| (Reach::of(l), Reach::of(l).ai_moves(), Reach::of(l).ai_fights());
-        assert_eq!(of(0), (Reach::Whole, false, false));
-        assert_eq!(of(1), (Reach::Weapons, true, false));
-        assert_eq!(of(2), (Reach::Nothing, true, true));
+        let of = |l, s| {
+            let r = Reach::of(l, s);
+            (r, r.ai_moves(), r.ai_fights())
+        };
+        for sensors in [false, true] {
+            assert_eq!(of(0, sensors), (Reach::Whole, false, false));
+            assert_eq!(of(1, sensors), (Reach::Weapons, true, false));
+        }
+        assert_eq!(of(2, false), (Reach::Nothing, true, true));
+        assert_eq!(of(2, true), (Reach::Sensors, true, true));
+    }
+
+    #[test]
+    fn a_level_2_the_key_reached_leaves_the_player_the_camera_and_the_repair_switch_alone() {
+        // The take at 2 writes neither `+0x210` (group 2: camera, radar, seeker) nor `+0x214`
+        // (group 0: the repair system) (`0x10075072`-`0x10075099`), so after the take at 1 wrote
+        // them 3 they stay the player's; a letting-go wrote them 1, the AI's (`0x10075131`).
+        // The shields' `+0x208` goes to the AI at 2 either way (`0x10075082`).
+        let groups = |r: Reach| (r.sensors(), r.shields());
+        assert_eq!(groups(Reach::of(0, false)), (true, true));
+        assert_eq!(groups(Reach::of(1, false)), (true, true));
+        assert_eq!(groups(Reach::of(2, true)), (true, false));
+        assert_eq!(groups(Reach::of(2, false)), (false, false));
     }
 }

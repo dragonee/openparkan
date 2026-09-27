@@ -175,9 +175,6 @@ pub struct Driving {
     /// Taken from command mode (mode 2, telepresence): the hero stays where it stood, and
     /// leaving goes back to the command view.
     pub telepresence: bool,
-    /// The auto-driver level [`Play::auto_driver`] read before the unit was taken, the
-    /// hero's, which it reads again once the unit is let go.
-    resume: u8,
 }
 
 /// `ORDER_ROBOT_UPGRADE`, which keeps a unit from being taken over (docs/40).
@@ -284,8 +281,6 @@ pub struct Play {
     pub units: Vec<Unit>,
     /// What the hero is and carries, which its own panel shows.
     pub hero_designation: crate::robot::Designation,
-    /// The driven unit's auto-driver level, 0–2, which `CMD_JAMES_AUTO_DRIVER` steps (docs/31).
-    pub auto_driver: u8,
     pub clans: Vec<Clan>,
     /// Each clan's relation word towards each clan, as the loader files them and the clan
     /// brains' takt leaves them: `attitudes` owns them and this is refreshed from it.
@@ -1001,7 +996,6 @@ impl Play {
             cues: Vec::new(),
             units,
             hero_designation,
-            auto_driver: 0,
             clans: mission.clans.clone(),
             relations: mission::relation_words(&mission.clans),
             attitudes: parkan_sim::relations::Relations::new(&mission::relation_words(&mission.clans)),
@@ -1418,15 +1412,18 @@ impl Play {
                 self.enter_or_board();
                 false
             }
-            // `0x10075fc0`: the level steps 0, 1, 2 and round, and the driven unit is taken again
-            // at the new level (`0x10074ff0` with 1). The hero's take reads no level.
+            // `0x10075fc0`, only with mode 1 or 2 at the front (`0x1007263f`-`0x10072648`): the
+            // driven unit's record steps its level 0, 1, 2 and round, and the unit is taken again
+            // at the new level (`0x10074ff0` with 1). On foot nothing steps.
             parkan_formats::controls::CMD_JAMES_AUTO_DRIVER => {
-                self.auto_driver = (self.auto_driver + 1) % 3;
-                if let Some(t) = self.driving.as_ref().map(|d| d.target)
+                if matches!(self.mode(), Mode::Driving(_))
+                    && let Some(t) = self.driving.as_ref().map(|d| d.target)
                     && let Some(r) = self.robots.iter().position(|(rt, _)| *rt == t)
                 {
-                    if Reach::of(self.auto_driver).ai_moves() {
-                        self.robots[r].1.walker.body.command = [0.0; 3];
+                    let robot = &mut self.robots[r].1;
+                    robot.auto_driver = (robot.auto_driver + 1) % 3;
+                    if robot.auto_driver != 0 {
+                        robot.walker.body.command = [0.0; 3];
                     }
                     self.take_as_level(r);
                 }
@@ -1990,7 +1987,10 @@ impl Play {
                 match self.mode() {
                     Mode::Driving(below) if below == t => {
                         self.select_unit_alone(t);
-                        self.take(t, false, 0);
+                        if let Some((_, robot)) = self.robots.iter_mut().find(|(rt, _)| *rt == t) {
+                            robot.auto_driver = 0;
+                        }
+                        self.take(t, false);
                     }
                     Mode::Command(b) => {
                         self.select_building(b);
@@ -2146,13 +2146,16 @@ impl Play {
     }
 
     /// The driven unit let go (`0x10074ff0` with 0), back to its AI: its held keys dropped and
-    /// its command cleared.
+    /// its command cleared. Its record keeps its level; the Wizard's words go to the AI, the
+    /// sensors' among them (`0x10075131`).
     fn let_go(&mut self) {
         if let Some(mut d) = self.driving.take()
             && let Some((_, robot)) = self.robots.iter_mut().find(|(rt, _)| *rt == d.target)
         {
-            crate::hero::drive_input(robot, &mut d.pilot, true, Reach::of(self.auto_driver));
+            let reach = Reach::of(robot.auto_driver, robot.sensors_taken);
+            crate::hero::drive_input(robot, &mut d.pilot, true, reach);
             robot.walker.body.command = [0.0; 3];
+            robot.sensors_taken = false;
             let_go(robot);
             // Back to its fire control, which picks its own target; the hero's guns take the
             // player's again.
@@ -2160,47 +2163,65 @@ impl Play {
             robot.target_point = None;
             let current = self.targets.current;
             self.hero.relink(current);
-            self.auto_driver = d.resume;
         }
     }
 
-    /// Unit `t` taken by the player (`0x10074ff0` with 1) at auto-driver level `level`: driven
-    /// by its own input table's pilot, as far as the level reaches ([`Reach`]), with every held
-    /// key let go and its walk cleared; its turret lock set at level 0 alone. Pushes no mode.
-    ///
-    /// STAND-IN: docs/40-command-mode.md#telepresence-mode-2--read -- the level lives on the
-    /// unit's record (`+0x9c`) in the game, and a bot boarded is taken at whatever its record
-    /// holds; here each take names its level, boarding 0. At level 2 the camera is never the
-    /// player's, where the game leaves it so after a step from 1 (docs/40). And at levels 1
-    /// and 2 the unit's power still spends on the player's switches, and a hit asks its
-    /// behaviour for nothing, though its AI's repair decision and hit reaction run in the game.
-    fn take(&mut self, t: usize, telepresence: bool, level: u8) -> bool {
+    /// Unit `t` taken by the player (`0x10074ff0` with 1) at the auto-driver level its record
+    /// holds ([`Robot::auto_driver`], `0x10075027`): driven by its own input table's pilot, as
+    /// far as the level reaches ([`Reach`]), with every held key let go and its walk cleared;
+    /// its turret lock set at level 0 alone. Its repair system keeps the state it had, which
+    /// for a unit its AI ran is what its repair decision last sent. Pushes no mode.
+    fn take(&mut self, t: usize, telepresence: bool) -> bool {
         let Some(r) = self.robots.iter().position(|(rt, _)| *rt == t) else { return false };
         let chassis = self.robots[r].1.parts[self.robots[r].1.chassis_part].record.clone();
-        let Ok(pilot) = crate::hero::Hero::pilot_for(&mut self.assembly, &chassis) else { return false };
+        let Ok(mut pilot) = crate::hero::Hero::pilot_for(&mut self.assembly, &chassis) else { return false };
+        pilot.switches.repair = self.robots[r].1.behaviour.repair;
         self.hero.release_keys();
-        let resume = self.auto_driver;
-        self.auto_driver = level.min(2);
         self.robots[r].1.wizard.clear();
         self.take_as_level(r);
-        self.driving = Some(Driving { target: t, pilot, fire_held: false, telepresence, resume });
+        self.driving = Some(Driving { target: t, pilot, fire_held: false, telepresence });
         true
     }
 
-    /// Robot `r` taken at the level [`Play::auto_driver`] reads (`0x10074ff0` with 1), as a
-    /// take and each step of the level do: its turret lock set at level 0 alone (property 179,
-    /// `0x100750fd`), the AI's drive dropped where the player moves it, and its guided guns
-    /// given the player's target -- or at level 2, where the fight module aims, their own.
+    /// Robot `r` taken at the level its record reads (`0x10074ff0` with 1), as a take and each
+    /// step of the level do: its turret lock set at level 0 alone (property 179, `0x100750fd`),
+    /// the AI's drive dropped where the player moves it, and its guided guns given the player's
+    /// target -- or at level 2, where the fight module aims, their own. A take at level 0 or 1
+    /// writes the sensors' words the player's; one at 2 leaves them (`0x100750a2`-`0x100750b9`).
     fn take_as_level(&mut self, r: usize) {
-        let reach = Reach::of(self.auto_driver);
         let current = self.targets.current;
         let robot = &mut self.robots[r].1;
+        let level = robot.auto_driver.min(2);
+        robot.auto_driver = level;
+        if level < 2 {
+            robot.sensors_taken = true;
+        }
+        let reach = Reach::of(level, robot.sensors_taken);
         if !reach.ai_moves() {
             robot.walker.drive = None;
         }
         take_over(robot, reach == Reach::Whole);
         robot.fire_target = None;
         robot.relink(if reach.ai_fights() { None } else { current });
+    }
+
+    /// The auto-driver level of the unit the player drives, its record's `+0x9c`, which the
+    /// indicators show; the hero's is 0, as its bind and the briefing's end leave it
+    /// (`0x10074dd2`, `0x1005e7f8`), and nothing steps it on foot.
+    pub fn auto_driver(&self) -> u8 {
+        self.driving
+            .as_ref()
+            .and_then(|d| self.robots.iter().find(|(t, _)| *t == d.target))
+            .map_or(0, |(_, r)| r.auto_driver)
+    }
+
+    /// What the player's input reaches of the unit it drives ([`Reach`]): the whole hero on
+    /// foot.
+    pub fn reach(&self) -> Reach {
+        self.driving
+            .as_ref()
+            .and_then(|d| self.robots.iter().find(|(t, _)| *t == d.target))
+            .map_or(Reach::Whole, |(_, r)| Reach::of(r.auto_driver, r.sensors_taken))
     }
 
     /// Mode 0 → 4 with the bunker that is target `t` (`0x10063ca0`): the bunker selected, the
@@ -2404,7 +2425,7 @@ impl Play {
 
     /// A key or button to the unit the player drives.
     pub fn key(&mut self, scan: &str, pressed: bool) {
-        let reach = Reach::of(self.auto_driver);
+        let reach = self.reach();
         match self.driving.as_mut() {
             Some(d) => {
                 if let Some((_, robot)) = self.robots.iter_mut().find(|(t, _)| *t == d.target) {
@@ -2419,7 +2440,7 @@ impl Play {
     /// them go when its window is left (`stdSetApplicationState`, docs/14, "Leaving the
     /// window lets every key up").
     pub fn release_keys(&mut self) {
-        let reach = Reach::of(self.auto_driver);
+        let reach = self.reach();
         match self.driving.as_mut() {
             Some(d) => {
                 if let Some((_, robot)) = self.robots.iter_mut().find(|(t, _)| *t == d.target) {
@@ -2432,7 +2453,7 @@ impl Play {
 
     /// The input update of the unit the player drives.
     pub fn update_input(&mut self) {
-        let reach = Reach::of(self.auto_driver);
+        let reach = self.reach();
         match self.driving.as_mut() {
             Some(d) => {
                 if let Some((_, robot)) = self.robots.iter_mut().find(|(t, _)| *t == d.target) {
@@ -2464,10 +2485,12 @@ impl Play {
     }
 
     /// Board target `t` (`0x100720e8`): the hero leaves the world, the bot is selected with
-    /// `VOICE_SELECTED_B`, the player takes it at auto-driver level 0 with every held key let
-    /// go, and a flyer taken over asks for the mission's message 100.
+    /// `VOICE_SELECTED_B`, the player takes it at the auto-driver level its record holds -- 0
+    /// unless a unit page's drive button or the Y key left it another (mode 0 → 1,
+    /// `0x100637c0`, writes none) -- with every held key let go, and a flyer taken over asks
+    /// for the mission's message 100.
     pub fn board(&mut self, t: usize) -> bool {
-        if !self.boardable(t) || !self.take(t, false, 0) {
+        if !self.boardable(t) || !self.take(t, false) {
             return false;
         }
         let flyer = self.robots.iter().any(|(rt, r)| *rt == t && r.flyer);
@@ -2489,8 +2512,16 @@ impl Play {
     /// is not the player's, cannot be boarded, or is upgrading is refused (`0x10076d30`).
     /// At level 1 the unit's AI walks it and the player has its turret and guns; at level 2
     /// the AI has it whole and the player rides along ([`Reach`], docs/40, "Telepresence").
+    /// The button writes the level into the unit's record before the push (`0x1008495a`), and
+    /// the record keeps it once the unit is let go.
     pub fn telepresence(&mut self, t: usize, level: u8) -> bool {
-        if !self.mode().commands() || !self.can_take(t) || !self.take(t, true, level) {
+        if !self.mode().commands() || !self.can_take(t) {
+            return false;
+        }
+        if let Some((_, robot)) = self.robots.iter_mut().find(|(rt, _)| *rt == t) {
+            robot.auto_driver = level.min(2);
+        }
+        if !self.take(t, true) {
             return false;
         }
         self.select_unit_alone(t);
@@ -3207,11 +3238,20 @@ impl Play {
     /// A hit on target `t` from the round's `owner` (message `0x19`): a robot's behaviour asks
     /// for an attack on the unit that fired, and, unless the victim is a hero, its clan's
     /// SuperAI takes 0.004 off its attitude toward the firer's clan (`0x1000658c`, docs/25,
-    /// "Clan relations"). A building does nothing (`0x100064b0`), nor a unit the player drives.
+    /// "Clan relations"). A building does nothing (`0x100064b0`). A unit the player drives is
+    /// hurt as any other: the handler asks nothing of the Wizard's words or of the flags a take
+    /// sets, only the network bit, property `0x208` and the building bit
+    /// (`0x100064f2`-`0x1000651f`), so at levels 1 and 2, where its takt runs, it turns on the
+    /// firer (docs/40, "Telepresence").
     ///
     /// STAND-IN: docs/31-packages.md#a-hit-pulls-a-unit-in--read -- the call for help to the
     /// clan's warriors within 400 is not modelled.
-    fn hurt(&mut self, t: usize, owner: Option<usize>) {
+    ///
+    /// STAND-IN: docs/40-command-mode.md#what-the-ai-does-at-levels-1-and-2--read -- at level
+    /// 0, where the unit's takt does not run, the game's gate takes the hit at once and leaves
+    /// the attack on the stack for when the unit is let go; here the hit waits for the
+    /// behaviour's next takt, after the letting-go, and is gated then.
+    pub fn hurt(&mut self, t: usize, owner: Option<usize>) {
         let firer = match owner {
             None => self.hero_id,
             Some(o) => match self.units.get(o) {
@@ -3219,9 +3259,6 @@ impl Play {
                 None => return,
             },
         };
-        if self.driving.as_ref().is_some_and(|d| d.target == t) {
-            return;
-        }
         if let Some((_, robot)) = self.robots.iter_mut().find(|(rt, _)| *rt == t) {
             robot.behaviour.hurt(firer);
             self.resent(t, owner);
@@ -3462,9 +3499,24 @@ impl Play {
             // A unit the player drives keeps what its auto-driver level leaves the AI: its walk
             // at levels 1 and 2, and its aim and fire at 2.
             let driven = self.driving.as_ref().is_some_and(|d| d.target == t);
-            let reach = if driven { Reach::of(self.auto_driver) } else { Reach::Nothing };
+            let reach = if driven { self.reach() } else { Reach::Nothing };
             if !self.paused && reach.ai_moves() && self.thinks(self.units[t].clan) {
+                let sent = self.robots[r].1.behaviour.repair;
                 self.behave(r, dt_ms, &seen, &world, reach.ai_fights());
+                // The repair decision runs in the unit's takt, which flag `0x10` lets run at
+                // levels 1 and 2 as for a unit nobody drives, and its device manager sends
+                // each class-15 component the state when it changes (`+0xaf`,
+                // `Behavior.dll:0x10019a80`), through no word of the Wizard's: the behaviour
+                // takes no component's bits (`0x100067c1` returns for any but -1). So the
+                // switch the player drives with turns under it too (docs/26, "What the AI does
+                // with the switch").
+                let decided = self.robots[r].1.behaviour.repair;
+                if driven
+                    && decided != sent
+                    && let Some(d) = self.driving.as_mut()
+                {
+                    d.pilot.switches.repair = decided;
+                }
             }
             let (t, robot) = &mut self.robots[r];
             let target = &mut self.battle.combat.targets[*t];

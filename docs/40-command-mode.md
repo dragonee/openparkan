@@ -430,7 +430,13 @@ with 0 every word left to follow the mode: `+0x204`, the engines' and group
 `+0x214`, keep what was last written: 1 after a letting-go, which writes 1 into
 every word (`0x10075131`), and 3 when the key steps a driven unit from 1 to 2,
 so the sensors then stay the player's. A unit's words before its first take
-are its Wizard's constructor's (not read). The player rides along in the
+are its Wizard's constructor's: every word 0 and the mode 1
+(`Wizard.dll:0x10001992`–`0x100019eb`). The unit record's bind lets the unit go
+(`0x10074d8d`, every word 1 and message 7 with 0) when the third byte of its
+object id matches the level's `+0xad4`, which the game sets beside the player's
+clan `+0xad0` (`0x1005cbd4`–`0x1005cbe1`); which units that is was not
+followed. Either way a take at 2 leaves those two words to the AI, since message
+7 with 0 turns a 0 to the AI too. The player rides along in the
 unit's cockpit. The hero ignores the level: its take gives every word 3
 (`0x10075018`). `CMD_JAMES_AUTO_DRIVER` (744) steps the level 0 → 1 → 2 → 0 and
 takes the unit again at the new one (`0x10075fc0`).
@@ -450,10 +456,96 @@ view state 2** and redraws the panel's page. So the camera is where the player
 left it.
 
 **There is no mode 2 → 0 or 2 → 1** in the table: telepresence always returns
-to its command view. What happens when the unit dies is not read. Nor is there
+to its command view, and so does the unit's death: the unit record's removal
+rolls the stack back in modes 1, 2, 5 and 7 (`0x100755a9`). Nor is there
 a 1 → 4: its table entry is 0, and `0x10062bc0` calls the entry without a test,
 so the game does not expect a driven bot in a bunker's pod (*derived*; large
 bots are not routed to pods, [27-ownership.md](27-ownership.md#capture--read)).
+
+### Where the level is kept — *read*
+
+**The level is the unit record's `+0x9c`, and it stays there between takes.**
+The take reads it (`0x10075027`, `0x10075072`, `0x100750d0`), and letting go
+(`0x10074ff0` with 0, `0x1007510c`–`0x1007514f`) does not write it. A sweep of
+`iron3d.dll`'s code for stores through displacement `0x9c` (`analysis/pe.py`)
+finds 64. Of them, 48 go into stack locals, 6 are `fst`s in a float routine
+(`0x100cdc43`–`0x100ce891`), one goes into a building record's own field
+(`0x10032f27`) and one into a string table (`0x100b7308`). **Eight reach a unit
+record** (the ten `mov`s through a register are re-derived by
+`check_command_mode`):
+
+| where | writes | when |
+|---|---|---|
+| `0x1007e2bf` | 2 | the base record's constructor (vtable `0x100e6548`) |
+| `0x10074dd2` | 0, or 2 while the game's `+0xe5` is set | the unit record's bind (`0x10074d30`), after the base bind |
+| `0x1005e7f8` | 0 | the briefing's end, on the driven unit, the hero |
+| `0x1008495a` | 0, 1 or 2 | a unit page's A, B or C button, before it pushes mode 2 |
+| `0x10075fd3`, `0x10075fe5`, `0x10075ff5` | the next level | Y, on the driven unit |
+| `0x10063b20` | 0 | mode 3 → 1, on the HQ |
+
+The control is in the table: the sweep finds the panel's and the key's writers,
+which this section had read by other routes.
+
+- **In play every unit record starts at 0.** The bind overwrites the
+  constructor's 2, and `+0xe5` is clear in ordinary play
+  ([The camera](#it-starts-where-it-was-made)) (*derived*).
+- **Boarding takes a bot at whatever its record holds.** Mode 0 → 1
+  (`0x100637c0`) takes the bot (`0x10063851`) and writes no level. So a bot
+  taken at level 2 from a unit page and let go is boarded at level 2: its AI
+  drives it and fights, and the player rides along (*derived*). Only an HQ's
+  3 → 1 sets 0 first.
+- **Y steps the driven unit alone, and only with mode 1 or 2 at the front**
+  (`0x10072632`–`0x10072650`: the front's mode must be above 0 and at most 2).
+  On foot, in a command view or at a building's screen it does nothing, and the
+  hero's level stays 0.
+- **The indicators read the driven unit's `+0x9c`**
+  ([35-hud.md](35-hud.md#the-indicators--read-and-seen)): the bot's level while
+  it is driven, the hero's 0 on foot.
+
+**So a level 2 reached by the key keeps the camera the player's, and one
+reached otherwise does not** (*derived*, from the words above).
+- The take at 2 writes neither `+0x210` (group 2: camera, radar and seeker)
+  nor `+0x214` (group 0, which holds the repair system, class 15).
+- Y reaches 2 only from 1, whose take wrote both 3. The player keeps the
+  camera's look, N's infrared and G's repair switch.
+- A take at 2 from a unit page, or a boarding of a bot whose record holds 2,
+  comes after a letting-go, which wrote every word 1. The Wizard gives those
+  groups to the AI, and the player's rows for them do nothing
+  (`Wizard.dll:0x10003b3b`–`0x10003b87`).
+- The shields' word `+0x208`, which holds H's camouflage (class 10, group 5),
+  goes to the AI at 2 either way.
+
+### What the AI does at levels 1 and 2 — *read*
+
+The behaviour's flag `0x10` is on at both levels, so the unit's takt
+(`Behavior.dll:0x10005110`, gated at `0x100050aa`) runs as it does for a unit
+nobody drives.
+
+- **The repair decision runs**
+  ([26-damage.md](26-damage.md#repair-a-units-own-repair-unit-switched-on-and-off--read-and-measured)).
+  - Its device manager sends each class-15 component `CIS_SWITCHON` or
+    `CIS_SWITCHOFF` when its decision changes (`+0xaf`, `0x10019a80`), through
+    the behaviour's `+0x68` slot 6.
+  - No word of the Wizard's is on that path. The Wizard hands the behaviour
+    each component's bits through its mode setter too, and the setter returns
+    at once for any component but −1 (`0x100067be` → `0x10007009`).
+  - So **the AI switches the repair system under the player's hand**: on when
+    the unit needs service or its life is under 0.5 and its charge is over
+    30%, off when its charge falls under 10%. The player's G, where it
+    reaches the system, toggles the same state in between.
+- **A hit turns the unit on its firer.**
+  - The behaviour's hit handler (slot 67, `0x100064b0`) tests only the network
+    bit (`+0xa04 & 4`), property `0x208` (`+0xa64`) and the building bit
+    (`0x100064f2`–`0x1000651f`).
+  - The gate (`0x100179c0`) and its speed test (`0x10034510`, bit `0x800` of
+    `+0xa04`) test none of the flags a take sets.
+  - So at every level the hit asks for its reason-1 attack, costs its clan's
+    attitude and calls for help
+    ([31-packages.md](31-packages.md#a-hit-pulls-a-unit-in--read)).
+  - At 1 and 2 the attack runs at once. At 1 the AI walks the unit at the
+    firer while the player keeps the guns.
+  - At 0 the unit's takt does not run, and the attack waits on its stack until
+    the unit is let go (*derived*).
 
 ## An HQ's command mode: mode 3 — *read*, and *seen*
 
@@ -827,6 +919,15 @@ mode.
    player drives it whole; at 1 its AI walks it on its orders and the player
    has the turret and guns; at 2 its AI has it whole, fire included, and the
    player rides along. Esc returns to the command view, the camera where it was.
+   - Keep the level on the unit: it starts at 0, letting go leaves it, and
+     boarding takes the bot at it. Y steps it only while a bot is driven.
+   - Keep with it whether the camera's and group 0's words are the player's:
+     a take at 0 or 1 makes them so, a letting-go gives them to the AI, a take
+     at 2 leaves them. At 2 they decide whether the mouse's look, N and G still
+     reach the unit.
+   - At 1 and 2 run the unit's takt as for a unit nobody drives: its repair
+     decision switches the repair system when it changes its mind, and a hit
+     turns it on the firer. At 0 a hit waits for the letting-go.
 
 ## Not established
 
@@ -853,6 +954,20 @@ mode.
   level 1 the walk, level 2 the whole unit, fire and shields included
   (`0x10074ff0`, `Wizard.dll:0x10003890`), in
   [Telepresence](#telepresence-mode-2--read).
+- ~~Telepresence's remainder: where a bot's auto-driver level is kept between
+  takes; that a level 2 reached by the key leaves the camera the player's; the
+  AI's repair decision and hit reaction at levels 1 and 2~~ — **read**: the
+  level is the unit record's `+0x9c`, 0 from its bind, written only by the
+  panel's buttons, Y (in modes 1 and 2) and an HQ's 3 → 1, and boarding takes a
+  bot at whatever it holds (eight writers of 64 stores, `0x10074dd2`,
+  `0x100637c0`). A 2 reached by Y keeps the camera and group 0 the player's; one
+  after a letting-go does not. At 1 and 2 the unit's takt runs: the repair
+  decision switches the repair system through no word of the Wizard's
+  (`0x10019a80`, `0x100067c1`), and a hit asks for its attack at every level
+  (`0x100064b0`), in [Where the level is kept](#where-the-level-is-kept--read)
+  and [What the AI does at levels 1 and 2](#what-the-ai-does-at-levels-1-and-2--read).
+  Still open: which units the bind's let-go reaches, by their object id's third
+  byte against the level's `+0xad4`.
 - ~~What mode 2 does when its unit dies~~ — **read**: the unit record's removal
   rolls the stack back in modes 1, 2, 5 and 7 (`0x100755a9`, table
   `0x1007563c`), so telepresence ends with its unit, back to the command view.

@@ -1056,9 +1056,8 @@ fn telepresence_at_level_1_lets_the_warbots_ai_walk_it_and_at_level_0_the_player
         let at = play.battle.combat.targets[bunker].position + glam::Vec3::new(40.0, 0.0, 0.0);
         let bot = play.spawn(&project, play.player_clan, at, 0.0).expect("the prebuilt design is a robot");
         play.tick(1000.0 / 60.0, [0.0; 2]);
-        let hero_level = play.auto_driver;
         assert!(play.telepresence(bot, level));
-        assert_eq!((play.mode(), play.auto_driver), (Mode::Driving(bot), level));
+        assert_eq!((play.mode(), play.auto_driver()), (Mode::Driving(bot), level));
         fn robot(p: &parkan_world::play::Play, bot: usize) -> &parkan_world::hero::Robot {
             &p.robots.iter().find(|(t, _)| *t == bot).unwrap().1
         }
@@ -1074,7 +1073,8 @@ fn telepresence_at_level_1_lets_the_warbots_ai_walk_it_and_at_level_0_the_player
         let to = robot(&play, bot).walker.body.position;
         assert_eq!(robot(&play, bot).walker.body.command, [0.0; 3], "no key of the player's moved it");
         assert!(play.roll_back());
-        assert_eq!(play.auto_driver, hero_level, "letting go reads the hero's level again");
+        assert_eq!(play.auto_driver(), 0, "on foot, the hero's level");
+        assert_eq!(robot(&play, bot).auto_driver, level, "the unit's record keeps its own");
         (from.truncate().distance(goal.truncate()), to.truncate().distance(goal.truncate()))
     };
     let (before, after) = walked(1);
@@ -1087,6 +1087,140 @@ fn telepresence_at_level_1_lets_the_warbots_ai_walk_it_and_at_level_0_the_player
         (after - before).abs() < 5.0,
         "at level 0 it only settles, waiting for the player: {before:.1}, then {after:.1}"
     );
+}
+
+/// A command key pressed from the view the player has.
+fn press(play: &mut parkan_world::play::Play, command: &str) {
+    let eye = play.eye();
+    let view = parkan_world::play::View {
+        eye: eye.position,
+        look: eye.forward,
+        view_proj: glam::Mat4::IDENTITY,
+        shift: false,
+    };
+    play.command(command, &view);
+}
+
+/// The auto-driver level lives on the unit's record (`+0x9c`): Y steps nothing on foot
+/// (`0x10072645`, modes 1 and 2 only), boarding takes a bot at whatever its record holds (mode 0
+/// → 1, `0x100637c0`, writes no level), and a level 2 the key reached from 1 leaves the camera
+/// and the repair switch the player's, where one a record held at boarding does not -- the take
+/// at 2 writes neither `+0x210` nor `+0x214` (`0x10075072`-`0x10075099`). Letting go keeps the
+/// level.
+#[test]
+#[ignore = "needs the game install"]
+fn a_bot_is_boarded_at_the_level_its_record_holds_and_the_key_keeps_the_players_camera_at_2() {
+    use parkan_formats::controls::CMD_JAMES_AUTO_DRIVER;
+    use parkan_world::hero::Reach;
+    use parkan_world::play::{Mode, Play};
+
+    let (mut play, m) = mission_04_play();
+    let hq = object_target(&play, &m, "tut4_hq.dat");
+    fn record(play: &mut Play, hq: usize) -> &mut parkan_world::hero::Robot {
+        &mut play.robots.iter_mut().find(|(t, _)| *t == hq).unwrap().1
+    }
+    for _ in 0..3 {
+        press(&mut play, CMD_JAMES_AUTO_DRIVER);
+    }
+    assert_eq!((play.auto_driver(), record(&mut play, hq).auto_driver), (0, 0), "on foot Y steps nothing");
+
+    // The record left at 2, as a unit page's C button leaves it: boarding takes it there.
+    record(&mut play, hq).auto_driver = 2;
+    stand_facing(&mut play, hq, 12.0, 0.0);
+    play.tick(1000.0 / 60.0, [0.0; 2]);
+    while play.targets.current != Some(hq) {
+        play.targets.select_next();
+    }
+    press_enter(&mut play);
+    assert_eq!(play.mode(), Mode::Driving(hq), "boarded");
+    assert_eq!(
+        (play.auto_driver(), play.reach()),
+        (2, Reach::Nothing),
+        "the AI has it whole, the camera too"
+    );
+
+    // Y: 2, 0, 1, 2 -- and the 2 reached from 1 keeps the sensors' words the player's.
+    let mut steps = Vec::new();
+    for _ in 0..3 {
+        press(&mut play, CMD_JAMES_AUTO_DRIVER);
+        steps.push((play.auto_driver(), play.reach()));
+    }
+    assert_eq!(steps, vec![(0, Reach::Whole), (1, Reach::Weapons), (2, Reach::Sensors)]);
+    assert!(
+        play.reach().sensors() && !play.reach().shields(),
+        "camera and repair the player's, shields the AI's"
+    );
+
+    // Esc lets it go: the record keeps 2, and the words go back to the AI.
+    assert!(play.roll_back());
+    assert_eq!(play.mode(), Mode::OnFoot);
+    let robot = record(&mut play, hq);
+    assert_eq!((robot.auto_driver, robot.sensors_taken), (2, false));
+}
+
+/// A hit reaches a warbot's behaviour whoever drives it (`Behavior.dll:0x100064b0` asks
+/// nothing of the take), and its repair decision runs in its takt: at level 1, where flag
+/// `0x10` lets the takt run, it turns on the unit that fired and switches its repair system on
+/// under the player's hand; at level 0 neither happens while the player has it.
+#[test]
+#[ignore = "needs the game install"]
+fn a_warbot_taken_at_level_1_turns_on_its_firer_and_its_ai_switches_its_repair_on() {
+    use parkan_sim::behaviour::Task;
+
+    let run = |level: u8| {
+        let (mut play, m) = mission_03_play();
+        let bunker = object_target(&play, &m, "sbunk01.dat");
+        play.units[bunker].clan = Some(play.player_clan);
+        play.enter_command(bunker);
+        let project = play.factories[0].projects[0].clone();
+        // Clear of the bunker, whose roof a bot would first escape (the ground Mission 03's
+        // warbot test stands its four on).
+        let ground = |p: &parkan_world::play::Play, x: f32, y: f32| {
+            glam::Vec3::new(x, y, p.ground.below(x, y, 10_000.0).map_or(0.0, |h| h.point.z) + 1.0)
+        };
+        let at = ground(&play, 1700.0, 300.0);
+        let bot = play.spawn(&project, play.player_clan, at, 0.0).unwrap();
+        // A neutral clan's unit, which no engagement takes up, so an attack on it is the hit's.
+        let other = (0..play.clans.len() as i64)
+            .find(|&c| play.clans[c as usize].kind == parkan_formats::mission::CLAN_NEUTRAL)
+            .expect("Mission 03 has a neutral clan");
+        let far = ground(&play, 1700.0, 420.0);
+        let firer = play.spawn(&project, other, far, 0.0).unwrap();
+        play.tick(1000.0 / 60.0, [0.0; 2]);
+        assert!(play.telepresence(bot, level));
+        // Every node at 30% of its life: under `Decision_RepairOn`'s 0.5, with a full battery.
+        for part in &mut play.battle.combat.targets[bot].parts {
+            for node in part.life.iter_mut().flat_map(|l| l.nodes.iter_mut()) {
+                node.life = 0.3 * node.max;
+            }
+        }
+        play.hurt(bot, Some(firer));
+        let id = play.units[firer].logical_id;
+        let mut turned = false;
+        let mut repair = false;
+        play_for(&mut play, 2.0, |p| {
+            let robot = &p.robots.iter().find(|(t, _)| *t == bot).unwrap().1;
+            // The attack goes on top; a refit the hurt unit sends itself on may go over it.
+            turned |= robot
+                .behaviour
+                .tasks
+                .iter()
+                .any(|t| matches!(t, Task::Attack { target: Some(t), .. } if *t == id));
+            repair |= p.driving.as_ref().is_some_and(|d| d.pilot.switches.repair);
+        });
+        // Let go, the unit's takt runs, and the hit it took is answered then.
+        assert!(play.roll_back());
+        play_for(&mut play, 0.1, |_| {});
+        let robot = &play.robots.iter().find(|(t, _)| *t == bot).unwrap().1;
+        let after = robot
+            .behaviour
+            .tasks
+            .iter()
+            .any(|t| matches!(t, Task::Attack { target: Some(t), .. } if *t == id));
+        (turned, repair, after)
+    };
+    assert_eq!(run(1), (true, true, true), "level 1: the takt runs, so the hit and the repair decision act");
+    assert_eq!(run(0), (false, false, true), "level 0: the takt waits for the player to let it go");
 }
 
 /// Where Mission 04's capturer is when a landing flag is set with building `id` picked: its
@@ -1188,7 +1322,7 @@ fn enter_aboard_mission_04s_hq_opens_its_command_view_whose_camera_rides_with_it
     assert!(play.roll_back());
     assert_eq!(play.mode(), Mode::Driving(hq));
     assert!(play.driving.as_ref().is_some_and(|d| d.target == hq && !d.telepresence));
-    assert_eq!((play.auto_driver, play.selected_units()), (0, vec![hq]));
+    assert_eq!((play.auto_driver(), play.selected_units()), (0, vec![hq]));
     assert!(play.command.follows.is_none());
     command_frames(&mut play, 10, |_| {});
     assert!(play.roll_back());

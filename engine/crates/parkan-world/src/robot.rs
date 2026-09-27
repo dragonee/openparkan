@@ -219,6 +219,16 @@ pub struct Robot {
     pub flyer: bool,
     /// The points it follows, and what it does with its orders, when the AI drives it.
     pub wizard: Wizard,
+    /// Its auto-driver level, the unit record's `+0x9c`: 0 as the record is bound
+    /// (`iron3d.dll:0x10074dd2`), then what a unit page's drive button (`0x1008495a`), the Y
+    /// key in modes 1 and 2 (`0x10075fc0`) or an HQ's 3 → 1 (`0x10063b20`) last wrote. A take
+    /// reads it; letting go leaves it (docs/40, "Telepresence").
+    pub auto_driver: u8,
+    /// Whether the two `Wizard.dll` words a take at level 2 leaves alone are the player's:
+    /// `+0x210`, the camera, radar and seeker, and `+0x214`, group 0 with the repair system. A
+    /// take at level 0 or 1 writes them 3, a letting-go 1 (`0x100750a2`-`0x100750b9`,
+    /// `0x10075131`).
+    pub sensors_taken: bool,
     pub behaviour: Behaviour,
     /// When each gun may next fire on the AI's timer, and the target its guns were given.
     pub next_shot_ms: Vec<f64>,
@@ -576,6 +586,8 @@ impl Robot {
             object,
             flyer,
             wizard: Wizard::default(),
+            auto_driver: 0,
+            sensors_taken: false,
             behaviour: Behaviour::new((object as u32).wrapping_mul(2_654_435_761)),
             next_shot_ms: Vec::new(),
             fire_target: None,
