@@ -12839,6 +12839,38 @@ def check_firing(check, game: Path) -> None:
           f"warbot needs 0.85.  Every other assembly is authored above 1 m/s, so only damage "
           f"can bring one under the bar")
 
+    # And which of the missions' units those are: the only ones the low bar reaches before
+    # damage does.
+    placed_units = 0
+    placed_crawlers: list[tuple[str, str, int]] = []
+    for folder in gamedir.missions(game):
+        for o in mission.load(folder / "data.tma").objects:
+            if o.kind != mission.KIND_UNIT:
+                continue
+            placed_units += 1
+            unit = objects.load_unit(game / o.path.replace("\\", "/"))
+            root = unit.components[0].ref.member.lower() if unit.components else ""
+            parsed = armoury.controller(root) if armoury.library.get(root) else None
+            if parsed is None or parsed.triples[control.TRIPLE_TOP_SPEED][1] >= 0.5:
+                continue
+            fitted_guns = sum(1 for c in unit.components
+                              if c.ref.member.lower().startswith("e_gun_"))
+            placed_crawlers.append((f"{folder.parent.name}/{folder.name}",
+                                    Path(o.path.replace("\\", "/")).stem.lower(), fitted_guns))
+    towers = [p for p in placed_crawlers if "tow" in p[1]]
+    targets = [p for p in placed_crawlers if "targ" in p[1]]
+    check("MISSIONS: the units placed below the 0.5 m/s bar are 28 armed towers and 5 targets",
+          placed_units == 296 and len(placed_crawlers) == 33
+          and len(towers) == 28 and all(g >= 1 for _, _, g in towers)
+          and len(targets) == 5 and all(g == 0 for _, _, g in targets)
+          and {m for m, _, _ in targets} == {"CAMPAIGN.00/Mission.01"}
+          and len({m for m, _, _ in towers}) == 7,
+          f"{len(placed_crawlers)} of the {placed_units} units the missions place are authored "
+          f"below 0.5 m/s: {len(towers)} towers, each with a gun, on "
+          f"{sorted({m for m, _, _ in towers})}, and {len(targets)} practice targets with none "
+          f"on {sorted({m for m, _, _ in targets})}.  Outside free fire those towers fire at "
+          f"0.45")
+
     fx = effects.EffectLibrary(game / "effects.rlb")
     load = [r for r in tur.references if r.group == tur.load_group]
     made = {r.values[7]: r.resource.member.lower() for r in load

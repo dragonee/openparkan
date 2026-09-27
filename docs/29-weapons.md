@@ -1022,8 +1022,14 @@ units only, or weighted by the areal figure (`0x100240ae`).
     is 1 (`0x10024d9e`).
 - **Threshold** (`0x10024e7a`–`0x10024ec5`):
   - 0.45 for a unit whose chassis profile can fly (`0x10014670`, `+0xc`);
-  - otherwise 0.85 when `MBehaviour+0x614` is **above 0.5** or the unit's Type
-    carries `0x80000000`, a building, and 0.45 when not.
+  - otherwise 0.85 when `MBehaviour+0x614` is **0.5 or more** or the unit's Type
+    carries `0x80000000`, a building, and 0.45 when not. The compare
+    (`0x10024e8f`–`0x10024ea0`, the 0.5 at `0x100595c0`) goes to 0.85 unless the
+    speed is below 0.5, so exactly 0.5 takes the high bar.
+
+  **The score must pass the bar, not reach it** (`0x10024f07`–`0x10024f1e`): the
+  product of the three factors is compared with it, and only a greater one goes
+  on to the shot.
 
   **`MBehaviour+0x614` is the unit's live forward top speed**, in m/s — *read*.
   The fight module sits at `MBehaviour+0x5fc`, and its refresh copies six live
@@ -1048,6 +1054,35 @@ units only, or weighted by the areal figure (`0x100240ae`).
   towers and the two practice targets. Those are units, not buildings, so nothing
   lifts their bar: **an AI tower fires at 0.45 where a warbot needs 0.85.** Every
   other assembly is authored above 1 m/s, so only damage brings one under.
+  Placed, they are 33 of the 296 units the mission files put down: 5 practice
+  targets on Mission 01, which carry no gun, and 28 towers with one — `12tower` on
+  C01 M03, `23tower` on C02 M02, `31towcan` and `31towm` on C03 M01, `33tower` on
+  C03 M03, the seven `33tow*` on C03 M04, `42towm` on C04 M02 and `m7_tow` on
+  Multi.05 (*measured*). The bar only counts outside the go, attack and search
+  tasks, whose free fire drops it to 0, so what the low bar changes is how far a
+  tower fires while it is not attacking: the Small Tower's `bb_f_01` (*v* 200)
+  scores 0.45 out to about 266 m where 0.85 stops at 146 m (*derived*).
+
+  **A building's guns take 0.85, and the Small Bunker's flamers fire on a
+  hovering flyer** (*read*, and *derived*). A building takes no task of its own
+  (`0x100179c0` refuses one), so unless a script orders it to attack it is not
+  in free fire, and the bar is what it fires by. Its Type gives it 0.85. The
+  flame, `bf_f_01`, carries frame flags 12, and bit 8 returns a distance score of
+  1 before the height term is reached (`0x1001ba00`–`0x1001ba0a`): its score does
+  not fall with the target's height at all. So once the bunker's turret has settled on a target and its gun
+  reports 0, the score is 1 × 1 × 1, which passes 0.85 at any range and any
+  height the turret can look at. The Small Bunker's sight looks from −15° to 75°
+  (*measured*, its pitch channel's two ends); a flyer's walk points are 15 m over
+  the ground, which 80 m and 40 m out from the Mission 03 bunker stands 3.5° and
+  2.1° above its sight, the bunker's own sight standing high. The engine holds to
+  this, and its test puts the enemy's flyer there: the player's bunker traces it
+  and fires 4 and 5 flames in 6 s, and 4 with the flyer 40 m up and 20.5° over
+  its sight. **So the bunker fights flyers as well as walkers**; what keeps its
+  fire off a target is its turret not having settled, not the target's height.
+  An earlier line in the queue had the walker's 0.85 limit the bunker to targets
+  near its own ground level. That holds only for a round without bit 8 or
+  `0x10`, which loses 1 − height ÷ *v* of its score, and neither of the bunker's
+  guns fires one.
 
   Past the bar, the gun fires **one shot** (`CIS_SINGLEFIGHT`, `0x200`,
   `0x10024fa2`). Before that it must have both factors above 0, a clear line
@@ -1278,6 +1313,16 @@ assembled nowhere, so "in the tree" and "assembled" are detected apart.
   buildings ([above](#how-the-ai-fires--read)). Which object answers class 2,
   the one bit an outer camera's query drops from a round's, is still open
   ([30-turrets.md](30-turrets.md#not-established)).
+- ~~Which fight-module bar a building's guns must clear. With the walker's 0.85
+  the Small Bunker's flamers only fire at a unit close to its own ground level,
+  never at hovering flyers, so the warbots do the fighting.~~ **Read**: a
+  building takes 0.85 by its Type, as a machine at 0.5 m/s or more does, while a
+  flyer and anything slower, the fixed towers among them, take 0.45. The premise
+  was wrong: the bunker's flame scores 1 at any height, its round's bit 8
+  returning before the height term (`0x1001ba00`), so with its turret settled it
+  passes 0.85 on a flyer 15 m up as on a walker, and the engine's bunker fires 4
+  flames in 6 s on a flyer hovering 80 m out
+  ([How the AI fires](#how-the-ai-fires--read)).
 - The order record whose `+0x30` id lets the go, attack and search tasks fire
   without aim (`0x10014bd0`); whether a self-given attack carries one; and
   the height term in the distance score.

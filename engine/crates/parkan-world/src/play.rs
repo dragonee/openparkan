@@ -25,8 +25,8 @@ use parkan_formats::mission::{
 use parkan_formats::pose::Pose;
 use parkan_formats::{arealmap, gamedir, landmesh};
 use parkan_sim::behaviour::{
-    Condition, FIRE_BAR_FLYER, FIRE_BAR_WALKER, SCORE_RAMP, SERVICE_GUNS, SERVICE_MAGAZINE, Search, Seen,
-    Senses, Takt, Task, Usable, Walk, distance_score, fire_wait_ms,
+    Condition, SCORE_RAMP, SERVICE_GUNS, SERVICE_MAGAZINE, Search, Seen, Senses, Takt, Task, Usable, Walk,
+    distance_score, fire_bar, fire_wait_ms,
 };
 use parkan_sim::combat::{Event, Part, Round, RoundEnd, Target};
 use parkan_sim::damage::FLIGHT_MS;
@@ -449,13 +449,15 @@ type Sighting = (Option<usize>, Seen, Option<i64>);
 
 /// The fire control's target, which is target `t`'s `robot`'s takt handed, reaches every gun:
 /// an AI turret traces a point, so its unguided guns take it too (docs/29). Each gun fires
-/// once its AI timer runs out and its score clears the bar, or freely during a search or an
-/// attack (docs/29, "How the AI fires"). With `floor`, a building's guns hold their fire on a
-/// target below the lowest its turret's sight can look.
+/// once its AI timer runs out and its score passes the bar its unit's Type `type_word` and
+/// live speed set, or freely during a search or an attack (docs/29, "How the AI fires"). With
+/// `floor`, a building's guns hold their fire on a target below the lowest its turret's sight
+/// can look.
 #[allow(clippy::too_many_arguments)]
 fn aim_and_fire(
     robot: &mut Robot,
     t: usize,
+    type_word: u32,
     takt: &Takt,
     seen: &[Sighting],
     battle: &Battle,
@@ -494,14 +496,12 @@ fn aim_and_fire(
         c.is_none_or(|c| (robot.rig.values[c] - robot.rig.target(axis)).abs() < AIM_SETTLED)
     });
     let distance = at.distance(point);
-    // STAND-IN: docs/29-weapons.md#how-the-ai-fires--read -- which of the fight module's bars
-    // a building's guns clear is not read: a building flies not, and takes the walker's.
+    // The bar by what the unit is and how fast it may go now (`0x10024e7a`–`0x10024ec5`): the
+    // live forward top speed is the limited one, which damage lowers.
     let bar = if takt.fire_freely {
         0.0
-    } else if robot.flyer {
-        FIRE_BAR_FLYER
     } else {
-        FIRE_BAR_WALKER
+        fire_bar(robot.flyer, robot.walker.limits.top_speed[1], type_word)
     };
     for g in 0..robot.guns.len() {
         if now < robot.next_shot_ms[g] {
@@ -528,7 +528,8 @@ fn aim_and_fire(
             let ramp = if animal { 0.0 } else { SCORE_RAMP };
             distance_score(distance, point.z - at.z, gun.round_speed, gun.round_flags, ramp) * turret * own
         };
-        if score < bar {
+        // A score must pass the bar, not reach it (`0x10024f13`–`0x10024f1e`).
+        if score <= bar {
             continue;
         }
         let Some((muzzle, _)) = robot.gun_muzzle(g, gun.current) else { continue };
@@ -3548,6 +3549,7 @@ impl Play {
             if !self.paused && self.thinks(self.units[t].clan) {
                 let sensed = self.radar_ids(e, true, world);
                 let others = self.seen_by(t, seen, &sensed);
+                let type_word = self.units[t].type_word;
                 let Play { emplacements, battle, ground, building_fire_floor, graph, .. } = self;
                 let robot = &mut emplacements[e].1;
                 let usable = |x: f32, y: f32| graph.as_ref().is_none_or(|g| g.usable(x, y));
@@ -3570,7 +3572,7 @@ impl Play {
                     pastures: parkan_sim::behaviour::Pastures::NONE,
                 };
                 let takt = robot.behaviour.takt(&senses);
-                aim_and_fire(robot, t, &takt, seen, battle, ground, false, *building_fire_floor);
+                aim_and_fire(robot, t, type_word, &takt, seen, battle, ground, false, *building_fire_floor);
             }
             let (t, robot) = &mut self.emplacements[e];
             let target = &self.battle.combat.targets[*t];
@@ -3667,7 +3669,8 @@ impl Play {
         self.escape_off_building(r);
         let sensed = self.radar_ids(r, false, world);
         let others = self.seen_by(t, seen, &sensed);
-        let animal = self.units[t].type_word & CLASS_ANIMAL != 0;
+        let type_word = self.units[t].type_word;
+        let animal = type_word & CLASS_ANIMAL != 0;
         let (clan, zones) = if animal { self.zones(t) } else { (None, Vec::new()) };
         let bounds = self.ground.bounds();
         let capturing = matches!(
@@ -3782,7 +3785,7 @@ impl Play {
         let forward = robot.walker.body.forward();
         robot.walker.drive = Some(robot.wizard.takt(now, at, forward, dt_ms));
         if fights {
-            aim_and_fire(robot, t, &takt, seen, &self.battle, &self.ground, animal, false);
+            aim_and_fire(robot, t, type_word, &takt, seen, &self.battle, &self.ground, animal, false);
         }
     }
 

@@ -619,6 +619,82 @@ fn a_small_bunker_taken_by_the_player_turns_its_flamers_on_an_enemy_holds_them_c
     assert!(aimed, "on the flyer");
 }
 
+/// The bar a building's guns must pass, and what the Small Bunker's flamers score on a flyer
+/// hovering where a flyer's walk points are, 15 m over the ground (docs/29, "How the AI fires").
+/// A building takes 0.85, its Type carrying the building bit; it takes no self-task, so it is
+/// never in free fire and the bar is what it fires by. Its flame (`bf_f_01`, frame flags 12)
+/// scores 1 at any distance and any height, the height term being only for a round without bit
+/// 8 or `0x10`. So once its turret has settled on the flyer both aim factors are 1, the score
+/// passes the bar, and it fires on a hovering flyer as on one near its own ground level.
+#[test]
+#[ignore = "needs the game install"]
+fn a_small_bunkers_flamers_pass_a_buildings_bar_on_a_flyer_hovering_15_m_up() {
+    use parkan_sim::behaviour::{FIRE_BAR_HIGH, Task, distance_score, fire_bar};
+    use std::collections::BTreeSet;
+
+    let (mut play, _) = mission_03_play();
+    let (bunker, _) = play.emplacements[0];
+    let type_word = play.units[bunker].type_word;
+    assert_eq!(type_word, 0x8001_0000, "the Small Bunker");
+    // How far up and down its sight looks, at the two ends of its pitch channel.
+    let robot = &mut play.emplacements[0].1;
+    let pitch = robot.rig.pitch.expect("a pitch channel");
+    let reach: Vec<f32> = [0.0, 1.0]
+        .into_iter()
+        .map(|v| {
+            robot.rig.values[pitch] = v;
+            let (_, d) = robot.sight().expect("a sight");
+            d.z.atan2(d.truncate().length()).to_degrees()
+        })
+        .collect();
+    let highest = reach.iter().copied().fold(f32::MIN, f32::max);
+    eprintln!("its sight looks from {:.1} to {:.1} deg", reach[0], reach[1]);
+    let robot = &play.emplacements[0].1;
+    let bar = fire_bar(robot.flyer, robot.walker.limits.top_speed[1], type_word);
+    assert_eq!(bar, FIRE_BAR_HIGH, "a building's bar is 0.85");
+    // Its flamers' round carries bit 8, and scores 1 whatever the height and distance.
+    assert_eq!(robot.guns.len(), 2);
+    for g in &robot.guns {
+        assert_eq!(g.round_flags & 8, 8, "the flame's frame flags: {}", g.round_flags);
+        assert_eq!(distance_score(80.0, 15.0, g.round_speed, g.round_flags, 5.0), 1.0);
+        assert_eq!(distance_score(300.0, 60.0, g.round_speed, g.round_flags, 5.0), 1.0);
+    }
+
+    // The enemy's flyer held `up` m over the ground `off` m east of the player's bunker for 6 s:
+    // the flamers' rounds, by id, whether the bunker traces the flyer, and how far over its
+    // sight the flyer stands.
+    let hover = |off: f32, up: f32| {
+        let (mut play, _) = mission_03_play();
+        play.units[bunker].clan = Some(play.player_clan);
+        let flyer = play.robots.iter().position(|(t, _)| play.units[*t].logical_id == 3).unwrap();
+        let flyer_target = play.robots[flyer].0;
+        assert!(play.robots[flyer].1.flyer, "the enemy's unit 3 flies");
+        let base = play.battle.combat.targets[bunker].position;
+        let (mut rounds, mut aimed, mut rise) = (BTreeSet::new(), false, f32::NAN);
+        play_for(&mut play, 6.0, |p| {
+            let at = base + glam::Vec3::new(off, 0.0, 0.0);
+            let ground = p.ground.below(at.x, at.y, 1.0e5).map_or(at.z, |h| h.point.z);
+            p.robots[flyer].1.walker.body.position = at.with_z(ground + up);
+            rounds.extend(p.battle.combat.rounds.iter().filter(|r| r.owner == Some(bunker)).map(|r| r.id));
+            aimed |= p.emplacements[0].1.fire_target == Some(flyer_target);
+            if let Some((origin, _)) = p.emplacements[0].1.sight() {
+                let d = p.robots[flyer].1.walker.body.position - origin;
+                rise = d.z.atan2(d.truncate().length()).to_degrees();
+            }
+            let task = p.emplacements[0].1.behaviour.task();
+            assert!(!matches!(task, Task::Attack { .. } | Task::Search { .. } | Task::Go { .. }), "{task:?}");
+        });
+        (rounds.len(), aimed, rise)
+    };
+    for (off, up) in [(80.0, 15.0), (40.0, 15.0), (80.0, 40.0)] {
+        let (rounds, aimed, rise) = hover(off, up);
+        eprintln!("{off} m out, {up} m up: {rise:.1} deg over the sight, traced {aimed}, {rounds} rounds");
+        assert!(rise > 0.0 && rise < highest, "{off} m out the flyer is {rise:.1}° over the sight");
+        assert!(aimed, "{off} m out it traces the flyer");
+        assert!(rounds > 0, "{off} m out and {rise:.1}° up, its flamers fire on the flyer");
+    }
+}
+
 /// Outflanking Maneuver's units wear the armour fitted into their chassis's slot, and every hit on
 /// any node of theirs passes through it (docs/26, "Armour"): the hero and the enemy's `12wel2`
 /// warbots `i_arm_l_02`, the helicopters `i_arm_t_df`, the tower `i_arm_b_05`. A laser bolt of 250

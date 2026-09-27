@@ -9476,6 +9476,30 @@ doc = "docs/23-economy.md"
 read = true
 
 [[entry]]
+module = "Behavior.dll"
+at = "0x10024e8f"
+kind = "site"
+name = "fight bar: live forward top +0x614 below 0.5 (0x100595c0) and no building bit takes 0.45, else 0.85"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10024f13"
+kind = "site"
+name = "fight: the three factors' product must be greater than the bar"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1001ba00"
+kind = "site"
+name = "distance score: round frame bit 8 returns 1.0 before the height term"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
 module = "AniMesh.dll"
 at = "0x10003775"
 kind = "site"

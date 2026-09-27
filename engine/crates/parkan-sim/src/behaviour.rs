@@ -56,9 +56,26 @@ pub const ATTACK_TRIES: usize = 77;
 /// The escape's rings of tries (`0x1002ba50`): so many points within so far of the unit along
 /// each axis, each inside the map by the roaming inset and on a usable areal.
 pub const LEAVE_RINGS: [(usize, f32); 4] = [(400, 150.0), (300, 300.0), (200, 400.0), (200, 1000.0)];
-/// The fight module's bars (`0x10024e7a`): a flyer's, and a walker's.
-pub const FIRE_BAR_FLYER: f32 = 0.45;
-pub const FIRE_BAR_WALKER: f32 = 0.85;
+/// The fight module's two bars (`0x10024e7a`–`0x10024ec5`), and the live forward top speed,
+/// m/s, from which a machine that cannot fly takes the high one ([`fire_bar`]).
+pub const FIRE_BAR_LOW: f32 = 0.45;
+pub const FIRE_BAR_HIGH: f32 = 0.85;
+pub const FIRE_BAR_SPEED: f32 = 0.5;
+
+/// The bar a gun's score must pass outside free fire (`0x10024e7a`–`0x10024ec5`): the low one
+/// for a unit whose chassis can fly; otherwise the high one while its live forward top speed
+/// (`MBehaviour+0x614`) is not below [`FIRE_BAR_SPEED`] or its Type carries the building bit,
+/// and the low one when it is slower. So a building takes the high one, and a fixed tower,
+/// authored at 0.2 m/s, or a machine shot down to a crawl, the low one.
+pub fn fire_bar(flyer: bool, forward_top_speed: f32, type_word: u32) -> f32 {
+    if flyer {
+        FIRE_BAR_LOW
+    } else if forward_top_speed >= FIRE_BAR_SPEED || type_word & BUILDING_BIT != 0 {
+        FIRE_BAR_HIGH
+    } else {
+        FIRE_BAR_LOW
+    }
+}
 /// The base priority's limit, which a stopped unit hands the attack it takes up: this far
 /// from where it stood (`0x1000193e`).
 pub const STOP_LIMIT: f32 = 1000.0;
@@ -2532,5 +2549,21 @@ mod tests {
         assert_eq!(distance_score(900.0, 0.0, 80.0, 16, SCORE_RAMP), 1.1);
         assert_eq!(fire_wait_ms(-1, 0.0), 500.0);
         assert_eq!(fire_wait_ms(10, 1.0), 6000.0);
+    }
+
+    #[test]
+    fn a_flyer_or_a_machine_below_half_a_metre_a_second_clears_the_low_bar_and_a_building_the_high() {
+        const WARBOT: u32 = 0x0100_0000;
+        const BUNKER: u32 = 0x8001_0000;
+        // A flyer clears 0.45 at any speed.
+        assert_eq!(fire_bar(true, 30.0, WARBOT), FIRE_BAR_LOW);
+        // A walker at speed clears 0.85, from exactly 0.5 m/s up.
+        assert_eq!(fire_bar(false, 12.0, WARBOT), FIRE_BAR_HIGH);
+        assert_eq!(fire_bar(false, FIRE_BAR_SPEED, WARBOT), FIRE_BAR_HIGH);
+        // A fixed tower, authored at 0.2 m/s, and a machine shot down to a crawl clear 0.45.
+        assert_eq!(fire_bar(false, 0.2, WARBOT), FIRE_BAR_LOW);
+        assert_eq!(fire_bar(false, 0.0, WARBOT), FIRE_BAR_LOW);
+        // A building has no speed, and its Type puts it at 0.85.
+        assert_eq!(fire_bar(false, 0.0, BUNKER), FIRE_BAR_HIGH);
     }
 }
