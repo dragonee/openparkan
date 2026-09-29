@@ -1428,6 +1428,41 @@ fn mission_04_research_play() -> (parkan_world::play::Play, parkan_formats::miss
 
 #[test]
 #[ignore = "needs the game install"]
+fn mission_04_has_small_research_center_sites_but_few_and_its_own_centre_stands_on_one() {
+    use parkan_world::selection::RESEARCH_CENTRE;
+
+    let (mut play, m) = mission_04_research_play();
+    let ground = |play: &parkan_world::play::Play, x: f32, y: f32| {
+        glam::Vec3::new(x, y, play.ground.below(x, y, 1.0e5).unwrap().point.z)
+    };
+    // The Enhanced Research Center's own site and turn: its model's three exits, 80 m out on
+    // its root node, all on walkable areals, and with it gone a Small Research Center passes
+    // there whole. While it stands its sphere refuses the site.
+    let erc = object_target(&play, &m, "einst01.dat");
+    let (at, yaw) = play.construction.placements[&erc];
+    let model = play.placement_model(RESEARCH_CENTRE).unwrap();
+    let exits = play.hall_exits(&model).unwrap();
+    let want = [[0.0, -80.0], [-77.8, 54.7], [77.8, 54.7]];
+    assert_eq!(exits.len(), 3);
+    assert!(want.iter().all(|w| exits.iter().any(|e| (e.x - w[0]).abs() < 0.1 && (e.y - w[1]).abs() < 0.1)));
+    let (s, c) = yaw.sin_cos();
+    let graph = play.graph.as_ref().unwrap();
+    assert!(exits.iter().all(|e| graph.usable(at.x + e.x * c - e.y * s, at.y + e.x * s + e.y * c)));
+    assert!(!play.placement_valid(None, RESEARCH_CENTRE, at, yaw), "the centre standing there");
+    play.construction.placements.remove(&erc);
+    assert!(play.placement_valid(None, RESEARCH_CENTRE, at, yaw), "its site, the centre gone");
+    play.construction.placements.insert(erc, (at, yaw));
+    // Two of the twelve sites a 5 m grid at 64 turns finds, in two patches: north-west of the
+    // factory and south-west of the main teleport. A turn either way leaves both.
+    let tau = std::f32::consts::TAU;
+    assert!(play.placement_valid(None, RESEARCH_CENTRE, ground(&play, 1050.0, 1330.0), 26.0 * tau / 64.0));
+    assert!(play.placement_valid(None, RESEARCH_CENTRE, ground(&play, 690.0, 805.0), 51.0 * tau / 64.0));
+    assert!(!play.placement_valid(None, RESEARCH_CENTRE, ground(&play, 1050.0, 1330.0), 0.0));
+    assert!(!play.placement_valid(None, RESEARCH_CENTRE, ground(&play, 690.0, 805.0), 0.0));
+}
+
+#[test]
+#[ignore = "needs the game install"]
 fn a_research_centre_built_in_play_takes_the_research_panels_orders() {
     use parkan_world::selection::RESEARCH_CENTRE;
 
@@ -1441,7 +1476,8 @@ fn a_research_centre_built_in_play_takes_the_research_panels_orders() {
     let at = glam::Vec3::new(683.17, 146.46, 215.13);
     // Not a site the placement test passes: its three exits stand 80 m out, and on Mission 04
     // no 20 m grid point at any of eight turns has all three on walkable areals and a level
-    // basement besides. `CreateObjectFromScheme` asks neither (docs/32, "The test").
+    // basement besides; the sites there are, but few (the next test). `CreateObjectFromScheme`
+    // asks neither (docs/32, "The test").
     assert!(!play.placement_valid(None, RESEARCH_CENTRE, at, 0.0), "an exit off the walkable ground");
     let now = play.hero.time_ms;
     let centre = play.create_building(player, RESEARCH_CENTRE, at, 0.0, now).expect("it stands");

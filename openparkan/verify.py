@@ -24924,6 +24924,91 @@ def check_mission_04_research(check, game: Path) -> None:
           f"and the name, plays VOICE_RSRCH_COMPLETE, refreshes {report}")
 
 
+def check_placed_exits(check, game: Path) -> None:
+    """The site test's exit step against the designers' own placements (docs/32, "The path and
+    the exits"): each placed building's hall-way exits, posed through their nodes and turned
+    with the placement, stand on walkable areals of its map nearly everywhere, the Mission 04
+    Enhanced Research Center's three included; and the research centre's exits stand on its
+    root node 80 m out, just past its .bas outer ring."""
+    fortif_path = game / "fortif.rlb"
+    if not fortif_path.exists():
+        return
+    fortif = NResArchive.open(fortif_path)
+    workshop = units.Workshop(game)
+    index: dict[str, Path] = {}
+    for f in game.glob("UNITS/**/*.dat"):
+        index.setdefault(f.name.lower(), f)
+    exits_of: dict[str, list | None] = {}
+
+    def exits(root: str) -> list | None:
+        """The exits of the root record's mesh, in the model's frame: a `FORT` record's first
+        slot is the building's agent, whose record carries the mesh."""
+        if root not in exits_of:
+            record = workshop.library.get(root)
+            if record is not None and record.tag == "FORT" and record.slots:
+                record = workshop.library.get(record.slots[0].member.lower())
+            ref = record.mesh if record is not None else None
+            if ref is None:
+                exits_of[root] = None
+                return None
+            blob = workshop.armoury.read(ref)
+            model = objmesh.parse(blob, ref.member)
+            graph = objmesh.read_path_graph(NResArchive(blob, ref.member))
+            exits_of[root] = None if graph is None else [
+                objmesh.apply(model.world_pose(n.b), n.position) for n in graph.nodes if n.a & 1]
+        return exits_of[root]
+
+    def inside(areal, x, y) -> bool:
+        hit, vs = False, areal.vertices
+        for i in range(len(vs)):
+            (x1, y1), (x2, y2) = vs[i][:2], vs[(i + 1) % len(vs)][:2]
+            if (y1 > y) != (y2 > y) and x < x1 + (y - y1) * (x2 - x1) / (y2 - y1):
+                hit = not hit
+        return hit
+
+    maps: dict[str, arealmap.ArealMap] = {}
+    buildings = walkable = total = whole = 0
+    erc = None
+    for d in gamedir.missions(game):
+        m = mission.load(d / "data.tma")
+        land = game / "DATA" / "MAPS" / m.map_name / "Land.map"
+        if not land.exists():
+            continue
+        amap = maps.setdefault(m.map_name, arealmap.load(land))
+        for o in m.objects:
+            found = index.get(o.path.replace("\\", "/").split("/")[-1].lower())
+            if o.kind != mission.KIND_BUILDING or found is None:
+                continue
+            unit = objects.load_unit(found)
+            posed = exits(unit.components[0].ref.member.lower()) if unit.components else None
+            if not posed:
+                continue
+            (px, py, _), r = o.position, o.rotation
+            ok = 0
+            for e in posed:
+                x = px + e[0] * math.cos(r) - e[1] * math.sin(r)
+                y = py + e[0] * math.sin(r) + e[1] * math.cos(r)
+                under = [i for i in amap.areals_at(x, y) if inside(amap.areals[i], x, y)]
+                ok += bool(under) and bool(amap.areals[under[0]].flags[0])
+            buildings += 1
+            total += len(posed)
+            walkable += ok
+            whole += ok == len(posed)
+            if m.map_name == "Tut_4" and "einst01" in found.name.lower():
+                erc = (ok, len(posed))
+    inst = sorted((round(e[0], 1), round(e[1], 1)) for e in exits("fr_l_inst") or [])
+    _, outer = objects.parse_base(fortif.read_name("fr_l_inst.bas"), "fr_l_inst")
+    xs, ys = [p[0] for p in outer.points], [p[1] for p in outer.points]
+    beyond = all(not (min(xs) <= x <= max(xs) and min(ys) <= y <= max(ys)) for x, y in inst)
+    check("fortif.rlb: the placed buildings' exits stand on their maps' walkable areals",
+          (buildings, total, walkable, whole) == (166, 1137, 1109, 155) and erc == (3, 3)
+          and inst == [(-77.8, 54.7), (0.0, -80.0), (77.8, 54.7)] and beyond,
+          f"{walkable} of the {total} exits of the {buildings} placed hall-way buildings, all of "
+          f"them at {whole}; Mission 04's Enhanced Research Center {erc}; the research "
+          f"centre's exits {inst} on its root node, past the outer ring's box "
+          f"x {min(xs):.1f}..{max(xs):.1f}, y {min(ys):.1f}..{max(ys):.1f}: {beyond}")
+
+
 def check_placement(check, game: Path) -> None:
     """Placing a building from the command view, and the builder's task that puts it up."""
     paths = [game / name for name in ("iron3d.dll", "Behavior.dll", "Terrain.dll")]
@@ -25513,7 +25598,7 @@ def run(game: Path) -> int:
         check_wingman,
         check_boarding, check_hull_follow, check_live_limits, check_body_sphere,
         check_zoom_and_outer_camera,
-        check_builder, check_placement,
+        check_builder, check_placement, check_placed_exits,
         check_designs,
         check_units, check_loading, check_search, check_construction,
         check_controls, check_player_input, check_strafe, check_focus, check_selection,

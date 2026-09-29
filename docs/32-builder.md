@@ -336,10 +336,39 @@ measured it, and puts 58 of the 73 exits of Missions 02–04's placed buildings 
 walkable areals: the designers' generators on high ground are the exception, and no
 test put them there.
 
-**On Mission 04 a Small Research Center fits nowhere** (*measured*): of 7,225 points
-on a 20 m grid, 700 are walkable, at yaw 0 its three exits — 80 m out — all stand on
-walkable areals at 212 and its basement and sphere pass at 43, and at no point of any
-of eight turns do both.
+**On Mission 04 a Small Research Center fits, but in very few places** (*measured*,
+with the engine's test). Of 7,225 points on a 20 m grid, 700 are walkable; at yaw 0
+its three exits all stand on walkable areals at 212 and its basement and sphere pass
+at 43, and at no point of any of eight turns do both. That grid is too coarse for
+it: a 10 m grid at 32 turns finds one site in 924,800, and a 5 m grid at 64 turns
+**12 in 7,398,400**, in two patches, (670–705, 800–815) south-west of the factory
+and (1025–1050, 1285–1330) west of the main teleport, each point at one or two of
+the 64 turns. A player turning the model 0.05 rad a key and moving it a pixel at a
+time can reach them (*derived*).
+
+Neither the posing nor the areal test is off; the building and the map are what
+make it so:
+- **The model.** The Small Research Center's three exits stand on its root node,
+  whose rest pose is the identity, at (0, −80), (−77.8, 54.7) and (77.8, 54.7):
+  8 to 16 m past its `.bas` outer ring, x ±70.8 and y −63.6 to 79.3, as the
+  storage's and the mine's stand just past theirs. But its three make a triangle
+  155.6 m a side, where the storage's and the mine's lie on one line 152 m
+  long.
+- **The map.** Tut_4's walkable areals are **9.7%** of its area, 78 of 737, the
+  least of the four training maps (Tut_3 12.7%).
+- **The control.** The same posing puts **1,109 of the 1,137** exits of the 166
+  placed buildings that carry a hall way on walkable areals of their maps, 155 of
+  the buildings with every exit so — Mission 04's own Enhanced Research Center
+  among them, 3 of 3 at its place and turn, 2.01 rad (`openparkan verify`). With
+  that centre taken away, the engine's whole test passes a Small Research Center
+  there. And on the same map the same test finds sites at 20 m and eight turns for
+  the Light Tower (837 of 57,800), the Outpost (392), the Small Bunker (257) and
+  the storage (12), and for the Small Research Center on Mission 03 (1,439 of
+  80,000) and Mission 02 (22 of 57,800).
+
+Whether the game shows the same few is not seen: Mission 04 places no builder for
+the player, so no play depends on it, and its recording was not searched for a
+Build row.
 
 **The query is the model's alone** (*read*, with a byte search). Its only
 callers are `iron3d.dll`'s wrapper `0x10033d10` (`0x10033d29`, `0x10033d66`),
@@ -1123,6 +1152,13 @@ laser (`e_gun_lc_03`, `e_gun_mc_20`).
   has taken; why, and whether the players present as the game starts count as
   joining, is not read. Network play only: the engine plays single play and needs
   nothing of it ([Its colour](#the-model-under-the-cursor)).
+- ~~Whether the game refuses a Small Research Center everywhere on Mission 04, or the
+  posing or the areal test is off on that map.~~ — **measured**: neither is off. The
+  exits stand on the root node 80 m out, just past the outer ring; the same posing
+  puts 1,109 of the 1,137 exits of the 166 placed hall-way buildings on walkable
+  areals, the mission's own research centre's 3 of 3; and a 5 m grid at 64 turns
+  finds 12 sites, where the 20 m grid at eight turns found none
+  ([The path and the exits](#the-path-and-the-exits--read-and-measured)).
 - ~~How `StartCheckMaxBasementAngle` triangulates the basement between its
   rings.~~ — **read**: as the constrained Delaunay triangulation of the ring
   between the two `.bas` rings, their edges its only constraints, the faces
