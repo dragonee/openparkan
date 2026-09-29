@@ -671,8 +671,9 @@ next to each other — the message and the agent's id-6 arm — gives 21, all in
 | argument | sent by |
 |---:|---|
 | 2 | `World3D.dll`'s `CreateMirror` (`0x100091fe`), `AddNewMirror` (`0x10009619`, *"AddNewMirror: Illegal player number"*) and the queued `ChangeOwner` (`0x10005031`) |
-| 0 | `LoadObject` (`0x1000a064`), the `GMSG_CHANGE_OBJECT_OWNER` handler (`0x100067b8`) and `iron3d.dll:0x1007508a`, `0x10075111` |
-| 1 | `iron3d.dll:0x100750c1` and six of the `0x10063df0`–`0x100643b0` family |
+| 0 | `LoadObject` (`0x1000a064`), the `GMSG_CHANGE_OBJECT_OWNER` handler (`0x100067b8`), `CreateObject` (`0x10007dae`) and `0x100084b9`; `iron3d.dll:0x1007508a`, `0x10075111`, and six of the mode handlers from `0x10063df0`: `0x10063ed1`, `0x100640b5` and `0x100643e6` after a push of 0, and `0x10063e41`, `0x100641ab` and `0x100642ab` after a push of `ebx`, which is 0 there (`0x10063e08`) |
+| 1 | `iron3d.dll:0x100750c1` and four of the mode handlers, the entries into mode 6 (`0x1006402a`, `0x10064125`, `0x10064235`, `0x10064366`) |
+| `ebp` | `World3D.dll:0x10005e34`, whose value is not traced |
 
 So **argument 2 means the object is not simulated here** — a mirror of another
 player's, or one part way through changing hands — and 0 and 1 hand it back.

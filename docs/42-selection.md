@@ -610,7 +610,13 @@ filled from `ui/cursor.cfg` (`0x10057660`, then `0x10057860` for each):
 `IDisplay` slot 12 answers, it calls `SetCursor` with the object's handle; the
 software draw below runs only when it does not, so slot 12 is whether the
 cursor is the system's (*derived*). The `FORCE_SOFTWARE_CURSOR` setting is read beside it
-(`0x100614e8`).
+(`0x100614e8`). **Slot 12 is `services.dll`'s display byte `+0x4fe`**, which
+`iron3d.dll` sets from `Iron_3D.ini`'s `FORCE_SOFTWARE_CURSOR` read as 0, held to 0
+unless the Direct3D driver reports `DDCAPS2_CANRENDERWINDOWED`; the install's file
+sets 1, so the game draws its own cursor
+([40-command-mode.md](40-command-mode.md#the-displays-slot-12-the-system-cursor--read-and-measured)).
+Of the state setter's 27 calls, one stores 7, the band (`0x100714bf`), and one 8,
+the Build row's building (`0x10079e74`).
 
 **The software cursor** (`0x10057060`) draws its phase's sprite with its
 extent as the hot spot. It moves to the next of the four phases once

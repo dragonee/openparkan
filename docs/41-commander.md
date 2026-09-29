@@ -200,12 +200,15 @@ The panel's click (`0x100841a0`) tries, in order:
      (`0x10084d80`);
    - **Chat** — show or hide the game's `+0x30` overlay;
    - **Satellite map** — open or close the map (`0x100740f0`, `0x10074100`);
-   - **Game menu** — push `CState` mode 7 (`0x10062bc0`, `0x10084674`);
+   - **Game menu** — push `CState` mode 7 (`0x10062bc0`, `0x10084674`), whose
+     screen is [39-boarding.md](39-boarding.md#the-game-menu--read)'s;
 4. **the page header's exit button** (334, 0)–(369, 20), while a page is up: page
    0, and pop mode 5 when it is the front ([36-factory.md](36-factory.md#what-the-controls-do--read));
 5. **the page's own controls** (jump table `0x10084b5c`), below.
 
-A click nothing takes returns 0 and falls through to the world.
+A click nothing takes returns 0 and falls through to the world. In a command
+view Alt+W, C, B, R and P turn the page too
+([40-command-mode.md](40-command-mode.md#input--read-and-measured)).
 
 ## The pages — *read*
 
