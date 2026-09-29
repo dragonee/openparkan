@@ -73,6 +73,54 @@ fn in_the_bunkers_command_view_the_cursor_takes_the_hero_on_its_pod_and_guard_pa
     );
 }
 
+/// The ray through window pixel `cursor` of a `size` window, from the command camera as it
+/// stands.
+fn ray_through(play: &Play, cursor: [f32; 2], size: [f32; 2]) -> Aim {
+    let eye = play.eye();
+    let right = eye.forward.cross(eye.up);
+    let f = size[0] / 2.0 / (eye.fov_x / 2.0).tan();
+    let (a, b) = ((cursor[0] - size[0] / 2.0) / f, (size[1] / 2.0 - cursor[1]) / f);
+    Aim::Ray { eye: eye.position, direction: (eye.forward + right * a + eye.up * b).normalize() }
+}
+
+/// The recording's `PLACE` over the Small Bunker's roof at 190.5 s. The object pick takes the
+/// agent's own sphere, its six parts' header spheres joined: 52.58 about a centre 4.41 over the
+/// placement. It passes over an object whose sphere holds the eye (`0x100362d8`). The command
+/// camera fitted to the eight corners of the roof's two signs in that frame stands at
+/// (1259.89, 816.21, 136.09), yaw 2.623, tilt 0.140, 51.39 from that centre, so the ray under
+/// the cursor, at (648, 552) of the 960 × 720 frame, takes nothing though it passes within
+/// 0.7 of the radius, and the builder may go where it meets the roof: kind 1, `PLACE`. Ten
+/// higher, the eye outside, the same ray takes the bunker: kind 10, `GUARD`.
+#[test]
+#[ignore = "needs the game install"]
+fn over_the_bunkers_roof_from_the_cameras_floor_the_eye_is_inside_its_sphere_and_the_cursor_is_place() {
+    let (mut play, m, bunker) = mission_03_command_view();
+    let builder = object_target(&play, &m, "tut3_b.dat");
+    let (centre, radius) = play.battle.combat.targets[bunker].agent_sphere;
+    assert!(
+        centre.distance(glam::Vec3::new(1260.924, 813.890, 84.764)) < 0.01 && (radius - 52.575).abs() < 0.01,
+        "the bunker's own sphere: {centre} {radius}"
+    );
+    play.select_unit_alone(builder);
+    play.command.position = glam::Vec3::new(1259.892, 816.207, 136.089);
+    play.command.yaw = 2.623;
+    play.command.tilt = 0.140;
+    let (cursor, size) = ([648.0, 552.0], [960.0, 720.0]);
+    let eye = play.eye().position;
+    assert!(eye.distance(centre) < radius, "the eye inside: {}", eye.distance(centre));
+    let pick = play.pick(ray_through(&play, cursor, size));
+    assert_eq!((pick.kind, pick.object), (1, None), "{pick:?}");
+    assert_eq!(cursor_state(pick.kind), 3, "PLACE");
+    let point = pick.point.expect("the roof");
+    assert!(point.truncate().distance(centre.truncate()) < 15.0, "on the bunker, by its turret: {point}");
+
+    play.command.position.z += 10.0;
+    assert!(play.eye().position.distance(centre) > radius);
+    let pick = play.pick(ray_through(&play, cursor, size));
+    assert_eq!((pick.kind, pick.object), (10, Some(bunker)), "{pick:?}");
+    assert_eq!(cursor_state(pick.kind), 5, "GUARD");
+}
+
 /// Aboard a bot the hero's object has no parent, and the pick passes it over: in Mission 04's
 /// HQ command view, entered from aboard the HQ, a ray through where the hero rides takes no
 /// hero (`0x100637fa`).
@@ -148,3 +196,4 @@ fn the_cursors_ray_passes_a_unit_to_the_ground_stops_on_a_building_and_guard_tak
         (orders::PATROL, GUARD_CLICK_RADIUS, Target::LogicId(play.units[plant].logical_id))
     );
 }
+

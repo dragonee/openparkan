@@ -285,6 +285,24 @@ pub fn devices(controller: &Controller) -> Vec<Item> {
         .collect()
 }
 
+/// The agent's sphere in the object's own frame, from its parts' header spheres
+/// (`AniMesh.dll:0x10009510`, docs/26): every part's, a building's or a unit's, their centres
+/// weighted by their radii, and a radius reaching the farthest part's sphere. A part's is
+/// carried by its mount at rest. Interface `0x18` slot 9 hands it out (`0x10014580`), and the
+/// world's queries by sphere ask for it: the ground contact's radius, the command-mode object
+/// pick (docs/42, "The object pick").
+pub fn agent_sphere(assembly: &mut Assembly, parts: &[Part]) -> Option<(Vec3, f32)> {
+    let f = |v: [f64; 3]| Vec3::new(v[0] as f32, v[1] as f32, v[2] as f32);
+    let spheres: Vec<(Vec3, f32)> = parts
+        .iter()
+        .filter_map(|p| {
+            let (c, r) = assembly.mesh(&p.reference)?.mesh.sphere?;
+            Some((f(p.pose.apply(c.map(f64::from))), r))
+        })
+        .collect();
+    (!spheres.is_empty()).then(|| join_spheres(&spheres))
+}
+
 /// Spheres joined as `AniMesh.dll:0x10009510` joins them: the centres weighted by the radii,
 /// and a radius reaching the farthest sphere.
 fn join_spheres(spheres: &[(Vec3, f32)]) -> (Vec3, f32) {
@@ -554,23 +572,14 @@ impl Robot {
             }
         };
 
-        // The agent's sphere from its parts' header spheres (`AniMesh.dll:0x10009510`,
-        // docs/26): every part's, the chassis's, the turret's and each gun's, their centres
-        // weighted by their radii, and a radius reaching the farthest part's sphere. A part's is
-        // carried by its mount at rest. The ground contact holds the body by this sphere's
+        // The agent's sphere from its parts' header spheres ([`agent_sphere`]): the chassis's,
+        // the turret's and each gun's. The ground contact holds the body by this sphere's
         // radius (`Control.dll:0x1001a487`) about the node sphere's centre (`0x1001a518`,
         // docs/24, "Finding the ground").
-        let f = |v: [f64; 3]| Vec3::new(v[0] as f32, v[1] as f32, v[2] as f32);
-        let spheres: Vec<(Vec3, f32)> = parts
-            .iter()
-            .filter_map(|p| {
-                let (c, r) = assembly.mesh(&p.reference)?.mesh.sphere?;
-                Some((f(p.pose.apply(c.map(f64::from))), r))
-            })
-            .collect();
-        let collision = join_spheres(&spheres);
+        let joined = agent_sphere(assembly, &parts);
+        let collision = joined.unwrap_or((Vec3::ZERO, 0.0));
         let bound = node_sphere(assembly, &parts);
-        if !spheres.is_empty() {
+        if joined.is_some() {
             walker.set_body_sphere(bound.0, collision.1, bound.1);
         }
         let power = (placed.kind == parkan_formats::mission::KIND_UNIT)

@@ -630,6 +630,7 @@ mod tests {
             position: at,
             aim: at,
             shield: None,
+            agent_sphere: (at + Vec3::Z, 1.5),
         }
     }
 

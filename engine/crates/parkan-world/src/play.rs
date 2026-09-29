@@ -566,6 +566,7 @@ fn pose_target(robot: &Robot, target: &mut Target) {
     target.position = robot.walker.body.position;
     let aim = place.apply(robot.bound.0.to_array().map(f64::from));
     target.aim = Vec3::new(aim[0] as f32, aim[1] as f32, aim[2] as f32);
+    target.agent_sphere = (robot.collision_centre(), robot.collision.1);
 }
 
 /// The hero as the battle strikes it: each of its parts, posed by [`pose_target`], its sphere
@@ -592,6 +593,7 @@ fn hero_target(hero: &Hero, shield: Option<parkan_sim::shield::Shield>) -> Targe
         position: hero.walker.body.position,
         aim: hero.walker.body.position,
         shield,
+        agent_sphere: (hero.walker.body.position, 0.0),
     };
     pose_target(&hero.robot, &mut target);
     let (mut lo, mut hi) = (Vec3::splat(f32::MAX), Vec3::splat(f32::MIN));

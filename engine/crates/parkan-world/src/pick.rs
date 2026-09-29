@@ -352,7 +352,15 @@ impl Play {
     /// In the world: where the cursor's ray meets the world ([`Play::cursor_point`]), and the
     /// object whose bounding sphere the ray passes (`0x100360f0`): the buildings at 0.7 of
     /// their radius, then the units at all of it, the nearest centre to the eye winning
-    /// ([`nearest_on_ray`]).
+    /// ([`nearest_on_ray`]). The sphere is the agent's own, interface `0x18` slot 9's: its
+    /// parts' header spheres joined ([`crate::robot::agent_sphere`]). An eye inside it passes
+    /// the object over, so over a building's roof, low, the pick finds nothing: from the
+    /// command camera's floor over Mission 03's Small Bunker, 36 over its turret, the eye
+    /// stands 49.6 from the centre of its 52.6 sphere, as the recording's `PLACE` over the
+    /// roof at 190.5 s shows (docs/42, "Low over a roof the eye is inside the building's
+    /// sphere"). A building going up is taken like any other: the sphere reads no node flag
+    /// (`AniMesh.dll:0x10014580`), and the kinds drop it as one building itself (docs/42, "What
+    /// a building going up is left out of").
     ///
     /// The frustum test each object passes first (`0x10036280`) is left out: a sphere the
     /// cursor's ray passes ahead of the eye is in view.
@@ -372,8 +380,8 @@ impl Play {
                 && !self.deleted.get(t).copied().unwrap_or(false);
             pickable.then_some(Sphere {
                 index: t,
-                centre: target.centre,
-                radius: target.radius,
+                centre: target.agent_sphere.0,
+                radius: target.agent_sphere.1,
                 building: kind == KIND_BUILDING,
             })
         });
@@ -381,8 +389,8 @@ impl Play {
             self.battle.combat.hero.as_ref().filter(|_| !self.hero.dead() && self.hero_in_world()).map(|h| {
                 Sphere {
                     index: self.battle.combat.hero_index(),
-                    centre: h.centre,
-                    radius: h.radius,
+                    centre: h.agent_sphere.0,
+                    radius: h.agent_sphere.1,
                     building: false,
                 }
             });

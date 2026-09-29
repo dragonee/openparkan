@@ -161,6 +161,10 @@ pub struct Target {
     pub aim: Vec3,
     /// Its fight shield and deflector, where it has both; the bubble is its bounding sphere.
     pub shield: Option<Shield>,
+    /// The agent's own sphere in the world, its centre and radius: its parts' stream-2 header
+    /// spheres joined (`AniMesh.dll:0x10009510`), which interface `0x18` slot 9 hands out
+    /// (`0x10014580`). The world's object pick asks for it (docs/42, "The object pick").
+    pub agent_sphere: (Vec3, f32),
 }
 
 impl Target {
@@ -256,7 +260,10 @@ pub struct Combat {
     pub hero: Option<Target>,
     pub fired: u64,
     /// Targets not in the world yet, which nothing strikes or sees: a building its
-    /// controller has not placed in the landscape.
+    /// controller has not placed in the landscape. A building made in play is hidden (node
+    /// flag 1) for the same 40 s, and every segment query passes a hidden node over
+    /// (`AniMesh.dll:0x10010dc0`, docs/26, "What a hidden node is left out of"); the
+    /// command-mode pick, which asks for its sphere alone, still meets it.
     pub absent: std::collections::HashSet<usize>,
 }
 
@@ -958,6 +965,7 @@ mod tests {
             position: at,
             aim: at,
             shield: None,
+            agent_sphere: (at + Vec3::Z, 1.5),
         }
     }
 

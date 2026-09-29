@@ -319,6 +319,15 @@ impl Battle {
         let (local, _) = crate::robot::node_sphere(assembly, &assembly_parts);
         let aim = place.apply((local * scale).to_array().map(f64::from));
         let aim = Vec3::new(aim[0] as f32, aim[1] as f32, aim[2] as f32);
+        // The agent's own sphere, its centre times the scale and its radius times the largest
+        // of the three, which is the one scale a placement carries (`0x10009510`).
+        let (agent_centre, agent_radius) =
+            crate::robot::agent_sphere(assembly, &assembly_parts).unwrap_or((Vec3::ZERO, 0.0));
+        let agent_centre = place.apply((agent_centre * scale).to_array().map(f64::from));
+        let agent_sphere = (
+            Vec3::new(agent_centre[0] as f32, agent_centre[1] as f32, agent_centre[2] as f32),
+            agent_radius * scale,
+        );
         let shield = if matches!(object.kind, mission::KIND_UNIT | mission::KIND_BUILDING) {
             crate::shields::load(assembly, object.kind, &object.path, object_ratio)
         } else {
@@ -332,6 +341,7 @@ impl Battle {
             position: Vec3::from_array(object.position),
             aim,
             shield,
+            agent_sphere,
         });
         self.objects.push(index);
         self.explosions.push(blasts);
