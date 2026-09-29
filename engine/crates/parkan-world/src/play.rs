@@ -3773,11 +3773,13 @@ impl Play {
         let legs = match takt.walk {
             Walk::Keep => None,
             Walk::Clear => Some((Vec::new(), Vec::new(), 0.0, false)),
-            Walk::To(goal, share) if flyer => {
+            Walk::To(goal, share) | Walk::Level(goal, share) if flyer => {
                 // A flyer's walk out of a building keeps the hall way's vertices at their own
                 // heights; its leg on from there is cut every 20 m across the ground, and each
                 // point is given its height over what lies under it (docs/24, "A flyer's walk
-                // points").
+                // points") -- unless the place keeps its own, follow's, when the cut points
+                // stay on the straight line to it (`0x1003a6bc`-`0x1003a726`).
+                let level = matches!(takt.walk, Walk::Level(..));
                 let mut hall = self.legs_to(t, at, goal);
                 let open: Vec<Vec3> = match hall.pop() {
                     Some(end) => {
@@ -3794,7 +3796,9 @@ impl Play {
                         // the ground under them, as every flyer's did before the read.
                         cut.into_iter()
                             .map(|p| {
-                                let z = if animal {
+                                let z = if level {
+                                    p.z
+                                } else if animal {
                                     let floor =
                                         self.ground.below(p.x, p.y, 10_000.0).map_or(p.z, |h| h.point.z);
                                     p.z.max(floor + FLIGHT_CLEARANCE)
@@ -3809,7 +3813,7 @@ impl Play {
                 };
                 Some((hall, open, share, false))
             }
-            Walk::To(goal, share) => {
+            Walk::To(goal, share) | Walk::Level(goal, share) => {
                 let floor = self.ground.below(goal.x, goal.y, 10_000.0).map_or(goal.z, |h| h.point.z);
                 Some((self.legs_to(t, at, goal.with_z(floor)), Vec::new(), share, false))
             }

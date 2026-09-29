@@ -310,6 +310,42 @@ fn wingmen_follow_seek_and_destroy_stand_by_and_fail_a_refit_with_no_dock() {
     assert!(play.killed.contains(&play.battle.objects[e1]) && play.deleted[e1]);
 }
 
+/// A flying wingman told to follow flies to a spot at its leader's height and 5, and holds it
+/// there: follow's `SetTarget` (`Behavior.dll:0x1002b059`) builds its place with the word `+0x14`
+/// at 1 (`0x1002affc`), so the walker leaves the points on the straight line to it, where every
+/// other task's place is raised 15 over the ground (docs/24, "A flyer's walk points").
+#[test]
+#[ignore = "needs the game install"]
+fn a_flying_wingman_follows_at_its_leaders_height_and_five_not_fifteen_over_the_ground() {
+    use glam::Vec3;
+    use parkan_sim::behaviour::FOLLOW_LIFT;
+    use parkan_world::play::{Play, View};
+
+    let (mut play, [mf1, helic, _]) = mission_01_wingmen();
+    let eye = play.hero.eye();
+    let view = View { eye: eye.position, look: eye.forward, view_proj: glam::Mat4::IDENTITY, shift: false };
+    play.command("CMD_JAMES_WINGMAN_MENU", &view);
+    assert!(play.wingman_digit(2), "Follow me");
+    // The hero goes 127 m north-west, onto open ground away from the bridges, whose decks a
+    // spot 5 over a hero on the shore below would lie under.
+    let start = play.hero.walker.body.position;
+    put(&mut play.hero.robot.walker, &play.ground, start + Vec3::new(-90.0, 90.0, 40.0));
+    play_for(&mut play, 20.0, |_| {});
+    let at =
+        |play: &Play, t: usize| play.robots.iter().find(|(rt, _)| *rt == t).unwrap().1.walker.body.position;
+    let hero = play.hero.walker.body.position;
+    for bot in [mf1, helic] {
+        let p = at(&play, bot);
+        let over = play.flight_ground(p.x, p.y) + 15.0;
+        assert!(p.truncate().distance(hero.truncate()) < 45.0, "it keeps near: {p}");
+        assert!(
+            (p.z - (hero.z + FOLLOW_LIFT)).abs() < 2.0,
+            "at the leader's height and 5: {p} against {hero}"
+        );
+        assert!((p.z - over).abs() > 4.0, "not 15 over the ground, {over}: {p}");
+    }
+}
+
 /// Mission 02's warbot, built from the factory's screen, leaves by the front door and its
 /// escape takes it back up over the factory: its point inside the hall's footprint stands 115 m
 /// over the roof (docs/24, "A flyer's walk points"). Follow me given there, from the forecourt,

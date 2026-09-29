@@ -768,8 +768,14 @@ pub enum Walk {
     Keep,
     /// Its queues emptied: the machine holds.
     Clear,
-    /// To a place, at a share of the unit's speed.
+    /// To a place, at a share of the unit's speed. A flyer's points are raised over what lies
+    /// under them: the place's word `+0x14` is 0, which every task's walk but two builds
+    /// (`Behavior.dll:0x1003a726`, docs/24, "A flyer's walk points").
     To(Vec3, f32),
+    /// To a place at its own height, at a share of the unit's speed: the word `+0x14` is 1, and
+    /// a flyer's points run along the straight line to it (`0x1003a6bc`-`0x1003a722`). Follow
+    /// builds its spot so (`0x1002affc`).
+    Level(Vec3, f32),
     /// Into the building of logic id `.0` to its pod at `.1`, at a share of the unit's speed
     /// (`MakeInsideDest`, `0x10001270`): the play routes the walk through its hall way.
     Inside(i32, Vec3, f32),
@@ -1401,7 +1407,9 @@ impl Behaviour {
                             let (dx, dy) = (self.random() * 2.0 - 1.0, self.random() * 2.0 - 1.0);
                             let spot = lead.position + Vec3::new(dx * radius, dy * radius, FOLLOW_LIFT);
                             if senses.flyer || senses.usable.at(spot) {
-                                walk = Walk::To(spot, 1.0);
+                                // The spot keeps its height, the leader's and 5 (`0x1002affc`):
+                                // a flying follower is not raised 15 over the ground.
+                                walk = Walk::Level(spot, 1.0);
                                 break;
                             }
                         }
@@ -2206,7 +2214,9 @@ mod tests {
         let near = b.takt(&senses(&[leader], 0.0, Vec3::new(130.0, 100.0, 0.0), true));
         assert_eq!(near.walk, Walk::Keep, "30 off is within 20 + 20");
         let far = b.takt(&senses(&[leader], 2000.0, Vec3::new(200.0, 100.0, 0.0), true));
-        let Walk::To(spot, share) = far.walk else { panic!("{far:?}") };
+        // The spot is the leader's height and 5, and keeps it (`0x1002affc`): a flyer is not
+        // raised over the ground to it as it is to every other task's place.
+        let Walk::Level(spot, share) = far.walk else { panic!("{far:?}") };
         assert!((spot.x - 100.0).abs() <= 20.0 && (spot.y - 100.0).abs() <= 20.0 && spot.z == 5.0);
         assert_eq!(share, 1.0);
         // It takes the first spot on usable ground, and with none of its 77 it holds.
@@ -2215,7 +2225,7 @@ mod tests {
             usable: Usable(&east),
             ..senses(&[leader], 3000.0, Vec3::new(200.0, 100.0, 0.0), true)
         });
-        assert!(matches!(t.walk, Walk::To(spot, _) if spot.x > 110.0), "{t:?}");
+        assert!(matches!(t.walk, Walk::Level(spot, _) if spot.x > 110.0), "{t:?}");
         let nowhere = |_: f32, _: f32| false;
         let t = b.takt(&Senses {
             usable: Usable(&nowhere),
@@ -2227,7 +2237,7 @@ mod tests {
             flyer: true,
             ..senses(&[leader], 5000.0, Vec3::new(200.0, 100.0, 0.0), true)
         });
-        assert!(matches!(flies.walk, Walk::To(..)), "a flyer's spot needs no walkable areal");
+        assert!(matches!(flies.walk, Walk::Level(..)), "a flyer's spot needs no walkable areal");
         let gone = Seen { own: false, ..leader };
         b.takt(&senses(&[gone], 6000.0, Vec3::ZERO, true));
         assert_eq!(b.task(), Task::Stop, "a leader of another clan ends the follow");
