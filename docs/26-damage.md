@@ -152,10 +152,13 @@ when it names one (`0x100113b2`–`0x100113be`). Then:
   (`0x1001199e`).
 - **A node with flag 1 is gone from the world.** The mesh draw skips it
   (`AniMesh.dll:0x10014e57`, and the second draw loop at `0x100150a2`). So do
-  the node visitors of the walk-face query (`0x1000ce90`), the collision push
-  (`0x1000dfe0`) and the segment hit test (`0x100106d0`, `0x10010dc0`), each
-  answering nothing for it. A hidden part is not drawn, not stood on, not
-  collided with and not struck.
+  the node visitors of the two walk-face queries (`0x1000ce90`, `0x10015b60`),
+  the collision push (`0x1000dfe0`), the segment query (`0x10010dc0`) and the
+  point-in-part test (`0x100106d0`), each answering nothing for it, and the
+  subtree draw a building's parts go through (`0x100101d0`). A hidden part is
+  not drawn, not stood on, not collided with and not struck. Its object's
+  sphere is not changed
+  ([What a hidden node is left out of](#what-a-hidden-node-is-left-out-of--read)).
 
 **Children go with their parent** (`0x10011130`). After a tick's hits the
 walk runs from node 0 down (`0x10013127`, `0x10013136`). A node whose stage
@@ -758,6 +761,104 @@ or a swept sphere over the frame, so nothing is sampled and nothing tunnels. 54
 of 66 rounds move further than their own radius even in a 0.01 s tick
 (*measured*).
 
+### What a hidden node is left out of — *read*
+
+**Flag 1 of a node's record hides it.** The records are `0x130` bytes, at the
+object's `+0x1a8` (count `+0x1ac`), the flags word at `+0x14` and the parent
+at `+0x18`. `IAnimation` slot 8 (`AniMesh.dll:0x10005500`) sets and clears the
+flag, and with mode bit `0x200` does the same to every node whose parent is
+that node, down the tree (`0x100055be`–`0x100055ea`). Slot 7 (`0x100054e0`)
+hands the word out. The flag is set by two things:
+- a node's last stage ([Hit points](#hit-points--read-and-measured));
+- a building's action 1 while it goes up, which action 2 clears
+  ([32-builder.md](32-builder.md#actions-1-and-2-hide-and-show-the-building--read)).
+
+**The sweep.** Over `AniMesh.dll`'s `.text`, every `test` or `and` on a
+`[… + 0x14]` operand with bit 0 in its mask, and every `bt` of bit 0 there,
+finds **9 sites**. The control is the draw's two, `0x10014e57` and
+`0x100150a2`, which it finds. A second sweep, for a load of `[reg + 0x14]`
+whose bit 0 is tested within four instructions, finds none at `+0x14`; the
+same sweep at any displacement finds 21.
+
+The object's interfaces are set by its constructor (`0x10006b38`–`0x10006b5b`).
+`CBuilding`'s errors name two of them: *"Could not obtain IMesh2"* and
+*"IJointMesh"* (`Terrain.dll:0x10055ee1`, `0x10055fbd`).
+
+| interface | at | vtable |
+|---|---|---|
+| `IAnimation` (`0xb`) | `+0` | `0x1002057c` |
+| `IMesh2` (`0x18`) | `+4` | `0x1002053c` |
+| `IJointMesh` (`0x20`) | `+8` | `0x1002050c` |
+| `0x25` (unnamed) | `+0xc` | `0x100204fc` |
+| `0x26` (unnamed) | `+0x10` | |
+
+The nine sites:
+
+| routine | where | what it is | a flagged node |
+|---|---|---|---|
+| `0x10014b30` (`0x10014e57`, `0x100150a2`) | `IMesh2` slot 11 | the mesh's draw | is not drawn |
+| `0x100101d0` (`0x10010251`) | `IJointMesh` slot 6 | a subtree draw, which hands each node's batches and matrix to the render queue; `CBuilding` draws its parts through it (`Terrain.dll:0x10058b2c`, `0x10058b7a`) | is not drawn; its children are walked, and carry the flag too |
+| `0x10010dc0` (`0x10010dcd`) | the node visitor of `IJointMesh` slot 10 (`0x10010a50`), vtable `0x10020a2c` | the **segment query**, which `IMesh2` slot 6 (`0x10013ef0`) runs per node, with the triangle test `0x10011090` | has no triangle tested: no hit |
+| `0x100106d0` (`0x100106d9`) | the node visitor of `IJointMesh` slot 7 (`0x10010550`), vtable `0x10020a20` | a **point-inside test** by crossing parity: the triangle test counts crossings (`0x10010995`, `0x100109a5`), and slot 7 answers the low bit (`0x100106a9`–`0x100106bc`). `CBuilding`'s own query uses it (`Terrain.dll:0x1005ab4d`) | answers "not inside" |
+| `0x1000ce90` (`0x1000ce99`) | the node visitor of interface `0x25` slot 2 (`0x1000ccb0`), vtable `0x10020954` | the walk-face query with its 0.5 margin ([24-motion.md](24-motion.md#finding-the-ground--read)) | is not stood on |
+| `0x10015b60` (`0x10015b69`) | the node visitor of `IMesh2` slot 7 (`0x10013fe0`), vtable `0x10020b84` | the walk-face query along its axis, with no margin | is not stood on |
+| `0x1000dfe0` (`0x1000dfe9`) | the node visitor of interface `0x25` slot 3 (`0x1000d410`), vtable `0x10020980` | the push-out ([24-motion.md](24-motion.md#collision-between-objects--read)) | pushes nothing out |
+| `0x1001db51` | no vtable | not a node: `[ebp + 0x14]` is a flags argument of a statically linked CRT string-to-integer routine | — |
+
+Earlier this page counted `0x100106d0` into the segment hit test; it is the
+point-inside test, and the segment query's visitor is `0x10010dc0` alone.
+
+**The visitors are asked first.** Two node walks call a visitor's slot 0 before
+any batch or triangle, and skip the node when it answers 0:
+- the flat walk `0x10007e90` (`0x10007f52`), which the push-out, the two
+  walk-face queries and the load's `0x1000af10` use;
+- the one-node walk `0x10008120` (`0x10008173`), which `IJointMesh` slots 7 and
+  10 use.
+
+The one visitor that takes every node, `0x1000b040` (`mov al, 1`), is the
+load's. It runs from `IAnimation` slot 2 only (`0x100070c4`, `0x10007268`,
+`0x1000728c`), not in play.
+
+**The sphere reads no node.** `IMesh2` slot 9 (`0x10014580`) copies the sphere
+that `0x10009510` worked out at `+0x110` and moves it into the world
+(`0x100145b5`–`0x100145ec`). Neither sweep hits it or `0x10009510`. So a query
+by sphere still meets an object whose nodes are all hidden:
+- the command-mode object pick
+  ([42-selection.md](42-selection.md#what-a-building-going-up-is-left-out-of--read));
+- the world's sphere walk that a building's kill asks (`Terrain.dll:0x10025d10`,
+  `0x10025d51`), where the mask takes its class.
+
+**Outside `AniMesh.dll`.** Across `iron3d`, `Terrain`, `Control`, `World3D`,
+`Effect`, `Behavior` and `Wizard`, slot 7's word has bit 0 tested at five
+sites. One is `Effect.dll:0x100061ba`, an effect's hidden attach point
+([11-effects.md](11-effects.md#a-beacon-lights-glow--read-and-measured)).
+The other four are in `Behavior.dll`. Each takes a hall-way vertex, asks slot 7
+about the vertex's joint, and passes the building over when the bit is set:
+- the refit's dock pick (`0x10023d5e`, in `0x10023b60`);
+- a factory's creation vertex (`0x10029a71`, in `0x100299a0`), which is
+  [36-factory.md](36-factory.md)'s *"Plant creation node destroyed"*;
+- the transport's mine, vertex flag 8 (`0x10032ad8`, in `0x10032a00`);
+- the transport's storage, flag `0x10` (`0x10032d28`, in `0x10032c50`).
+
+`IAnimation` slot 3's query `0xa`, which also answers the word (`0x10005221`),
+is asked nowhere: a sweep of slot-3 calls pushing `0xa` finds none, and the
+same sweep finds `Control.dll`'s `0xd` and `0xe` (`0x1000f97f`, `0x1000f9a1`).
+
+**So a building going up**, hidden from its first plan to its code-0 state:
+- **is not drawn**;
+- **stops no ray.** The world's segment walk (`Terrain.dll:0x100250c0`) asks the
+  object for `IMesh2` (`0x1002512f`) and calls slot 6 (`0x1002545e`), which
+  reaches `0x10010dc0`. `CBuilding`'s own slot 6 (`0x1005a6c0`) either
+  forwards to its mesh (`0x1005a724`) or asks its parts through `IJointMesh`
+  slots 7 and 10. Either way a hidden building gives no face. That covers the
+  cursor's ray ([42-selection.md](42-selection.md#what-stops-the-cursors-ray--read-and-measured)),
+  the sight ray and the outer camera's line. **A round passes through it**
+  the same way: its mesh test is `IMesh2` slot 6 (`Control.dll:0x1001da6b`).
+  The broad phase still pairs their spheres, but the mesh gives no contact;
+- **is not stood on, and pushes no walker out**;
+- **is taken by the object pick**, whose kinds table then answers 2, and never
+  by its own kill, whose mask has no class 3.
+
 ## Shields: a generator, a deflector, six sectors — *read*, and *measured*
 
 A shield is **two parts**: the fight shield (class 9, `i_fsh`) holds six
@@ -1195,6 +1296,17 @@ shield, battery and ammunition (`Behavior.dll:0x10018100`, `0x10019372`,
   mesh flags carry `0x100`; a destroyed part is first knocked off and flies
   for three seconds; a dead unit is deleted the controller's `+92` ms after it
   dies ([What a damaged node, a destroyed part and a dead unit draw](#what-a-damaged-node-a-destroyed-part-and-a-dead-unit-draw--read-and-measured)).
+- Whether Behavior's hall-way searches also pass over a building whose sphere
+  still runs. They pass over one whose place hangs on a hidden node: the
+  refit's dock pick, a factory's creation vertex, the transport's mine and its
+  storage ([What a hidden node is left out of](#what-a-hidden-node-is-left-out-of--read)).
+  A new building is shown at 40 s and its sphere ends at 41 s, and whether
+  those searches read its `0x20c` in that second was not read.
+- Whether a blast reaches a hidden node. A kind-3 hit hurts every object
+  whose bounds reach it and then each node by its sphere (`0x10010030`). No
+  `AniMesh.dll` routine that tests node flag 1 is on that way, and whether the
+  life system's own walk passes a node hidden by action 1, which is not a
+  destroyed node, was not traced.
 - How a knocked-off part flies: the push and spin it is given (`0x100102a0`,
   its subtree's box and mass from `0x10010760`),
   how its update integrates them, and what the world query at `0x100134c1`

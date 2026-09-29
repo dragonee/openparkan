@@ -38,6 +38,31 @@ each event to a chain of listeners, and stops at the first that answers 1:
 | 5 | `0x10070b70`, which first clears the held flag `0x1010bf7c` and its stamp `0x1010bf80` | `0x10071620` | the left button coming up |
 | 6 | | `0x100716b0` | the right button (*derived*: what it does, below) |
 
+**No double clicks reach the game.** It registers one window class
+(`RegisterClassA` at `0x100a0818`, in `0x100a07b0`), with style **`0x23`**
+(`0x100a07d0`): `CS_VREDRAW`, `CS_HREDRAW` and `CS_OWNDC`, without
+`CS_DBLCLKS` (8). So Windows sends no `WM_LBUTTONDBLCLK`, and a second click
+arrives as another `WM_LBUTTONDOWN`. No handler has a case for one either:
+- the window's message handler (`0x100a0e30`) sends `0x200` and `0x201` to
+  the listeners' slots 3 and 4 (`0x100a0e77`). Its jump table for `0x202`–`0x20a`
+  (`0x100a1014`) sends `0x202`, `0x204`, `0x205` and the wheel, `0x20a`, to
+  slots 5, 6, 7 and 9, and `0x203` and `0x206`–`0x209` to the default,
+  `DefWindowProcA`;
+- World3D's two converters, `WinMsg2ScanCode` (`0x10011330`) and
+  `UpdateManualEventsList` (`0x10010e90`), map `0x201`/`0x202`, `0x204`/`0x205`
+  and `0x207`/`0x208`, and let `0x203` and `0x206` fall to their defaults
+  (`0x100114a4`, `0x10011054`).
+
+The control is the same sweep of message compares: it finds `0x201` in those
+three dispatchers (`iron3d.dll:0x100a0e77`, `World3D.dll:0x1001134d`,
+`0x10010eba`). Only `iron3d.dll` imports `RegisterClassA`, of the 22 modules;
+nothing imports `GetDoubleClickTime`. So a double click is the game's own
+timing where it has one: the warbot designer's rows take a second click within
+0.2 s ([37-designer.md](37-designer.md)). Command mode times none: the world
+handler reads no timer, and the button's stamp `0x1010bf80` is read only by the
+band's 0.35 s test (`0x1007149f`). So kind 17 opens a unit's page on any click
+on the one selected unit, however long after the click that selected it.
+
 **Where the cursor is.** `0x1010414c` and `0x10104150` hold its x and y in
 window pixels. A handler that works in the 640 × 480 layout divides them by the
 display's scales (`IDisplay` slots 4 and 5).
@@ -144,8 +169,22 @@ to state 7 (`0x100714ba`) when all of these hold:
   gives the seconds since the stamp, compared with `0x100e64b8` (0.35).
 
 **While it is up** a move writes the band's far corner (`0x1005850b`). Each
-frame draws the rectangle from the anchor to the cursor in `0xff19b419`, opaque
-(25, 180, 25), converted to the layout, then the arrow over it (`0x10058631`).
+frame draws the rectangle's **outline** from the anchor to the cursor in
+`0xff19b419`, opaque (25, 180, 25), then the arrow over it (`0x10058631`):
+- the draw goes to the GUI server, which `getGUIServer` answers (the display's
+  slot 26, `services.dll:0x10005010`), not to `IDisplay`. Its slot 3
+  (`0x100586c3` → `services.dll:0x10001a60`) takes the two corners in window
+  pixels and the colour, and a last 0 that holds the alpha at `0xff`
+  (`0x10001a94`);
+- it hands the renderer **five vertices**, the four corners and the first
+  again, as **primitive 3** (`0x10001ba4`–`0x10001bac`). `Ngi32.dll`'s renderer
+  passes the primitive to Direct3D's `DrawPrimitive` as it stands
+  (`0x10007724`), so it is `D3DPT_LINESTRIP`: a closed frame one window pixel
+  wide.
+
+The control is the server's own fill: its slot 4 (`0x10001bc0`) draws a
+rectangle as four vertices of primitive 5, `D3DPT_TRIANGLESTRIP`
+(`0x10001cda`–`0x10001ce2`), and its slot 1 a line as two of primitive 3.
 
 **When the button comes up** (`0x10071620`):
 1. The corners are sorted (`0x10071b90`).
@@ -250,7 +289,12 @@ segment, its start the camera's place and its end on the far side
    and the hero loses its own only aboard a bot
    ([below](#the-hero-keeps-its-parent-until-it-boards--read));
 2. its bounding sphere (interface `0x18`, slot 9 with 2) must not lie wholly
-   behind any of the view's six planes (`0x10036280`);
+   behind any of the view's six planes (`0x10036280`). That sphere is **the
+   agent's own**: slot 9 (`AniMesh.dll:0x10014580`) copies the one `0x10009510`
+   works out from the parts' stream-2 header spheres, joined
+   ([26-damage.md](26-damage.md#the-hit-test--read-and-measured)), and moves it
+   to the world. It reads no node, so no node flag changes it
+   ([below](#what-a-building-going-up-is-left-out-of--read));
 3. **the eye must not be inside the sphere**, at its whole radius
    (`0x100362d8`);
 4. the radius is then scaled — **by 0.7 for class 3, the buildings, and 1.0
@@ -273,6 +317,65 @@ tie keeps the building** (*derived*).
 It differs from what this page said before on two counts: the shares were the
 other way round — a building's sphere is the shrunken one — and a class-4 hit
 is not preferred as such, only when it is the nearer.
+
+### Low over a roof the eye is inside the building's sphere — *measured*, and *seen*
+
+*Seen*: at 190.5 s the recording's cursor is `PLACE` over the Small Bunker's
+roof, with the builder selected. The kinds table gives an own building
+`GUARD` there (kind 10). **The pick found no object because the eye stood inside
+the bunker's sphere** (step 3), not because the ray passed outside 0.7 of it.
+
+**The sphere.** The bunker's agent is six parts: the building
+(`fr_l_bunker`, header sphere 48.29), its turret (4.10), two flamers (3.19
+each), the radar (1.54) and the deflector (5.77). Joined as `0x10009510` joins
+them, the sphere is centred 4.41 over the placement and is **52.58** across
+its radius (*measured*). On Tut_3, placed at (1260.93, 813.89, 80.35), its
+centre is (1260.92, 813.89, 84.76).
+
+**The camera.** It is fitted to the roof's two signs in the 190.5 s frame
+(*measured*):
+- the signs are the two `B_LBL_01` quads of the bunker's mesh, 2.9 m a side,
+  18.9 m apart and 12 m below the turret's ring;
+- their eight corners were read off the 960 × 720 frame and matched to the
+  quads' vertices;
+- through the command camera as [40-command-mode.md](40-command-mode.md#the-frame)
+  reads it (a field of 1.04 rad across the frame), a least-squares fit of
+  the five free values gives **(1259.89, 816.21, 136.09), yaw 2.623, tilt
+  0.140**, with 1.4 pixels' rms over the 16 coordinates.
+
+How well it is held:
+- **The height.** With the height fixed and the other four fitted again, the
+  rms is 2.3 pixels at 134.4, 1.4 at 136, 2.6 at 137 and 5.4 at 138. Reading
+  each corner again with 2 pixels' error, in 400 fits, puts the height between
+  135.6 and 136.4, and the eye 50.99 to 51.73 from the sphere's centre (5th to
+  95th percentile). **The eye is inside the sphere in all 400.**
+- **Against the read.** The camera's floor over the turret's top (98.36) is
+  134.36 ([40-command-mode.md](40-command-mode.md#height-36-to-236-over-what-is-below));
+  the fit stands 1.7 over it. The yaw points at the lode, where the view
+  turned by 186.5 s. So the fit agrees with the read camera. A field taken
+  down the frame instead would put the camera some 13 lower, under the floor
+  the read sets.
+- **Against the frame.** Drawn at the fitted pose, the turret's hull (at a
+  depth the signs do not share) and the roof's plates stand where the
+  recording has them.
+
+**The ray.** The cursor's hot spot is at about (648, 552) of the frame, (432,
+368) of the layout. At the fitted pose its ray passes 11.6 from the sphere's
+centre, well inside 0.7 × 52.58 = 36.8. So from outside the sphere the pick
+would take the bunker, and the cursor would be `GUARD`. From inside it takes
+nothing; the ray meets the bunker's roof, where the builder may go, and the
+kind is 1, `PLACE`.
+
+**Where it turns.** Straight over the centre, the eye leaves this sphere at a
+height of 137.3, 3 above the camera's floor over the turret. So from that floor
+the bunker is passed over. Lifted past 137.3 by PageUp, or moved far enough to
+one side, the eye is outside, and the same roof shows `GUARD` (*derived*). The
+base mesh's own sphere, 48.29, would have left the eye outside at every fitted
+height; the joined sphere is the one slot 9 answers.
+
+This page's earlier guess was the 0.7: over a roof's outer part, beyond 0.7
+of the radius, the pick would find nothing. At this frame the ray passes far
+inside that.
 
 ### The hero keeps its parent until it boards — *read*
 
@@ -346,7 +449,9 @@ are 0 (`0x10035e8a`–`0x10035ea2`).
 
 **So a unit, a tree or a stone does not stop the cursor's ray.** Through a unit
 the world point is the ground behind it; over a building it is on the
-building's walls or roof. The building ghost stands on the same point
+building's walls or roof. A building going up does not stop it either: its
+nodes are hidden, and the query's node visitor passes a hidden node over
+([below](#what-a-building-going-up-is-left-out-of--read)). The building ghost stands on the same point
 ([32-builder.md](32-builder.md#the-model-under-the-cursor)): on the ground or a
 building, never on a unit.
 
@@ -363,6 +468,27 @@ makes them class 3 and class 4 ([22-settings.md](22-settings.md)); the 303
 trees and 98 stones are scenery, class 10. On Mission 03 the ray stops on the
 ground and on the 4 buildings (bunker, plant, storage and generator). It passes
 the 6 units, the hero among them. `Tut_3` has no water.
+
+### What a building going up is left out of — *read*
+
+A new building is hidden from its first plan to its code-0 state, 40 s in:
+action 1 sets **node flag 1** down its whole node tree
+([32-builder.md](32-builder.md#actions-1-and-2-hide-and-show-the-building--read)).
+The mesh's routines that test the flag are read in
+[26-damage.md](26-damage.md#what-a-hidden-node-is-left-out-of--read). For
+command mode they give:
+- **The cursor's ray passes through it** to the ground beneath. Its query goes
+  through `IWorld` slot 7 to the building's mesh query, and the node visitor
+  there (`AniMesh.dll:0x10010dc0`) tests no triangle of a flagged node.
+- **The object pick still takes it.** The pick asks for the sphere alone
+  (`0x10036264`), and the sphere reads no node. The building's parent is set
+  before it is placed: action 20 reaches the landscape through it
+  ([13-control.md](13-control.md)) (*derived*). So the pick's first step passes
+  it too. Its `0x20c` is set while its sphere runs, so the kinds table drops it
+  and answers **kind 2, `WRONG_PLACE`**, whatever is selected.
+- **Its own sphere's kill** asks for spheres too, but its mask `0x414` has no
+  class 3, so it never takes a building, hidden or not
+  ([32-builder.md](32-builder.md#what-the-buildings-controller-does-with-the-codes--read-and-measured)).
 
 ### The kinds it answers
 
@@ -557,8 +683,9 @@ The three-frame ones repeat their second frame as the fourth phase.
 
 *Seen*: at 186.5 s, with the builder selected and its mine ordered, the cursor
 over open ground is `PLACE`'s green arrows. At 190.5 s it is still `PLACE` over
-the bunker's roof, where the table gives an own building `GUARD`
-(not established, below).
+the bunker's roof, where the table gives an own building `GUARD`: the camera
+stands inside the bunker's sphere, and the pick passes it over
+([above](#low-over-a-roof-the-eye-is-inside-the-buildings-sphere--measured-and-seen)).
 
 ## A left click in the world — *read*
 
@@ -619,9 +746,37 @@ order, replacing its queue (insert 3; [31-packages.md](31-packages.md)):
   [31-packages.md](31-packages.md#the-wingman-menu-from-first-person--read-and-measured)).
 - `0x10079190` then empties the batch.
 
-**Every selected unit gets the same place** (case 2 reads the one pair). So
-"regroup" is not a spread of destinations made here. Whether the go task
-spreads them is not established.
+**Every selected unit gets the same place.** `0x10078b60` copies the selection
+into the batch and stores the one pair at `0x1010c030`, `0x1010c034`
+(`0x10078cbd`, `0x10078cc7`), and case 2 gives each unit of the batch a `GO`
+with that pair (`0x1007931e`–`0x10079375`), no offset per unit. The go task
+keeps the place as given (`Behavior.dll:0x1002b3c0`) and hands the walker
+exactly that (`0x1002b5f2`).
+
+### Spreading a group — *read*
+
+**The group spreads when its go ends.** The go task is over within 30 of its
+place, across the ground, once the walker is idle
+([31-packages.md](31-packages.md#what-each-package-does--read)). It then logs
+*"We are staying... task over"* and, before it ends
+(`Behavior.dll:0x1002b7e6`–`0x1002b8d7`):
+1. if its target is a place, not an object (`+0x78` is −1, `0x1002b824`),
+2. and the unit's task list holds this one order (`IBehaviour` slot 4, the
+   list's count at `+0xa14`, is 1, `0x1002b83b`),
+3. it gives the unit **`PATROL` (4), parameter 150 (`0x96`), target `0x202` at
+   the go's own place**, x, y and z (`0x1002b8a8`–`0x1002b8c4`), through slot 3
+   with insert 1, **to the end** (`0x1002b8d7`).
+
+The patrol takes a parameter that is neither 0 nor −1 as its radius
+([31-packages.md](31-packages.md#setting-the-target-slot-3-0x1002d520)), and
+each unit draws its own loop of 15 to 19 points within 150 of the place on
+each axis. So **a group sent to one place walks to the one point, and each
+unit, once there, patrols its own loop about it**: the group spreads over a
+square 300 across and keeps moving (*derived*). The same holds for any unit
+whose last order is a go to a place, the player's or the AI's.
+
+A go with another order behind it gives nothing: a route's first points pass
+on to the next, and its last point, then the only order, leaves the patrol.
 
 ## A right click — *read*
 
@@ -648,7 +803,11 @@ id to the executor `0x1007b740` (jump table `0x1007bb48`; the rows are
 [31-packages.md](31-packages.md#the-commanders-menus--measured-and-read)'s):
 - a row with no target calls the dispatcher at once;
 - a row with a target writes a **pending pick** into the **first** selected
-  unit's record, from `+0xa8`.
+  unit's record, from `+0xa8`. Every such row passes through one tail
+  (`0x1007bab8`), which **empties the unit's point list** (`0x1007bac4`–`0x1007bad0`)
+  before it sets the pending byte (`0x1007bad5`). The first selected unit is
+  the first on the level's list `+0x720` that is selected (`0x10076e70`), not
+  the one selected first.
 
 **The executor's rows:**
 
@@ -671,7 +830,7 @@ id to the executor `0x1007b740` (jump table `0x1007bb48`; the rows are
 | `+0xb0` | the building Type |
 | `+0xb8` | a stage |
 | `+0xbc` | the record itself |
-| `+0xc0` | the unit's point list |
+| `+0xc0` | the unit's point list: 8-byte (x, y) pairs, begin `+0xc0`, end `+0xc4`, capacity `+0xc8`, built empty by the unit record's constructor (`0x10074b27`) |
 
 **The unit's update** runs `0x10079700` while `+0xa8` is set (`0x10075d2b`). Its
 kind picks a routine (jump table `0x10079734`). Each one's stage 0 sets the
@@ -713,7 +872,11 @@ from each routine:
 
 **So a route goes to the first selected unit only** (*derived*). Clicks add
 their points to every selected unit's list (kind 12), but only the pending unit
-gives its orders; the others keep their points until a later `GO` erases them.
+gives its orders, and Route's stage 2 empties only that unit's list
+(`0x1007991b`–`0x10079953`). The others keep their points until something
+empties theirs: their own next pick opening (`0x1007bac4`), a `GO` (case 2,
+`0x100792f6`) or an upgrade (case 32, `0x10079106`). Nothing else reads those
+points but the satellite map's route line for a selected unit (`0x100777e8`).
 
 ### What opens them, and what never does — *read*
 
@@ -747,7 +910,8 @@ through the dispatcher, on the object under the cursor.
 ### The Guard row's pick — *read*
 
 1. **Stage 0** sets mode 3 and clears `+0x131`–`+0x133`. It does not empty the
-   point list.
+   point list: the executor has emptied it as the pick opened
+   ([above](#an-order-row-leaves-a-pick-open--read)).
 2. **Clicks.**
    - A unit, the player's or another clan's, the hero among them, answers
      kind 9. It sets `+0x132` and `+0xe8` on every selected unit and closes the
@@ -763,10 +927,20 @@ through the dispatcher, on the object under the cursor.
    radius ([31-packages.md](31-packages.md#setting-the-target-slot-3-0x1002d520)),
    so the patrol's radius is 300, where the default for a unit or a place is 60.
    - A unit is patrolled by its logic id.
-   - A place is the **first** point of the pending unit's list, x and y. The
-     place clicked lands there only on an empty list. A unit that kept a
-     route's points, having been selected beside the pending unit of that
-     route, patrols about the first of those instead (*derived*).
+   - A place is the **first** point of the pending unit's list, x and y
+     (`0x1007a0e1`–`0x1007a115`), and **that is the place clicked**. The list is
+     empty from the pick's opening, and kind 8 is the one append in this mode,
+     closing it as it appends. So a unit that kept another pick's points
+     cannot reach this pick holding them. This page once said it could, from
+     a stage 0 that does not empty the list; the executor does.
+   - The list is emptied again once the patrol is given (`0x1007a144`–`0x1007a177`).
+4. **The flags go on the units selected at the click**, not on the pending
+   unit as such (`0x100902de`, `0x10090337`). A band during the pick writes no
+   pick mode (`0x10076820`). A band started on a building, or where no unit
+   may go, leaves the pick open, since its first click does nothing. If the
+   band leaves the pending unit out, the click that closes the mode sets no
+   flag of its. Its stage 1 then finds the mode at 0 with its flags clear, and
+   the pick is dropped with no order (`0x1007a17a`) (*derived*).
 
 **A guard given outside the pick** is the free mode's kind 10, an own building
 under the cursor. It goes to every selected unit through the dispatcher's case 7,
@@ -799,7 +973,8 @@ building. The click patrols an own building, never a unit.
      another clan's.
 3. **The band.**
    - It starts after 0.35 s held in the commander's view, outside Route.
-   - Draw it as a rectangle in (25, 180, 25).
+   - Draw its outline, one window pixel wide, in (25, 180, 25); it is not
+     filled.
    - It needs 10 × 10 window pixels, and replaces the selection. Test each
      unit's projected point, or on the open map its world position.
 4. **The pick**, each frame and on each click:
@@ -811,8 +986,10 @@ building. The click patrols an own building, never a unit.
      kept 0.001 × L inside the map. The ghost stands on the same point.
    - **And the object** whose bounding sphere the ray passes (0.7 × r for
      buildings, 1.0 × r for units; not one holding the eye), the centre nearest
-     the eye winning and a tie keeping the building. The hero is among the
-     units unless it is aboard a bot.
+     the eye winning and a tie keeping the building. The sphere is the
+     agent's own, its parts' header spheres joined; low over a roof the eye is
+     inside it. The hero is among the units unless it is aboard a bot.
+   - A building going up stops no ray, but the pick still takes it, as kind 2.
    - Classify by the kinds table. A click on the hero selects nothing.
 5. **Valid places.** An areal must cover the point. Its first flag word must be
    non-zero unless every selected unit is a flyer (chassis type 1).
@@ -822,14 +999,20 @@ building. The click patrols an own building, never a unit.
    - Or decode the `.ani` for a system cursor.
    - In state 8 draw no cursor, only the ghost.
 7. **Clicks.** Give the orders through one dispatcher, as tabled, replacing
-   each selected unit's queue.
+   each selected unit's queue. Every unit of a Go gets the same place; a go to
+   a place that ends as the unit's only order leaves a patrol of radius 150
+   about the place. There are no double clicks: a click on the one selected
+   unit opens its page.
 8. **Order rows.** A row with a target opens a pick mode on the first selected
    unit.
    - **Route:** points collect on clicks, a right click gives them as a chain
      of `GO`s.
    - **Guard:** a unit or a valid place closes it with a `PATROL` of radius
-     300; a building leaves it open. A guard clicked outside it, on an own
-     building, has radius 100 and goes to every selected unit.
+     300, the place the one clicked; a building leaves it open. A pending unit
+     no longer selected at that click gets nothing, and the pick is dropped. A
+     guard clicked outside it, on an own building, has radius 100 and goes to
+     every selected unit.
+   - **Opening any pick** empties the pending unit's point list.
    - **Build:** takes the next good site.
    - **Attack and Capture building** open no pick in command mode: no row the
      panel offers opens them.
@@ -841,13 +1024,22 @@ building. The click patrols an own building, never a unit.
 
 - ~~**Areal flag word 0.** What it means, beyond deciding where a non-flyer
   selection may be sent~~ — **read**: it marks a walkable areal
-  ([24-motion.md](24-motion.md#the-global-path--read-and-measured)). Still
+  ([24-motion.md](24-motion.md#the-global-path--read-and-measured)). ~~Still
   open: why the recording shows `PLACE`, not `GUARD`,
   over the bunker's roof at 190.5 s. Narrowed by the pick below: a building is
   taken only where the ray passes within **0.7** of its bounding radius, so
   over a roof's outer part the pick finds no object and a valid place gives
   `PLACE` (*inferred*). Whether the recording's cursor stands outside that
-  0.7 there, rather than the frame lagging the cursor, was not measured.
+  0.7 there, rather than the frame lagging the cursor, was not measured.~~
+  **Measured**: the eye is inside the bunker's sphere, which the pick passes
+  over, and the 0.7 does not come into it. The sphere is the agent's own, its
+  six parts' header spheres joined: 52.58 about (1260.92, 813.89, 84.76). The
+  camera fitted to the roof's two signs in the frame stands at (1259.89,
+  816.21, 136.09), 51.39 from that centre, with 1.4 pixels' rms. It is inside
+  in all 400 fits with each corner read 2 pixels astray. The cursor's ray
+  passes 11.6 from the centre, well inside 0.7 × 52.58, so from outside the
+  pick would take the bunker and show `GUARD`
+  ([Low over a roof](#low-over-a-roof-the-eye-is-inside-the-buildings-sphere--measured-and-seen)).
 - ~~**The object pick.** Which object classes the world's lists 3 and 4 are, and
   the exact order and nearest-hit rule of `0x100361a0` beyond its frustum and
   sphere tests.~~ **Read**: class 3 is the buildings and class 4 the units,
@@ -864,8 +1056,12 @@ building. The click patrols an own building, never a unit.
   in the pod it is picked like any unit, kind 7, and a click on it selects
   nothing. Aboard, in an HQ's view, it is passed over
   ([The hero keeps its parent until it boards](#the-hero-keeps-its-parent-until-it-boards--read)).
-- **The band's draw.** Whether `IDisplay` slot 3, which draws the band, fills
-  it or outlines it.
+- ~~**The band's draw.** Whether `IDisplay` slot 3, which draws the band, fills
+  it or outlines it.~~ **Read**: it outlines it. The band goes to the GUI
+  server's slot 3, not the display's (`services.dll:0x10001a60`). That slot
+  draws five vertices, the corners and the first again, as a
+  `D3DPT_LINESTRIP`, one window pixel wide. The server's slot 4 fills, with a
+  four-vertex triangle strip ([The band](#the-band--read)).
 - ~~**The pending picks not traced here.** What sets pending kind 2 and so the
   attack-target mode, and the orders kinds 2 to 5 give, read here only in
   outline (their `+0x131`–`+0x133` flags and targets).~~ **Read**: nothing sets
@@ -879,12 +1075,23 @@ building. The click patrols an own building, never a unit.
   [The Guard row's pick](#the-guard-rows-pick--read)). The Build row's own pick
   is [32-builder.md](32-builder.md)'s: mode 6 for a mine and 4 for any other
   building, and a good click gives `ORDER_ROBOT_BUILD` with target `0x206`.
-- **Double clicks.** World3D's message-to-scan converter (`0x10011330`) maps
+- ~~**Double clicks.** World3D's message-to-scan converter (`0x10011330`) maps
   `WM_LBUTTONDOWN`/`UP` and the right button, and has no case for
   `WM_LBUTTONDBLCLK`. Whether the window class asks for double clicks was not
-  read. Kind 17, a click on the one selected unit, is what opens its page.
-- **Spreading a group.** Whether a group sent to one place spreads out, in the
-  go task.
+  read. Kind 17, a click on the one selected unit, is what opens its page.~~
+  **Read**: the game's one window class (`RegisterClassA`, `0x100a0818`) has
+  style `0x23`, without `CS_DBLCLKS`, so Windows sends none. The window
+  handler's jump table (`0x100a1014`) and World3D's two converters send `0x203` and `0x206`
+  to their defaults, where they route `0x201`, `0x202`, `0x204` and `0x205`.
+  The designer times its own, a second click within 0.2 s; command mode needs
+  none ([The mouse's way in](#the-mouses-way-in--read)).
+- ~~**Spreading a group.** Whether a group sent to one place spreads out, in the
+  go task.~~ **Read**: every unit gets the one place (`0x1007931e`), and the go
+  task spreads them as it ends. A go to a place that is the unit's only order
+  gives it, as it ends, `PATROL` of radius 150 about that place, to the end of
+  its list (`Behavior.dll:0x1002b824`–`0x1002b8d7`). Each unit then walks its
+  own loop of 15 to 19 points within 150
+  ([Spreading a group](#spreading-a-group--read)).
 - **Telepresence.** Taking over a selected unit from command mode belongs to
   the mode stack's transitions ([40-command-mode.md](40-command-mode.md),
   [39-boarding.md](39-boarding.md)), and is not read here.

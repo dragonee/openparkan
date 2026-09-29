@@ -964,6 +964,52 @@ fn mission_03s_mine_stands_only_once_its_controller_places_it_as_the_dome_turns_
     assert_eq!(play.ground.cuts.len(), cuts + 1);
 }
 
+/// A building going up is hidden (node flag 1) and the segment queries' node visitor passes a
+/// flagged node over (`AniMesh.dll:0x10010dc0`), so a round's segment and the cursor's ray
+/// go through it to the ground. The object pick asks only for its sphere
+/// (`iron3d.dll:0x10036264`), which no node flag changes (`AniMesh.dll:0x10014580`), so it
+/// still takes the building, and its running sphere answers kind 2, `WRONG_PLACE`
+/// (docs/42, "What a hidden building is left out of"). Shown at 40 s, both stop on it.
+#[test]
+#[ignore = "needs the game install"]
+fn mission_03s_mine_going_up_lets_a_round_and_the_cursors_ray_through_and_the_pick_takes_it_as_wrong_place() {
+    use parkan_world::construction::BUILDING_MINE;
+    use parkan_world::pick::{Aim, cursor_state};
+
+    let (mut play, _) = mission_03_play();
+    let player = play.player_clan;
+    let lode = glam::Vec3::new(1026.1, 942.7, 0.0);
+    let at = lode.with_z(play.ground.below(lode.x, lode.y, 1.0e5).unwrap().point.z);
+    let now = play.hero.time_ms;
+    let mine = play.create_building(player, BUILDING_MINE, at, 0.0, now).expect("the mine stands");
+    play_for(&mut play, 1.0, |_| {});
+    assert!(!play.shown(mine));
+    let (centre, radius) = play.battle.combat.targets[mine].agent_sphere;
+    let eye = centre + glam::Vec3::new(0.0, -2.0 * radius, radius);
+    let down = (centre - eye).normalize();
+    let far = eye + down * 4.0 * radius;
+    let ground_under = |p: glam::Vec3, play: &parkan_world::play::Play| {
+        (play.ground.below(p.x, p.y, p.z + 1.0).unwrap().point.z - p.z).abs() < 0.5
+    };
+    // Hidden: a round's segment meets the ground beyond it, and the cursor's ray the same.
+    let hit = play.battle.combat.first_hit(&play.ground, None, eye, far, 0.0);
+    assert!(hit.is_none_or(|(_, struck, _)| struck != Some(mine)), "the round passes through");
+    let ground = play.cursor_point(eye, down).expect("the ground");
+    assert!(ground_under(ground, &play), "the cursor's ray reaches the ground: {ground}");
+    // The pick takes it by its sphere, and a building building itself is kind 2.
+    let pick = play.pick(Aim::Ray { eye, direction: down });
+    assert_eq!((pick.kind, pick.object), (2, None), "{pick:?}");
+    assert_eq!(cursor_state(pick.kind), 9, "WRONG_PLACE");
+
+    // Code 0 at 40 s shows it: both stop on it.
+    play_for(&mut play, 39.2, |_| {});
+    assert!(play.shown(mine));
+    let hit = play.battle.combat.first_hit(&play.ground, None, eye, far, 0.0);
+    assert_eq!(hit.map(|(_, struck, _)| struck), Some(Some(mine)), "the round strikes it");
+    let point = play.cursor_point(eye, down).expect("the mine");
+    assert!(point.distance(eye) + 1.0 < ground.distance(eye), "on the mine, short of the ground: {point}");
+}
+
 #[test]
 #[ignore = "needs the game install"]
 fn mission_03s_mine_hides_itself_with_its_sign_and_turns_its_dome_back_a_step_after_code_0() {
