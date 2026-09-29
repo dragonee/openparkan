@@ -843,8 +843,9 @@ the building and action 2 shows it**: a new building is hidden from its first
 plan until the code-0 state that places it. An upgrade's two buildings are never
 hidden. A sweep for `test [reg + 0x14], 1` finds the bit tested in seven other
 routines of the module, interface `0x20`'s slots 6 and 10 among them (`0x10010251`,
-`0x10010dcd`); which of them read node records, and what they leave a hidden node
-out of, is not followed.
+`0x10010dcd`); six read node records and pass a hidden node over, so a building
+going up stops no ray or round and is not stood on, while the pick still takes it
+by its sphere ([26-damage.md](26-damage.md#what-a-hidden-node-is-left-out-of--read)).
 
 **Where an action-5 effect stands** (*read*). The building's load group makes the
 three at load (action 5, `Control.dll:0x10002e0e`), each an instance under its own
@@ -1136,9 +1137,18 @@ laser (`e_gun_lc_03`, `e_gun_mc_20`).
 - ~~What the site shows of an unfinished building before the dome: the recording's
   views of the mine are distant or behind it.~~ — **seen**: nothing of it, until code 0
   places it ([Building a building, tick by tick](#building-a-building-tick-by-tick--read-and-seen)).
-- What the seven other routines of `AniMesh.dll` that test bit 1 at `+0x14` leave out
+- ~~What the seven other routines of `AniMesh.dll` that test bit 1 at `+0x14` leave out
   of, and so whether a hidden building still stops a ray or is struck
-  ([Actions 1 and 2](#actions-1-and-2-hide-and-show-the-building--read)).
+  ([Actions 1 and 2](#actions-1-and-2-hide-and-show-the-building--read)).~~ —
+  **read**: six read node records, and the seventh (`0x1001db51`) tests a C runtime
+  routine's argument. They are the subtree draw (`0x100101d0`), the segment query's
+  node visitor (`0x10010dc0`), a point-inside test (`0x100106d0`), the two walk-face
+  queries (`0x1000ce90`, `0x10015b60`) and the push-out (`0x1000dfe0`), and each
+  passes a hidden node over. The sphere (`IMesh2` slot 9, `0x10014580`) reads no
+  node. So a building going up stops no ray and no round and is not stood on, but
+  the object pick still takes it by its sphere, as kind 2
+  ([26-damage.md](26-damage.md#what-a-hidden-node-is-left-out-of--read),
+  [42-selection.md](42-selection.md#what-a-building-going-up-is-left-out-of--read)).
 - ~~Why a clan whose byte `+0x64` is set — only *"%s joined the game"* sets it — no
   longer keeps a network placement 400 from its base point, while one no player has
   joined does (`0x10033de4`); the byte's other readers are not followed.~~ —

@@ -1479,9 +1479,9 @@ impl Behaviour {
                 if !walking {
                     walk = Walk::To(goal, GO_SPEED);
                 } else if senses.walker_idle {
-                    // STAND-IN: docs/31-packages.md#what-each-package-does--read -- whether the
-                    // go task's 30 is measured in three dimensions is not read: across the
-                    // ground, as a script's place carries no height.
+                    // The 30, and the 1.5 for an order naming an object, are measured across
+                    // the ground: the length the go task compares them with (`0x1002b7d0`,
+                    // `0x10020f70`) takes x and y alone.
                     if at.truncate().distance(goal.truncate()) <= GO_ARRIVED {
                         // Over at a place, a go that is the unit's only order appends a patrol
                         // of radius 150 about that place, to the end, and then ends

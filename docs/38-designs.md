@@ -387,8 +387,9 @@ alone reads **"LF?-X Unknown"** and with the 4L1 **"LFW-X Warrior"** (*seen*,
 
 **A built bot is numbered by its clan.** `0x10075d50` names every unit of a
 clan `"%s-%d %s"` with one more than the clan's count, and raises the count
-for every unit it names — the hero's "Human" and an animal's "Animal" too
-(`0x10075eb2`). Mission 02's player clan names its hero first, so its first bot
+for every unit it names — the hero's "Human", an animal's "Animal" and a *Tiny
+Tower* too, every branch reaching `0x10075eb2`
+([41-commander.md](41-commander.md#the-box)). Mission 02's player clan names its hero first, so its first bot
 is **LFW-2** (*derived*, and *seen*).
 
 ## The files — *read*, and *measured*

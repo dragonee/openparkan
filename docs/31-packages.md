@@ -358,7 +358,14 @@ readers were not traced, that is marked.
   speed and ends when it stops there ("We are staying... task over",
   `0x1002b670`), or fails if the place is unreachable. It acts only when the
   walker is idle. Within 30 of the place it is over; 1.5 counts as arrival
-  when the order names an object. Otherwise it calls `SetTarget` again.
+  when the order names an object. Both are measured across the ground: the length
+  they are compared with (`0x1002b7d0`, `0x10020f70`) takes x and y alone.
+  Otherwise it calls `SetTarget` again. **A go that ends at a place while it is the
+  unit's only order** (`IBehaviour` slot 4 answers 1, `0x1002b83b`) first gives it
+  `PATROL` of radius 150 about that place, to the end of its list
+  (`0x1002b8a8`–`0x1002b8d7`), so a unit sent somewhere and given nothing after
+  keeps patrolling there
+  ([42-selection.md](42-selection.md#spreading-a-group--read)).
   "Unreachable" is that call's refusal: out of the map, no areal map, or no
   global path
   ([24-motion.md](24-motion.md#how-the-ai-drives-a-machine--read-and-measured)).
@@ -1089,7 +1096,8 @@ named, so reasons 2 and 4 are tested by the priorities but never asked.
   ("Give default patrol inside building order", `0x1000ac4c`). **A unit left
   idle or stopped on a building escapes** from it ([The escape](#the-escape--read)).
   For other units no default order was found: an empty stack answers with an
-  embedded stop task ([Which objects run a behaviour](#which-objects-run-a-behaviour--read)).
+  embedded stop task, and a go to a place that was a unit's only order leaves a
+  patrol of 150 about it ([Route — go](#what-each-package-does--read)) ([Which objects run a behaviour](#which-objects-run-a-behaviour--read)).
 
 ### Migrate: an animal's pasture — *read*, and *measured*
 

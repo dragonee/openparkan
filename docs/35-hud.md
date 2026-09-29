@@ -590,7 +590,9 @@ rectangle's alpha is forced to 255.
   `x = round(303 + (37 − width ÷ sx) ÷ 2)`, where the width comes from the
   font's slot 6 in pixels.
 - **On the hero.** Its radar reads 300 m ([33-units.md](33-units.md)), the
-  recording's 300.
+  recording's 300. Mission 03's hero, `tut3_p.dat`, carries a 250 m radar, and
+  its recording's range figure reads 250
+  ([34-progression.md](34-progression.md#seen-in-a-recording-1)).
 
 **The altitude** (left, `0x1003f6a0`).
 - **The figure.** `a = round(z − W)`, in white `GAME_FONT` at y 446, centred in
