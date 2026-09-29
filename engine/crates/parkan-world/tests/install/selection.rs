@@ -197,3 +197,37 @@ fn the_cursors_ray_passes_a_unit_to_the_ground_stops_on_a_building_and_guard_tak
     );
 }
 
+/// Opening a pick empties the pending unit's point list (`0x1007bac4`), so the Guard pick's
+/// place is the one clicked; and the click sets its flags on the units selected at the click.
+/// A band during the pick, started on a building so its first click does nothing, can leave
+/// the pending unit out: the click then orders nobody and the pick is dropped.
+#[test]
+#[ignore = "needs the game install"]
+fn a_band_during_the_guard_pick_that_leaves_its_unit_out_drops_it_with_no_order() {
+    let (mut play, m, _) = mission_03_command_view();
+    let builder = object_target(&play, &m, "tut3_b.dat");
+    let transport = object_target(&play, &m, "tut3_t.dat");
+    let plant = object_target(&play, &m, "lplant01.dat");
+    play.select_unit_alone(builder);
+    play.open_pick(parkan_sim::hq::Act::Guard);
+    let before = (order_of(&play, builder), order_of(&play, transport));
+    // The band's first click, on the plant, leaves the pick open.
+    let building = play.battle.combat.targets[plant].centre;
+    let pick = play.pick(at(&play, building));
+    assert_eq!(pick.kind, 9, "{pick:?}");
+    play.click_world(pick);
+    assert_eq!(play.commander.pick_mode, PickMode::Guard);
+    // The band, over the map, takes the transport alone.
+    let t = play.battle.combat.targets[transport].position;
+    play.band_select([[t.x - 5.0, t.y - 5.0], [t.x + 5.0, t.y + 5.0]], parkan_world::pick::BandSpace::Map);
+    assert_eq!(play.selected_units(), vec![transport]);
+    assert_eq!(play.commander.pick_mode, PickMode::Guard, "the band writes no pick mode");
+    // A place closes the mode, and nobody is ordered: the pending builder's flags stay clear.
+    let beside = t + glam::Vec3::new(30.0, 0.0, 0.0);
+    let pick = play.pick(at(&play, beside));
+    assert_eq!((pick.kind, pick.object), (8, None), "{pick:?}");
+    play.click_world(pick);
+    assert_eq!(play.commander.pick_mode, PickMode::Free);
+    assert!(play.commander.pending.is_none(), "the pick is dropped");
+    assert_eq!((order_of(&play, builder), order_of(&play, transport)), before);
+}

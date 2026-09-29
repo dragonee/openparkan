@@ -444,7 +444,7 @@ impl Play {
             8 if self.commander.pick_mode == PickMode::Guard => {
                 let p = pick.point?;
                 self.commander.pick_mode = PickMode::Free;
-                self.give_pending(Order {
+                self.close_guard(Order {
                     code: orders::PATROL,
                     parameter: GUARD_PICK_RADIUS,
                     target: Target::Place(p.to_array()),
@@ -453,7 +453,7 @@ impl Play {
             9 if self.commander.pick_mode == PickMode::Guard => {
                 unit?;
                 self.commander.pick_mode = PickMode::Free;
-                self.give_pending(Order {
+                self.close_guard(Order {
                     code: orders::PATROL,
                     parameter: GUARD_PICK_RADIUS,
                     target: Target::LogicId(target_id?),
@@ -499,6 +499,21 @@ impl Play {
         }
         if let Some(class) = class {
             self.acknowledge(class);
+        }
+    }
+
+    /// The Guard pick closed by a click (kinds 8 and 9): the click sets its flags, and a place
+    /// joins the list, on the units selected now (`0x100902de`, `0x10090337`), and the pending
+    /// unit gives the patrol on its own flags (`0x10079f40`). A band during the pick, started
+    /// on a building or where no unit may go so that its first click did nothing, can leave the
+    /// pending unit out of the selection, and the band writes no pick mode (`0x10076820`): its
+    /// flags then stay clear and the pick is dropped with no order (`0x1007a17a`, *derived*).
+    fn close_guard(&mut self, order: Order) {
+        let pending = self.commander.pending.as_ref().map(|p| p.unit);
+        if pending.is_some_and(|u| self.selected_units().contains(&u)) {
+            self.give_pending(order);
+        } else {
+            self.commander.pending = None;
         }
     }
 
