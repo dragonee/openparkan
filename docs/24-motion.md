@@ -1547,8 +1547,8 @@ rising ground raises it, and it stays up when the ground falls away again
 (*derived*). **The ceiling** is the world's box: a flyer more than 20 above its
 top is pushed back ([The map edge](#the-map-edge--read)). A flyer the AI drives
 holds the heights its walk points are given, 15 m over the ground and 115 over a
-building, a tree or a stone
-([A flyer's walk points](#a-flyers-walk-points--read-and-measured)).
+building, a tree or a stone, except that a follower flies at its leader's height
++ 5 ([A flyer's walk points](#a-flyers-walk-points--read-and-measured)).
 
 **What a player sees, then** (*measured* on openparkan's engine, which follows
 these reads). Turret pitch reaches nothing that moves the body, and the eye
@@ -2099,8 +2099,22 @@ runs before the hit's kind is looked at
 3. **It looks for a door on that node.** It walks the components from the last
    to the first (`0x1000ec13`–`0x1000ec54`). For each of class 12 it asks
    property `0x200` and stops at the first whose answer is the hit's node.
-   Every door component's node is the node its channel plays: 56 of 56 in
-   `fortif.rlb` (*measured*).
+   **Property `0x200` is the component's node** (*read*). The walk goes through
+   the control system's own `IDeviceManager`, which the system asks itself for
+   (interface `0x204`) into its `+0x38` as it loads (`Control.dll:0x10007972`):
+   slot 3 is the component count (`0x10008830`), slot 8 a component's class
+   word (`0x1002c390`), and slot 6 (`0x1002bb40`) the component query by index
+   and id, whose case for `0x200` (`0x1002bc1f`) answers the component's `+4`
+   with no class test. That `+4` is the `.ctl` record's own node, copied by the
+   shared parser ([13-control.md](13-control.md#the-component-record)). The
+   weighing asks the same query the same way and takes the answer for a node
+   index: `0x200`, then `0x100` for the mass, which it adds to the node record
+   at control `+0x55c` + 44 × the answer (`0x1000fbf5`–`0x1000fc31`,
+   [Load](#load--read-and-measured)). So every door component's node, which is
+   the node its channel plays on 56 of 56 in `fortif.rlb` (*measured*), is what a
+   hit is matched against. (The controller's actions 1 and 2, `IAnimation` slot
+   8 with modes `0x200` and `0x201`, are another thing,
+   [13-control.md](13-control.md#the-section-5-record--read-and-measured).)
 4. **It opens that door** through `IBuilding` slot 14 (`0x1000ec7e` →
    `Terrain.dll:0x1005b5d0`). Slot 10 turns the component into its door, and
    `0x1005b480` runs. A door that is shut (state 0) or closing (2) has its item
@@ -2119,6 +2133,16 @@ The hit then does its damage like any other.
   in range with the same node number, and only the number is compared. A
   nearby building with a door on that node index would open too; this is not
   seen.
+- **From any range, and so often first.** The hit's opener has no reach; the
+  proximity opener waits for a child of the building within its radius plus the
+  capsule's of the door part. A door shot from outside that reach starts to
+  open the moment it is hit, as early as the round can get to it. The recording
+  shows it happen at both of Mission 03's doors (below).
+- **Only the node is compared, not the face.** A round's face query excludes
+  triangle flags 4 and `0x20` and batches flagged 8 and `0x200`
+  ([26-damage.md](26-damage.md#the-query-record-and-what-a-round-excludes--read-and-measured)),
+  so any door face that carries none of them is struck, and its node opens its
+  door, whatever its triangle flags.
 
 **No door is locked in play** (*read*, as a search). `IBuilding` slot 6
 (`0x1005b2f0`) locks a door: bit 1 of its `+0x58` and a value at `+0x60`, where
@@ -2141,19 +2165,59 @@ opens for a hero on its floor as the hero's own does.
   (4.58, −2.07, −2.83) to (−5.03, −0.16, −2.83), 2.92 wide
   ([above](#walking-into-a-building--read-and-measured)). On the ramp at y −6,
   a hero's centre on the doorway's middle line is 4.8 from its segment, inside
-  2.01 + 2.92. So walking down should open the door with no shot (*derived*).
+  2.01 + 2.92. So walking down should open the door with no shot (*derived*),
+  from about y −6 on.
 
-**Against the recording** (*seen*, 5 fps from 164.4 s):
-- 164.4–166.6 s: the hero walks down the ramp toward the closed door, which is
-  dark with hazard stripes along its foot.
-- 166.8 s: the battle laser's beam strikes the middle of the door.
-- 167.2 s: a lit gap opens under the door's top edge, and widens as the edge
-  drops.
-- 171.5 s: the hero is in the corridor inside.
+**Mission 03's Small Generator**, `fr_l_gener` (*measured*): **its sliding doors
+are two class-12 doors**, one leaf each: `i32`, node 13, component 4, and `i31`,
+node 14, component 5, each driving one channel of rate 0.7 on its own node, at
+the south doorway; components 6 and 7 (`i21`, `i22`, nodes 10 and 11) are the
+north doorway's pair. The leaves' faces carry triangle flags 0 and their one
+level-0 batch the word `0x2000`, so a round strikes them, and a hit on node 13 or
+14 opens that leaf. Each leaf's capsule is its box's thin side, 0.89 long across
+y −28.84 to −29.72 at x −2.38 (radius 4.44) or 2.64 (4.24), z −2.87: on the
+ramp's middle line a hero's centre comes within 2.01 + 4.44 of `i32`'s from
+about y −35 on.
 
-The shot and the approach come together, so the recording cannot tell which
-opened the door. Both fit: the door began to move within 0.4 s of the beam, and
-the hero was through inside 4.7 s, as a 4 s door allows.
+**Against the recording** (*seen*, 30 fps, and *measured* off its HUD): **at
+both doors the shot came first**, and at each the door was already moving while
+the hero was still outside its reach.
+
+- **Where the hero is.** The target panel's figure is the distance between the
+  two spheres' centres ([35-hud.md](35-hud.md#distance--read)), and the radar
+  draws each contact 60 × d ÷ R from its centre, R the 250 under the disc (the
+  range of `tut3_p.dat`'s radar, where Mission 01's hero carries 300), turned by
+  the north mark's angle ([35-hud.md](35-hud.md#the-radar--read-and-seen)).
+  At the generator the two building marks, the generator's grey and the
+  warehouse's blue, give fixes 1 to 5 m apart, and the generator's distance
+  agrees with the panel's (67.6 against 67 at 109 s, 47.3 against 47 at 110.5 s).
+- **The generator.** The hero comes up from the south-south-west heading 60°,
+  crosses the row of the south exits at model y −64.2 at about x −8 (109.2 s),
+  and turns onto the ramp's middle line, at model (0.0, −49.7) at 110.25 s and
+  (1.7, −47.2) at 110.5 s. The beam first strikes ahead at **110.7 s**, the hero
+  at about y −45, some 10 m short of the leaves' reach. By **111.4 s** the green
+  corridor shows through the opened doorway, when the hero, at 14 m/s, would
+  only just have come within reach, and the hero walks through without a stop:
+  the panel's distance falls 3 m every 0.2 s to 111.4 s.
+- **The bunker.** The panel reads the transport, which stands west of the
+  bunker nearly on the ramp's axis, so the figure counts the hero's way down
+  the ramp: 193 m at 166.0 s, rising 2 to 3 m every 0.2 s to 226 m at 168.4 s,
+  then 226–227 m to 169.0 s, where the hero stands at the sinking door. The
+  beam first strikes the door at **166.93 s**, at about 205.5 m, and the gap
+  under the door's top edge first shows at **167.23 s**, at about 210.5 m. The
+  hero's stop at the door, its centre about y −4.5, is at 226.5 m, so the beam
+  struck with the hero some 21 m back up the ramp (y ≈ −26) and the door moved
+  with it 16 m back (y ≈ −20), against the reach from about y −6. **The
+  approach would have started the door at about 168.1–168.3 s**, 225 m, some
+  1 s after it began to lower; the hero reached it at 168.4 s and waited for it
+  to sink until about 171 s, where a door started by proximity would have held
+  it about a second longer.
+
+So the recording's hero opened both doors by shooting them, about 0.7 s (the
+generator) and 1 s (the bunker) sooner than walking up to them would have. The
+walk alone gets through both as well (*measured* on openparkan's engine, which
+opens a door either way,
+[below](#the-ways-into-mission-03s-small-generator-and-small-bunker--measured-and-seen)).
 
 **For an engine**: when a hit on a building names a node, open the first door on
 that node as proximity would, with no hold. Gate neither opener by clan. The
@@ -2688,8 +2752,12 @@ by −0.0631 rad and (1260.93, 813.89, 80.35) turned by −1.6016 rad.
 **The Small Generator** is two mirrored halves: 57 vertices, 56 links, the pod
 vertex 16. Of its eleven exits, five reach the pod: 46 and 49 to the north
 (`o06`, both also ground places, `0x10000000`), and 51, 53 and 54 to the south
-(`o07`), 112.5 to 119.7 along. The recording's hero comes from the south,
-past the warehouse, and takes the south way:
+(`o07`), 112.5 to 119.7 along. The three south exits stand in a row across the
+ramp's mouth at model y −64.24, 54 at x −13.07, 51 at 0 and 53 at 13.07, and all
+three join the way at 55. **The recording's hero takes the south way**
+(*measured* off the radar, [A shot opens a door](#a-shot-opens-a-door--read-and-seen)): it comes from the south-south-west, past the
+warehouse, crosses the exits' row between 54 and 51, about 5 m from 54 and 8 m
+from 51, and turns down the ramp on its middle line. The way:
 
 | vertex | node | model (x, y, z) | floor under it | world (x, y, z) | along |
 |---|---|---|---|---|---:|
@@ -2716,9 +2784,11 @@ Along it, on half-metre samples:
    −0.04.
 2. **52 → 56.** A 14° ramp down, 19 m long. Half-way to 35 it passes the
    entrance's `DEFAULT` quads (`o07`, `i30`, `i12`) and the sliding door `i32`
-   (node 13, rate 0.7, sliding 5.18 across): its faces carry triangle flags 0,
-   not the door face's `0x10`, and its lower edge gives the only two samples
-   off a floor, a 51° face at −3.80.
+   (node 13, rate 0.7, sliding 5.18 across), the west one of the doorway's two
+   leaves: its faces carry triangle flags 0, not the door face's `0x10`, and its
+   lower edge gives the only two samples off a floor, a 51° face at −3.80. Both
+   leaves are class-12 doors a shot opens
+   ([A shot opens a door](#a-shot-opens-a-door--read-and-seen)).
 3. **35 → 6.** Corridors and ramps of up to 17°, with `DEFAULT` quads between
    `i12` and `i04`.
 4. **6 → 16.** `PORTAL_001` quads between `i04` and the pod room `i05`, and the
@@ -2790,8 +2860,10 @@ held from the exit, each vertex counted within 1.2:
 |---|---|
 | 104.0 | walking north between the pillars |
 | 108.0 | the grey apron under the hero |
+| 109.2 | across the south exits' row, at model x about −8, by the radar |
 | 109.5 | down the dark ramp |
-| 110.5 | the laser strikes the door ahead |
+| 110.7 | the laser strikes the door ahead (30 fps) |
+| 111.4 | the green corridor through the opened doorway (30 fps) |
 | 111.5 | through the doorway |
 | 112.0–114.0 | the green corridors |
 | 116.0 | on the pod |
@@ -2800,15 +2872,24 @@ held from the exit, each vertex counted within 1.2:
 | time (s) | the Small Bunker |
 |---|---|
 | 162.5 | the forecourt's grey under the hero |
-| 164.0 | the ramp's top, the tower ahead |
-| 166.5 | the laser strikes the door |
-| 167.5 | the corridor |
+| 164.0 | at the exit 43's end of the way, model (−16.8, −67.9) by the radar, the tower ahead |
+| 166.0–166.2 | the ramp's top, by the target panel's distance (below) |
+| 166.93 | the laser strikes the door (30 fps) |
+| 167.23 | the door's top edge starts down (30 fps) |
+| 168.4 | at the sinking door, until about 171 |
 | 178.2 | command mode ([40-command-mode.md](40-command-mode.md#against-the-recording--seen)) |
 
+The 164.0 s row once read *"the ramp's top"* off the view; the target panel puts
+the hero there only at about 166.1 s
+([A shot opens a door](#a-shot-opens-a-door--read-and-seen)).
+
 *Derived*: the generator's apron to its capture takes 8.5 s in the recording
-and 8.2 on the engine; the bunker's ramp top to command mode 14.2 s and 14.6.
-Both of the recording's heroes shoot the door on the way, and the engine's
-doors open as the hero comes, so the shots change nothing here.
+and 8.2 on the engine; the bunker's ramp top to command mode about 12.1 s in the
+recording and 14.6 on the engine. The recording's hero shot both doors before
+they would have opened for it
+([A shot opens a door](#a-shot-opens-a-door--read-and-seen)), which saved it
+about a second at the bunker's door, where the engine's hero, walking with no
+shot, waits 3.25 s.
 
 **For an engine**: walk Mission 03's buildings by their hall ways, as step 7
 above does the Large Factory's: the Small Generator's from 51 (or 46, 49, 53,
@@ -3189,11 +3270,40 @@ queue in turn and cuts the leg to it:
   from 28 sites, migrate's (`0x1002cc84`) and the escape's five among them,
   builds its place with `+0x14` 0 (`0x10001981`); the walk to a place taken from
   an object and an offset (`0x100019e0`) sets it to 1 (`0x10001a34`), and keeps
-  its own height. Tasks that call `SetTarget` with a place of their own —
-  seven sites, the patrol's loop (`0x1002dd74`) among them — are not read here.
-  The global path's waypoints carry 0 (`0x10036f9e`, `0x1003711d`,
+  its own height. The global path's waypoints carry 0 (`0x10036f9e`, `0x1003711d`,
   `0x100372e9`, `0x10037775`). A walker's points are given the height too, and
   zero their z axis with `0x3030`, so only a flyer's is ever flown.
+- **With `+0x14` at 1 the leg keeps its line.** The cut points are the leg's
+  start plus *i* ÷ *n* of the whole three-dimensional span to the place
+  (`0x1003a6bc`–`0x1003a722`), and only the test at `0x1003a726` raises them; so a
+  place that keeps its own height is flown to along the straight line from where
+  the flyer is, over or through whatever lies between.
+- **The seven sites that build their own place** (*read*). `MWalker::SetTarget`
+  has 15 direct calls: the two helpers above (`0x100019cb`, `0x10001a99`), a
+  third that logs *"Maked Inside dest"* and sets 0 (`0x10001bc2`, call
+  `0x10001bdb`), five inside `MWalker` itself, and these seven:
+
+  | site | task | `+0x14` | the place's height |
+  |---|---|---:|---|
+  | `0x1002dd74` | the patrol's loop, the next point (slot 7, `0x1002d900`) | 0 | the ground + 15: `esi`, cleared at `0x1002d916` and never set again on the way to the store at `0x1002dcec` |
+  | `0x10027a1f` | the attack's move (`MakeGoCommand`, `0x10027580`) | 0 | the ground + 15: `ebx`, cleared at `0x100275b8`, stored at `0x100279c0` |
+  | `0x1002b5f2`, `0x1002b954` | go's start and takt (`0x1002b540`, `0x1002b670`), on the task's own place `+0x5c` | 0 by place | the ground + 15: slot 3 clears `+0x70`, the place's `+0x14`, for a `TARGET_BY_PLACE` (`0x1002b3e8`); a go into a building takes the place `0x10001270` builds, not read |
+  | `0x10033083` | the transport's walk to a building's point (`0x10032f30`, from `0x10032802` and `0x10032844`) | 0 | the ground + 15: `ebx`, cleared at `0x10032fc1` |
+  | `0x1002b059` | follow's takt (`0x1002ae20`) | 1 (`0x1002affc`) | **the leader's height + 5** (`0x1002b011`, the 5.0 at `0x10059608`) |
+  | `0x1002b240` | get on board's start (`0x1002b110`, vtable `0x10059dc0`, order 23) | 1 (`0x1002b20f`) | not written in the routine: its z is whatever the stack held |
+
+  The patrol's other two walks, its start's and a fresh loop's first point, go
+  through the tasks' walk to a point (`0x1002d8b6`, `0x1002dc67` → `0x10001960`),
+  so **every point a patrolling flyer is sent to stands 15 m over the ground under
+  it**, 115 over a building. Only follow and get on board keep a height of their
+  own ([31-packages.md](31-packages.md#what-follows--derived) has what that means
+  for Mission 03's patrol).
+
+  *Measured on openparkan's engine*, which gave every flyer's walk its points 15 m
+  over the ground until this read: Mission 01's two captured flyers, told to follow
+  a hero 127 m off on open ground at z 22.7, hold 28.7 and 28.9 m, within 1.3 m of
+  his height + 5, where the ground + 15 under them is 34.5 and 35.3 m; walked the
+  old way one held 35.4. The engine has no get on board task.
 
 **The ground routine** (`Behavior.dll:0x100146b0`) looks straight down at x and
 y from 1000 over the top of the map's box (`0x100146d5`), through slot 8 of the
@@ -3761,3 +3871,24 @@ patrol runs past it.
   Triple 2 is never read inside `Control.dll` — nothing reaches +32..+40 in
   either copy of the block ([13-control.md](13-control.md)) — and the AI reads
   its forward component as a floor.
+- ~~Which of the Small Generator's exits the recording's hero used (the south
+  one was inferred), and whether a shot opens a door sooner than an
+  approach.~~ — **measured** off the recording's radar and target panel: the
+  south way, across the south exits' row between 54 and 51
+  ([The ways into Mission 03's buildings](#the-ways-into-mission-03s-small-generator-and-small-bunker--measured-and-seen)).
+  A shot opens a door from any range, and at both of Mission 03's doors the
+  recording's hero shot it while still outside its reach: about 0.7 s and 1 s
+  before the approach would have opened it
+  ([A shot opens a door](#a-shot-opens-a-door--read-and-seen)). The generator's
+  sliding leaves, whose faces carry no `0x10`, are class-12 doors a shot opens.
+- ~~What component property `0x200` is, taken to be the door's node.~~ —
+  **read**: `IDeviceManager` slot 6's id `0x200` (`Control.dll:0x1002bc1f`)
+  answers the component's `+4`, the `.ctl` record's node, for every class; the
+  weighing takes it as a node index too
+  ([A shot opens a door](#a-shot-opens-a-door--read-and-seen),
+  [13-control.md](13-control.md#the-component-record)).
+- ~~What height the seven tasks that build their own place hand the walker.~~ —
+  **read**: the patrol's loop, the attack's move, go by place and the
+  transport's walk ask for the ground + 15; follow keeps its leader's height + 5
+  and get on board a height its routine never writes
+  ([A flyer's walk points](#a-flyers-walk-points--read-and-measured)).

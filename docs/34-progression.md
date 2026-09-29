@@ -824,9 +824,10 @@ more finely where a time is given to a tenth.
 | 110 s | `T03_H05`, route 2, at the generator |
 | 116 s | "Building is captured": the generator, from its pod inside |
 | 118 s | objective 0, `T03_I02` |
+| 142–160 s | the hero walks straight from the lode toward the bunker, heading 339.5°, at 14.1 m/s: in route 3 from about 142 s to 149.4 s, then in none until route 6 at about 160.4 s, passing 8 m north of route 4 and 21 m south of route 5 (the radar, below) |
 | 144 s | `T03_H04`, route 3; the lode's pillar of fire stands beside the transport |
-| 164 s | `T03_H061`, route 6, walking down the bunker's ramp |
-| 166.8 s | the laser strikes the bunker's closed door; its top edge drops from 167.2 s, and the hero is in the corridor by 171.5 s ([24-motion.md](24-motion.md#a-shot-opens-a-door--read-and-seen)) |
+| 164 s | `T03_H061`, route 6, at the bunker's forecourt; on the ramp's top at about 166.1 s |
+| 166.93 s | the laser strikes the bunker's closed door; its top edge drops from 167.23 s, the hero reaches it at 168.4 s, and is in the corridor by 171.5 s ([24-motion.md](24-motion.md#a-shot-opens-a-door--read-and-seen)) |
 | 178 s | "Building is captured": the bunker; the view is command mode's camera over the bunker's roof, with the icon column and the Energy row |
 | 180 s | objective 1, `T03_I03`; `T03_H062` was asked first and is not seen |
 | 182 s | `T03_H08`, message 22, as Build Mine is chosen on the Builders page; the model is red at 184 s and green at 186 s |
@@ -852,13 +853,44 @@ What follows from it:
   about 185 s. The count took the mine by 196 s, while the building was seen
   standing only at 236 s. Its construction sphere runs in between
   ([32-builder.md](32-builder.md#the-construction-sphere--read-and-measured)).
-- **Neither `T03_H03` nor `T03_H02` is seen.** Routes 4 and 5 lie between the
-  lode's route and the bunker's. Whether the hero entered them without passing
-  through none is not measured.
-- **The patrol took about 85 s** from its orders to the fight. Flying straight
-  at 0.8 of 160 km/h covers its 1.3 to 1.5 km in 37 to 44 s. Where the rest went
-  is not measured: its first point may wait for the patrol's timer, and its
-  way down from the plateau is not straight.
+- **Neither `T03_H03` nor `T03_H02` is seen, because the hero never stands in
+  route 4 or 5** (*measured*). Nothing else gates them: each is the route test
+  on the hero's id with the latch, and no objective, flag or earlier message is
+  asked ([What the scripts ask](#what-the-scripts-ask--read-and-measured-1)); a
+  message asked for behind another is queued, never dropped
+  ([Messages](#messages--read-and-measured)). Route 4 is a quadrilateral about
+  50 by 60 m round the builder, route 5 one about 85 by 90 m round the transport,
+  and they touch neither route 3 nor route 6. The radar puts the hero on a
+  straight line between them:
+  - **How.** The radar draws each contact 60 × d ÷ R from its centre, R the 250
+    under the disc, `tut3_p.dat`'s radar range, turned by the north mark's angle
+    ([35-hud.md](35-hud.md#the-radar--read-and-seen)); the transport and the
+    builder stand still until 185 s, so each of their two marks gives a fix for
+    the hero. Over 143.5–158.5 s at 0.25 s steps, 41 frames give both fixes within
+    6 m of each other; their mean fits one line with 1.1 m of scatter about it,
+    heading 339.5° at 14.1 m/s, the hero's 50 km/h.
+  - **Where.** The line enters route 3 at about 142 s (the message at 144 s),
+    leaves it at 149.4 s, and passes **8.2 m north of route 4's west corner and
+    8.3 m north of its north corner** (the fixes 7.2 to 9.1 m off at 154.5–157 s)
+    and **21.3 m south of route 5's south corner** (20.7 m at 152.25 s), into
+    route 6 at about 160.4 s. The target panel agrees: the transport, 141 m off at
+    144 s, comes no nearer than about 60 m at 152 s.
+  - So between the lode and the bunker the only run that finds the hero in a
+    route after one in none is route 6's, `T03_H061` at 164 s. Before, the hero
+    comes to the lode from the generator in the west, and routes 4 and 5 lie
+    east of route 3. After, the hero stays at the bunker's pod, in route 6: the command panel
+    is up in every frame sampled 12 s apart from 180 s to 420 s.
+- **The patrol took about 84 s** from its orders to the fight, and nothing is
+  missing from it. The orders go out on the `Mission` run that completes
+  objective 3, seen at 334 s: the three function-15 calls (nodes 120, 124 and
+  128) follow `OBJECTIVE_COMPLETE` and message 14 in the same run. The fight
+  starts at 418 s. The flyers fly at 0.8
+  of their *live* top speed, 14.3 to 16.0 m/s, 15 m over the ground, and the
+  satellite map shows them coming in at 12.7 and 14.2 m/s across the ground,
+  within 4 to 6 s of that prediction; they meet the base's defence some 275 m
+  short of (1124, 783)
+  ([31-packages.md](31-packages.md#seen-in-a-recording)). The 37 to 44 s once
+  given here took the chassis's authored 160 km/h.
 - **The win came within 2 s of the last explosion**, the handler's period.
 
 ### For an engine
@@ -1692,3 +1724,14 @@ sits 11.8 dB under its file: music and sounds come out alike, as the equal
   Mission 01's script never fails. ~~What a driven bot's loss does
   (`0x10062ff0`) is not followed.~~ It rolls the mode stack back, which puts
   the hero out ([39-boarding.md](39-boarding.md#when-the-driven-bot-is-lost--read)).
+- ~~Why `T03_H03` and `T03_H02` never show in Mission 03's recording.~~ —
+  **measured**: the hero never stands in routes 4 or 5. The radar's two marks,
+  the transport and the builder, put its walk from the lode to the bunker on one
+  straight line 8 m north of route 4 and 21 m south of route 5, and nothing but
+  the route and the latch gates either message
+  ([Mission 03, seen in a recording](#seen-in-a-recording-1)).
+- ~~Why the patrol took about 85 s to reach the base, where a straight flight is
+  37–44 s.~~ — **measured**: the 37–44 s took the chassis's authored speed. The
+  flyers come in at 0.8 of their live top speed along the ground + 15, 12.7 and
+  14.2 m/s across it on the satellite map, and meet the defence some 275 m short
+  of their place ([31-packages.md](31-packages.md#seen-in-a-recording)).

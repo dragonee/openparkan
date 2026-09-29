@@ -505,6 +505,55 @@ fn a_laser_round_on_mission_03s_bunker_door_opens_it_and_it_shuts_again_once_fre
     assert!((5.0..10.0).contains(&closed), "shut {closed} s after it opened");
 }
 
+/// The Small Generator's south doorway is two sliding leaves, `i32` and `i31`, each a class-12
+/// door of its own on nodes 13 and 14, whose faces carry triangle flags 0 rather than the door
+/// face's `0x10`. The hit's opener matches a component's node, property `0x200`
+/// (`Control.dll:0x1002bc1f`), against the struck face's, and asks nothing of the face: a round
+/// strikes a leaf, and opens that leaf and not the other (docs/24, "A shot opens a door").
+#[test]
+#[ignore = "needs the game install"]
+fn a_laser_round_on_one_of_mission_03s_generator_leaves_opens_that_leaf_alone() {
+    use glam::Vec3;
+    use parkan_sim::combat::Event;
+    use parkan_world::buildings::Phase;
+
+    let (mut play, m) = mission_03_play();
+    let t = object_target(&play, &m, "gener01.dat");
+    let b = play.buildings.iter().position(|b| b.target == t).unwrap();
+    let nodes: Vec<Vec<usize>> = play.buildings[b].doors.iter().map(|d| d.nodes.clone()).collect();
+    assert_eq!(nodes, vec![vec![13], vec![14], vec![10], vec![11]], "four leaves, two a doorway");
+    let components = play.buildings[b].controller().components.clone();
+    for d in &play.buildings[b].doors {
+        assert_eq!(components[d.item.component].node, d.nodes[0] as i32, "the record's node is the leaf's");
+    }
+    let part = play.buildings[b].part;
+    let leaf = door_centre(&play, t, part, 13);
+    let muzzle = (0..32)
+        .map(|k| k as f32 * std::f32::consts::TAU / 32.0)
+        .flat_map(|a| [0.0, 2.0, 4.0].map(|dz| leaf + Vec3::new(a.cos(), a.sin(), 0.0) * 12.0 + Vec3::Z * dz))
+        .find(|&p| {
+            play.battle
+                .combat
+                .first_hit(&play.ground, None, p, leaf, 0.0)
+                .is_some_and(|(s, x, _)| x == Some(t) && s.node == Some(13))
+        })
+        .expect("a line to the leaf");
+    let direction = (leaf - muzzle).normalize();
+    let laser = play.hero.robot.rounds[2].expect("the battle laser's round");
+    play.battle.combat.fire(laser, None, muzzle, direction, Vec3::ZERO, 1.0, None).unwrap();
+    let (mut struck, mut opened) = (false, false);
+    for _ in 0..(60 * 3) {
+        for e in play.tick(1000.0 / 60.0, [0.0; 2]) {
+            struck |= matches!(e, Event::Struck { target: Some(x), node: Some(13), .. } if x == t);
+        }
+        let d = &play.buildings[b].doors;
+        opened |= matches!(d[0].phase, Phase::Opening | Phase::Open);
+        assert_eq!(d[1].phase, Phase::Shut, "the other leaf stays shut");
+    }
+    assert!(struck, "the round strikes the leaf, its faces flagged 0");
+    assert!(opened, "and the leaf opens");
+}
+
 #[test]
 #[ignore = "needs the game install"]
 fn c03_m01s_builder_upgrades_the_captured_factory_to_the_medium_one_its_clan_has_researched() {

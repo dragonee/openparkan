@@ -1708,25 +1708,42 @@ The player's side:
 
 1. **The patrols.** Each flyer draws a loop of 15–19 points within 60 m of its
    place on x and y and flies to the first at 0.8 of its speed. That is its
-   live top speed, 17.8–20.0 m/s once its engine and load are counted
+   live top speed, 17.84, 20.03 and 18.62 m/s for `f1`, `f2` and `f3` once
+   engine and load are counted
    ([24-motion.md](24-motion.md#what-shipped-units-get--measured-then-derived)),
-   so 14.3–16.0 m/s and about 90 s to (1124, 783) and 97 s to (606, 993). (This
-   page once took the chassis's authored 44.4 m/s, and 37 s and 44 s.) Every
-   20–30 s it draws a new loop; it never stops patrolling.
+   so 14.27, 16.02 and 14.90 m/s. **It flies 15 m over the ground**: every walk
+   the patrol asks for builds its place with the word that has the walker raise
+   each point ([24-motion.md](24-motion.md#a-flyers-walk-points--read-and-measured)),
+   the loop's own `SetTarget` (`0x1002dd74`) included. Over Tut_3 that way is
+   longer than the straight line — 1,407 m for `f1`, 1,419 for `f3`, 1,716 for
+   `f2`, 6.2 to 10.8% more, on 20 m cuts over the landscape (*measured*) — so the
+   flight takes about 99, 95 and 107 s. (This page once took the chassis's
+   authored 44.4 m/s, and 37 s and 44 s.) Every 20–30 s it draws a new loop about
+   the same place, and it never stops patrolling.
 2. **On the way it only shoots.** Its fire control, mode 2 from the patrol's
    start, aims at the nearest hostile unit its radar lists within 500 — within
    its 300 m sensor. It takes up no engagement: nothing scores unless it is
    inside 60 m of its place.
-3. **Hit, it barely turns.** Retaliation (and a call for help from a wingman
-   within 400) inserts an attack with the patrol's circle, radius 120 about the
-   place — and a script's place stands at z 0. With the ground 84.1 m and
-   90.6 m high there, even a unit on the ground is outside that sphere beyond
-   85.6 m (78.7 m) across the ground, and a unit more than 120 m above z 0 is
-   outside it everywhere. The attack is dropped on its first stack takt and the
+3. **Hit on the way, it barely turns.** Retaliation (and a call for help from a
+   wingman within 400) inserts an attack with the patrol's circle, radius 120
+   about the place — and a script's place stands at z 0, the limit testing in
+   three dimensions. Anywhere on its way in the flyer is hundreds of metres
+   outside that sphere, so the attack is dropped on its first stack takt and the
    patrol starts over with a fresh loop.
-4. **At its place** it circles its loop and takes up an attack on a hostile unit
-   inside 60 m of the place, dropped again as soon as it strays out of the
-   circle.
+4. **At its place the limit holds, mostly** (*measured*). Flying 15 m over ground
+   84.1 m and 90.6 m high, the flyer stands 99 m and 106 m above z 0 at the two
+   places, inside the sphere out to about 68 m and 57 m across the ground. Of a
+   1 m grid over the square its loop is drawn from, 13,464 of 14,641 points
+   (92.0%) lie inside the limit about (1124, 783), where the ground falls away,
+   the farthest 73.6 m out; about (606, 993), 7,601 (51.9%), and 3,059 (20.9%)
+   lie over the Small Generator, whose faces put a point 115 m over their top
+   (the ground routine's first query; its inner ring gives the same 3,059). So
+   there it circles its loop and takes up an attack on a hostile unit inside 60 m
+   of the place, and keeps it while it stays inside the sphere: over most of the
+   bunker-side square, over half the generator-side one. The attack's own moves,
+   50–100 short of the target and up to 80 to the side, are flown 15 m over the
+   ground as well ([24-motion.md](24-motion.md#a-flyers-walk-points--read-and-measured)),
+   and one that carries it out is dropped.
 5. **The defence.** A player warbot with no order engages any hostile unit
    within 500 (its radar permitting) and may chase it 1000 from where it stood;
    on Standby it only shoots; guarding, the patrol's rules apply about its own
@@ -1748,6 +1765,25 @@ In the 960 × 720 recording of *The Field Base*:
   `0x1002aa6e`), so these are the player's Guard orders, given on the map
   (*derived*; ordering from command mode is
   [40-command-mode.md](40-command-mode.md)'s).
+- **The patrol comes in at the read speed** (*measured* off the satellite map).
+  The map on the command panel is north up; fitted by least squares to five
+  building icons (the generator, the mine, the warehouse, the bunker and the
+  factory, residuals within 4.5 px), it draws 0.193 px a metre across and 0.199
+  down, about 5 m a pixel. From 396 s it shows two groups of red flyer crosses:
+  - **a pair**, 8–10 px apart, on the line from the plateau to (1124, 783) to
+    within 19 m: 760 m along it at 396 s and 1,065 m at 420 s, 12.7 m/s across
+    the ground, against 13.1 and 13.8 m/s for `f1` and `f3` at 0.8 of their live
+    top speed along the ground + 15;
+  - **one** on the line to (606, 993) to within 19 m: 931 m along at 404 s and
+    1,158 m at 420 s, 14.2 m/s, against 14.4 m/s for `f2`.
+
+  Both trail the prediction from the orders at 334 s by 58 to 81 m, 4 to 6 s of
+  flight, which the start from a standstill would take up (*guess*). **At 418 s, when the fight starts, the pair is some 275 m short of its
+  place** and about 195 m from the bunker, inside the HFTB's 250 m, and the
+  single flyer about 355 m from the generator. So the patrol took 84 s to the
+  fight because its flyers fly at 0.8 of their *live* top speed along the ground
+  + 15 and met the base's defence well before their places; nothing is missing
+  from the 85 s.
 - **The fight.** At 420 s the cursor over the base's marks at the top of the
   map shows *"SFW-2 Warrior [patrolling]"* — an enemy flyer, reading its patrol.
   From 418 s to 426 s explosions and two burning flyers fill the lower left of
@@ -1766,7 +1802,8 @@ In the 960 × 720 recording of *The Field Base*:
 - **Patrol by place**: 15 + (0..4) points uniformly in the square of the radius
   (the parameter, or 60) about the place, inside the map less 100, a walker's on
   usable ground; walk them in turn at 0.8 × speed, advancing when the walker is
-  idle; draw a new loop every 20 + U(0, 10) s. **By unit**: 3 + (0..4) points
+  idle, a flyer 15 m over the ground under each; draw a new loop every
+  20 + U(0, 10) s. **By unit**: 3 + (0..4) points
   about the unit, own clan only, full speed, every 5 + U(0, 10) s. **By
   building**: its contour's vertices pushed out 30, full speed, every
   60 + U(0, 60) s.
@@ -1926,9 +1963,18 @@ captures by logic id 34 times.
   `ILifeSystem` properties 54 and 38 with device query 6 between them, cached
   by `ArealMap.dll:0x10006e40`
   ([15-behaviour.md](15-behaviour.md#what-a-strength-is--read-and-measured)).
-- How high a flyer on patrol flies, which decides whether a script patrol's
-  circle about a place at z 0 ever holds its attack
-  ([24-motion.md](24-motion.md#not-established)).
+- ~~How high a flyer on patrol flies, which decides whether a script patrol's
+  circle about a place at z 0 ever holds its attack.~~ — **read**, and
+  **measured**: 15 m over the ground under each point, as every walk the patrol
+  asks for builds its place with the word that has the walker raise it
+  ([24-motion.md](24-motion.md#a-flyers-walk-points--read-and-measured)); so on
+  Mission 03 the attack holds near the place, over 92.0% of the loop's square
+  about (1124, 783) and 51.9% about (606, 993), and is dropped anywhere on the
+  way in ([What follows](#what-follows--derived)). ~~Why the recording's patrol
+  took about 85 s to the fight~~: its flyers come in at 0.8 of their live top
+  speed along the ground + 15, measured off the satellite map, and meet the
+  base's defence some 275 m short of their place
+  ([Seen in a recording](#seen-in-a-recording)).
 - The two behaviour fields, `+0x18c` and `+0x140`, that make a building patrol
   hold inside a building, and the walker tests `0x1003ddc0` and `0x1003ddb0` a
   building patrol moves on by.

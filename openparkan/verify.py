@@ -10079,6 +10079,48 @@ def check_door_shot(check, game: Path) -> None:
           f"slot sphere has radius {slot.sphere[3]:.2f}, and a hero's centre on the ramp at "
           f"y -6 is {reach:.2f} from its centre")
 
+    # Property 0x200: IDeviceManager slot 6's case answers the component's +4, its node; the
+    # control system asks itself for the interface into +0x38, and the weighing takes 0x200
+    # for a node index too (docs/13, "The component record").
+    slots = struct.unpack("<9I", c_at(0x1003B4FC, 36))
+    query = (c_at(0x1002BBEE, 7) == bytes.fromhex("3d00020000742a")
+             and c_at(0x1002BC1F, 6) == bytes.fromhex("8b97b0050000")
+             and c_at(0x1002BC26, 3) == bytes.fromhex("8b04b2")
+             and c_at(0x1002BC2F, 3) == bytes.fromhex("8b4804")
+             and c_at(0x1002BC34, 2) == bytes.fromhex("890a"))
+    itself = c_at(0x10007972, 13) == bytes.fromhex("8d4d3851ba040200008bcdff10")
+    weigh = c_at(0x1000FBED, 0x2C) == bytes.fromhex(
+        "8b4e388d5424185268000200008b018bd7ff501884c074468b4e388d5424105268000100008b018bd7ff5018")
+    check("Control.dll: a component's property 0x200 is its node, for every class",
+          (slots[3], slots[6], slots[8]) == (0x10008830, 0x1002BB40, 0x1002C390)
+          and query and itself and weigh,
+          "IDeviceManager (vtable 0x1003b4fc): slot 3 the component count, slot 8 its class, "
+          "slot 6 the query by index and id, whose case for 0x200 (0x1002bc1f) answers the "
+          "component's +4 with no class test; the control system asks itself for 0x204 into "
+          "its +0x38 (0x10007972), where the door opener and the weighing (0x1000fbed, 0x200 "
+          "then 0x100, the node index and the mass) find it")
+
+    # The Small Generator's sliding leaves: two class-12 doors to a doorway, faces flagged 0.
+    gener = control.parse(fortif.read(entries["fr_l_gener.ctl"]), names)
+    gmesh = objmesh.parse(fortif.read(entries["fr_l_gener.msh"]), "fr_l_gener.msh")
+    leaves = [(i, c.node, gener.channels[c.entries[0]].node,
+               round(gener.channels[c.entries[0]].rate, 2))
+              for i, c in enumerate(gener.components) if c.type_id == control.DOOR_TYPE]
+    words = set()
+    face_flags = set()
+    for n in (13, 14):
+        s = gmesh.slots[gmesh.nodes[n].slot_index[0]]
+        tris = range(s.first_triangle, s.first_triangle + s.triangle_count)
+        face_flags.update(gmesh.face_flags[t] for t in tris)
+        words.update(b.flags for b in gmesh.batches if b.triangles[0] in tris)
+    check("fortif.rlb: the Small Generator's sliding leaves are class-12 doors a round strikes",
+          leaves == [(4, 13, 13, 0.7), (5, 14, 14, 0.7), (6, 10, 10, 0.7), (7, 11, 11, 0.7)]
+          and words == {0x2000} and face_flags == {0},
+          f"door components (index, node, channel node, rate) {leaves}; the leaves i32 and "
+          f"i31 (nodes 13, 14) draw with batch words {sorted(hex(w) for w in words)} and "
+          f"triangle flags {face_flags}, none a round's query excludes (batch 8, 0x200; "
+          f"triangle 4, 0x20)")
+
 
 def _sphere_union(spheres):
     """The smallest sphere holding two or more spheres, grown one at a time:
@@ -13900,6 +13942,87 @@ def check_patrol(check, game: Path) -> None:
           f"{bunker.label}: {[(w.code, w.gun.round.range) for w in bunker.weapons]}, and "
           f"e_gun_fs_12 is a radar of range {radar_values}; it thinks only once its clan "
           f"is not neutral")
+
+    # The place word +0x14 of the seven sites that build their own place for SetTarget
+    # (docs/24, "A flyer's walk points"): 0 has the walker raise a flyer's points.
+    text_va, text_size, _ = resources._sections(beh)[0][0]
+    text_va += _image_base(beh)
+    body = at(text_va, text_size)
+    set_target = [text_va + i for i in range(len(body) - 5) if body[i] == 0xE8
+                  and (text_va + i + 5 + struct.unpack_from("<i", body, i + 1)[0]) & 0xFFFFFFFF
+                  == 0x1003BAD0]
+    def code(*pieces: tuple[int, str]) -> bool:
+        return all(at(va, len(h) // 2) == bytes.fromhex(h) for va, h in pieces)
+
+    zero = {  # the register's clearing, or the constant, and the place word's store
+        "patrol loop": code((0x1002D916, "33f6"), (0x1002DCEC, "89742438")),
+        "attack move": code((0x100275B8, "33db"), (0x100279C0, "899c24a0000000")),
+        "go by place": code((0x1002B3E8, "c7467000000000")),
+        "transport": code((0x10032FC1, "33db"), (0x10032FC7, "895c2428")),
+        "walk to a point": code((0x10001981, "89542424")),
+        "inside dest": code((0x10001BC2, "c744243000000000")),
+    }
+    own = {
+        "follow": code((0x1002AFFC, "c744245401000000"), (0x1002B011, "d9442424d80508960510")),
+        "get on board": code((0x1002B15E, "bd01000000"), (0x1002B20F, "896c2440")),
+    }
+    lift = struct.unpack("<f", at(0x10059608, 4))[0], struct.unpack("<f", at(0x10059974, 4))[0]
+    patrol_walks = [(site, _call_target(at, site)) for site in (0x1002D8B6, 0x1002DC67)]
+    check("Behavior.dll: every walk a patrol asks for raises a flyer's points; follow's keeps "
+          "its leader's height + 5",
+          len(set_target) == 15 and all(zero.values()) and all(own.values())
+          and code((0x1003A726, "8b84242c010000"), (0x1003A73B, "750e"))
+          and lift == (5.0, 15.0)
+          and patrol_walks == [(0x1002D8B6, 0x10001960), (0x1002DC67, 0x10001960)],
+          f"{len(set_target)} calls of MWalker::SetTarget; the place word +0x14 is 0 at "
+          f"{sorted(k for k, v in zero.items() if v)} and 1 at "
+          f"{sorted(k for k, v in own.items() if v)}; the trajectory builder raises a point "
+          f"only for a 0 (0x1003a726); the patrol's start and fresh loop walk through "
+          f"0x10001960; follow's lift {lift[0]:g}, the walker's {lift[1]:g}")
+
+    # Mission 03's patrol flies the ground + 15: its way in, and where its attack's circle of
+    # 60 + 60 about a place at z 0 holds (docs/31, "What follows").
+    fortif = NResArchive.open(game / "fortif.rlb")
+    bases = {e.name.lower(): e for e in fortif}
+
+    def inner_ring(name: str, place: tuple[float, float], turn: float):
+        ring = next(r for r in objects.parse_base(fortif.read(bases[name]), name) if r.traced)
+        c, s = math.cos(turn), math.sin(turn)
+        return [(place[0] + x * c - y * s, place[1] + x * s + y * c, 0.0)
+                for x, y, _ in ring.points]
+
+    rings = []
+    for o in m.objects:
+        stem = o.path.replace("\\", "/").rsplit("/", 1)[-1].lower()
+        if stem in ("gener01.dat", "sbunk01.dat"):
+            member = {"gener01.dat": "fr_l_gener.bas", "sbunk01.dat": "fr_l_bunker.bas"}[stem]
+            rings.append(inner_ring(member, o.position[:2], o.angles[2]))
+    starts = {o.logical_id: o.position[:2] for o in m.objects if o.logical_id in (3, 4, 5)}
+    goals = {3: (1124.0, 783.0), 4: (606.0, 993.0), 5: (1124.0, 783.0)}
+    ways = {}
+    for i, (sx, sy) in starts.items():
+        gx, gy = goals[i]
+        n = int(math.dist((sx, sy), (gx, gy))) // 20
+        pts = [(sx + (gx - sx) * k / n, sy + (gy - sy) * k / n) for k in range(n + 1)]
+        way = [(x, y, land.height_at(x, y) + 15) for x, y in pts]
+        ways[i] = round(sum(math.dist(way[k], way[k + 1]) for k in range(n)))
+    shares = []
+    for px, py in ((1124.0, 783.0), (606.0, 993.0)):
+        held = over = 0
+        for i in range(-60, 61):
+            for j in range(-60, 61):
+                x, y = px + i, py + j
+                if any(_inside(r, x, y) for r in rings):
+                    over += 1
+                elif math.sqrt(i * i + j * j + (land.height_at(x, y) + 15) ** 2) <= 120:
+                    held += 1
+        shares.append((held, over))
+    check("Mission 03: the patrol's way in at the ground + 15, and where its attack's limit holds",
+          ways == {3: 1407, 4: 1716, 5: 1419} and shares == [(13464, 0), (7601, 3059)],
+          f"along the ground + 15 on 20 m cuts, ids 3, 4, 5 fly {ways} m to their places; of the "
+          f"121 x 121 points of a loop's square, {shares[0][0]} about (1124, 783) and "
+          f"{shares[1][0]} about (606, 993) lie within 120 of the place at z 0, and "
+          f"{shares[1][1]} of the latter over the Small Generator, 115 over its top")
 
 
 def _turret_role(text: tuple[str, ...]) -> int:

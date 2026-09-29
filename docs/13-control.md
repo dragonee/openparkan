@@ -364,6 +364,23 @@ the record's extent is common to all of them:
 **All 531 members now walk end to end**, 1066 component records among them,
 every one carrying an id in 1..30 — 20 of the 30 ids are used.
 
+**The node at `+4` is what the component query's id `0x200` answers** (*read*).
+The shared parser keeps the record's `+4` at the component's own `+4`
+(`0x10021d72`), and the loader rebases it for every part but the chassis
+([39-boarding.md](39-boarding.md#the-turrets-life-is-its-bodys-node-1--read-and-measured)).
+The control system's `IDeviceManager` (interface `0x204`, which it asks itself
+for into its `+0x38` as it loads, `0x10007972`) answers a component by index and
+id through slot 6 (`0x1002bb40`); the case for `0x200` (`0x1002bc1f`) hands back
+that `+4` whatever the class, next to `0x100`, the mass
+([24-motion.md](24-motion.md#load--read-and-measured)), and `0x400`, the life
+left on the same node. Two readers take it as a node: the weighing adds each
+component's mass to node record `0x200`'s answer (`0x1000fbf5`), and a hit on a
+building opens the class-12 component whose answer is the struck node
+([24-motion.md](24-motion.md#a-shot-opens-a-door--read-and-seen)). It is not the
+controller's actions 1 and 2, `IAnimation` slot 8's modes `0x200` and `0x201`
+([below](#the-section-5-record--read-and-measured)), nor the contact flag `0x200`
+([below](#section-1s-conditions-are-contacts--read-and-measured)).
+
 **The type id is the engine's `CICLS_` class.** Every label family below sits
 on exactly one id, and each family the input tables have a name for sits on
 that name's number: `i_pws` on 19 (`POWERSTOR`), `i_fsh` on 9, `i_dsh` on 10,
