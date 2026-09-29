@@ -265,6 +265,97 @@ fn mission_01s_cockpit_names_its_units_lists_its_guns_and_frames_its_target_as_r
     assert!(!later.text.iter().any(|r| r.text.starts_with("from:")), "the box lives 20 s");
 }
 
+/// The name raises its clan's count for every unit it names, the hero's "Human" and a *Tiny
+/// Tower* among them (`0x10075eb2`); a robot whose device manager answers its id 2 with 0 or
+/// less, which only the Small Tower chassis `R_B_06`'s battery of capacity -1 makes it do, is
+/// a *Tiny Tower* (`0x10075e17`), and on a walking warrior its panel icons are the towers'
+/// cell alone (`0x10077342`). *Seen*: Mission 03's builder is SWB-2, and in the recording of
+/// *Outflanking Maneuver* the player's wingman reads SWW-2 and the enemy's TSW-4 to TSW-6.
+#[test]
+#[ignore = "needs the game install"]
+fn every_unit_named_raises_its_clans_count_and_the_small_towers_robots_are_tiny_towers() {
+    use parkan_formats::mission;
+    use parkan_world::cockpit::commander::{TOWER_CELL, unit_cells};
+    use parkan_world::cockpit::panels::Panels;
+
+    let game = gamedir::find(None).expect("a Parkan install: set PARKAN_DIR");
+    let strings = parkan_world::resources::game_strings(&game).unwrap();
+    let names = |play: &parkan_world::play::Play, m: &mission::Mission| {
+        let panels = Panels::new(play, &strings);
+        (0..play.units.len())
+            .filter(|&t| !panels.names[t].is_empty())
+            .map(|t| {
+                let path = &m.objects[play.battle.objects[t]].path;
+                (path.rsplit('\\').next().unwrap().to_owned(), panels.names[t].clone())
+            })
+            .collect::<Vec<_>>()
+    };
+    let (play, m) = mission_03_play();
+    let named = names(&play, &m);
+    let of = |named: &[(String, String)], dat: &str| {
+        named.iter().filter(|(p, _)| p == dat).map(|(_, n)| n.clone()).collect::<Vec<_>>()
+    };
+    assert_eq!(of(&named, "tut3_b.dat"), ["SWB-2 Builder"], "the hero is Plr's first");
+    assert_eq!(of(&named, "tut3_t.dat"), ["SWT-3 Transport"]);
+    assert_eq!(of(&named, "tut3_f2.dat"), ["SFW-2 Warrior"], "Enm has no hero");
+
+    let dir = gamedir::resolve(&game, gamedir::C01_MISSION_03).unwrap();
+    let m = mission::parse(&std::fs::read(dir.join("data.tma")).unwrap(), "Mission.03").unwrap();
+    let play = parkan_world::play::Play::load(&game, &m).unwrap().expect("a hero");
+    let named = names(&play, &m);
+    assert_eq!(of(&named, "12wel1.dat"), ["SWW-2 Warrior"]);
+    assert_eq!(of(&named, "12wel2.dat"), ["SWW-2 Warrior", "SWW-1 Warrior", "SWW-2 Warrior"]);
+    assert_eq!(of(&named, "12wlk1.dat"), ["SSW-8 Warrior"]);
+    assert_eq!(of(&named, "12tower.dat"), ["Tiny Tower", "Tiny Tower"]);
+    let towers: Vec<usize> = (0..play.units.len())
+        .filter(|&t| m.objects[play.battle.objects[t]].path.ends_with("12tower.dat"))
+        .collect();
+    for &t in &towers {
+        let (u, d) = (&play.units[t], play.units[t].designation);
+        assert!(d.negative_battery && d.battery, "R_B_06's -1 beside the fitted battery");
+        assert_eq!(
+            unit_cells(u.type_word, d.chassis_type, d.tiny_tower(u.type_word)),
+            [Some(TOWER_CELL), None]
+        );
+    }
+
+    // Over every placed robot: 28 are Tiny Towers, every one a walking warrior on R_B_06.
+    let mut assembly = parkan_world::assembly::Assembly::new(&game).unwrap();
+    let profiles = gamedir::resolve(&game, parkan_formats::profiles::ARCHIVE)
+        .and_then(|p| parkan_formats::nres::Archive::open(&p).ok());
+    let mut files = vec![game.join("MISSIONS")];
+    let (mut robots, mut tiny, mut walking_warriors) = (0, 0, 0);
+    while let Some(dir) = files.pop() {
+        for entry in std::fs::read_dir(&dir).unwrap().flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                files.push(path);
+                continue;
+            }
+            if !path.file_name().is_some_and(|n| n.eq_ignore_ascii_case("data.tma")) {
+                continue;
+            }
+            let m = mission::parse(&std::fs::read(&path).unwrap(), "data.tma").unwrap();
+            for o in m.objects.iter().filter(|o| o.kind == mission::KIND_UNIT) {
+                let type_word = o.property("Type").map_or(0, |p| match p.value {
+                    parkan_formats::mission::Value::Int(i) => i as u32,
+                    parkan_formats::mission::Value::Float(f) => f as u32,
+                });
+                if type_word & parkan_world::robot::TYPE_ROBOT == 0 {
+                    continue;
+                }
+                robots += 1;
+                let d = parkan_world::robot::designation(&mut assembly, profiles.as_ref(), o.kind, &o.path);
+                if d.tiny_tower(type_word) {
+                    tiny += 1;
+                    walking_warriors += usize::from(type_word == 0x0100_8000 && d.chassis_type == 2);
+                }
+            }
+        }
+    }
+    assert_eq!((robots, tiny, walking_warriors), (267, 28, 28));
+}
+
 #[test]
 #[ignore = "needs the game install"]
 fn leaving_the_window_lets_shift_up_and_the_free_look_centres_on_foot_and_aboard() {

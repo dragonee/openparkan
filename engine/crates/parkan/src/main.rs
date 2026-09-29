@@ -1308,8 +1308,14 @@ impl App {
         let aim = self.command_aim();
         let (Some(play), Some(hud)) = (self.play.as_mut(), self.hud.as_mut()) else { return };
         play.update_ghost(aim);
-        let panel = &mut hud.cockpit.commander;
         let pick = play.pick(aim);
+        // The line under the commander's map names the pick's object when the pick came from
+        // the map (the cursor object's `+0x1c`, docs/35, "The commander's variant").
+        hud.cockpit.map.pointed = match aim {
+            parkan_world::pick::Aim::Map(_) => pick.object,
+            _ => None,
+        };
+        let panel = &mut hud.cockpit.commander;
         // The markers are never drawn over the hero, which the pick can take (docs/42).
         panel.hovered = pick.object.filter(|&t| !play.is_hero(t));
         panel.cursor_state = if play.commander.ghost.is_some() {

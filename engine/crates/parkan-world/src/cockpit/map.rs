@@ -39,17 +39,22 @@ pub const HERO_GREEN: u32 = 0xff00_ff00;
 pub const HEADING_SHARE: f32 = 1.8;
 
 /// The map's state: open (`+0x261`), its alpha (`+0x90`, `Iron_3D.ini`'s `[CS] MAP_ALPHA`) and
-/// when the alpha last changed.
+/// when the alpha last changed; and the object the cursor points at on it.
 #[derive(Clone, Debug, PartialEq)]
 pub struct SatelliteMap {
     pub open: bool,
     pub alpha: i32,
     changed_ms: Option<f64>,
+    /// The object of the pick under the cursor when that pick came from the map: the cursor
+    /// object at game `+0x24` with its `+0x1c` set (docs/42, "The pick under the cursor").
+    /// The line under the commander's map names it; `None` when the pick came from the world
+    /// or found nothing.
+    pub pointed: Option<usize>,
 }
 
 impl Default for SatelliteMap {
     fn default() -> Self {
-        Self { open: false, alpha: ALPHA_DEFAULT, changed_ms: None }
+        Self { open: false, alpha: ALPHA_DEFAULT, changed_ms: None, pointed: None }
     }
 }
 
@@ -151,13 +156,157 @@ fn title_bar(cockpit: &Cockpit, ink: &mut Ink) {
     put(ink, "exit_icon", [ix, iy, ix + 13.0, iy + 13.0], EXIT_ICON_TINT);
 }
 
-/// The map in `panel`: the cockpit's, or with `commander` the commander's, under its title
-/// bar ([`title_bar`]) and with the camera marked in yellow (`0x10073830`, docs/35, "The
-/// satellite map").
+/// Where the line under the commander's map starts its pen (`0x10073a1e`, `0x10073c38`,
+/// `0x10073e15`), its bar's width (`0x10073bea`, `0x10073dca`, `0x10073f6a`), and the empty
+/// text boxes a building's line and an empty line draw (`0x10073b1e`, `0x10073e89`). Every
+/// kind of line puts its emitter at x 436: 5 + 19 × 3, or 5 + 57 (*derived*).
+pub const LINE_AT: [f32; 2] = [374.0, 330.0];
+pub const LINE_BAR: f32 = 183.0;
+pub const LINE_BUILDING_BOX: f32 = 19.0;
+pub const LINE_EMPTY_BOX: f32 = 57.0;
+/// The line's clan colour (`0x10073a3a`-`0x10073a65`, `0x10073c56`-`0x10073c84`): red where the
+/// player's clan's word towards the object's clan is 0, hostile (`0x10039440`); grey where it
+/// is 1, neutral (`0x10039460`); light blue for any other, the player's own clan (2 towards
+/// itself) and an ally. Both tests ask the player's clan record's SuperAI, slot 8, for its word
+/// (docs/25, "Clan relations").
+pub const LINE_HOSTILE: u32 = 0xffff_0000;
+pub const LINE_NEUTRAL: u32 = 0xff80_8080;
+pub const LINE_OTHER: u32 = 0xff80_80ff;
+
+/// The line's clan colour for the player's clan's relation `word` towards the object's clan.
+pub fn line_colour(word: Option<u32>) -> u32 {
+    match word {
+        Some(0) => LINE_HOSTILE,
+        Some(1) => LINE_NEUTRAL,
+        _ => LINE_OTHER,
+    }
+}
+
+/// What the line under the commander's map is drawn for (`0x100739e7`-`0x10073a16`,
+/// `0x10073c1a`-`0x10073c32`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Pointed {
+    /// A building, its node class 3, not a ruin.
+    Building(usize),
+    /// Any other object but an animal: a robot, or the hero.
+    Unit(usize),
+    /// Nothing under the cursor on the map, an animal or a ruin.
+    Nothing,
+}
+
+/// What the line names for the object the cursor points at on the map.
+pub fn pointed(play: &Play, object: Option<usize>) -> Pointed {
+    let Some(t) = object else { return Pointed::Nothing };
+    if play.is_hero(t) {
+        return Pointed::Unit(t);
+    }
+    match play.units.get(t) {
+        Some(u) if u.kind == KIND_BUILDING && u.type_word != BUILDING_RUINE => Pointed::Building(t),
+        Some(u) if u.kind == KIND_UNIT && u.type_word != super::panels::TYPE_ANIMAL => Pointed::Unit(t),
+        _ => Pointed::Nothing,
+    }
+}
+
+/// The line under the commander's map (`0x10073830`, from `0x100739e7`), naming what the cursor
+/// points at on the map, pieces drawn with the pen from (374, 330) (docs/35, "The commander's
+/// variant"):
+/// - **a building**: `ending_text`; an icon piece with its clan's sign in the clan colour; an
+///   icon piece with its building icon in its size's tint; an empty box 19 wide; the end
+///   mirrored back over the box's last 6 (`0x10073b4a`-`0x10073b6d`); `ray_emitter_off`; a bar
+///   183 wide with its name over its life; `ray_ending`;
+/// - **a unit**: the same with its two icons in place of the building's and no box, the end
+///   drawn back from 5 past the pen (`0x10073d7b`-`0x10073d9c`), and in the bar `"%s [%s]"`,
+///   its name and its head order's status;
+/// - **nothing**: `ending_text`, an empty box 57 wide, the end, `ray_emitter_off`, an empty
+///   bar and `ray_ending`.
 ///
-/// STAND-IN: docs/35-hud.md#the-commanders-variant--read-and-seen -- the line the
-/// commander's variant draws under the map at (374, 330), naming what the cursor points at on
-/// the map, is not drawn: its clan piece (the game's `+0x2c` table at `+0x20`) is not read.
+/// The clan's sign is the screens' `+0x20` table, the eight 32 × 32 cells along y 224 of
+/// `icons` the unit markers draw, at the clan record's `+0x14`, which a single-player mission
+/// sets to the clan's index (`0x10073a83`-`0x10073a97`; docs/25, "The unit marker's layout").
+fn line_under(cockpit: &Cockpit, ink: &mut Ink, play: &Play) {
+    use super::commander::{
+        ICON_PIECE, building_class, building_icon, building_tint, life_bar, name_status, put, unit_icons,
+    };
+    let [x, y] = LINE_AT;
+    let bottom = y + PIECE_TALL;
+    let white = super::WHITE;
+    let piece = |ink: &mut Ink, pen: f32, page: &str, source: [f32; 4], colour: u32| {
+        put(cockpit, ink, "ccres_body_text", [pen, y, pen + ICON_PIECE, bottom], white);
+        if let Some(&p) = cockpit.pages.get(page) {
+            let inner = ICON_PIECE - 4.0;
+            ink.painter.sprite_to(Blend::Alpha, p, source, [pen + 2.0, y + 2.0, inner, inner], argb(colour));
+        }
+    };
+    let text_down = ((PIECE_TALL - ink.font.line_height.round()) / 2.0).floor();
+    let what = pointed(play, cockpit.map.pointed);
+    let mut pen = x;
+    put(cockpit, ink, "ccres_ending_text", [pen, y, pen + ENDING, bottom], white);
+    pen += ENDING;
+    let object = match what {
+        Pointed::Building(t) | Pointed::Unit(t) => Some(t),
+        Pointed::Nothing => None,
+    };
+    if let Some(t) = object {
+        let clan =
+            if play.is_hero(t) { Some(play.player_clan) } else { play.units.get(t).and_then(|u| u.clan) };
+        let colour = line_colour(clan.and_then(|c| play.word(play.player_clan, c)));
+        let sign = clan.and_then(|c| usize::try_from(c).ok()).unwrap_or(0) as f32;
+        let [cell, row] = [super::markers::SIGN_CELL, super::markers::SIGN_ROW];
+        piece(ink, pen, ICONS, [cell * sign, row, cell, cell], colour);
+        pen += ICON_PIECE;
+    }
+    match what {
+        Pointed::Building(t) => {
+            let tint = building_tint(building_class(play, t));
+            match building_icon(play.units[t].type_word) {
+                Some((page, [cx, cy])) => piece(ink, pen, page, [cx, cy, 15.0, 15.0], tint),
+                None => put(cockpit, ink, "ccres_body_text", [pen, y, pen + ICON_PIECE, bottom], white),
+            }
+            pen += ICON_PIECE;
+            put(cockpit, ink, "ccres_body_text", [pen, y, pen + LINE_BUILDING_BOX, bottom], white);
+            pen += LINE_BUILDING_BOX;
+            put(cockpit, ink, "ccres_ending_text", [pen, y, pen - ENDING - 1.0, bottom], white);
+        }
+        Pointed::Unit(t) => {
+            let (cells, tint) = unit_icons(play, t);
+            for cell in cells {
+                match cell {
+                    Some([cx, cy]) => piece(ink, pen, "ui_menu", [cx, cy, 15.0, 15.0], tint),
+                    None => put(cockpit, ink, "ccres_body_text", [pen, y, pen + ICON_PIECE, bottom], white),
+                }
+                pen += ICON_PIECE;
+            }
+            let from = pen + ENDING;
+            put(cockpit, ink, "ccres_ending_text", [from, y, from - ENDING - 1.0, bottom], white);
+        }
+        Pointed::Nothing => {
+            put(cockpit, ink, "ccres_body_text", [pen, y, pen + LINE_EMPTY_BOX, bottom], white);
+            pen += LINE_EMPTY_BOX;
+            put(cockpit, ink, "ccres_ending_text", [pen, y, pen - ENDING - 1.0, bottom], white);
+        }
+    }
+    put(cockpit, ink, "ccres_ray_emitter_off", [pen, y, pen + 10.0, bottom], white);
+    pen += 10.0;
+    match what {
+        Pointed::Building(t) => {
+            life_bar(cockpit, ink, play, t, [pen, y, pen + LINE_BAR]);
+            let name = play.building_name(t, &cockpit.strings);
+            ink.centred(&name, pen, LINE_BAR, y + text_down, white);
+        }
+        Pointed::Unit(t) => {
+            life_bar(cockpit, ink, play, t, [pen, y, pen + LINE_BAR]);
+            let text = name_status(cockpit, play, t);
+            ink.centred(&text, pen, LINE_BAR, y + text_down, white);
+        }
+        Pointed::Nothing => put(cockpit, ink, "ccres_ray_body", [pen, y, pen + LINE_BAR, bottom], white),
+    }
+    pen += LINE_BAR;
+    put(cockpit, ink, "ccres_ray_ending", [pen, y, pen + 6.0, bottom], white);
+}
+
+/// The map in `panel`: the cockpit's, or with `commander` the commander's, under its title
+/// bar ([`title_bar`]), with the camera marked in yellow and the line under it naming what the
+/// cursor points at on the map ([`line_under`]) (`0x10073830`, docs/35, "The satellite map").
 pub fn draw_in(
     cockpit: &mut Cockpit,
     ink: &mut Ink,
@@ -201,6 +350,9 @@ pub fn draw_in(
     if let Some(compass) = cockpit.skin.get("map_compass_icon") {
         let (right, bottom) = (x1 - INSET - 1.0, y1 - INSET - 1.0);
         ink.painter.piece(compass, [right - COMPASS[0], bottom - COMPASS[1], right, bottom], [1.0; 4]);
+    }
+    if commander {
+        line_under(cockpit, ink, play);
     }
 
     // The marks (`0x10074220`): every building the player may see by its icon, then every unit.

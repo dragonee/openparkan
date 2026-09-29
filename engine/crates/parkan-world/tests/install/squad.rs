@@ -1103,6 +1103,87 @@ fn the_commanders_map_closes_on_its_title_bars_exit_button() {
     assert!(!cockpit.map.open, "the exit closes the map");
 }
 
+/// The line under the commander's map names what the cursor points at on the map, not the
+/// selection (`0x10073830`, docs/35, "The commander's variant"): a building's name over its
+/// life, a unit's `"%s [%s]"`, nothing on empty ground; its clan piece red for a hostile clan,
+/// grey for a neutral one and light blue for the player's own.
+#[test]
+#[ignore = "needs the game install"]
+fn the_line_under_the_commanders_map_names_what_the_cursor_points_at_on_the_map() {
+    use glam::Mat4;
+    use parkan_world::cockpit::Cockpit;
+    use parkan_world::cockpit::map::{LINE_HOSTILE, LINE_NEUTRAL, LINE_OTHER, Pointed, line_colour, pointed};
+    use parkan_world::hud::{Pages, Space};
+    use parkan_world::pick::Aim;
+    use parkan_world::text::GameFont;
+
+    let game = gamedir::find(None).expect("a Parkan install: set PARKAN_DIR");
+    let (mut play, m) = mission_03_play();
+    let bunker = object_target(&play, &m, "sbunk01.dat");
+    let (factory, builder, flyer) = (
+        object_target(&play, &m, "lplant01.dat"),
+        object_target(&play, &m, "tut3_b.dat"),
+        object_target(&play, &m, "tut3_f1.dat"),
+    );
+    let neutral = play.units[bunker].clan;
+    play.units[bunker].clan = Some(play.player_clan);
+    play.enter_command(bunker);
+    play.hero.radar.range = 1.0e5;
+    let pages = Pages::open(&game).unwrap();
+    let mut cockpit = Cockpit::open(&game, &pages, &play).unwrap();
+    let (font, menu) = (GameFont::ui(&game, "GAME_FONT").unwrap(), GameFont::ui(&game, "MENU_FONT").unwrap());
+    let now = play.hero.time_ms;
+    cockpit.update(&mut play, now);
+    cockpit.map.toggle();
+    let space = Space::new(640.0, 480.0);
+    let line = |cockpit: &mut Cockpit, play: &parkan_world::play::Play, t: Option<usize>| {
+        let aim = match t {
+            Some(t) => {
+                let at = play.battle.combat.targets[t].position;
+                Aim::Map([at.x, at.y])
+            }
+            None => Aim::Map([5.0, 5.0]),
+        };
+        let pick = play.pick(aim);
+        cockpit.map.pointed = pick.object;
+        let drawn = cockpit.draw(play, space, &font, &menu, Mat4::IDENTITY);
+        // The bar's text is centred in 183 from x 446, under the map: a run's anchor is in NDC.
+        let text: Vec<String> = drawn
+            .text
+            .iter()
+            .filter(|r| {
+                let [x, y] = [(r.anchor[0] + 1.0) * 320.0, (1.0 - r.anchor[1]) * 240.0];
+                (330.0..349.0).contains(&y) && (446.0..629.0).contains(&x)
+            })
+            .map(|r| r.text.clone())
+            .collect();
+        (pointed(play, pick.object), text)
+    };
+    assert_eq!(
+        line(&mut cockpit, &play, Some(factory)),
+        (Pointed::Building(factory), vec!["Large Factory".into()])
+    );
+    // The builder, its clan's second name after the hero's (docs/35, "Name and status").
+    let (what, text) = line(&mut cockpit, &play, Some(builder));
+    assert_eq!(what, Pointed::Unit(builder));
+    assert_eq!(text.len(), 1);
+    assert!(text[0].starts_with("SWB-2 Builder ["), "{text:?}");
+    assert_eq!(line(&mut cockpit, &play, None), (Pointed::Nothing, vec![]));
+    // The enemy's flyers start shut down, and a hostile unit so ordered gets no mark and no
+    // pick on the map (docs/35, "Which get a mark").
+    let shut = play
+        .robots
+        .iter()
+        .any(|(t, r)| *t == flyer && r.order.is_some_and(|o| o.code == parkan_sim::orders::SHUTDOWN));
+    assert!(shut);
+    assert_eq!(line(&mut cockpit, &play, Some(flyer)), (Pointed::Nothing, vec![]));
+    // The clan piece's colour by the player's word towards the object's clan.
+    let colour = |t: usize| line_colour(play.units[t].clan.and_then(|c| play.word(play.player_clan, c)));
+    assert_eq!(colour(factory), LINE_OTHER, "the player's own: 2 towards itself");
+    assert_eq!(colour(flyer), LINE_HOSTILE, "Enm");
+    assert_eq!(line_colour(neutral.and_then(|c| play.word(play.player_clan, c))), LINE_NEUTRAL, "Ntrl");
+}
+
 /// Telepresence at auto-driver level 1 leaves the unit's walk to its AI and at 0 does not
 /// (`iron3d.dll:0x10074ff0`: level 1 gives the Wizard's unit word, the behaviour's movement
 /// flag `0x10`, to the AI, and keeps the turret and guns the player's).

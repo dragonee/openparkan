@@ -385,10 +385,30 @@ pub struct Designation {
     pub chassis_type: u8,
     /// A battery with a capacity.
     pub battery: bool,
+    /// A battery whose capacity is below 0, the unlimited one the Small Tower chassis `R_B_06`
+    /// carries unslotted. The device manager's id 2 answers the first such capacity, which is 0
+    /// or less (`Control.dll:0x1002b519`-`0x1002b524`, stored at `0x1002b98c`); every other
+    /// unit it answers the sum of its capacities when that is above 0, or not at all. A robot
+    /// that answers 0 or less is a *Tiny Tower* ([`Designation::tiny_tower`]).
+    pub negative_battery: bool,
     /// Both a fight shield and a deflector, without which no sector is drawn.
     pub shielded: bool,
     pub repair: bool,
     pub detection_shield: bool,
+}
+
+/// The bit every robot's Type carries (`iron3d.dll:0x10075e0b`).
+pub const TYPE_ROBOT: u32 = 0x0100_0000;
+
+impl Designation {
+    /// Whether a unit of `type_word` so designed is a *Tiny Tower*: a robot whose device
+    /// manager answers its id 2 with 0 or less (`iron3d.dll:0x10075e17`-`0x10075e40`), which
+    /// only a battery of negative capacity makes it do. *Measured*: 17 of the 374 robot
+    /// designs under `UNITS`, every one on `R_B_06`, and 28 of the 267 robots the missions
+    /// place (docs/35, "Name and status").
+    pub fn tiny_tower(&self, type_word: u32) -> bool {
+        type_word & TYPE_ROBOT == TYPE_ROBOT && self.negative_battery
+    }
 }
 
 /// A placed object's designation: its size class and chassis type from its chassis part, the
@@ -407,6 +427,9 @@ pub fn designation(
         for k in &c.components {
             match k.type_id {
                 control::BATTERY_TYPE if k.values[control::BATTERY_CAPACITY] > 0.0 => out.battery = true,
+                control::BATTERY_TYPE if k.values[control::BATTERY_CAPACITY] < 0.0 => {
+                    out.negative_battery = true;
+                }
                 control::FIGHT_SHIELD_TYPE => out.shielded = true,
                 control::REPAIR_TYPE => out.repair = true,
                 control::DETECT_SHIELD_TYPE => out.detection_shield = true,

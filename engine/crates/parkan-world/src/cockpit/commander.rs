@@ -511,16 +511,16 @@ impl Panel {
     }
 }
 
-/// A building row's buttons: at this x, each this wide.
-///
-/// STAND-IN: docs/41-commander.md#the-building-pages-5-to-8--read-and-seen -- the width of
-/// the piece a row's icon stands in is not read: 20, as the recording's rows measure, so the
-/// buttons start at x 86.
-pub const BUILDING_BUTTONS_X: f32 = 86.0;
-pub const BUILDING_BUTTON: f32 = 35.0;
-/// A unit row's icon pieces (`0x1009a7a0`): each a `body_text` square as wide as the piece is
-/// high, 19, its icon inset by 2 (docs/31, "The wingman menu from first person").
+/// A row's icon piece (`0x1009a7a0`): a `body_text` square as wide as the piece is high, its
+/// `+0x88`, 19, its icon inset by 2 on every side, and the pen moved on by the same 19
+/// (`0x1009a8c5`-`0x1009a8db`; docs/31, "The wingman menu from first person"). A unit row
+/// draws two, a building row one (`0x10096339`), the line under the commander's map one to
+/// three.
 pub const ICON_PIECE: f32 = 19.0;
+/// A building row's buttons: at this x, after the 10-wide lamp end, the icon piece and the
+/// 5-wide `separator_left_text` (`0x10096322`-`0x10096348`); each this wide.
+pub const BUILDING_BUTTONS_X: f32 = ROWS_LEFT + 10.0 + ICON_PIECE + 5.0;
+pub const BUILDING_BUTTON: f32 = 35.0;
 
 /// The panel in command mode, after the world: the resource rows, the column and the page, the
 /// commander's map and the message box (`0x1008d51c`).
@@ -641,7 +641,19 @@ pub(super) fn put(cockpit: &Cockpit, ink: &mut Ink, name: &str, rect: [f32; 4], 
 
 /// A 15 × 15 icon of `ui_menu` at its cell.
 pub(super) fn icon(cockpit: &Cockpit, ink: &mut Ink, cell: [f32; 2], at: [f32; 2], colour: u32) {
-    if let Some(&page) = cockpit.pages.get("ui_menu") {
+    icon_on(cockpit, ink, "ui_menu", cell, at, colour);
+}
+
+/// A 15 × 15 icon of `page` at its cell.
+pub(super) fn icon_on(
+    cockpit: &Cockpit,
+    ink: &mut Ink,
+    page: &str,
+    cell: [f32; 2],
+    at: [f32; 2],
+    colour: u32,
+) {
+    if let Some(&page) = cockpit.pages.get(page) {
         ink.painter.sprite(Blend::Alpha, page, [cell[0], cell[1], 15.0, 15.0], at, argb(colour));
     }
 }
@@ -680,25 +692,35 @@ fn column(cockpit: &Cockpit, ink: &mut Ink, now_ms: f64) {
     }
 }
 
-/// A unit's two icons' cells (`0x10077120`) and their tint: [`unit_cells`] by its Type and its
-/// property `0x207`, [`unit_tint`] by its record's `+0x30`.
-///
-/// STAND-IN: docs/41-commander.md#the-box -- a *Tiny Tower*, a walking warrior whose record's
-/// `+0x64` answers its query 2 with 0 or less, shows the towers' cell (81, 126) for its first
-/// icon and a blank second (`0x10077342`-`0x100773d1`); which robots answer so is not read,
-/// and none is told apart.
+/// A unit's two icons' cells (`0x10077120`) and their tint: [`unit_cells`] by its Type, its
+/// property `0x207` and whether it is a *Tiny Tower*, [`unit_tint`] by its record's `+0x30`.
+/// The hero, which has no entry among the units, by its own designation.
 pub(super) fn unit_icons(play: &Play, t: usize) -> ([Option<[f32; 2]>; 2], u32) {
-    let u = &play.units[t];
-    (unit_cells(u.type_word, u.designation.chassis_type), unit_tint(play.record_class(t)))
+    let (type_word, d) = match play.units.get(t) {
+        Some(u) if !play.is_hero(t) => (u.type_word, u.designation),
+        _ => (crate::play::ROBOT_HERO, play.hero_designation),
+    };
+    (unit_cells(type_word, d.chassis_type, d.tiny_tower(type_word)), unit_tint(d.size_class))
 }
+
+/// The towers' building cell, which a *Tiny Tower* takes for its first icon.
+pub const TOWER_CELL: [f32; 2] = [81.0, 126.0];
 
 /// A unit's two icons' cells on `ui_menu` (`0x10077120`). The first by its Type, compared
 /// whole: a builder's (65, 110), a transport's (81, 110), a warrior's, an HQ's or the hero's
 /// (49, 110), and none for any other. The second by its property `0x207`, its chassis
 /// profile's `ChassisType` (table `0x100773fc`): flying (97, 94), walking (49, 94), wheeled
 /// (65, 94), tracked (81, 94), and none past 4 (docs/41, "The box").
-pub fn unit_cells(type_word: u32, chassis_type: u8) -> [Option<[f32; 2]>; 2] {
+///
+/// A walking warrior that is a *Tiny Tower* takes the towers' cell (81, 126) and for its
+/// second a 1 × 1 cut of `ui_menu`'s clear texel (0, 0), which draws nothing
+/// (`0x10077342`-`0x100773d1`). *Measured*: all 17 robot designs that are one are walking
+/// warriors on `R_B_06`.
+pub fn unit_cells(type_word: u32, chassis_type: u8, tiny_tower: bool) -> [Option<[f32; 2]>; 2] {
     use super::panels::{TYPE_BUILDER, TYPE_HQ, TYPE_TRANSPORT, TYPE_WARRIOR};
+    if tiny_tower && type_word == TYPE_WARRIOR && chassis_type == 2 {
+        return [Some(TOWER_CELL), None];
+    }
     let first = match type_word {
         TYPE_BUILDER => Some([65.0, 110.0]),
         TYPE_TRANSPORT => Some([81.0, 110.0]),
@@ -745,14 +767,19 @@ pub fn building_tint(size_class: u32) -> u32 {
 
 /// Building target `t`'s size class, its record's `+0x30`: the fourth letter of its root
 /// record ([`crate::selection::building_size`]).
-fn building_class(play: &Play, t: usize) -> u32 {
+pub(super) fn building_class(play: &Play, t: usize) -> u32 {
     let root = play.assembly.records(play.commander.paths.get(t).map_or("", String::as_str));
     root.first().map_or(0, |r| crate::selection::building_size(r))
 }
 
-/// A unit's name and status, `"%s [%s]"` (docs/31, "The orders").
-fn name_status(cockpit: &Cockpit, play: &Play, t: usize) -> String {
-    let name = cockpit.panels.names.get(t).cloned().unwrap_or_default();
+/// A unit's name and status, `"%s [%s]"` (docs/31, "The orders"); the hero's name is
+/// "Human".
+pub(super) fn name_status(cockpit: &Cockpit, play: &Play, t: usize) -> String {
+    let name = if play.is_hero(t) {
+        cockpit.panels.hero_name.clone()
+    } else {
+        cockpit.panels.names.get(t).cloned().unwrap_or_default()
+    };
     format!("{name} [{}]", cockpit.string(order_status(super::panels::status_order(play, t))))
 }
 
@@ -911,12 +938,15 @@ fn unit_box(cockpit: &mut Cockpit, ink: &mut Ink, play: &Play, t: usize) {
 /// A row's bar over its unit's or building's life (`0x1009a380`, `0x1007e980`).
 pub(super) fn life_bar(cockpit: &Cockpit, ink: &mut Ink, play: &Play, t: usize, [x0, y, x1]: [f32; 3]) {
     put(cockpit, ink, "ccres_ray_body", [x0, y, x1, y + ROW_HEIGHT], WHITE);
-    let share = play
-        .battle
-        .combat
-        .targets
-        .get(t)
-        .map_or(0.0, |target| life_share(target.parts.iter().filter_map(|p| p.life.as_ref())));
+    let share = if play.is_hero(t) {
+        life_share(play.hero.lives.iter().flatten())
+    } else {
+        play.battle
+            .combat
+            .targets
+            .get(t)
+            .map_or(0.0, |target| life_share(target.parts.iter().filter_map(|p| p.life.as_ref())))
+    };
     let percent = (share * 100.0).round() as i32;
     if percent > 0 {
         let w = (x1 - x0) * percent.min(100) as f32 / 100.0;
@@ -924,18 +954,21 @@ pub(super) fn life_bar(cockpit: &Cockpit, ink: &mut Ink, play: &Play, t: usize, 
     }
 }
 
-/// A building's icon cell (`0x100344e0`) and its tint by its record `+0x30`.
-fn building_icon(type_word: u32) -> [f32; 2] {
-    match type_word {
-        0x8000_0008 => [81.0, 110.0],
-        0x8000_0004 => [129.0, 126.0],
-        0x8000_0002 => [113.0, 126.0],
-        0x8000_0010 => [129.0, 94.0],
-        0x8000_0040 => [97.0, 126.0],
-        0x8000_0400 => [49.0, 126.0],
-        t if hq::within(t, BUNKERS) => [65.0, 126.0],
-        _ => [81.0, 126.0],
-    }
+/// A building's icon (`0x100344e0`): its page and 15 × 15 cell by Type, and none for any other
+/// Type, the bridge and the ruin among them, which leaves the sprite uncut (`0x100347c7`).
+pub(super) fn building_icon(type_word: u32) -> Option<(&'static str, [f32; 2])> {
+    Some(match type_word {
+        0x8000_0008 => ("ui_menu", [81.0, 110.0]),
+        0x8000_0004 => ("ui_menu", [129.0, 126.0]),
+        0x8000_0002 => ("ui_menu", [113.0, 126.0]),
+        0x8000_0010 => ("ui_menu", [129.0, 94.0]),
+        0x8000_0040 => ("ui_menu", [97.0, 126.0]),
+        0x8000_0400 => ("ui_menu", [49.0, 126.0]),
+        0x8001_0000 | 0x8002_0000 | 0x8004_0000 => ("ui_menu", [65.0, 126.0]),
+        0x8010_0000 | 0x8020_0000 => ("ui_menu", TOWER_CELL),
+        0x8000_0200 => ("ui_menu3", [148.0, 27.0]),
+        _ => return None,
+    })
 }
 
 fn building_rows(cockpit: &mut Cockpit, ink: &mut Ink, play: &Play, mask: u32, top: f32) {
@@ -954,10 +987,12 @@ fn building_rows(cockpit: &mut Cockpit, ink: &mut Ink, play: &Play, mask: u32, t
             WHITE,
         );
         pen += 10.0;
-        put(cockpit, ink, "ccres_body_text", [pen, y, pen + 20.0, y + ROW_HEIGHT], WHITE);
+        put(cockpit, ink, "ccres_body_text", [pen, y, pen + ICON_PIECE, y + ROW_HEIGHT], WHITE);
         let tint = building_tint(building_class(play, t));
-        icon(cockpit, ink, building_icon(type_word), [pen + 2.0, y + 2.0], tint);
-        pen += 20.0;
+        if let Some((page, cell)) = building_icon(type_word) {
+            icon_on(cockpit, ink, page, cell, [pen + 2.0, y + 2.0], tint);
+        }
+        pen += ICON_PIECE;
         put(cockpit, ink, "ccres_separator_left_text", [pen, y, pen + 5.0, y + ROW_HEIGHT], WHITE);
         pen += 5.0;
         let bunker = hq::within(type_word, BUNKERS);
@@ -1018,16 +1053,44 @@ mod tests {
     fn a_units_icons_are_picked_by_its_type_and_its_chassis_type_and_tinted_by_its_size() {
         // `0x10077120`: the first by the Type compared whole, the second by property `0x207`
         // through the table at `0x100773fc`, the tint by `+0x30` through `0x100773ec`.
-        let builder = unit_cells(0x0100_4000, 3);
+        let builder = unit_cells(0x0100_4000, 3, false);
         assert_eq!(builder, [Some([65.0, 110.0]), Some([65.0, 94.0])]);
-        assert_eq!(unit_cells(0x0100_2000, 4), [Some([81.0, 110.0]), Some([81.0, 94.0])]);
+        assert_eq!(unit_cells(0x0100_2000, 4, false), [Some([81.0, 110.0]), Some([81.0, 94.0])]);
         for warrior in [0x0100_8000, 0x0101_0000, 0x0102_0000] {
-            assert_eq!(unit_cells(warrior, 1), [Some([49.0, 110.0]), Some([97.0, 94.0])]);
+            assert_eq!(unit_cells(warrior, 1, false), [Some([49.0, 110.0]), Some([97.0, 94.0])]);
         }
-        assert_eq!(unit_cells(0x0100_8000, 2)[1], Some([49.0, 94.0]));
-        assert_eq!(unit_cells(0x2000_0000, 5), [None, None], "an animal's Type and a ChassisType past 4");
+        assert_eq!(unit_cells(0x0100_8000, 2, false)[1], Some([49.0, 94.0]));
+        assert_eq!(
+            unit_cells(0x2000_0000, 5, false),
+            [None, None],
+            "an animal's Type and a ChassisType past 4"
+        );
         let tints: Vec<u32> = (1..=4).map(unit_tint).collect();
         assert_eq!(tints, [0xffff_e7ff, 0xffff_8080, 0xff80_ff80, 0xff80_80ff]);
+    }
+
+    #[test]
+    fn a_walking_warrior_that_is_a_tiny_tower_shows_the_towers_cell_alone() {
+        // `0x10077342`-`0x100773d1`: the Type compared whole with a warrior's, property 0x207
+        // with 2, and the device manager's id 2 at 0 or less.
+        assert_eq!(unit_cells(0x0100_8000, 2, true), [Some(TOWER_CELL), None]);
+        // Anything else keeps its two icons, a Tiny Tower on wheels or of another class too.
+        assert_eq!(unit_cells(0x0100_8000, 3, true), [Some([49.0, 110.0]), Some([65.0, 94.0])]);
+        assert_eq!(unit_cells(0x0101_0000, 2, true), [Some([49.0, 110.0]), Some([49.0, 94.0])]);
+    }
+
+    #[test]
+    fn a_building_row_puts_its_buttons_after_one_19_wide_icon_piece() {
+        // `0x100961f0`: the 10-wide lamp end, the icon piece `0x1009a7a0` (body_text's height,
+        // 19), and the 5-wide separator.
+        assert_eq!(BUILDING_BUTTONS_X, 85.0);
+        // `0x100344e0`: the towers and the bunkers by their Types, the main teleport on
+        // ui_menu3, and nothing for a bridge or a ruin.
+        assert_eq!(building_icon(0x8010_0000), Some(("ui_menu", TOWER_CELL)));
+        assert_eq!(building_icon(0x8004_0000), Some(("ui_menu", [65.0, 126.0])));
+        assert_eq!(building_icon(0x8000_0200), Some(("ui_menu3", [148.0, 27.0])));
+        assert_eq!(building_icon(0x8000_1000), None);
+        assert_eq!(building_icon(0x8000_2000), None);
     }
 
     #[test]

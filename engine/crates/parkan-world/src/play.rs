@@ -199,6 +199,10 @@ pub const MESSAGE_FLYER_TAKEN: i64 = 100;
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Unit {
     pub clan: Option<i64>,
+    /// The clan it was placed or made in, whose count its name took (`0x10075eb2`). The
+    /// record's bind names it once; a capture changes `clan` and not the name: *seen*, a
+    /// captured MFW-1 keeps its name (docs/35, "Name and status").
+    pub named_clan: Option<i64>,
     pub type_word: u32,
     pub logical_id: i32,
     /// Placed as a unit, a building, or scenery.
@@ -916,6 +920,7 @@ impl Play {
             };
             units.push(Unit {
                 clan: object.clan_id(),
+                named_clan: object.clan_id(),
                 type_word: object.property("Type").map_or(0, |p| number(p.value)) as u32,
                 logical_id: object.logical_id,
                 kind: object.kind,
@@ -3011,6 +3016,7 @@ impl Play {
             crate::robot::designation(&mut self.assembly, profiles.as_ref(), KIND_UNIT, &placed.path);
         self.units.push(Unit {
             clan: Some(clan),
+            named_clan: Some(clan),
             type_word: project.type_word,
             logical_id,
             kind: KIND_UNIT,
@@ -3021,7 +3027,7 @@ impl Play {
         // A built bot is numbered by its clan: one more than the units the clan had named,
         // the hero among them (`0x10075d50`, docs/38, "The name"); the count here holds the
         // new unit already.
-        let named = self.units.iter().filter(|u| u.clan == Some(clan) && u.kind == KIND_UNIT).count()
+        let named = self.units.iter().filter(|u| u.named_clan == Some(clan) && u.kind == KIND_UNIT).count()
             + usize::from(clan == self.player_clan);
         let name = project.name.replacen("-X ", &format!("-{named} "), 1);
         self.names.push(name);

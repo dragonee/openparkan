@@ -965,10 +965,57 @@ In `"%s-%d %s"`:
   - class, from Type: B builder, T transport, W warrior, C HQ, H hero;
   - `?` for anything else.
 - **The number** is one more than a count the unit's clan keeps (its clan entry
-  `+0x734`), raised as each of its units is named.
+  `+0x734`), raised as each of its units is named — **every** unit, whichever
+  string it gets: all four rows of the table jump to the one `inc` at
+  `0x10075eb2`. So the hero's *"Human"* counts in the player's clan, an
+  animal's in nature's and a *Tiny Tower*'s in its own.
 - **The class word** is handed in. It is one of 6200–6205 *"Transport"*,
-  *"Builder"*, *"Warrior"*, *"Comm. Center"*, *"Human"*, *"Unknown"*; which
-  caller passes which was not followed.
+  *"Builder"*, *"Warrior"*, *"Comm. Center"*, *"Human"*, *"Unknown"*. **The
+  unit record's bind passes it** (*read*): the naming routine is slot 1 of the
+  record's vtable (`0x100e64d0` + 4), which the bind calls at `0x10074f2b` with
+  the word `0x10076490` gives by Type (`0x10074e88`,
+  [38-designs.md](38-designs.md#the-name--read-and-seen)). Each class letter
+  takes its own word.
+
+**Which robots are *Tiny Tower*s** (*read*, and *measured*). The record's
+`+0x64` is the unit's `IDeviceManager`, which the *"Dangerous!"* test below
+reads too, and its slot 4 with `edx` 2 (`0x10075e1e`–`0x10075e2a`)
+is the getter's **id 2, the batteries' capacity**
+([14-controls.md](14-controls.md#the-join-with-the-controller--read)). Its case
+(`Control.dll:0x1002b4e9`) walks the control system's components and, for each
+battery (class `0x13`), takes value 0:
+- **a value below 0 is answered at once** (`0x1002b519`–`0x1002b524`, stored at
+  `0x1002b98c`), true, the negative capacity itself;
+- otherwise the sum is answered when it is above 0 (`0x1002b53d`–`0x1002b55e`);
+- a sum of 0 or no battery at all answers false (`0x1002b9dc`), and the name
+  goes on to `"%s-%d %s"`.
+
+So the query answers 0 or less only for a unit with a **battery of negative
+capacity**, which the economy reads as unlimited
+([23-economy.md](23-economy.md#a-power-shortage-lowers-efficiency-once-the-batteries-run-down--read-and-measured)).
+*Measured* over the install (`openparkan verify`):
+- of the **374** robot designs under `UNITS`, **17** carry one, and every one of
+  them stands on the chassis `R_B_06`, the *Small Tower* L-22w, whose own
+  controller lists an unslotted battery of capacity −1 that no fitted part
+  replaces; all 17 are walking warriors (Type `0x1008000`, `ChassisType` 2);
+- the control: **355** answer above 0, and **2** answer nothing — the target
+  dummies `l_targ` and `M_targ`, with no battery, which the recording names
+  *"SSW-1 Warrior"* as the rule says;
+- of the **267** robots the 29 missions place, **28** are *Tiny Tower*s, in
+  seven missions: *Outflanking Maneuver* (2, `12tower`), `CAMPAIGN.02/Mission.02`
+  (2), `CAMPAIGN.03`'s missions 1, 3 and 4 (4, 3 and 7), `CAMPAIGN.04/Mission.02`
+  (4) and `Multi.05` (6).
+
+No recording shows one named: *Outflanking Maneuver*'s player never targets its
+two towers (every second of its 462 s sampled). What that recording does show
+is the count. Its player clan holds the hero and `12wel1`, and the wingman reads
+**SWW-2** *"[following]"*: the hero was the clan's first. Its enemy's `12spd1`s
+read **TSW-4** to **TSW-6** and its `12wlk1` **SSW-8**, the file's order. The
+units the enemy makes in play that it shows read **TSW-12** to **TSW-17**, which
+fits the two towers taking 10 and 11; that no unit made in play took them is not
+established. *The Field Base* agrees: its builder is **SWB-2** after the hero,
+and the five warbots its factory makes **SSW-4** to **SSW-8** after the builder
+and the transport.
 
 Mission 01 fits both properties:
 - property `0x201` is the unit's size class (`units.Unit.size_class`);
@@ -1102,8 +1149,16 @@ hit, and prints *"SSW-1 Warrior"* above a falling distance.
   what `GetShade()` slot 12's `+4` and `+8` are.
 - The driven unit record's `+0x10` and `+0x14` in the frame's scale.
 - What interface `0x20`'s sphere is, beside interface `0x18`'s bounding sphere.
-- Which caller hands the name its class word, and who writes the panel level at
-  `AniMesh.dll:0x100225e8`.
+- ~~Which caller hands the name its class word~~ — **read**: the unit record's
+  bind, which calls the name, the record's slot 1, with the word `0x10076490`
+  gives by Type (`0x10074e88`, `0x10074f2b`). ~~Which robots are *Tiny
+  Tower*s~~ — **read** and **measured**: those whose device manager's id 2, the
+  batteries' capacity, answers a negative capacity; 17 of the 374 robot designs,
+  all on the Small Tower chassis `R_B_06` and its battery of −1, and 28 of the
+  267 placed robots. The name raises its clan's count for every unit, the hero's
+  and a *Tiny Tower*'s too
+  ([Name and status](#name-and-status--read-and-seen)). Still open: who writes
+  the panel level at `AniMesh.dll:0x100225e8`.
 - ~~The routine that names a building (strings 6031–6098).~~ **Read**:
   `0x100338d0`, from the building record's slot 1, by the behaviour's Type and
   its size class `0x201`; all 167 placed buildings get a string
@@ -1539,17 +1594,49 @@ and their sizes `ui/compaund.cfg`'s: `ending_text` 5 × 19, the exit buttons
 **The line under the map**, the pen from (374, 330) (`0x10073a1e`, `0x10073c38`,
 `0x10073e15`). It names **the object under the cursor, when the cursor's pick
 came from the map**: the cursor object at game `+0x24` with its `+0x1c` set
-([42-selection.md](42-selection.md#the-pick-under-the-cursor--read)). Its
-colour for the clan is **red `0xffff0000`** when `0x10039440` answers for the
-object's clan on the player's clan record, else **`0xff808080`** when
-`0x10039460` answers, else **`0xff8080ff`** (`0x10073a3a`–`0x10073a65`); which
-relations the two answer was not followed.
+([42-selection.md](42-selection.md#the-pick-under-the-cursor--read)).
+
+**Its clan colour is the player's word towards the object's clan** (*read*).
+The two tests are the clan record's relation helpers (`0x10039440`,
+`0x10039460`), called on the player's clan record with the object's owner
+(`0x10073a36`–`0x10073a54`). Each asks the record's SuperAI (`+0x50`) slot 8 for
+its word towards that clan
+([25-sensors.md](25-sensors.md#clan-relations-the-files-words-straight-through--read-and-measured))
+and answers whether it is 0 and whether it is 1:
+
+| the player's word towards the object's clan | colour |
+|---|---|
+| 0, hostile (`0x10039440`) | red `0xffff0000` |
+| 1, neutral (`0x10039460`) | grey `0xff808080`, from `0xffffff81 + 0xff8080ff` (`0x10073a59`–`0x10073a60`) |
+| anything else: 2, allied, and the player's own clan, which the loader gives 2 towards itself | light blue `0xff8080ff` |
+
+Unlike the marks' colour rule
+([25-sensors.md](25-sensors.md#how-the-game-colours-what-it-marks--read-and-measured))
+it asks no clan type, so a neutral clan is grey by its word, 1 towards everyone.
+
+**Its sign is the clan's emblem** (*read*). The table at the game's `+0x2c` →
+`+0x20` is the screens object's eight clans' signs, 32 × 32 cells of `icons`
+along y 224 ([Who draws it](#who-draws-it-and-what-it-hides--read)), and the
+line takes entry `+0x14` of the owner's clan record (`0x738` − `0x724`), each
+0x8c bytes, a sprite (`0x10073a80`–`0x10073a97`). That is the index the unit
+markers draw their sign by, which a single-player mission sets to the clan's own
+([25-sensors.md](25-sensors.md#the-unit-markers-layout--read-and-measured)).
+The line asks no clan type for it either.
+
+**An icon piece** (`0x1009a7a0`) is a `body_text` square as wide as the piece is
+tall, its `+0x88`, 19: the piece is drawn white from the pen to 19 on, its
+sprite from 2 in to 2 short of the far corner, 15 × 15, in the colour handed in,
+and the pen moves 19 (`0x1009a827`–`0x1009a8db`). A 32 × 32 sign is so drawn at
+15 × 15.
 
 | the object | pieces, left to right |
 |---|---|
-| a building (node kind 3), not the ruin `0x80002000` | `ending_text`; an icon piece (`0x1009a7a0`) holding the clan's sprite, entry `+0x14` of the clan's record × 0x8c in the table at the game's `+0x2c` → `+0x20`, in the clan colour; an icon piece with the building's icon, tinted by its size class (`0x100344e0`, [41-commander.md](41-commander.md#the-building-pages-5-to-8--read-and-seen)); an empty text box 19 wide; the mirrored end; `ray_emitter_off`; a bar 183 wide with its name (interface `0x10` slot 41) over its life (`0x1007e980`); `ray_ending` |
-| a unit, not an animal | the same, with its two icons (`0x10077120`) in place of the building's and no empty box, and in the bar `"%s [%s]"` of its name and its head order's status (`0x10076f90`) |
+| a building (node kind 3), not the ruin `0x80002000` | `ending_text`; an icon piece with the clan's sign in the clan colour; an icon piece with the building's icon, tinted by its size class (`0x100344e0`, [41-commander.md](41-commander.md#the-building-pages-5-to-8--read-and-seen)); an empty text box 19 wide; the end mirrored back from the pen over the box's last 6 (`0x10073b4a`–`0x10073b6d`); `ray_emitter_off`; a bar 183 wide with its name (interface `0x10` slot 41) over its life (`0x1007e980`), the text white; `ray_ending` |
+| a unit, not an animal | the same, with its two icons (`0x10077120`) in place of the building's and no empty box; the end drawn back from 5 past the pen (`0x10073d7b`–`0x10073d9c`), under the emitter; and in the bar `"%s [%s]"` of its name and its head order's status (`0x10076f90`) |
 | nothing, an animal or a ruin | `ending_text`, an empty text box 57 wide, the mirrored end, `ray_emitter_off`, an empty bar 183 wide, `ray_ending` |
+
+Every kind puts its emitter at x 436, 374 + 5 + 3 × 19 or 374 + 5 + 57, and its
+bar from 446 to 629 (*derived*).
 
 So the line is not the selection's. It is a readout of what the pointer rests
 on over the map (*derived*).
@@ -1564,6 +1651,20 @@ map open over the Battle units page:
 - **The line under the map** is the empty one. A dark box runs from 375 to
   433, the mirrored end to about 437, the emitter to 446, and an empty bar from
   446. Nothing lies under the cursor on the map.
+
+*Seen*, *The Field Base* at 421 s, the cursor over the base's marks at the top of
+the commander's map, on 960 × 720 divided by 1.5:
+- **The line reads *"SFW-2 Warrior [patrolling]"*** on a green bar, the enemy's
+  second flyer, `Enm` towards whom the player's word is 0.
+- **The sign** is a red emblem over x 382.7–394.7, inside the piece's
+  15-wide sprite at 381–396: red, the hostile word's colour.
+- **The two icons** are pale red, a small unit's `0xffff8080`: the warrior's
+  crossed swords over 401.3–414.0 and the flyer's over 420.0–433.3, against
+  400–415 and 419–434 as read.
+- **The dark box ends at 435.3**, the emitter runs to about 446, and the bar's
+  green starts at 446.7: the 436 and 446 above.
+
+From 417 s to 420 s the same line is the empty one.
 
 ### Not established
 
@@ -1581,9 +1682,16 @@ map open over the Battle units page:
   end and the exit button in its `normal` variant, whose rectangle (605, 43)–(640,
   63) is the `+0x230` the column's click closes the map on. The line at y 330
   names what the cursor points at on the map, not the selection
-  ([The commander's variant](#the-commanders-variant--read-and-seen)). Still
-  open: the clan sprite table the line draws from (the game's `+0x2c` →
-  `+0x20`), and the relations `0x10039440` and `0x10039460` answer.
+  ([The commander's variant](#the-commanders-variant--read-and-seen)).
+- ~~The clan sprite table the line under the commander's map draws from (the
+  game's `+0x2c` → `+0x20`), and the relations `0x10039440` and `0x10039460`
+  answer.~~ — **read**: the table is the screens object's eight clans' signs,
+  indexed by the clan record's `+0x14`, the unit markers' emblem; the two
+  helpers answer whether the player's clan's SuperAI holds word 0 or word 1
+  towards the object's clan, so the sign is red for a hostile clan, grey for a
+  neutral one and light blue for the player's own or an ally. *Seen* at 421 s of
+  *The Field Base*: a red sign and two pale red icons before *"SFW-2 Warrior
+  [patrolling]"* ([The commander's variant](#the-commanders-variant--read-and-seen)).
 - The blinking square of game mode 8 (`0x10074430`), and the game's `+0xea`
   byte.
 - The map's other openers and closers.

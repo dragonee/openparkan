@@ -284,10 +284,17 @@ selected units, and none unless the game's `+0x08` is 4):
     caller's colour;
   - **a walking warrior whose record's `+0x64` answers its query 2** (slot 4,
     `edx` 2) with 0 or less gets the towers' building cell (81, 126) for its
-    first icon and a blank second (`0x10077342`–`0x100773d1`). The same query
-    names a robot *Tiny Tower* (`0x10075e17`,
-    [35-hud.md](35-hud.md#name-and-status--read-and-seen)); which robots answer
-    so is not read;
+    first icon and a blank second (`0x10077342`–`0x100773d1`): the Type is
+    compared whole with `0x1008000`, property `0x207` with 2, and the second
+    sprite is cut 1 × 1 from `ui_menu`'s texel (0, 0), which is clear
+    (*measured*: alpha 0), so nothing draws. The same query names a robot *Tiny
+    Tower* (`0x10075e17`). **Which robots answer so** (*read*, and *measured*):
+    `+0x64` is the device manager, and id 2 its batteries' capacity, which
+    answers 0 or less only for a unit carrying a battery of negative capacity.
+    Of the 374 robot designs under `UNITS` that is **17**, every one a walking
+    warrior on the *Small Tower* chassis `R_B_06`, whose own battery is −1; and
+    **28** of the 267 robots the missions place
+    ([35-hud.md](35-hud.md#name-and-status--read-and-seen));
   - *measured*, over the 296 units the 29 missions place: size classes 1 to 4,
     13, 140, 75 and 68 of them, and `ChassisType` 1 to 4, 58 flying,
     127 walking, 58 wheeled and 53 tracked. None falls outside the tables. The
@@ -526,7 +533,13 @@ the factory panel at (51, 171 + 20*i*), and only with the column
 - its icon (`0x100344e0`), 15 × 15 on `ui_menu`: storage (81, 110), mine
   (129, 126), generator (113, 126), plant (129, 94), Outpost (97, 126), institute
   (49, 126), any bunker (65, 126), either tower (81, 126); the main teleport,
-  `0x80000200`, takes `ui_menu3` (148, 27). It is tinted by the record's `+0x30`
+  `0x80000200`, takes `ui_menu3` (148, 27); any other Type, a bridge or a ruin,
+  leaves the sprite uncut (`0x100347c7`). **It stands in an icon piece**
+  (`0x1009a7a0`, called at `0x10096339`): a `body_text` square as wide as the
+  piece is tall, 19, the icon 2 in (*read*,
+  [35-hud.md](35-hud.md#the-commanders-variant--read-and-seen)). So the row's
+  pen reaches 51 + 10 + 19 = 80 before the separator and its buttons start at
+  x 85. It is tinted by the record's `+0x30`
   (`0x100344fc`, table `0x100347dc`): 1 white, 2 `0xffff0000`, 3 `0xff00ff00`,
   4 and 5 `0xff0000ff`; any other value leaves the caller's colour. `+0x30` is
   the building's size class, from its root's fourth letter (`l` 2, `m` 3, `b` 4,
@@ -817,6 +830,13 @@ Mission 04, on the Enhanced Research Center's pod
       units has them among its radar contacts.
     - **The rest.** Units as crosses and squares, and the camera
       ([35-hud.md](35-hud.md#the-panel-in-the-cockpit--read-and-seen)).
+    - **The line under it**, from (374, 330), names what the cursor points at
+      on the map: for a building its clan's sign, its icon and an empty box
+      19 wide; for a unit its sign and its two icons; for nothing a box 57
+      wide; then the emitter at 436 and a 183-wide bar with the name over the
+      life. The sign is red when the player's word towards the object's clan is
+      0, grey when 1, light blue otherwise
+      ([35-hud.md](35-hud.md#the-commanders-variant--read-and-seen)).
 
 ## Not established
 
@@ -862,3 +882,15 @@ Mission 04, on the Enhanced Research Center's pod
   `0x1007b32d`).
 - Whether a click on a disabled order row can happen at all: the commander's
   rows are only the offered ones, and the click tests no row flag.
+- ~~Which robots answer query 2 (slot 4, `edx` 2) with 0 or less, and so show
+  the towers' cell alone (`0x10077342`–`0x100773d1`).~~ — **read** and
+  **measured**: the query is the device manager's id 2, the batteries'
+  capacity, which answers a negative capacity at once (`Control.dll:0x1002b519`)
+  and otherwise only a sum above 0. 17 of the 374 robot designs carry one, all
+  walking warriors on the *Small Tower* chassis `R_B_06` (its battery −1), and 28
+  of the 267 placed robots are among them; 355 answer above 0 and the 2 target
+  dummies fail ([The box](#the-box)).
+- ~~The width of the piece a building row's icon stands in.~~ — **read**: 19, the
+  icon piece `0x1009a7a0` the unit rows use, as wide as `body_text` is tall
+  (`0x10096339`), so a row's buttons start at x 85
+  ([The building pages](#the-building-pages-5-to-8--read-and-seen)).

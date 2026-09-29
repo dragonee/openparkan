@@ -953,6 +953,7 @@ impl Play {
         }
         self.units.push(Unit {
             clan: Some(clan),
+            named_clan: Some(clan),
             type_word,
             logical_id,
             kind: KIND_BUILDING,

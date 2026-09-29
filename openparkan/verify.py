@@ -24594,6 +24594,8 @@ def check_commander_panel(check, game: Path) -> None:
 
     _check_commander_icons(check, game, at, u32)
     _check_commander_map(check, at, strings)
+    _check_commander_map_line(check, game, at)
+    _check_tiny_towers(check, game, at)
 
 
 def _check_commander_icons(check, game: Path, at, u32) -> None:
@@ -24683,6 +24685,127 @@ def _check_commander_map(check, at, strings) -> None:
           f"exit button stored at +0x230 as (605, 43)-(640, 63), variant 1: {rect}; its icon "
           f"0xfff0f0f0: {button}; the column's click closes the map in it: {close}; tooltip "
           f"6169 {strings.get(6169)!r}: {tooltip}")
+
+
+def _check_commander_map_line(check, game: Path, at) -> None:
+    """The line under the commander's map (docs/35, "The commander's variant"): the pen from
+    (374, 330), the clan's colour by the player's word towards the object's clan, its sign from
+    the screens' +0x20 at the clan record's +0x14, the 19-wide icon pieces, and the 183-wide
+    bar every kind of line ends in."""
+    pen = at(0x10073A1E, 16) == bytes.fromhex("c744241076010000c74424144a010000")
+    # 0x10039440 answers word == 0 and 0x10039460 word == 1, both from the clan record's
+    # SuperAI (+0x50) slot 8; the line takes red, else grey, else light blue.
+    words = (at(0x10039440, 20) == bytes.fromhex("8b5424048b41508b085250ff5120f7d81bc040c2")
+             and at(0x10039460, 21) == bytes.fromhex("8b5424048b41508b085250ff512048f7d81bc040c2"))
+    calls = (at(0x10073A3F, 5) == bytes.fromhex("e8fc59fcff")
+             and at(0x10073A54, 5) == bytes.fromhex("e8075afcff"))
+    colours = (at(0x10073A48, 5) == bytes.fromhex("bb0000ffff")
+               and at(0x10073A59, 12) == bytes.fromhex("f6d81bc083e08105ff8080ff"))
+    grey = (-1 & 0xFFFFFF81) + 0xFF8080FF & 0xFFFFFFFF
+    # The clan record's +0x14 (0x738 - 0x724) times 0x8c into the game's +0x2c's +0x20.
+    sign = at(0x10073A80, 24) == bytes.fromhex("6bed688b842f380700008b54243c69c08c0000008b4a2003")
+    # The icon piece: kind 4 variant 1, body_text, its +0x88 the square's side and the step.
+    piece = (at(0x1009A827, 4) == bytes.fromhex("6a016a04")
+             and at(0x1009A840, 6) == bytes.fromhex("8bb188000000")
+             and at(0x1009A8CB, 20) == bytes.fromhex("33c085d20f94c08d4400ff0fafc603c8890f5f5e"))
+    widths = (at(0x10073B1E, 2) == b"\x6a\x13" and at(0x10073E89, 2) == b"\x6a\x39"
+              and all(at(a, 5) == bytes.fromhex("68b7000000")
+                      for a in (0x10073BEA, 0x10073DCA, 0x10073F6A)))
+    # A building row's icon stands in the same piece (0x10096339 calls 0x1009a7a0), then the
+    # 5-wide separator_left_text (kind 3 variant 0).
+    row = at(0x10096339, 7) == bytes.fromhex("e8624400006a00")
+    cfg = game / "ui" / "compaund.cfg"
+    body = resources.load_cfg(cfg).get("ccres_body_text", {}) if cfg.exists() else {}
+    side = int(body.get("height", 0))
+    check("iron3d.dll: the line under the commander's map, its clan colour and its sign",
+          pen and words and calls and colours and grey == 0xFF808080 and sign and piece and widths
+          and row and side == 19,
+          f"pen (374, 330): {pen}; red where 0x10039440 (word 0), {grey:#x} where 0x10039460 "
+          f"(word 1), else 0xff8080ff: {words and calls and colours}; the sign at the clan "
+          f"record's +0x14 x 0x8c in the screens' +0x20: {sign}; icon pieces body_text's "
+          f"+0x88 square, {side}: {piece}, a building row's one: {row}; an empty box 19 or 57 "
+          f"wide and a 183-wide bar: {widths}")
+
+
+def _check_tiny_towers(check, game: Path, at) -> None:
+    """A *Tiny Tower* (docs/35, "Name and status"; docs/41, "The box"): a robot whose record's
+    +0x64, the device manager, answers its id 2 with 0 or less; id 2 answers the first battery
+    capacity below 0 (Control.dll:0x1002b519), else the sum when above 0, else fails. Counted
+    over every robot design and every placed robot."""
+    ctl_path = game / "Control.dll"
+    if not ctl_path.exists():
+        return
+    ctl = _image_at(ctl_path.read_bytes())
+    name = at(0x10075E0B, 72) == bytes.fromhex(
+        "25000000013d0000000175378b4e6485c974308b018d54241452ba02000000ff501084c0741dd9442414"
+        "d81da8500e10dfe0f6c4417a0ce8e971050068bc170000eb838b44244c8b")
+    icons = (at(0x10077342, 23) == bytes.fromhex("817c241c008000010f85860000008b442420ba02000000")
+             and at(0x1007739D, 10) == bytes.fromhex("68000070416800007041")      # 15 x 15
+             and at(0x100773AF, 10) == bytes.fromhex("680000fc42680000a242")      # (81, 126)
+             and at(0x100773C0, 17) == bytes.fromhex("55680000803f680000803f555553568bcf")
+             and struct.unpack("<f", at(0x100E50A8, 4))[0] == 0.0)
+    # Control.dll: the jump table's second case, the batteries (class 0x13) walked, a value 0
+    # below 0 answered at once (0x1002b98c), the sum only when above 0.
+    id2 = (ctl(0x1002B9EC, 4) == struct.pack("<I", 0x1002B4E9)
+           and ctl(0x1002B50D, 3) == bytes.fromhex("833813")
+           and ctl(0x1002B519, 17) == bytes.fromhex("d8158cb10310dfe0f6c4010f8562040000")
+           and ctl(0x1002B541, 13) == bytes.fromhex("d81d8cb10310dfe0f6c4410f85")
+           and ctl(0x1002B98C, 15) == bytes.fromhex("8b44241c5f5e5bd918b00183c40cc2"))
+
+    # The second icon is a 1 x 1 cut of ui_menu's texel (0, 0), which is clear; the first,
+    # the towers' 15 x 15 cell, holds art.
+    clear = inked = False
+    ui_lib = game / "ui" / "ui.lib"
+    if ui_lib.exists():
+        ui = NResArchive.open(ui_lib)
+        menu = next((e for e in ui if e.name.lower() == "ui_menu1.tex"), None)
+        if menu is not None:
+            tex = texm.decode(ui.read(menu))
+            clear = tex.rgba[3] == 0
+            inked = sum(tex.rgba[(y * tex.width + x) * 4 + 3] > 0
+                        for y in range(126, 141) for x in range(81, 96)) > 0
+    icons = icons and clear and inked
+
+    workshop = units.Workshop(game)
+    answers: Counter[str] = Counter()
+    roots: Counter[str] = Counter()
+    towers: dict[str, bool] = {}
+    for dat in sorted(game.glob("UNITS/**/*.dat")):
+        unit = objects.load_unit(dat)
+        if not unit.kind or unit.kind & 0x1000000 == 0:
+            continue
+        assembled = workshop.assemble(unit)
+        capacities = [d.values[0] for d in (assembled.devices if assembled else [])
+                      if d.type_id == control.POWER_STORE_TYPE]
+        negative = [c for c in capacities if c < 0]
+        answer = "below" if negative else ("above" if sum(capacities) > 0 else "fails")
+        answers[answer] += 1
+        if negative:
+            root = unit.components[0].ref.member.lower()
+            roots[root] += 1
+            walking = workshop.chassis(root)
+            towers[dat.name.lower()] = (unit.kind == 0x1008000 and walking is not None
+                                        and walking.locomotion == profiles.CHASSIS_TYPE.get(2))
+    placed: Counter[str] = Counter()
+    for d in gamedir.missions(game):
+        for o in mission.load(d / "data.tma").objects:
+            if o.kind != mission.KIND_UNIT:
+                continue
+            leaf = o.path.replace("\\", "/").split("/")[-1].lower()
+            prop = o.properties.get("Type")
+            kind = int(prop.value) if prop else 0
+            if kind & 0x1000000:
+                placed["tiny" if leaf in towers else "robot"] += 1
+    check("Control.dll: a Tiny Tower answers the device manager's id 2 with a negative battery",
+          name and icons and id2 and answers == Counter({"above": 355, "below": 17, "fails": 2})
+          and roots == Counter({"r_b_06": 17}) and all(towers.values())
+          and placed == Counter({"robot": 239, "tiny": 28}),
+          f"0x10075e17 names a robot answering id 2 (edx 2, slot 4) at 0 or less 6076: {name}; "
+          f"0x10077342 gives a walking warrior so the towers' cell and a 1x1 clear second: "
+          f"{icons}; id 2 (0x1002b4e9) answers the first capacity below 0: {id2}. Of the "
+          f"{sum(answers.values())} robot designs, {dict(answers)}, the below all on "
+          f"{dict(roots)} and all walking warriors; of the {sum(placed.values())} placed "
+          f"robots {placed['tiny']} are Tiny Towers")
 
 
 #: tut4_pl.trf's starting categories: out of the tree, granted, open.

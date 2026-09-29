@@ -14,6 +14,7 @@ use parkan_sim::damage::Life;
 use super::{Cockpit, Ink, argb};
 use crate::hud::{Blend, Layer, Piece, Pin};
 use crate::play::{Play, ROBOT_HERO};
+use crate::robot::Designation;
 
 /// The two panels: the driven unit's target, and the driven unit itself.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -29,9 +30,11 @@ pub const RANGE_COLOUR: u32 = 0xff00_ff00;
 /// The life arc's tint and the battery arc's.
 pub const LIFE_TINT: u32 = 0xff19_ffaf;
 pub const ENERGY_TINT: u32 = 0xffff_b450;
-/// Strings: "Human", "Animal", "m", "no order", the order statuses, and the class words.
+/// Strings: "Human", "Animal", "Tiny Tower", "m", "no order", the order statuses, and the class
+/// words.
 pub const STRING_HUMAN: u32 = 6230;
 pub const STRING_ANIMAL: u32 = 6253;
+pub const STRING_TINY_TOWER: u32 = 6076;
 pub const STRING_METRES: u32 = 6178;
 pub const STRING_NO_ORDER: u32 = 6180;
 pub const STRING_TRANSPORT: u32 = 6200;
@@ -116,16 +119,14 @@ pub struct Panels {
     last_repair: Option<(Option<usize>, bool)>,
 }
 
-/// A unit's name (`0x10075d50`, `0x10076270`): "Human" for a hero, "Animal", or its size,
-/// chassis and class letters, its place among its clan's named units, and its class word.
-///
-/// STAND-IN: docs/35-hud.md#name-and-status--read-and-seen -- which caller hands the name its
-/// class word is not read: each class letter takes its own; and a robot whose record answers
-/// its query 2 with 0 or less, a *"Tiny Tower"*, is not told apart.
+/// A unit's name, the unit record's slot 1 (`0x10075d50`, `0x10076270`): "Human" for a hero,
+/// "Animal", "Tiny Tower" for a robot whose device manager answers its id 2 with 0 or less, or
+/// its size, chassis and class letters, its place among its clan's named units, and its class
+/// word. The record's bind hands it the class word `0x10076490` gives by Type (`0x10074e88`,
+/// `0x10074f2b`), so each class letter takes its own.
 pub fn name(
     type_word: u32,
-    size_class: u8,
-    chassis_type: u8,
+    designation: Designation,
     number: usize,
     strings: &BTreeMap<u32, String>,
 ) -> String {
@@ -136,6 +137,10 @@ pub fn name(
     if type_word & TYPE_ANIMAL != 0 {
         return string(STRING_ANIMAL);
     }
+    if designation.tiny_tower(type_word) {
+        return string(STRING_TINY_TOWER);
+    }
+    let Designation { size_class, chassis_type, .. } = designation;
     let size = match size_class {
         1 => 'T',
         2 => 'S',
@@ -196,31 +201,36 @@ pub fn life_share<'a>(lives: impl Iterator<Item = &'a Life>) -> f32 {
 }
 
 impl Panels {
-    /// Every unit of `play` named, each clan counting its own in file order.
+    /// Every unit of `play` named, each clan counting its own in file order. The name raises
+    /// its clan's count for every unit it names, whichever string it gives: the hero's "Human",
+    /// an animal's "Animal" and a *Tiny Tower*'s too (`0x10075eb2`). So the player's first bot
+    /// after the hero is its clan's second: *seen*, Mission 03's builder is **SWB-2** and
+    /// *Outflanking Maneuver*'s wingman **SWW-2** (docs/35, "Name and status").
     pub fn new(play: &Play, strings: &BTreeMap<u32, String>) -> Panels {
-        let mut counts: BTreeMap<Option<i64>, usize> = BTreeMap::new();
-        let names = play
+        // The units in the mission's order, the hero among them at its own place.
+        let mut order: Vec<(usize, Option<usize>)> = play
             .units
             .iter()
-            .map(|u| {
-                if u.kind != KIND_UNIT {
-                    return String::new();
-                }
-                let d = u.designation;
-                let numbered = u.type_word != ROBOT_HERO && u.type_word & TYPE_ANIMAL == 0;
-                let number = if numbered {
-                    let c = counts.entry(u.clan).or_default();
-                    *c += 1;
-                    *c
-                } else {
-                    0
-                };
-                name(u.type_word, d.size_class, d.chassis_type, number, strings)
-            })
+            .enumerate()
+            .filter(|(_, u)| u.kind == KIND_UNIT)
+            .map(|(t, _)| (play.battle.objects.get(t).copied().unwrap_or(usize::MAX), Some(t)))
             .collect();
+        order.push((play.hero.object, None));
+        order.sort_by_key(|&(object, _)| object);
+        let mut counts: BTreeMap<Option<i64>, usize> = BTreeMap::new();
+        let mut names = vec![String::new(); play.units.len()];
+        for (_, t) in order {
+            let clan = t.map_or(Some(play.player_clan), |t| play.units[t].named_clan);
+            let count = counts.entry(clan).or_default();
+            *count += 1;
+            if let Some(t) = t {
+                let u = &play.units[t];
+                names[t] = name(u.type_word, u.designation, *count, strings);
+            }
+        }
         Panels {
             names,
-            hero_name: name(ROBOT_HERO, 0, 0, 0, strings),
+            hero_name: name(ROBOT_HERO, Designation::default(), 0, strings),
             frame_clock_ms: 0.0,
             last_voices_ms: [None; 2],
             last_repair: None,
@@ -566,19 +576,46 @@ mod tests {
     use super::*;
 
     fn strings() -> BTreeMap<u32, String> {
-        [(STRING_HUMAN, "Human"), (STRING_WARRIOR, "Warrior"), (STRING_ANIMAL, "Animal")]
-            .into_iter()
-            .map(|(k, v)| (k, v.to_owned()))
-            .collect()
+        [
+            (STRING_HUMAN, "Human"),
+            (STRING_WARRIOR, "Warrior"),
+            (STRING_ANIMAL, "Animal"),
+            (STRING_TINY_TOWER, "Tiny Tower"),
+        ]
+        .into_iter()
+        .map(|(k, v)| (k, v.to_owned()))
+        .collect()
     }
 
     #[test]
     fn a_unit_is_named_by_its_size_chassis_and_class_and_its_place_in_its_clan() {
         let s = strings();
-        assert_eq!(name(TYPE_WARRIOR, 1, 1, 2, &s), "TFW-2 Warrior");
-        assert_eq!(name(TYPE_WARRIOR, 2, 2, 1, &s), "SSW-1 Warrior");
-        assert_eq!(name(TYPE_WARRIOR, 3, 1, 1, &s), "MFW-1 Warrior");
-        assert_eq!(name(ROBOT_HERO, 2, 2, 0, &s), "Human");
+        let d = |size_class, chassis_type| Designation { size_class, chassis_type, ..Designation::default() };
+        assert_eq!(name(TYPE_WARRIOR, d(1, 1), 2, &s), "TFW-2 Warrior");
+        assert_eq!(name(TYPE_WARRIOR, d(2, 2), 1, &s), "SSW-1 Warrior");
+        assert_eq!(name(TYPE_WARRIOR, d(3, 1), 1, &s), "MFW-1 Warrior");
+        assert_eq!(name(ROBOT_HERO, d(2, 2), 0, &s), "Human");
+    }
+
+    #[test]
+    fn a_robot_with_a_battery_of_negative_capacity_is_a_tiny_tower() {
+        // `0x10075e17`: the device manager's id 2 answers the first capacity below 0, which
+        // only the Small Tower chassis R_B_06's unslotted battery, -1, has.
+        let s = strings();
+        let tower = Designation {
+            size_class: 4,
+            chassis_type: 2,
+            battery: true,
+            negative_battery: true,
+            ..Designation::default()
+        };
+        assert_eq!(name(TYPE_WARRIOR, tower, 10, &s), "Tiny Tower");
+        // The hero and an animal are named before the query is asked.
+        assert_eq!(name(TYPE_ANIMAL, tower, 1, &s), "Animal");
+        assert_eq!(name(ROBOT_HERO, tower, 1, &s), "Human");
+        // No battery at all fails the query: the dummies read "SSW-1 Warrior" (docs/35).
+        let dummy = Designation { size_class: 2, chassis_type: 2, ..Designation::default() };
+        assert_eq!(name(TYPE_WARRIOR, dummy, 1, &s), "SSW-1 Warrior");
     }
 
     #[test]
