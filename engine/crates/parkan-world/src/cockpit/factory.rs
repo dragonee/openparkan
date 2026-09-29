@@ -41,6 +41,17 @@ pub const BRAIN: [f32; 4] = [324.0, 126.0, 339.0, 141.0];
 pub const MINDS_AT: [f32; 2] = [344.0, 129.0];
 /// The message box in mode 5 (docs/36, "The screens' draw in mode 5").
 pub const MESSAGES_AT: [f32; 3] = [374.0, 352.0, 266.0];
+/// The panel's tooltips (docs/36, "The icons in the box" and "The bottom row").
+pub const STRING_RECENT_PROJECTS: u32 = 3068;
+pub const STRING_CONSTRUCTED_BOT: u32 = 3069;
+pub const STRING_FREE_BOTS: u32 = 6248;
+pub const STRING_ORE_REQUIRED: u32 = 6249;
+pub const STRING_AVAILABLE_CPUS: u32 = 3067;
+pub const STRING_CONSTRUCTOR: u32 = 1511;
+pub const STRING_START_BATCH: u32 = 6238;
+pub const STRING_STOP_BATCH: u32 = 6239;
+pub const STRING_START_PRODUCTION: u32 = 1553;
+pub const STRING_STOP_PRODUCTION: u32 = 3070;
 /// A displayed resource value steps a point toward its target every 50 ms, and a zero
 /// blinks every 0.5 s (docs/23, "What the HUD shows").
 pub const STEP_MS: f64 = 50.0;
@@ -306,19 +317,26 @@ pub fn panel(
             ink.painter.piece(p, rect, argb(colour));
         }
     };
+    // Each piece under the cursor hands the tooltip manager its text (`+0x8f0`–`+0x914`, made
+    // at `0x10096c5e`–`0x10096fce`, handed at `0x1009791e`–`0x10097fb8`).
+    let (cursor, tip) = (cockpit.commander.cursor, &cockpit.tip);
     for i in 0..f.projects.len() {
         let x = RECENT_X + RECENT_STEP * i as f32;
+        tip.hand([x, 122.0, x + 23.0, 143.0], cursor, STRING_RECENT_PROJECTS);
         put(ink, "short_button_frame_off", [x, 122.0, x + 23.0, 143.0], WHITE);
         let colour = if f.selected == Some(i) { WHITE } else { ICON_GREEN };
         put(ink, "project_icon", [x + 2.0, 124.0, x + 21.0, 141.0], colour);
     }
     if f.build.is_some() {
+        tip.hand(ACTIVE, cursor, STRING_CONSTRUCTED_BOT);
         put(ink, "long_button_frame_off", ACTIVE, WHITE);
         let colour = if f.selected.is_none() { WHITE } else { ICON_GREEN };
         put(ink, "active_project", [ACTIVE[0] + 2.0, 124.0, ACTIVE[2] - 2.0, 141.0], colour);
     }
     let free_icon = if f.free_bots > 0 { "free_bots_icon" } else { "no_free_bots_icon" };
     put(ink, free_icon, FREE_BOTS, ICON_GREEN);
+    tip.hand(FREE_BOTS, cursor, if f.free_bots > 0 { STRING_FREE_BOTS } else { STRING_ORE_REQUIRED });
+    tip.hand(BRAIN, cursor, STRING_AVAILABLE_CPUS);
     let minds = play.free_minds(play.player_clan);
     if minds > 0 || blink_on {
         put(ink, "brain_icon", BRAIN, if minds == 0 { BRAIN_RED } else { ICON_GREEN });
@@ -330,6 +348,7 @@ pub fn panel(
     put(ink, "ccres_ending_stub", [51.0, y, 56.0, y + ROW_HEIGHT], WHITE);
     put(ink, "ccres_long_button_normal", [CONSTRUCTOR[0], y, CONSTRUCTOR[2], y + ROW_HEIGHT], WHITE);
     put(ink, "constructor_icon", [66.0, y + 2.0, 96.0, y + 17.0], ICON_VARIANTS[1]);
+    tip.hand(CONSTRUCTOR, cursor, STRING_CONSTRUCTOR);
     put(ink, "ccres_ray_emitter_off", [106.0, y, 116.0, y + ROW_HEIGHT], WHITE);
     put(ink, "ccres_ray_body", [BAR[0], y, BAR[1], y + ROW_HEIGHT], WHITE);
     if f.build.is_some() {
@@ -346,6 +365,13 @@ pub fn panel(
     let (batch_icon, build_icon) =
         if idle { ("batch_build_icon", "build_icon") } else { ("batch_stop_build_icon", "stop_build_icon") };
     let (batch_on, build_on) = if idle { (startable, startable) } else { (f.batch, !f.batch) };
+    let (batch_tip, build_tip) = if idle {
+        (STRING_START_BATCH, STRING_START_PRODUCTION)
+    } else {
+        (STRING_STOP_BATCH, STRING_STOP_PRODUCTION)
+    };
+    tip.hand(BATCH, cursor, batch_tip);
+    tip.hand(BUILD, cursor, build_tip);
     for (rect, icon, on) in [(BATCH, batch_icon, batch_on), (BUILD, build_icon, build_on)] {
         let variant = usize::from(on);
         let frame = if on { "ccres_long_button_normal" } else { "ccres_long_button_off" };

@@ -7,6 +7,7 @@ pub mod commander;
 pub mod designer;
 pub mod escape;
 pub mod factory;
+pub mod game_menu;
 pub mod map;
 pub mod markers;
 pub mod messages;
@@ -14,6 +15,7 @@ pub mod objectives;
 pub mod panels;
 pub mod radar;
 pub mod research;
+pub mod tooltip;
 pub mod weapons;
 pub mod wingmen;
 
@@ -115,6 +117,12 @@ pub struct Cockpit {
     pub commander: commander::Panel,
     /// Each part's code in the player clan's research tree, by lower-case record name.
     pub gun_codes: BTreeMap<String, String>,
+    /// The tooltip manager (`0x1009bbc0`).
+    pub tip: tooltip::Tip,
+    /// Whether the system's cursor is used, the display's slot 12: `Iron_3D.ini`'s
+    /// `[CS] FORCE_SOFTWARE_CURSOR` read as 0, on a device that renders in a window (docs/42,
+    /// "The cursor shows a state").
+    pub system_cursor: bool,
 }
 
 /// Each part's code in the player clan's research tree, by lower-case part name: `IResearch`
@@ -157,6 +165,8 @@ impl Cockpit {
             designer: designer::Screen::default(),
             commander: commander::Panel::default(),
             gun_codes: gun_codes(game, play),
+            tip: tooltip::Tip::default(),
+            system_cursor: !crate::settings::software_cursor(game),
             map: map::SatelliteMap::new(
                 crate::settings::value(game, "CS", "MAP_ALPHA").and_then(|v| v.parse().ok()),
             ),
@@ -167,15 +177,40 @@ impl Cockpit {
         self.strings.get(&id).map_or("", String::as_str)
     }
 
+    /// The cursor on the layout pinned by `pin`, while it is over the window.
+    pub fn cursor_at(&self, space: Space, pin: Pin) -> Option<[f32; 2]> {
+        self.commander.cursor.map(|c| space.layout(space.pixel(c, Pin::TOP_LEFT), pin))
+    }
+
+    /// The tooltip for this frame, drawn in `font`, `TOOL_FONT`, at `clock_ms` of real time:
+    /// the timer runs after the interface pass unless the objectives screen is up
+    /// (`0x10060c7e`), and gives the text last handed once the cursor has rested
+    /// ([`tooltip::Tip::tick`]). Its box in [`crate::hud::Layer::Tip`], and its text.
+    pub fn tooltip(&mut self, space: Space, font: &GameFont, clock_ms: f64) -> (Vec<Batch>, Vec<TextRun>) {
+        let none = (Vec::new(), Vec::new());
+        if self.objectives.up {
+            return none;
+        }
+        let Some(cursor) = self.commander.cursor else { return none };
+        let Some(string) = self.tip.tick(space.pixel(cursor, Pin::TOP_LEFT), clock_ms) else { return none };
+        let text = self.string(string).to_owned();
+        let below = if self.system_cursor { tooltip::BELOW_SYSTEM_CURSOR } else { tooltip::BELOW };
+        let (batches, run) = tooltip::draw(space, cursor, &text, font, below);
+        (batches, vec![run])
+    }
+
     /// What the screens keep current every frame before they draw (`0x1008d5f0`): in command
     /// mode the column's update and the units the unit box shows rated.
     pub fn update(&mut self, play: &mut Play, now_ms: f64) {
         let command = play.mode().commands();
-        // Entering command mode turns the panel to page 0 (`0x10063ca0`).
-        if command && !self.commander.entered {
-            self.commander.page = 0;
+        // Entering command mode turns the panel to page 0 (`0x10063ca0`). The game menu over a
+        // command view leaves its page as it was (`0x10064650`, `0x10064730`).
+        if play.mode() != crate::play::Mode::GameMenu {
+            if command && !self.commander.entered {
+                self.commander.page = 0;
+            }
+            self.commander.entered = command;
         }
-        self.commander.entered = command;
         if command {
             self.commander.update(play, now_ms);
             let shown = play.selected_units();
@@ -204,8 +239,21 @@ impl Cockpit {
         view_proj: Mat4,
     ) -> Drawn {
         let now_ms = play.hero.time_ms;
+        self.tip.clear();
         let mut ink =
             Ink { painter: Painter::new(space), text: Vec::new(), font, menu_runs: Vec::new(), menu };
+        // The game menu, while it is up, is drawn and nothing else (`0x1008d211`), with the
+        // cursor shown: `ARROW`, the pick answering nothing while the menu is up (`0x1008dafb`).
+        if play.mode() == crate::play::Mode::GameMenu {
+            game_menu::draw(self, &mut ink, play);
+            commander::cursor(self, &mut ink, crate::pick::ARROW, now_ms);
+            return Drawn {
+                batches: ink.painter.batches,
+                text: ink.text,
+                menu_text: ink.menu_runs,
+                ..Drawn::default()
+            };
+        }
         if objectives::draw(self, &mut ink, play, now_ms) {
             return Drawn { batches: ink.painter.batches, menu_text: ink.menu_runs, ..Drawn::default() };
         }

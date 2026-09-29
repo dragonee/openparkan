@@ -71,6 +71,19 @@ pub const COLUMN: [Item; 16] = [
     Item::Button { y: 428.0, icon: "objpanel_icon_system", tooltip: 1302, control: Control::GameMenu },
 ];
 
+/// The page Alt and a letter turn to in a command view (`0x10071710`, table `0x10071a08`):
+/// W battle units, C transports, B builders, R the research centre, P the factory.
+pub fn alt_page(letter: char) -> Option<u8> {
+    match letter.to_ascii_uppercase() {
+        'W' => Some(1),
+        'C' => Some(2),
+        'B' => Some(3),
+        'R' => Some(4),
+        'P' => Some(5),
+        _ => None,
+    }
+}
+
 /// Each page's header title (`0x10083a20`, table `0x10083c00`), and 6205 for any other.
 pub fn title(page: u8) -> u32 {
     match page {
@@ -122,6 +135,13 @@ pub const STRATEGIC_BUTTON: [f32; 2] = [138.0, 88.0];
 /// The `Type` whose unit box shows Strategic control (`0x10085b5e`).
 pub const HQ_TYPE: u32 = 0x0101_0000;
 pub const EXPLODE_BUTTON: [f32; 4] = [324.0, 88.0, 356.0, 109.0];
+/// The unit box's buttons' tooltips (docs/41, "The box"): 1502 *Manual*, 1519 *Gunner*, 1518
+/// *Automatic*; 1517 *Strategic control*, 6244 *Explode!*. A bunker's row carries the same
+/// 1517, and a bunker's or a tower's 1502.
+pub const DRIVE_TOOLTIPS: [u32; 3] = [1502, 1519, 1518];
+pub const STRING_MANUAL: u32 = 1502;
+pub const STRING_STRATEGIC_CONTROL: u32 = 1517;
+pub const STRING_EXPLODE: u32 = 6244;
 /// The rows: 20 apart from (51, 118) under the unit box, from (51, 171) under the factory
 /// panel, from (51, 20) on the other building pages.
 pub const ROW_STEP: f32 = 20.0;
@@ -263,6 +283,14 @@ impl Panel {
         }
     }
 
+    /// Turn to `page` with the column open at once, whatever it showed (`0x10084d80` with the
+    /// page, then `0x10083c20`: the step count 16 and nothing sliding): Alt and a letter.
+    pub fn open_page(&mut self, play: &mut Play, page: u8, now_ms: f64) {
+        self.turn(play, page, now_ms);
+        self.steps = SLIDE_STEPS;
+        self.sliding = 0;
+    }
+
     /// The order menu opens again for the selection (`0x1007a8e0`, `0x1007aaa0`).
     pub fn rebuild(&mut self, play: &mut Play, now_ms: f64) {
         self.menu = play.hq_rows();
@@ -278,6 +306,7 @@ impl Panel {
             let Item::Button { control, .. } = *item else { continue };
             self.enabled[i] = match control {
                 Control::Hero | Control::Map | Control::GameMenu => true,
+                // Only in a network game, the game's `+0xe4` (docs/41): never in single play.
                 Control::Chat => false,
                 Control::Page(p @ 1..=3) => units(page_units(p).unwrap_or(0)),
                 Control::Page(4) => buildings(RESEARCH_CENTRE),
@@ -369,10 +398,14 @@ impl Panel {
                     Control::Page(p) if p == self.page => self.page = 0,
                     Control::Page(p) => self.turn(play, p, now_ms),
                     Control::Map => map.toggle(),
-                    // STAND-IN: docs/41-commander.md#what-a-click-on-the-column-does -- the chat
-                    // overlay and the game menu's screen (mode 7) are not built: a click on
-                    // either is taken and does nothing.
-                    Control::Chat | Control::GameMenu => {}
+                    // Mode 7 pushed (`0x10084674`, docs/39, "The game menu").
+                    Control::GameMenu => {
+                        play.game_menu();
+                    }
+                    // Enabled only in a network game (the game's `+0xe4`), which the engine
+                    // does not play, so never clicked: it would show or hide the game's `+0x30`
+                    // chat overlay (docs/41).
+                    Control::Chat => {}
                 }
                 return Click::Taken;
             }
@@ -610,9 +643,14 @@ fn band_and_cursor(cockpit: &Cockpit, ink: &mut Ink, now_ms: f64) {
 /// wherever the cursor is shown (`0x10060c95`), and the pick answers kind 0 in view state 1
 /// and while the designer is up (`0x1008daa4`–`0x1008dae5`), docs/36, "The cursor in mode 5".
 ///
-/// STAND-IN: docs/42-selection.md#the-cursor-shows-a-state--read-and-measured -- whether the
-/// display's slot 12 answers, which picks the system's cursor, is not read: the software
-/// cursor is drawn, the system's hidden.
+/// The display's slot 12 answers `Iron_3D.ini`'s `[CS] FORCE_SOFTWARE_CURSOR` read as 0 on a
+/// device that renders in a window ([`Cockpit::system_cursor`], docs/40, "What command mode
+/// draws"); the install's own file sets 1, and the game draws this cursor.
+///
+/// STAND-IN: docs/40-command-mode.md#what-command-mode-draws--read -- with the setting 0 the
+/// game shows the system's cursor instead, each state's `HARDWARE_CURSOR` `.ani` through
+/// `SetCursor`; that is not built: the software cursor is drawn whatever the setting, and the
+/// system's hidden.
 pub(super) fn cursor(cockpit: &Cockpit, ink: &mut Ink, state: u8, now_ms: f64) {
     let (Some(at), Some((offset, hot)), Some(&page)) =
         (cockpit.commander.cursor, crate::pick::cursor_object(state), cockpit.pages.get("new_ui1"))
@@ -665,7 +703,10 @@ fn column(cockpit: &Cockpit, ink: &mut Ink, now_ms: f64) {
     for (i, item) in COLUMN.iter().enumerate().take(usize::from(panel.steps)) {
         match *item {
             Item::Separator { y } => put(cockpit, ink, "objpanel_separator", [0.0, y, 46.0, y + 24.0], WHITE),
-            Item::Button { y, icon, .. } => {
+            Item::Button { y, icon, tooltip, .. } => {
+                // Under the cursor, enabled or not, it hands the tooltip manager its text
+                // (`0x1009c3a0`).
+                cockpit.tip.hand(button_rect(y), panel.cursor, tooltip);
                 let mut state = if !panel.enabled[i] {
                     0
                 } else if panel.on[i] {
@@ -904,13 +945,15 @@ fn unit_box(cockpit: &mut Cockpit, ink: &mut Ink, play: &Play, t: usize) {
     // and Explode!.
     let boardable = play.can_take(t);
     let lit = if boardable { WHITE } else { GREY };
-    for (at, name) in DRIVE_BUTTONS.iter().zip([
-        "buildscreen_hq_icon",
-        "botscreen_autogunner_icon",
-        "botscreen_autodriver_icon",
-    ]) {
+    let cursor = cockpit.commander.cursor;
+    for ((at, name), tip) in DRIVE_BUTTONS
+        .iter()
+        .zip(["buildscreen_hq_icon", "botscreen_autogunner_icon", "botscreen_autodriver_icon"])
+        .zip(DRIVE_TOOLTIPS)
+    {
         put(cockpit, ink, "short_button_frame_off", [at[0], at[1], at[0] + 21.0, at[1] + 21.0], WHITE);
         put(cockpit, ink, name, [at[0] + 3.0, at[1] + 3.0, at[0] + 18.0, at[1] + 18.0], lit);
+        cockpit.tip.hand(button_hit(*at), cursor, tip);
     }
     // Strategic control, for a unit of the HQ type, lit when its turret makes it an HQ
     // (`0x10085b5e`).
@@ -925,6 +968,7 @@ fn unit_box(cockpit: &mut Cockpit, ink: &mut Ink, play: &Play, t: usize) {
             [at[0] + 3.0, at[1] + 3.0, at[0] + 18.0, at[1] + 18.0],
             lit,
         );
+        cockpit.tip.hand(button_hit(at), cursor, STRING_STRATEGIC_CONTROL);
     }
     // Explode!, `_on` with its icon grey while one is pending.
     let pending = play.explode_pending(t);
@@ -933,6 +977,13 @@ fn unit_box(cockpit: &mut Cockpit, ink: &mut Ink, play: &Play, t: usize) {
     put(cockpit, ink, frame, [ex0, ey0, ex1, ey1], WHITE);
     let lit = if pending { GREY } else { WHITE };
     put(cockpit, ink, "self_destruction_icon", [ex0 + 2.0, ey0 + 2.0, ex0 + 32.0, ey0 + 17.0], lit);
+    cockpit.tip.hand([ex0, ey0, ex0 + 34.0, ey0 + 19.0], cursor, STRING_EXPLODE);
+}
+
+/// A unit box button's icon rectangle grown by 2, which a click and the tooltip test hit
+/// (`0x1008470d`, `0x10085f8c`).
+fn button_hit([x, y]: [f32; 2]) -> [f32; 4] {
+    [x + 1.0, y + 1.0, x + 20.0, y + 20.0]
 }
 
 /// A row's bar over its unit's or building's life (`0x1009a380`, `0x1007e980`).
@@ -996,7 +1047,13 @@ fn building_rows(cockpit: &mut Cockpit, ink: &mut Ink, play: &Play, mask: u32, t
         put(cockpit, ink, "ccres_separator_left_text", [pen, y, pen + 5.0, y + ROW_HEIGHT], WHITE);
         pen += 5.0;
         let bunker = hq::within(type_word, BUNKERS);
+        let cursor = cockpit.commander.cursor;
         if bunker {
+            cockpit.tip.hand(
+                [pen, y, pen + BUILDING_BUTTON, y + ROW_HEIGHT],
+                cursor,
+                STRING_STRATEGIC_CONTROL,
+            );
             put(
                 cockpit,
                 ink,
@@ -1014,6 +1071,7 @@ fn building_rows(cockpit: &mut Cockpit, ink: &mut Ink, play: &Play, mask: u32, t
             pen += BUILDING_BUTTON;
         }
         if bunker || hq::within(type_word, TOWERS) {
+            cockpit.tip.hand([pen, y, pen + BUILDING_BUTTON, y + ROW_HEIGHT], cursor, STRING_MANUAL);
             put(
                 cockpit,
                 ink,
@@ -1048,6 +1106,13 @@ fn building_rows(cockpit: &mut Cockpit, ink: &mut Ink, play: &Play, mask: u32, t
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn alt_and_a_letter_name_the_five_pages_and_no_other() {
+        assert_eq!(['W', 'C', 'B', 'R', 'p'].map(alt_page), [Some(1), Some(2), Some(3), Some(4), Some(5)]);
+        assert_eq!(alt_page('D'), None, "Alt+D is the debug camera's");
+        assert_eq!(alt_page('Q'), None);
+    }
 
     #[test]
     fn a_units_icons_are_picked_by_its_type_and_its_chassis_type_and_tinted_by_its_size() {

@@ -236,6 +236,13 @@ impl Camera {
         }
     }
 
+    /// The edges it holds (`+0x94`–`+0x97`). While the band is up, cursor state 7, the update
+    /// leaves them as they are (`0x10037c52`), so the caller hands them back: a turn under way
+    /// when the drag became a band goes on, and none starts.
+    pub fn held_edges(&self) -> Edges {
+        self.edges
+    }
+
     /// One update at `now` seconds (`0x10037a50`): the rates from the edges, the zoom, the
     /// edges from the cursor, the velocities from the keys, then the move, the turn and the
     /// clamps. `top` is the highest landscape or building surface at a place, and `side`
@@ -575,6 +582,30 @@ mod tests {
         assert!(c.yaw > std::f32::consts::FRAC_PI_2 + 0.5, "{}", c.yaw);
         c.leave();
         assert_eq!(c.follows, None);
+    }
+
+    #[test]
+    fn under_the_band_the_edges_hold_what_they_held() {
+        let flat = |_: f32, _: f32| Some(50.0);
+        let run = |held: bool| {
+            let mut c = Camera::default();
+            c.enter(Vec3::new(1000.0, 800.0, 0.0));
+            let left = Edges { left: true, ..Edges::default() };
+            let mut t = 0.0;
+            for _ in 0..30 {
+                t += 1.0 / 60.0;
+                c.update(t, left, SIDE, flat);
+            }
+            // The cursor leaves the edge as the drag becomes a band (state 7).
+            for _ in 0..30 {
+                t += 1.0 / 60.0;
+                let edges = if held { c.held_edges() } else { Edges::default() };
+                c.update(t, edges, SIDE, flat);
+            }
+            c.yaw
+        };
+        let (band, free) = (run(true), run(false));
+        assert!(band > free + 0.3, "the band keeps the turn: {band} against {free}");
     }
 
     #[test]

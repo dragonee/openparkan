@@ -371,6 +371,8 @@ pub fn clear_briefing(renderer: &mut parkan_render::Renderer, device: &wgpu::Dev
 /// The font slots the cockpit's text is drawn in: `GAME_FONT`'s, and `MENU_FONT`'s over it.
 pub const HUD_TEXT_SLOT: usize = 2;
 pub const HUD_MENU_SLOT: usize = 3;
+/// The slot the tooltip's text draws in, `TOOL_FONT`, over its box (docs/37, "A tooltip").
+pub const HUD_TIP_SLOT: usize = parkan_render::TIP_TEXT_SLOT;
 
 /// The cockpit HUD (docs/35-hud.md): its state, and `GAME_FONT` and `MENU_FONT` to lay its text
 /// out in.
@@ -383,6 +385,10 @@ pub struct Hud {
     /// The textures the previews' models draw with, and what the previews show now.
     pub preview_store: Option<TextureStore>,
     pub preview_keys: Vec<parkan_world::cockpit::designer::PreviewKey>,
+    /// `TOOL_FONT`, the game's `+0x18`, which a tooltip is drawn in, and the real time in ms
+    /// the tooltip's timer reads, as the game's reads `timeGetTime`.
+    pub tool: parkan_world::text::GameFont,
+    pub clock_ms: f64,
 }
 
 /// The cockpit for `play` in `mission_dir`: the interface's pages and the mission's minimap
@@ -404,6 +410,7 @@ pub fn hud(
     renderer.set_ui_pages(device, queue, &pages.pages);
     renderer.set_font_slot(device, queue, HUD_TEXT_SLOT, GameFont::ui(game, "GAME_FONT")?);
     renderer.set_font_slot(device, queue, HUD_MENU_SLOT, GameFont::ui(game, "MENU_FONT")?);
+    renderer.set_font_slot(device, queue, HUD_TIP_SLOT, GameFont::ui(game, "TOOL_FONT")?);
     let mut cockpit = parkan_world::cockpit::Cockpit::open(game, &pages, play)?;
     // The designer loads from the game's `units/` (docs/37, "The buttons") and saves to the
     // player's own folder, or with `--save-to-game` to `units/` as the game does.
@@ -420,6 +427,8 @@ pub fn hud(
         stretch: args.stretch_hud,
         preview_store: None,
         preview_keys: Vec::new(),
+        tool: GameFont::ui(game, "TOOL_FONT")?,
+        clock_ms: 0.0,
     })
 }
 
@@ -442,6 +451,7 @@ pub fn draw_hud(
         renderer.set_ui(device, queue, (width, height), &[]);
         renderer.set_text_slot(device, queue, HUD_TEXT_SLOT, &[]);
         renderer.set_text_slot(device, queue, HUD_MENU_SLOT, &[]);
+        renderer.set_text_slot(device, queue, HUD_TIP_SLOT, &[]);
         renderer.set_views(device, Vec::new());
         return (Vec::new(), Vec::new());
     }
@@ -450,10 +460,13 @@ pub fn draw_hud(
         ..parkan_world::hud::Space::new(width as f32, height as f32)
     };
     hud.cockpit.update(play, play.hero.time_ms);
-    let drawn = hud.cockpit.draw(play, space, &hud.font, &hud.menu, view_proj);
+    let mut drawn = hud.cockpit.draw(play, space, &hud.font, &hud.menu, view_proj);
+    let (tip, tip_text) = hud.cockpit.tooltip(space, &hud.tool, hud.clock_ms);
+    drawn.batches.extend(tip);
     renderer.set_ui(device, queue, (width, height), &drawn.batches);
     renderer.set_text_slot(device, queue, HUD_TEXT_SLOT, &drawn.text);
     renderer.set_text_slot(device, queue, HUD_MENU_SLOT, &drawn.menu_text);
+    renderer.set_text_slot(device, queue, HUD_TIP_SLOT, &tip_text);
     let views = drawn
         .views
         .iter()

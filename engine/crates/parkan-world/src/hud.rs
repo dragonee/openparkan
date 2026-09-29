@@ -254,6 +254,9 @@ pub enum Layer {
     UnderViews,
     /// Over the views, under the text.
     OverViews,
+    /// Over the HUD's text, under the tooltip's own text and the cursor: the tooltip's box,
+    /// which the game frame draws after the interface pass (docs/37, "A tooltip").
+    Tip,
     /// Over the text as well: the mouse cursor, which nothing is drawn on top of
     /// (docs/42, "The cursor shows a state").
     OverText,

@@ -7,7 +7,7 @@
 //!        [--screenshot OUT.png] [--size WxH] [--top-down] [--look X,Y,Z,TX,TY,TZ]
 //!        [--headless] [--ticks N] [--hold SCAN_W,SCAN_A] [--press N] [--release N] [--mouse DX,DY] [--trace] [--sway]
 //!        [--capture-idle] [--god-mode] [--stretch-hud] [--save-to-game] [--outcome won|lost] [--text "…"] [--face NAME,DISTANCE] [--at X,Y,YAW[,Z]] [--pod NAME] [--drive PATH] [--hq] [--take NAME] [--designer] [--design PART,…]
-//!        [--skip-briefing] [--briefing-at SECONDS] [--objectives] [--map]
+//!        [--skip-briefing] [--briefing-at SECONDS] [--objectives] [--map] [--game-menu]
 //! ```
 //!
 //! In the cockpit the hero's own input table drives it: W/S walk, A/D strafe,
@@ -59,7 +59,8 @@
 //!
 //! The objectives screen opens as the cockpit first shows and closes 7 s later; F12 opens and
 //! closes it, and Esc closes it. M opens the satellite map, and ] and [ make it more or less
-//! opaque. A `--screenshot` draws the cockpit with neither, unless `--objectives` or `--map`.
+//! opaque. A `--screenshot` draws the cockpit with neither, unless `--objectives` or `--map`;
+//! `--game-menu` draws the game menu with the cursor on *Resume game*.
 
 mod audio;
 mod camera;
@@ -142,6 +143,8 @@ struct Args {
     /// `--objectives`, `--map`: a screenshot with the objectives screen up, or the map open.
     objectives: bool,
     map: bool,
+    /// `--game-menu`: the game menu up, the cursor on *Resume game* (docs/39).
+    game_menu: bool,
     /// `--page N`: a screenshot in command mode with the commander panel on page N.
     page: Option<u8>,
     /// `--ghost X,Y`: a screenshot in command mode with the first builder placing a mine at X,Y.
@@ -204,6 +207,7 @@ fn args() -> Result<Args> {
         briefing_at: None,
         objectives: false,
         map: false,
+        game_menu: false,
         page: None,
         ghost: None,
         camera_yaw: None,
@@ -241,6 +245,7 @@ fn args() -> Result<Args> {
             "--skip-briefing" => out.skip_briefing = true,
             "--objectives" => out.objectives = true,
             "--map" => out.map = true,
+            "--game-menu" => out.game_menu = true,
             "--page" => out.page = Some(value()?.parse()?),
             "--camera-yaw" => out.camera_yaw = Some(value()?.parse()?),
             "--capture" => out.capture = true,
@@ -670,7 +675,7 @@ fn screenshot(loaded: &scene::Loaded, game: &Path, args: &Args, out: &Path) -> R
     if let Some(p) = play.as_mut() {
         scene::sync(&mut renderer, &gpu.device, &gpu.queue, p, &world.objects, view_proj, eye);
         if let Some(v) = &view {
-            let outside = briefing.is_some() || p.mode().shows_cursor() || p.outer_shows();
+            let outside = briefing.is_some() || p.view_mode().shows_cursor() || p.outer_shows();
             scene::place_own_view(&mut renderer, &gpu.queue, v, p, outside);
         }
         scene::panel_fonts(&mut renderer, &gpu.device, &gpu.queue, game);
@@ -685,6 +690,12 @@ fn screenshot(loaded: &scene::Loaded, game: &Path, args: &Args, out: &Path) -> R
                     hud.cockpit.objectives.open_at_start();
                 }
                 hud.cockpit.map.open = args.map;
+                if args.game_menu && p.game_menu() {
+                    let space = hud_space(width, height, args);
+                    let resume = space.pixel([300.0, 220.0], parkan_world::hud::Pin::CENTRE);
+                    hud.cockpit.commander.cursor =
+                        Some(space.layout(resume, parkan_world::hud::Pin::TOP_LEFT));
+                }
                 if let Some(page) = args.page {
                     hud.cockpit.update(p, p.hero.time_ms);
                     hud.cockpit.commander.turn(p, page, p.hero.time_ms);
@@ -836,10 +847,15 @@ struct App {
     cursor_in: bool,
     /// Cmd is down: the keys pressed now are a system shortcut's.
     shortcut: bool,
+    /// Alt is down: a letter with it comes as `WM_SYSKEYDOWN` (docs/40, "Input").
+    alt: bool,
     /// In command mode: when the left button went down and where, for a band, and whether the
     /// system's cursor is hidden for the software one.
     left_down: Option<(Instant, [f32; 2])>,
     cursor_hidden: bool,
+    /// The mode stack's front at the last frame: a move into a command view drops the press
+    /// held down (the transitions' clearing of `0x1010bf7c`–`0x1010bf80`, docs/40).
+    last_mode: Option<parkan_world::play::Mode>,
 }
 
 /// The mission's briefing, unless `--skip-briefing` or `--fly`; a play has its world paused
@@ -1046,8 +1062,9 @@ impl App {
             .strip_prefix("SCAN_W_")
             .and_then(|d| d.parse::<usize>().ok())
             .filter(|d| (1..=9).contains(d));
-        // Command mode's keys act on the way down and up (`0x10071cd0`, `0x10072740`).
-        if play.mode().commands()
+        // Command mode's keys act on the way down and up (`0x10071cd0`, `0x10072740`), under
+        // the game menu too, whose world stands still.
+        if play.view_mode().commands()
             && let Some(command) =
                 parkan_formats::controls::command_for(&self.bindings, scan, |m| self.scans.contains(m))
             && play.command_key(command, pressed)
@@ -1097,8 +1114,15 @@ impl App {
             if let Some(hud) = self.hud.as_mut() {
                 let now = play.hero.time_ms;
                 let screens = &mut hud.cockpit;
+                let menu = play.mode() == parkan_world::play::Mode::GameMenu;
                 match command.as_str() {
+                    // F3 opens the game menu, or closes it (`0x10072359`).
+                    CMD_GAME_MENU => {
+                        play.game_menu();
+                    }
                     CMD_PAGER => screens.messages.pager(),
+                    // No objectives screen while the game menu is up (`0x1007213b`).
+                    CMD_JAMES_MISSION_OBJ if menu => {}
                     CMD_JAMES_MISSION_OBJ => screens.objectives.toggle(),
                     CMD_JAMES_SATELLITE_MAP => screens.map.toggle(),
                     CMD_INC_MAP_ALPHA => screens.map.step_alpha(true, now),
@@ -1362,17 +1386,33 @@ impl App {
         if self.grabbed && self.play.as_ref().is_some_and(|p| p.mode().shows_cursor()) {
             self.grab(false);
         }
+        // Every transition into a command view clears the left button's held flag, its moved
+        // flag and its stamp (`0x10063cd6`, `0x10063e0d` and nine more, docs/40): a press made
+        // before it, the click that made it among them, grows no band.
+        let mode = self.play.as_ref().map(|p| p.mode());
+        if mode != self.last_mode {
+            if mode.is_some_and(|m| m.commands()) {
+                self.left_down = None;
+                if let Some(hud) = self.hud.as_mut() {
+                    hud.cockpit.commander.band = None;
+                }
+            }
+            self.last_mode = mode;
+        }
         // Command mode's camera runs each frame in real seconds, turned by the cursor at an
         // edge of the screen (docs/40, "The cursor at an edge turns and tilts it").
         if let (Some(play), Some(r)) = (self.play.as_mut(), self.running.as_ref()) {
             let space = hud_space(r.config.width, r.config.height, &self.args);
             let designer = self.hud.as_ref().is_some_and(|h| h.cockpit.designer.is_open());
-            let edges = match self.cursor_in && !designer {
-                true => parkan_world::command::Edges::of(
+            // Under the band, cursor state 7, the edges are not read again (`0x10037c52`).
+            let band = self.hud.as_ref().is_some_and(|h| h.cockpit.commander.band.is_some());
+            let edges = match (band, self.cursor_in && !designer) {
+                (true, _) => play.command.held_edges(),
+                (false, true) => parkan_world::command::Edges::of(
                     space.layout(self.cursor, parkan_world::hud::Pin::TOP_LEFT),
                     space.layout(self.cursor, parkan_world::hud::Pin::BOTTOM_RIGHT),
                 ),
-                false => parkan_world::command::Edges::default(),
+                (false, false) => parkan_world::command::Edges::default(),
             };
             play.command_frame(self.started.elapsed().as_secs_f64(), edges);
         }
@@ -1553,9 +1593,10 @@ impl App {
                     eye.position,
                 );
                 if let Some(v) = &self.view {
-                    let outside = briefing.is_some() || play.mode().shows_cursor() || play.outer_shows();
+                    let outside = briefing.is_some() || play.view_mode().shows_cursor() || play.outer_shows();
                     scene::place_own_view(&mut r.renderer, &r.gpu.queue, v, play, outside);
                     if let Some(hud) = self.hud.as_mut() {
+                        hud.clock_ms = self.started.elapsed().as_secs_f64() * 1000.0;
                         let (voices, sounds) = scene::draw_hud(
                             &mut r.renderer,
                             &r.gpu.device,
@@ -1645,6 +1686,7 @@ impl ApplicationHandler for App {
                 if !state.super_key() {
                     self.shortcut = false;
                 }
+                self.alt = state.alt_key();
             }
             WindowEvent::KeyboardInput { event, .. } => {
                 let PhysicalKey::Code(code) = event.physical_key else { return };
@@ -1675,6 +1717,26 @@ impl ApplicationHandler for App {
                 }
                 let outcome =
                     self.play.as_ref().and_then(|p| p.progression.as_ref()).and_then(|p| p.progress.outcome);
+                // Alt and a letter in a command view turn the commander's page and open the
+                // column at once (`WM_SYSKEYDOWN`, `0x10071710`); the key goes on to the bindings.
+                if self.alt
+                    && event.state == ElementState::Pressed
+                    && let (Some(play), Some(hud)) = (self.play.as_mut(), self.hud.as_mut())
+                    && play.mode().commands()
+                {
+                    let letter = match code {
+                        KeyCode::KeyW => Some('W'),
+                        KeyCode::KeyC => Some('C'),
+                        KeyCode::KeyB => Some('B'),
+                        KeyCode::KeyR => Some('R'),
+                        KeyCode::KeyP => Some('P'),
+                        _ => None,
+                    };
+                    if let Some(page) = letter.and_then(parkan_world::cockpit::commander::alt_page) {
+                        let now = play.hero.time_ms;
+                        hud.cockpit.commander.open_page(play, page, now);
+                    }
+                }
                 // `0x10070e75`: Esc in a briefing skips the rest of it.
                 if code == KeyCode::Escape && event.state == ElementState::Pressed && self.briefing.is_some()
                 {
@@ -1714,10 +1776,13 @@ impl ApplicationHandler for App {
                 // `0x10070db0`): an objectives screen, a placement, a message box, and in the
                 // commander's view an open map and a page other than 0 are put away first, one
                 // a press, and only then does 735 roll the mode back.
+                // With the game menu at the front the key-down handler passes over them all
+                // (the `0x10044190` tests), and 735 closes the menu.
                 if code == KeyCode::Escape
                     && event.state == ElementState::Pressed
                     && outcome.is_none()
                     && let (Some(play), Some(hud)) = (self.play.as_mut(), self.hud.as_mut())
+                    && play.mode() != parkan_world::play::Mode::GameMenu
                 {
                     use parkan_world::cockpit::escape::{Layer, Up, peel};
                     let cockpit = &mut hud.cockpit;
@@ -1756,6 +1821,14 @@ impl ApplicationHandler for App {
                     return;
                 }
                 if code == KeyCode::Escape && event.state == ElementState::Pressed {
+                    // On foot while the mission is played, the key-down handler opens the game
+                    // menu (748, `0x10070dea`), which shows the cursor.
+                    if outcome.is_none()
+                        && let Some(play) = self.play.as_mut()
+                    {
+                        play.game_menu();
+                        return;
+                    }
                     // `iron3d.dll:0x10070e2c`: once the outcome is recorded Esc leaves the mission.
                     //
                     // STAND-IN: docs/34-progression.md#after-the-outcome--read-and-measured -- the
@@ -1865,6 +1938,51 @@ impl ApplicationHandler for App {
                                     }
                                 }
                             }
+                        }
+                    }
+                    return;
+                }
+                // The game menu takes a left press on its buttons (its listener's slot 4,
+                // `0x10065d00`, `0x10065a40`): Resume game closes it, Quit game leaves the mission.
+                if let Some(play) = self.play.as_mut()
+                    && play.mode() == parkan_world::play::Mode::GameMenu
+                {
+                    use parkan_world::cockpit::game_menu::{self, Button};
+                    if pressed
+                        && button == MouseButton::Left
+                        && let Some(r) = self.running.as_ref()
+                    {
+                        let space = hud_space(r.config.width, r.config.height, &self.args);
+                        let at = space.layout(self.cursor, parkan_world::hud::Pin::CENTRE);
+                        match game_menu::click(play, at) {
+                            Some(Button::Resume) => {
+                                play.roll_back();
+                            }
+                            // STAND-IN: docs/34-progression.md#after-the-outcome--read-and-measured
+                            // -- the shell's menus are not built: exit code 1 closes the window.
+                            Some(Button::Quit) => event_loop.exit(),
+                            // STAND-IN: docs/39-boarding.md#the-game-menu--read -- the save page
+                            // (six slots and a typed name, `save/saveslots.cfg`) and the shell's
+                            // load-game screen exit code 3 opens are not built: outside the
+                            // training campaign, where both are enabled, the click is taken and
+                            // does nothing.
+                            Some(Button::Save | Button::Load) | None => {}
+                        }
+                    }
+                    // The right button's handler asks only the view state (`0x100716b0`), which
+                    // the menu over a command view leaves at 2: it undoes what is open there.
+                    if pressed
+                        && button == MouseButton::Right
+                        && play.view_mode().commands()
+                        && let Some(hud) = self.hud.as_mut()
+                    {
+                        let cockpit = &mut hud.cockpit;
+                        let undo = play.right_click(cockpit.commander.page, cockpit.map.open);
+                        if undo.page_zero {
+                            cockpit.commander.page = 0;
+                        }
+                        if undo.close_map {
+                            cockpit.map.toggle();
                         }
                     }
                     return;
@@ -1981,8 +2099,10 @@ fn main() -> Result<()> {
         cursor: [0.0; 2],
         cursor_in: false,
         shortcut: false,
+        alt: false,
         left_down: None,
         cursor_hidden: false,
+        last_mode: None,
         counts: [0.0; 2],
         mouse: args.mouse,
         trace: args.trace,

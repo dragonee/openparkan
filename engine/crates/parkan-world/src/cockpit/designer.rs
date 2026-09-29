@@ -1437,7 +1437,12 @@ fn draw_session(
             (if side == Side::Source { STRING_SOURCE } else { STRING_DESTINATION }, YELLOW)
         };
         ink.text(cockpit.string(title), [x0 + 10.0, 6.0], colour);
+        // A tab under the cursor arms its tooltip (`0x10047c10`); a button's the same
+        // (`0x10035a60`, `0x10035af9`), each on the square a click must land on.
+        let cursor = cockpit.cursor_at(space, Pin::CENTRE);
         for (i, t) in TABS.iter().enumerate() {
+            let [ix, iy] = [x0 + t.icon[0], t.icon[1]];
+            cockpit.tip.hand([ix, iy, ix + 24.0, iy + 24.0], cursor, t.tooltip);
             let enabled = s.enabled[i];
             let selected = s.tab == t.tab && enabled;
             let frame_cut = if selected { [27.0, 106.0, 26.0, 37.0] } else { [0.0, 106.0, 26.0, 37.0] };
@@ -1621,7 +1626,9 @@ fn draw_session(
     }
 
     // The buttons.
+    let cursor = cockpit.cursor_at(space, Pin::CENTRE);
     for b in &BUTTONS {
+        cockpit.tip.hand([b.icon[0], b.icon[1], b.icon[0] + 24.0, b.icon[1] + 24.0], cursor, b.tooltip);
         let enabled = s.drawn_enabled(b.button);
         let [bx0, by0, bx1, by1] = b.frame;
         let c = b.cuts[0];

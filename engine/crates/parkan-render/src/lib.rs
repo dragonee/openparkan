@@ -30,6 +30,9 @@ pub const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 /// The colour format of an offscreen capture.
 pub const CAPTURE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
 const CLEAR: wgpu::Color = wgpu::Color { r: 0.05, g: 0.06, b: 0.08, a: 1.0 };
+/// The text slot the tooltip's text draws in: its box, [`Layer::Tip`], goes between the slots
+/// below it and this one.
+pub const TIP_TEXT_SLOT: usize = 4;
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
@@ -713,8 +716,22 @@ impl Renderer {
             if let Some(text) = &self.text {
                 text.draw(&mut pass);
             }
-            for text in self.more_text.iter().flatten() {
-                text.draw(&mut pass);
+            // The tooltip's box goes over every slot's text below the tooltip's own slot, and
+            // its text over the box (docs/37, "A tooltip").
+            for (slot, text) in self.more_text.iter().enumerate() {
+                if slot == TIP_TEXT_SLOT
+                    && let Some(ui) = &self.ui
+                {
+                    ui.draw(&mut pass, Layer::Tip);
+                }
+                if let Some(text) = text {
+                    text.draw(&mut pass);
+                }
+            }
+            if self.more_text.len() <= TIP_TEXT_SLOT
+                && let Some(ui) = &self.ui
+            {
+                ui.draw(&mut pass, Layer::Tip);
             }
             // The mouse cursor last of all, over the text as well (docs/42, "The cursor
             // shows a state").

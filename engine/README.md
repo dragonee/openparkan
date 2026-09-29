@@ -435,11 +435,20 @@ the own panel's unit while aboard.
   its ramp and through its sliding door to the pod, which captures it 8.2 s after it steps on,
   and down the Small Bunker's sunk ramp, through its door, to the pod, which opens command
   mode 14.6 s after the ramp's top, as the recording takes 8.5 and 14.2 s.
+- The game menu, mode 7: F3, Esc on foot or the column's *Game menu* button open it, and F3,
+  Esc or *Resume game* close it. The world is paused under it and drawn from the view it
+  opened over, the screen dimmed to 40%, and only the menu is drawn: *Game Menu* over four
+  buttons, *Save game* and *Load game* grey in the training campaign. Alt+W, C, B, R and P turn
+  the commander's page. A widget carrying a tooltip under a cursor that has rested 250 ms
+  shows it in `TOOL_FONT` on pale yellow: the column's buttons, the unit box's, the rows'
+  *Strategic control* and *Manual*, the map's *Close*, the factory panel's and the designer's.
+  A hit on a bot driven at level 0 is gated as it lands. Once the hero is lost the world is
+  seen from a still camera 16 over where it fell.
 
 On Mission 03 the hero takes the Small Generator and the Small Bunker from their pods, the
 builder puts the Small Mine on the lode from command mode, the transport carries its ore, the
 Large Factory builds four *SSW-X* in batch, and they beat the patrol: the mission is won. Not
-yet: Explode!, tooltips, the chat and game menu buttons, and the designer's save and load.
+yet: the game menu's save page, and the shell behind *Load game* and *Quit game*.
 
 **M13.** Mission 04, *Teleport*: a mobile command centre, research, a small warbot's captures, and the Main Teleport.
 
@@ -545,7 +554,7 @@ it, one Enter takes the HQ and another opens its command view; the helicopter, s
 and capture, takes the Large Factory and the Research Center; the Large Battle Turret is
 researched free in 5 s; the Large Factory builds an L-2f with it in 60 s; routed to the HQ, the
 flyer is boarded and flown up onto the Teleport's plateau; and the hero takes the Teleport and
-goes through, 318 s in. Not yet: tooltips, the research box's clip, the maps' route lines and
+goes through, 318 s in. Not yet: the research box's clip, the maps' route lines and
 selected outline, the ground contact once a frame (the Small Bunker's sinking door still
 presses a hero standing at it down), and which of Mission 04's units holds no mind.
 
@@ -1360,10 +1369,9 @@ a row here. A row leaves this table when research closes it.
 | M14 | The builder's invulnerability (property 162) while it works, but against its building's kill | the builder is hurt as it always is; the sphere's kill passes it over | [32](../docs/32-builder.md#upgrading-a-building--read) |
 | M14 | How the point beside a building an upgrade walks to is drawn (`0x100338a0`) | a random one on the ring 20 out past the building's sphere, on walkable ground, as the attack draws its own | [32](../docs/32-builder.md#upgrading-a-building--read) |
 | M12 | A builder's beam's life, which the Build rows need intact | a live builder can build | [32](../docs/32-builder.md#building-a-building--read) |
-| M12 | The chat overlay and the game menu's screen (mode 7) | not built: their buttons are taken and do nothing | [41](../docs/41-commander.md#what-a-click-on-the-column-does) |
+| M12 | The game menu's save page, and the shell its *Load game* and *Quit game* hand the mission to | *Save game* and *Load game*, enabled outside the training campaign, are taken and do nothing; *Quit game* closes the window | [39](../docs/39-boarding.md#the-game-menu--read) |
 | M12 | Whether `getTimer`, which times *Explode!*'s 0.6 s, runs on a clock or on `timeGetTime` | game time | [41](../docs/41-commander.md#explode--read) |
-| M12 | Whether the display's slot 12 answers, so the system's cursor is used | the software cursor's four phases from `new_ui1` are drawn and the system's hidden | [42](../docs/42-selection.md#the-cursor-shows-a-state--read-and-measured) |
-| M12 | When a hit on a bot driven at level 0 is gated: the game's gate takes it at once and leaves the attack on the stack for the letting-go | the hit waits for the behaviour's first takt after the letting-go, and is gated then | [40](../docs/40-command-mode.md#what-the-ai-does-at-levels-1-and-2--read) |
+| M12 | The system's cursor, each state's `HARDWARE_CURSOR` `.ani`, which the display's slot 12 picks when `Iron_3D.ini`'s `FORCE_SOFTWARE_CURSOR` is 0 on a device that renders in a window (the install's file sets 1) | the software cursor's four phases from `new_ui1` are drawn whatever the setting, and the system's hidden | [40](../docs/40-command-mode.md#the-displays-slot-12-the-system-cursor--read-and-measured) |
 | M6 | What a node naming a variable, operand, formula or handler that does not exist reads | the node does nothing; a switch to no handler ends the run; a run stops after a million nodes | [15](../docs/15-behaviour.md#how-a-handler-runs) |
 | M12 | Function 15's answer: whether the unit takes the order (1) or refuses it (0) | an id some unit or building answers gives 1, and the unit is handed the order after the handler's run | [34](../docs/34-progression.md#what-the-scripts-ask--read-and-measured-1) |
 | M12 | A building's contour (property `0x203`), whose vertices a patrol of the building walks | eight points on the building's sphere, pushed out by 30 | [31](../docs/31-packages.md#the-patrol-tick-by-tick--read) |

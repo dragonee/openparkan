@@ -125,6 +125,8 @@ pub const EXIT: [f32; 4] = [
 /// The exit button's variant 1, `exit_button_normal`, tints its icon so (`0x1009a2ad`); the
 /// icon stands 15 in and 3 down (`0x1009a33d`-`0x1009a34c`).
 pub const EXIT_ICON_TINT: u32 = 0xfff0_f0f0;
+/// The exit's tooltip, 6169 *Close* (`0x10073196`–`0x100731bc`).
+pub const STRING_CLOSE: u32 = 6169;
 pub const EXIT_ICON_AT: [f32; 2] = [15.0, 3.0];
 
 /// The commander's title bar (`0x10073830`, before the panel): from (374, 43) `ending_text`,
@@ -152,6 +154,9 @@ fn title_bar(cockpit: &Cockpit, ink: &mut Ink) {
     put(ink, "ccres_ending_text", [pen, y, pen - ENDING - 1.0, bottom], super::WHITE);
     let [x0, y0, x1, _] = EXIT;
     put(ink, "ccres_exit_button_normal", [x0, y0, x1, y0 + PIECE_TALL], super::WHITE);
+    // The cursor on it hands the tooltip manager 6169 *Close* (`0x100739a6`–`0x100739d9`).
+    let cursor = cockpit.cursor_at(ink.painter.space, crate::hud::Pin::TOP_RIGHT);
+    cockpit.tip.hand(EXIT, cursor, STRING_CLOSE);
     let [ix, iy] = [x0 + EXIT_ICON_AT[0], y0 + EXIT_ICON_AT[1]];
     put(ink, "exit_icon", [ix, iy, ix + 13.0, iy + 13.0], EXIT_ICON_TINT);
 }

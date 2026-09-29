@@ -41,3 +41,36 @@ pub fn level_ratio(game: &Path) -> f32 {
 pub fn game_level(game: &Path) -> usize {
     value(game, "CS", "GAME_LEVEL").and_then(|v| v.parse::<usize>().ok()).unwrap_or(1)
 }
+
+/// `[CS] FORCE_SOFTWARE_CURSOR`, read as `atoi` reads it (`iron3d.dll:0x100614e8`): anything
+/// but 0 has the display draw the cursor itself (its slot 21 handed 0, `0x10061534`). The
+/// install's own file sets 1. See `docs/42-selection.md`, "The cursor shows a state".
+pub fn software_cursor(game: &Path) -> bool {
+    value(game, "CS", "FORCE_SOFTWARE_CURSOR").is_some_and(|v| atoi(&v) != 0)
+}
+
+/// The C library's `atoi`: leading white space, a sign, and the digits up to the first that
+/// is not one; 0 for none.
+fn atoi(text: &str) -> i64 {
+    let t = text.trim_start();
+    let (sign, digits) = match t.as_bytes().first() {
+        Some(b'-') => (-1, &t[1..]),
+        Some(b'+') => (1, &t[1..]),
+        _ => (1, t),
+    };
+    let n = digits
+        .bytes()
+        .take_while(u8::is_ascii_digit)
+        .fold(0i64, |n, d| n.saturating_mul(10).saturating_add(i64::from(d - b'0')));
+    sign * n
+}
+
+#[cfg(test)]
+mod tests {
+    use super::atoi;
+
+    #[test]
+    fn atoi_reads_a_leading_number_and_nothing_else() {
+        assert_eq!([atoi("1"), atoi(" 12x"), atoi("-3"), atoi("x"), atoi("")], [1, 12, -3, 0, 0]);
+    }
+}

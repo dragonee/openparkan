@@ -43,7 +43,7 @@ records, its front the mode the player is in.
   | 3 | an HQ's command view ([40-command-mode.md](40-command-mode.md#an-hqs-command-mode-mode-3--read-and-seen)) | Enter from a bot that passes `IsHQ` (`0x10072104`), Enter in telepresence aboard one, or a unit page's D button |
   | 4 | a bunker's command view ([40-command-mode.md](40-command-mode.md)) | the bunker's pod, or its page in mode 3 |
   | 5, 6 | a building's screen | the building's pod ([27-ownership.md](27-ownership.md#capture--read)) |
-  | 7 | the game menu | `CMD_GAME_MENU` (748, `0x10072359`): it pushes 7, or rolls back when the menu is up (`0x100723a5`) |
+  | 7 | the game menu ([below](#the-game-menu--read)) | `CMD_GAME_MENU` (748, F3, `0x10072359`): it pushes 7, or rolls back when the menu is up (`0x100723a5`); Esc on foot; the commander column's button |
 - **These are not the names at `0x1005a5cc`.** That switch (`FREE_MODE`,
   `SELECT_ATTACK_TARGET_MODE`, … `SELECT_PLACE_MODE_FM`) reads the global
   `0x1010c388`, which the commander's order menu writes (`0x10079998`,
@@ -459,6 +459,113 @@ The flag the Enter test reads is written, besides the drive switch:
 [27-ownership.md](27-ownership.md) read the last two as the hero's body shown
 and hidden.
 
+## The game menu — *read*
+
+Mode 7 is a menu over the world: the screens' `+0x0c`, a 0x3c-byte widget made
+at `0x10065500` (vtable `0x100e61ec`) with its own input listener at `+0x24`
+(vtable `0x100e61c4`), registered as it is made.
+
+**What opens and closes it.**
+- **F3**, `CMD_GAME_MENU` (748, `0x10072359`), only while the mission is played
+  (the state word 4), and not while the help screen or the pause is up or a
+  building is being placed (cursor 8): it pushes 7, or with the menu up rolls the
+  stack back (`0x100723a5`).
+- **Esc on foot**, the key-down handler's own 748
+  ([40-command-mode.md](40-command-mode.md#input--read-and-measured)).
+- **The commander column's *Game menu* button** (`0x10084674`,
+  [41-commander.md](41-commander.md#what-a-click-on-the-column-does)).
+- **Esc with the menu up**: the key-down handler passes over what it would put
+  away (the `0x10044190` tests), and 735 rolls the stack back.
+- ***Resume game***, below.
+
+**The handlers** (table `0x10104b18`, row and column 7):
+
+| front → new | handler | what else |
+|---|---|---|
+| 0 → 7 | `0x100645e0` | the hero's manual controller (record `+0x50`, interface `0x19`) slot 9; the keyboard cleared |
+| 1 → 7, 2 → 7 | `0x10064620` | the record's unit's controller slot 9; the keyboard cleared |
+| 3 → 7, 4 → 7 | `0x10064650` | view state 2 set again |
+| 5 → 7 | `0x100647a0` | — |
+| 6 → 7 | `0x10064680` | the building's controller slot 9; the keyboard cleared |
+| 7 → 0 | `0x100646b0` | the hero the driven unit again (`0x100a5660`), its controller slot 10; the keyboard cleared |
+| 7 → 1, 7 → 2 | `0x10064700` | the unit's controller slot 10; the keyboard cleared |
+| 7 → 3, 7 → 4 | `0x10064730` | view state 2; the left button's press cleared ([40-command-mode.md](40-command-mode.md#the-press-held-down--read)) |
+| 7 → 5 | `0x100647c0` | — |
+| 7 → 6 | `0x10064770` | the building's controller slot 10 |
+
+Each shows the menu or hides it (its slot 11 with 1 or 0, `0x100656c0`), and
+**showing it pauses the game**: the slot hands its flag to the game's
+`0x1005f620`, which outside a network game sets the pause byte `+0xe8` and calls
+`World3D.dll`'s `PauseGameTime`, and hiding it clears the byte and calls
+`ResumeGameTime`. The pause skips the game frame (`0x1005ea7f`,
+[What becomes of the hero](#boarding--read)), so the world stands still under
+the menu, and the view state is left as it was (*derived*).
+
+**It is drawn alone.** The screens' draw asks it first (`0x1008d211`): while it
+is shown it shows the cursor and draws it, and nothing else (`0x1008d24d`); the
+pick answers nothing while it is up (`0x1008dafb`), so the cursor is `ARROW`
+([42-selection.md](42-selection.md#which-state--read)). Its draw (slot 9,
+`0x100658a0`):
+1. **the whole screen** black at 60%, `0x99000000` (the GUI's fill over the
+   display's width and height, `0x100658dc`–`0x100658fd`);
+2. **the box**, (200, 150)–(440, 330) (`0x10065550`–`0x1006556c`), framed and
+   filled `0xcc328032`, green at 80% (`0x1009afa0`,
+   [35-hud.md](35-hud.md#the-message-box--read-and-measured));
+3. in a network game on the server, 3077 in red at y 75, as the outcome panel
+   has it ([34-progression.md](34-progression.md#after-the-outcome--read-and-measured));
+4. **its page**: the main page, or the save page once *Save game* is clicked.
+
+**The main page** (`0x10066360`, drawn by `0x10066840`): a title bar, the pen
+from (210, 160), `ending_text`, a text box 215 wide with 5085 *Game Menu* in
+white and `ending_text` mirrored ([35-hud.md](35-hud.md#everything-is-drawn-on-a-640--480-screen--read));
+and four buttons, each a widget (vtable `0x100e621c`) of its string on its
+rectangle (`0x100670d0`):
+
+| button | string | rectangle | a click (`0x10065a40`) |
+|---|---|---|---|
+| *Resume game* | 3080 | (210, 210)–(430, 235) | rolls the stack back (`0x10062ff0`) |
+| *Save game* | 3081 | (210, 235)–(430, 260) | if enabled, the save page (`0x10065b00` with 1) |
+| *Load game* | 3082 | (210, 260)–(430, 285) | if enabled, the game exits with code 3 (`0x10061a30`) |
+| *Quit game* | 3083 | (210, 285)–(430, 310) | exits with code 1 |
+
+- **A button** (`0x10065e10`) is a pen row from its rectangle's corner:
+  `lamp_text_ending`, `_pressed` under the cursor and `_normal` otherwise; a
+  text box its width less 10 wide with its string centred; the lamp mirrored.
+  Its text is white under the cursor, `#80ff80` otherwise, and `#808080` when
+  disabled.
+- **The hit test** is the widget's, x0 ≤ x < x1 and y0 ≤ y < y1 (`0x1009b740`),
+  on the 640 × 480 layout.
+- ***Save game* and *Load game* are disabled** in a network game and in the
+  training campaign (the game's `+0xe4`, `+0xe6`, `0x10066786`–`0x100667b5`,
+  [34-progression.md](34-progression.md#the-parameter-blocks-modes--read)).
+  *Resume game* and *Quit game* test nothing.
+- **Exit codes 1 and 3** hand the mission back to the shell: its menus, or its
+  load-game screen ([34-progression.md](34-progression.md#after-the-outcome--read-and-measured)).
+
+So **in *The Field Base*, a training mission, the menu offers *Resume game* and
+*Quit game*, with *Save game* and *Load game* grey** (*derived*).
+
+**The save page** (`+0x38`, `0x100669a0`; not followed further): the box grows
+to (200, 150)–(440, 420) (`0x10065b00`); six slots, one selected by a click; a
+name typed into it, up to 16 characters, through the menu's listener
+(backspace `0x10065bee`, a printable character `0x10065cc7`, Enter to save
+`0x10065c54`); a button that saves into the selected slot (`0x1006574c`–
+`0x10065778`, through the level's `0x100a1590`, which builds a path under
+`/save/`) and one back to the main page.
+
+**Input under the menu.** The game's own listener is asked before the menu's
+(the chain appends, `0x10070940`, and the game's registers first, `0x1005cbfb`):
+- its left-button handler hands the press to the interface's and the world's
+  (`0x100715fa`), where the pick answers nothing, and answers 0; the menu's
+  listener then takes it while the menu is shown (slot 4, `0x10065d00`) and hands
+  its page the layout point (slot 8, `0x100656e0`);
+- its right-button handler asks only the view state (`0x100716b0`), so over a
+  command view the right button still undoes what is open there
+  ([42-selection.md](42-selection.md#a-right-click--read));
+- the command handler refuses F12 (`0x1007213b`), the wingman menu
+  (`0x1007252b`) and F1 (`0x100722df`) while the menu is up; the camera's keys
+  still set its flags, which move nothing while the game is paused.
+
 ## Against the recording — *seen*
 
 | time (s) | what |
@@ -540,6 +647,14 @@ would read 9.
 6. **If the driven bot dies, or the boarded bot's turret body is shot to
    nothing,** leave at once, through any command view standing on it, the hero
    at (bot x − 1, bot y − 1), 8 m above the surface, untested.
+7. **The game menu, mode 7**: F3 while the mission is played (not while a
+   building is placed), Esc on foot, or the commander column's button push it,
+   and F3, Esc or *Resume game* roll it back. While it is up the world is
+   paused, the unit driven takes no input, the view stays as it was, and only
+   the menu is drawn over a 60% black screen with the arrow cursor: the box
+   (200, 150)–(440, 330) in `0xcc328032` inside its frame, the title bar and
+   the four buttons 25 apart from y 210. *Save game* and *Load game* are grey in
+   the training campaign; *Quit game* and *Load game* leave for the shell.
 
 ## Not established
 
@@ -584,6 +699,9 @@ would read 9.
   the factory gives every new bot left it at 234.5 s
   ([Against the recording](#against-the-recording--seen)).
 - The wingman line's own layout (`0x1009d970`).
+- **The game menu's save page** ([The game menu](#the-game-menu--read)): its
+  draw (`0x10066d50`), its six slots' records and what the level's
+  `0x100a1590` writes under `/save/`.
 - ~~What game messages `0x3f1` and `0x3f2` do on other machines.~~ **Read**:
   the receiving queue's consumer (slot 8, `World3D.dll:0x10006460`) dispatches a
   game message's code above `0x3ee` by subtraction (`0x1000695d`); `0x3f1`

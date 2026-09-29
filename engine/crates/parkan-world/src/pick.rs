@@ -586,7 +586,7 @@ impl Play {
             }
             _ => {}
         }
-        if self.mode().commands() && !self.selected_units().is_empty() {
+        if self.view_mode().commands() && !self.selected_units().is_empty() {
             self.commander.units.clear();
             return RightClick { page_zero: (1..=3).contains(&page), close_map: false };
         }

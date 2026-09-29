@@ -13,9 +13,9 @@ cursor, in the world and on the map, is
 [32-builder.md](32-builder.md)'s.
 
 **Every claim is tagged**, as in [23-economy.md](23-economy.md): *measured* is
-re-derived by `openparkan verify` (`check_command_mode`), *read* comes from the
-disassembly at the address given (all `iron3d.dll`), *derived* follows from
-those, *seen* is the recording
+re-derived by `openparkan verify` (`check_command_mode`, `check_command_views`),
+*read* comes from the disassembly at the address given (all `iron3d.dll`),
+*derived* follows from those, *seen* is the recording
 `training mission 3   The field base [DW8XuX10y0U].mkv` (960 × 720), and
 *guess* fits the evidence without being established.
 
@@ -39,7 +39,7 @@ from (`0x100a1c30`, table `0x100a1c7c`):
 | 1 | the driven unit's camera (`0x1007e6a0` on `+0xaec`) | on foot, in a bot, telepresence |
 | **2** | **the command camera**, the level's `+0x104` (the camera object at `+0x100`) | modes 3 and 4 |
 | 3 | the outer camera, `+8` ([30-turrets.md](30-turrets.md#the-outer-camera--read-and-measured)) | `CMD_JAMES_OUTER_CAMERA` |
-| 4 | a second camera of the same class, `+0x6c` (at `+0x68`) | not read |
+| 4 | the level's second camera, `+0x6c` (at `+0x68`) | the hero's loss, a level with no hero, the auto-demo, a lost network session, and a debug key ([below](#view-state-4-the-second-camera--read)) |
 | 5 | the briefing's | [21-briefing.md](21-briefing.md) |
 | 6 | the building's camera (`0x1007e6a0` on `+0xaf0`) | a tower's screen |
 
@@ -96,7 +96,9 @@ back to it (`0x10062ce0`) and pushes nothing.
 2. turns the outer camera off (`0x10038ad0`);
 3. clears the keyboard: `World3D.dll`'s `stdClearKeyboard` drops every pending
    key and mouse message ([39-boarding.md](39-boarding.md#boarding--read));
-4. clears four globals (`0x1010bf7c`–`0x1010bf80`, not followed);
+4. clears the left button's press: its held flag `0x1010bf7c`, its moved flag
+   `0x1010bf7e`, its stamp `0x1010bf80`, and `0x1010bf7d`, which nothing reads
+   ([The press held down](#the-press-held-down--read));
 5. **lets the hero go** (`0x10074ff0` with 0): its `+0xa2` cleared and its
    overrides all off, so it stands where it is, with no AI
    ([31-packages.md](31-packages.md#the-escape--read));
@@ -199,8 +201,15 @@ scale (`services.dll` `IDisplay` slots 4 and 5) into the 640 × 480 layout
   (`0x100373d4`).
 - The rate ramps and dies away as the keys' velocities do: 2t × R for the
   first half second, then R, and × (0.5 − dt) once the cursor leaves the edge.
-- The edge flags are not updated while cursor 7 is up (`0x10104148`,
-  [42-selection.md](42-selection.md)).
+- **Under the band the edge flags keep what they held.** Cursor state 7
+  (`0x10104148`) is the band: of the state setter's 27 calls (`0x100571a0`),
+  one stores 7, the mouse-move handler's once the left button has been held
+  0.35 s in view state 2 (`0x100714bf`,
+  [42-selection.md](42-selection.md#the-band--read)). While it is up the update
+  skips the four flags and goes straight to the keys (`0x10037a8f`,
+  `0x10037c52` → `0x10037d53`), so a turn under way when the drag became a band
+  goes on, and the cursor reaching an edge during the drag starts none
+  (*derived*).
 - **The yaw is not limited.** **The tilt is kept strictly between 0 and π/2**:
   a step that would reach either end is not taken (`0x10037835`).
 
@@ -258,7 +267,9 @@ The screens' draw (`0x1008d200`) switches on the mode; **modes 3 and 4 share
 `0x1008d51c`**:
 
 1. **The system cursor is shown** (`ShowCursor` until it counts up), when the
-   display's slot 12 answers.
+   display's slot 12 answers ([below](#the-displays-slot-12-the-system-cursor--read-and-measured)).
+   Otherwise the game frame draws its own
+   ([42-selection.md](42-selection.md#the-cursor-shows-a-state--read-and-measured)).
 2. If the warbot designer is open, only the designer is drawn
    ([37-designer.md](37-designer.md)).
 3. Otherwise:
@@ -278,7 +289,114 @@ The screens' draw (`0x1008d200`) switches on the mode; **modes 3 and 4 share
 
 **No cockpit HUD** is drawn: that is the path of modes 0–2 and 6
 (`0x1008d37f`). While cursor 8 is up, only the resource rows, the map, the box
-and the objectives are drawn (`0x1008d326`).
+and the objectives are drawn (`0x1008d326`). Cursor 8 is the building ghost:
+of the state setter's 27 calls one stores 8, the Build row's pick as it opens
+(`0x10079e74`, beside pick mode 4 or 6,
+[32-builder.md](32-builder.md)), and leaving the state ends the ghost
+(`0x10057ec0`).
+
+### The display's slot 12: the system cursor — *read*, and *measured*
+
+**The display is `services.dll`'s** (`getDisplay`, `0x10004270`, the object at
+`0x100462e0`, vtable `0x1003a1f8`). Slot 12 (`0x10004c10`) answers its byte
+`+0x4fe`.
+
+- **Slot 21 sets it** (`0x10004ef0`): the argument, forced to 0 unless the byte
+  slot 13 answers, `+0x4ff`, is set.
+- **`+0x4fc`–`+0x500` are the current Direct3D driver's flags.** They are bytes
+  `+0x18`–`+0x1c` of the 32-byte driver record at `+0x4e4`, which slot 18
+  (`0x10004d10`) copies whole from the list slot 25 builds (`0x10001040`), one
+  record a driver `Ngi32.dll` enumerates.
+- **`+0x4ff` is a device that renders in a window.** Slot 25 sets the record's
+  `+0x19` and `+0x1b` from bit `0x100000` of the driver's caps
+  (`niGetD3DDriverCaps`, `Ngi32.dll:0x10005460`), which `Ngi32.dll` sets from
+  bit `0x80000` of the driver record's `+0x29c` (`0x1000552d`). That word is
+  `dwCaps2` of the `DDCAPS` at `+0x294`, 0x17c bytes, which `IDirectDraw` slot 11,
+  `GetCaps`, fills (`0x10004e42`–`0x10004e5b`); `0x80000` is
+  `DDCAPS2_CANRENDERWINDOWED`. `+0x1a`, slot 12's byte, starts 0.
+- **`iron3d.dll` hands slot 21 the setting** (`0x1006151d`–`0x10061534`):
+  `Iron_3D.ini`'s `[CS] FORCE_SOFTWARE_CURSOR` through `atoi`, and 1 when that
+  reads 0. It is the one caller.
+
+So **the system's cursor is used when `FORCE_SOFTWARE_CURSOR` is 0 and the
+chosen Direct3D device renders in a window**; otherwise the game draws its own
+(*derived*). *Measured*: the install's `Iron_3D.ini` carries
+`FORCE_SOFTWARE_CURSOR=1`, so the game draws the software cursor, `new_ui1`'s
+sprites ([42-selection.md](42-selection.md#the-files--measured)). Slot 12 has
+36 readers in `iron3d.dll` (*measured*, a scan for its call after `getDisplay`).
+Among them: the cursor setter's eight cases for a state with a cursor object
+call `SetCursor` with its handle only when it answers (`0x10057294`–
+`0x10057606`); the software draw returns at once when it does (`0x1005706c`);
+the screens' draw shows or hides the system cursor by it as a cursor mode
+starts or ends (`0x1008d22c`–`0x1008d535`, eight); and a tooltip stands 12
+under the cursor with the system's and 16 with the game's own (`0x1009b9d5`,
+[37-designer.md](37-designer.md#the-buttons--read-and-seen)).
+
+### The press held down — *read*
+
+The left button's state lives in four globals the game's listener keeps
+([42-selection.md](42-selection.md#the-mouses-way-in--read)):
+
+| global | written | read |
+|---|---|---|
+| `0x1010bf7c`, held | 1 as it goes down (`0x100714d7`), 0 as it comes up (`0x10070b74`) | the band's test (`0x10071488`) |
+| `0x1010bf7d` | 0, by the transitions alone | nothing |
+| `0x1010bf7e`, moved | 1 by any mouse move (`0x10070ad2`), 0 as the left or right button goes down (`0x100714de`, `0x100716b8`) and as the game frame starts (`0x1005e72d`) | nothing |
+| `0x1010bf80`, the press's stamp | the time as it goes down (`0x100714f1`), 0 as it comes up and while cursor 8 is up (`0x10071433`) | the band's 0.35 s (`0x1007149f`) |
+
+**Every transition into a command view clears all four**: 1 → 3, 2 → 3, 3 → 3,
+0 → 4, 4 → 4, 2 → 4, 6 → 4, 6 → 3, 3 → 4, 4 → 3, and 7 → 3 and 4
+(`0x10063a3a`, `0x10063c0e`, `0x10064920`, `0x10063cd6`, `0x10063e0d`,
+`0x10063f5f`, `0x100641ca`, `0x100642ca`, `0x10064893`, `0x100647f8`,
+`0x10064752`; *measured*, the eleven writers of `0x1010bf7c` among them). A
+click that moves the view, as a bunker row's *Strategic control* does, runs
+inside the press's own handler, after it set the held flag
+([42-selection.md](42-selection.md#the-mouses-way-in--read)), so **a press made
+before a transition grows no band**, the click that made it among them
+(*derived*).
+
+## View state 4: the second camera — *read*
+
+The level's second camera (`+0x68`, view `+0x6c`) is the command camera's class,
+made beside it by the level's set-up: outside the auto-demo with the very
+arguments the command camera is made with next (`0x100a29c8`, `0x100a29da`),
+so with its field, 1.04, and its near and far planes, 3 and 700; in the
+auto-demo over the player clan's base (`0x100a295e`). What draws from it is view
+state 4, which six sites set:
+
+| where | when |
+|---|---|
+| `0x100a4e50`, from the unit record's removal (`0x10075612`) | **the player's hero is lost**, just before the game's own fail (`0x100618a0`) |
+| `0x100a4e50`, from the level's set-up (`0x100a3da8`) | the level has no hero: the camera over the player clan's base |
+| `0x100a4e50`, from the game's message callback (`0x1005fb05`) | a network session is lost, the state word set to 2 ([34-progression.md](34-progression.md#after-the-outcome--read-and-measured)) |
+| the level's set-up, `0x100a2971` | the auto-demo (the game's `+0xe5`): the camera made over the player clan's base |
+| the demo's director, the game's `+0x3c` (`0x1002c620`, run only while `+0xe5` is set, `0x1005ec35`) | it drives the player clan's units by turns, and between them draws from the camera (`0x1002c673`, `0x1002c6e0`, `0x1002c73e`, `0x1002c795`, `0x1002caa7`) |
+| the game listener's `WM_SYSKEYDOWN` handler (slot 8, `0x10071710`; `0x104` reaches slot 8 at `0x100a0f1f`), Alt+D, `0x44` | only with `Iron_3D.ini`'s `[CS] DEBUG_KEYS_ON` set (the game's `+0xea`, `0x1005c742`): Alt+D places the camera 25 south of the hero and 20 above it (`0x10071898`–`0x100718be`), sets state 4 and the level's `+0xaf5` (`0x100719be`, `0x100719c6`); again, it puts the last state back (`0x100a4f70`) and clears `+0xaf5` |
+
+*Measured*: the install's `Iron_3D.ini` carries no `DEBUG_KEYS_ON`.
+
+**The camera's update** (`0x10037a50`, on the camera of the view state,
+`0x100a55c0`) in state 4 runs only in a network game or with `+0xaf5` set
+(`0x10037a70`–`0x10037a82`), and then only the edges, the keys and the move: no
+zoom and no following. The level's constructor writes `+0xaf5` 0
+(`0x100a1291`); the debug key is its one other writer. So **in single play the
+second camera holds still** (*derived*).
+
+**Where the hero's loss puts it** (`0x100a4e50`, with the unit's record):
+- the hero object's kind-2 world matrix (`IGameObject` slot 8) is copied whole;
+- its height, element 11, is replaced by the highest surface at its x, y that
+  the level's query finds with its three flags set, mask `0x41a` — landscape,
+  buildings, scenery and units (`0x100a14d0` with 1, 1, 1) — plus **16**
+  (`0x100e5c8c`);
+- the camera is let go (`0x10037dd0`) and the matrix handed to its view as it is
+  (slot 7 with kind 2, `0x10036c10`); view state 4 is set.
+
+The view looks along the matrix's first column (*The frame*, above), so the
+camera stands 16 over where the hero fell, **level, looking along the hero's own
+x axis**, its right-hand side (*derived*); with no record it takes the matrix
+kept at `0x1010c490`, moved to the player clan's base (`0x100a4e81`). The
+mission has failed by
+then, and what the panel then shows is [34-progression.md](34-progression.md#after-the-outcome--read-and-measured)'s.
 
 ## Input — *read*, and *measured*
 
@@ -315,6 +433,25 @@ the play dispatch (*read*).
 
 **The hero's own table does not move it**: it has been let go (step 5 above)
 (*derived*).
+
+**Alt and a letter turn the panel's page** (*read*). A key held with Alt comes
+as `WM_SYSKEYDOWN`, which the window message routine hands the listeners' slot 8
+(`0x100a0f13`–`0x100a0f1f`); the game's (`0x10071710`), with mode 4 or 3 at the
+stack's front, turns the page by the key (table `0x10071a08`) and opens the
+column at once (`0x10084d80` with the page and 1, then `0x10083c20`,
+[41-commander.md](41-commander.md#the-lock-the-column-slides-in-and-out)):
+
+| keys | page |
+|---|---|
+| Alt+W | 1, battle units |
+| Alt+C | 2, transports |
+| Alt+B | 3, builders |
+| Alt+R | 4, the research centre |
+| Alt+P | 5, the factory |
+
+No button's enabled flag is asked. The handler answers 0, so the key goes on to
+the bindings as well (*derived*). Its other keys, Alt+D and Alt+F, act only with
+`DEBUG_KEYS_ON` ([View state 4](#view-state-4-the-second-camera--read)).
 
 **Esc** has a second reader, and it reads the key first (*read*). The window
 message routine (`0x100a0e30`) hands a message to the input listeners before
@@ -377,9 +514,45 @@ the bunker facing north.
 bunker, re-places the camera over it and holds it there. 3 → 4 (`0x10064880`)
 and 4 → 3 (`0x100647e0`) do the same between a bunker and an HQ unit. 4 → 4 and
 4 → 2 also send the bunker being left interface `0x201` slot 9 with (`0x20`, 1)
-and its object message (6, 7, 0), which [31-packages.md](31-packages.md#the-escape--read)
-reads as the Wizard's AI mode (*guess* that this hands the bunker's own guns
-back to its AI).
+and its object message (6, 7, 0).
+
+### What a bunker's guns do in command mode — *read*
+
+**The pair hands a building's guns to its AI.** A record's `+0x54` is its
+object's interface `0x201` (the bind, `0x1007e4bc`), the `Wizard.dll` object
+whose slot 9 (`0x10002070`) the take writes the words through
+([Telepresence](#telepresence-mode-2--read)): mask `0x20` is the word `+0x20c`,
+group 4 — the turret, the guns, the arms and the builder — and the fight
+module's flags `0x20` and `0x40`, and 1 gives it to the AI. Message (6, 7, 0)
+sets the Wizard's mode to the AI's ([31-packages.md](31-packages.md#the-escape--read)).
+
+**It is the pair that takes a tower's guns back.** Every write of that word and
+every mode message in the mode handlers (*measured*, as a scan of `0x10062000`–
+`0x10065000`) pairs up:
+
+| handler | the building | slot 9, mask `0x20` | message (6, 7, *p*) |
+|---|---|---|---|
+| into 6, a tower's *Manual*: 0 → 6, 2 → 6, 3 → 6, 4 → 6 | the tower entered | 3, the player's (`0x10064020`, `0x1006435c`, `0x1006422b`, `0x1006411b`) | 1 |
+| out of 6: 6 → 0, 6 → 2, 6 → 3, 6 → 4 | the tower left | 1, the AI's (`0x100640ab`, `0x100643dc`, `0x100642a2`, `0x100641a2`) | 0 |
+| 4 → 4, 4 → 2 | the bunker left | 1 (`0x10063e38`, `0x10063ec7`) | 0 |
+
+No handler into mode 4 sends a bunker anything, and none but the four into 6
+sends a building the player's pair. **Every object starts in the AI's mode**:
+`World3D.dll`'s `CreateObject` (`0x10007cb0`), through which `ArealMap.dll`'s
+`CreateObjectFromScheme` makes every placed and every built building and unit
+(`ArealMap.dll:0x1001556a`), sends it (6, 7, 0) (`0x10007db3`). A building's
+words are the Wizard constructor's 0, which follow the mode, until a handler
+into mode 5 or 6 writes one: of the 20 word writes in `iron3d.dll` with a
+constant value (*measured*, a scan for slot 9's call), 12 are the mode
+handlers' above and the two into mode 5 (mask 1, `0x10064485`, `0x10064550`),
+and 8 the take's, a unit record's (`0x10074ff0`).
+
+So **a bunker's guns are its AI's all through command mode** (*derived*): while
+it is the command view's building they aim and fire on their own, as any
+building's with guns do once its clan is not neutral
+([29-weapons.md](29-weapons.md#how-the-ai-fires--read)), and the pair 4 → 4 and
+4 → 2 send the bunker left only says so again. It would matter only for a bunker
+whose guns the player had been handed, which nothing does.
 
 ## Telepresence: mode 2 — *read*
 
@@ -429,14 +602,14 @@ with 0 every word left to follow the mode: `+0x204`, the engines' and group
 1's. The two words level 2 does not write, `+0x210` (camera, radar, seeker) and
 `+0x214`, keep what was last written: 1 after a letting-go, which writes 1 into
 every word (`0x10075131`), and 3 when the key steps a driven unit from 1 to 2,
-so the sensors then stay the player's. A unit's words before its first take
-are its Wizard's constructor's: every word 0 and the mode 1
-(`Wizard.dll:0x10001992`–`0x100019eb`). The unit record's bind lets the unit go
-(`0x10074d8d`, every word 1 and message 7 with 0) when the third byte of its
-object id matches the level's `+0xad4`, which the game sets beside the player's
-clan `+0xad0` (`0x1005cbd4`–`0x1005cbe1`); which units that is was not
-followed. Either way a take at 2 leaves those two words to the AI, since message
-7 with 0 turns a 0 to the AI too. The player rides along in the
+so the sensors then stay the player's. Before its first take a unit's Wizard
+has been through three hands: its constructor writes every word 0 and the mode
+1 (`Wizard.dll:0x10001992`–`0x100019eb`); `World3D.dll`'s `CreateObject` sends
+every object it makes the AI's mode, (6, 7, 0) (`0x10007db3`); and the unit
+record's bind lets the unit go (`0x10074d8d`: every word 1 and message 7 with 0)
+when the third byte of its object id is the level's `+0xad4` — in single play
+every unit ([Which units the bind lets go](#which-units-the-bind-lets-go--read-and-measured)).
+So a take at 2 leaves those two words to the AI. The player rides along in the
 unit's cockpit. The hero ignores the level: its take gives every word 3
 (`0x10075018`). `CMD_JAMES_AUTO_DRIVER` (744) steps the level 0 → 1 → 2 → 0 and
 takes the unit again at the new one (`0x10075fc0`).
@@ -461,6 +634,46 @@ rolls the stack back in modes 1, 2, 5 and 7 (`0x100755a9`). Nor is there
 a 1 → 4: its table entry is 0, and `0x10062bc0` calls the entry without a test,
 so the game does not expect a driven bot in a bunker's pod (*derived*; large
 bots are not routed to pods, [27-ownership.md](27-ownership.md#capture--read)).
+
+### Which units the bind lets go — *read*, and *measured*
+
+**An object id carries the player number it was filed under.** `World3D.dll`'s
+queue files every object it is given under a player number below 8 (slot 2,
+`0x100055f0`) and makes its id from it: the object's class in bits 24–27 with
+bit 28 set, **the player number in the third byte**, bits 16–23, and its index
+in that player's table in the low 16 bits (`0x10005633`–`0x10005659`).
+`GetIGObject` (slot 11, `0x10007860`) takes the player back from the third byte
+and refuses one of 8 or more (*"GetIGObject: Illegal player number"*).
+
+**This machine files what it makes under its own number.**
+- `CreateObjectFromScheme`, which makes every placed and every built unit and
+  building, hands `AddObjectToGame` `GetNetPlayerNum()` (`ArealMap.dll:0x10015dc9`–
+  `0x10015dd0`; the add, `World3D.dll:0x10007f24`).
+- `iron3d.dll`'s own `AddNewObjectToGame` calls pass the level's `+0xad4`
+  (`0x100a24b5`, `0x100a4334`, `0x100a43e4`) or `GetNetPlayerNum()`
+  (`0x10039249`); two more pass a register not followed (`0x100366b4`,
+  `0x100a2322`).
+- Only a network game's mirrors come under another player's number
+  (`AddMirrorObjectToGame`, `AddNewMirrorToGame`).
+
+**`+0xad4` is that number.** `stdInitGame` hands back `GetNetPlayerNum`'s word
+(`World3D.dll:0x1001418d`–`0x10014196`, the global `0x100a5940`), and the game
+stores it in both `+0xad4` and `+0xad0` (`0x1005cbd4`, `0x1005cbe1`): **the
+level's player number and the player's clan are one number.** The queue's
+set-up writes it 0 (`0x100053bf`); only a network game's host data writes
+another (`0x100072b8`, `0x100098c1`).
+
+*Measured*, the control: over the 22 single-play missions (the 20 campaign
+missions and `Single.01`–`02`) the hero belongs to clan 0 and the one player
+clan stands at index 0; the six `Multi` maps place heroes of clans 0 and 1, 0
+to 2 and 0 to 3, one a player clan each, as a player's number would name them.
+
+So **in single play the bind lets every unit go** (*derived*): every one of the
+249 units the 22 missions place — 55 of the player's clan, the 22 heroes among
+them, 144 of enemy clans, 28 of nature clans and 22 of neutral ones — and every
+unit a factory makes, gets every word 1 and the AI's mode as its record is
+bound. In a network game it lets go the units this machine made and not the
+mirrors of another player's.
 
 ### Where the level is kept — *read*
 
@@ -885,8 +1098,9 @@ mode.
    including the capture's own firing: select the bunker, let the
    hero go (it stands, no AI, not driven), clear held keys, hold the camera
    around the bunker, place it at the bunker's position facing north (yaw π/2),
-   show the system cursor, turn the panel to page 0, hide the cockpit HUD, move
-   the message box to (374, 352) × 266. Do not pause the world.
+   show the cursor (the game's own, as the install's `Iron_3D.ini` has it), turn
+   the panel to page 0, hide the cockpit HUD, move the message box to
+   (374, 352) × 266, and drop a press held down. Do not pause the world.
 3. **Camera state:** position; yaw; tilt (0 down .. π/2 level), 1.0 at the
    mission's start and kept between visits; field 1.04 rad (near 3, far 700),
    zoomed toward 0.2 by 0.1 an update; velocities per axis with key-down and
@@ -927,19 +1141,51 @@ mode.
      reach the unit.
    - At 1 and 2 run the unit's takt as for a unit nobody drives: its repair
      decision switches the repair system when it changes its mind, and a hit
-     turns it on the firer. At 0 a hit waits for the letting-go.
+     turns it on the firer. At 0 a hit is gated as it arrives, and the attack it
+     lets through waits on the stack for the letting-go.
+9. **After the hero's loss** draw the world from a still camera 16 over the
+   highest surface where the hero fell, level, along the hero's x axis, with the
+   command camera's field.
+10. **Alt+W, C, B, R and P** in a command view turn the panel to pages 1 to 5
+   and open the column at once. F3 and the column's *Game menu* button open the
+   game menu ([39-boarding.md](39-boarding.md#the-game-menu--read)).
 
 ## Not established
 
-- What view state 4 and the second camera at `+0x68` are for: its update runs
+- ~~What view state 4 and the second camera at `+0x68` are for: its update runs
   only in a network game or with the level's `+0xaf5` set, and nothing read
-  here sets that state.
-- The four globals `0x1010bf7c`–`0x1010bf80` the transitions clear, and cursors
-  7 and 8 (`0x10104148`), which stop the edge turns and cut the draw.
-- What interface `0x201` slot 9 with (`0x20`, 1) does to the bunker left for
+  here sets that state.~~ **Read**: six sites set it — the hero's loss, a level
+  with no hero and a lost network session through `0x100a4e50`, the auto-demo's
+  set-up and its director, and Alt+D with `DEBUG_KEYS_ON`, the one writer of
+  `+0xaf5` (`0x100719c6`). **In single play it is the view after the hero is
+  lost** (`0x10075612`): the hero's own matrix, 16 over the highest surface
+  under it (mask `0x41a`), looking along the hero's x axis, and still, its
+  update not running, in [View state 4](#view-state-4-the-second-camera--read).
+- ~~The four globals `0x1010bf7c`–`0x1010bf80` the transitions clear, and cursors
+  7 and 8 (`0x10104148`), which stop the edge turns and cut the draw.~~
+  **Read**: the left button's held flag, moved flag and stamp, and a byte
+  nothing reads; every transition into a command view clears them, so a press
+  made before it grows no band ([The press held down](#the-press-held-down--read)).
+  Of the cursor state setter's 27 calls one stores 7, the band (`0x100714bf`),
+  and one 8, the Build row's ghost (`0x10079e74`); under the band the edge
+  flags keep what they held ([The cursor at an edge](#the-cursor-at-an-edge-turns-and-tilts-it)).
+- ~~What interface `0x201` slot 9 with (`0x20`, 1) does to the bunker left for
   another view or for telepresence, and whether its guns fire on their own
-  while command mode is up.
-- The display's slot 12 that decides whether the system cursor is shown.
+  while command mode is up.~~ **Read**: it gives the Wizard's word `+0x20c` —
+  the turret, the guns, the arms and the fight module — to the AI, and (6, 7, 0)
+  the Wizard's mode, the pair every exit from a tower's *Manual* sends
+  (`0x100640ab`–`0x100643eb`). No handler into mode 4 sends a bunker anything,
+  and `CreateObject` makes every object in the AI's mode (`World3D.dll:0x10007db3`),
+  so a bunker's guns are its AI's all through command mode and after, in
+  [What a bunker's guns do in command mode](#what-a-bunkers-guns-do-in-command-mode--read).
+- ~~The display's slot 12 that decides whether the system cursor is shown.~~
+  **Read**: `services.dll`'s display answers its `+0x4fe`
+  (`0x10004c10`), which `iron3d.dll` sets from `Iron_3D.ini`'s
+  `FORCE_SOFTWARE_CURSOR` read as 0 (`0x10061534`), held to 0 unless the
+  chosen Direct3D driver reports `DDCAPS2_CANRENDERWINDOWED`; the install's
+  file sets 1, so the game draws its own cursor, in
+  [The display's slot 12](#the-displays-slot-12-the-system-cursor--read-and-measured).
+- What Alt+F toggles with `DEBUG_KEYS_ON` (`0x10059d30`, `0x100717e3`).
 - ~~The following camera's distance logic in mode 3~~ — **read**, in
   [An HQ's command mode](#an-hqs-command-mode-mode-3--read-and-seen). Still
   open: the two attached positions (`+0x3c` 30 above, `+0x40` 90 above) that
@@ -966,8 +1212,14 @@ mode.
   (`0x10019a80`, `0x100067c1`), and a hit asks for its attack at every level
   (`0x100064b0`), in [Where the level is kept](#where-the-level-is-kept--read)
   and [What the AI does at levels 1 and 2](#what-the-ai-does-at-levels-1-and-2--read).
-  Still open: which units the bind's let-go reaches, by their object id's third
-  byte against the level's `+0xad4`.
+  ~~Still open: which units the bind's let-go reaches, by their object id's third
+  byte against the level's `+0xad4`.~~ **Read**: the third byte is the player
+  number `World3D.dll` files the object under (`0x100055f0`, `0x10007860`), and
+  `+0xad4` the level's own, `GetNetPlayerNum`'s, which is the player's clan too
+  (`0x1005cbd4`, `0x1005cbe1`); this machine files what it makes under it
+  (`ArealMap.dll:0x10015dc9`), so in single play the bind lets every unit go,
+  all 249 the 22 single-play missions place, in
+  [Which units the bind lets go](#which-units-the-bind-lets-go--read-and-measured).
 - ~~What mode 2 does when its unit dies~~ — **read**: the unit record's removal
   rolls the stack back in modes 1, 2, 5 and 7 (`0x100755a9`, table
   `0x1007563c`), so telepresence ends with its unit, back to the command view.

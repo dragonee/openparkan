@@ -619,6 +619,60 @@ fn a_small_bunker_taken_by_the_player_turns_its_flamers_on_an_enemy_holds_them_c
     assert!(aimed, "on the flyer");
 }
 
+/// A bunker's guns are its AI's throughout command mode (docs/40, "Between command views"):
+/// every object made is sent the Wizard's AI mode (`World3D.dll:0x1000a064`), mode 0 → 4 sends
+/// the bunker nothing, and the pair 4 → 4 and 4 → 2 send the bunker left -- its guns' word
+/// to the AI and message (6, 7, 0) -- only says so again. Only a tower entered for manual
+/// control (mode 6) is handed to the player. So the Small Bunker fires on the enemy while it is
+/// the command view's building, while a unit is driven from it, and after it is left.
+#[test]
+#[ignore = "needs the game install"]
+fn a_small_bunker_fires_on_its_own_while_it_is_the_command_views_building_and_after_it_is_left() {
+    let (mut play, m) = mission_03_play();
+    play.building_fire_floor = true;
+    let (bunker, _) = play.emplacements[0];
+    play.units[bunker].clan = Some(play.player_clan);
+    let flyer = play.robots.iter().position(|(t, _)| play.units[*t].logical_id == 3).unwrap();
+    let flyer_target = play.robots[flyer].0;
+    let base = play.battle.combat.targets[bunker].position;
+    // The enemy's flyer held 5 m up, 80 m east of the bunker, and made too tough to fall, so
+    // the flamers have a target all along.
+    for part in &mut play.battle.combat.targets[flyer_target].parts {
+        for node in part.life.iter_mut().flat_map(|l| l.nodes.iter_mut()) {
+            node.max *= 1.0e6;
+            node.life = node.max;
+        }
+    }
+    let rounds = |p: &mut parkan_world::play::Play, seconds: f32| {
+        let mut ids = std::collections::BTreeSet::new();
+        play_for(p, seconds, |p| {
+            let at = base + glam::Vec3::new(80.0, 0.0, 0.0);
+            let ground = p.ground.below(at.x, at.y, 1.0e5).map_or(at.z, |h| h.point.z);
+            p.robots[flyer].1.walker.body.position = at.with_z(ground + 5.0);
+            ids.extend(p.battle.combat.rounds.iter().filter(|r| r.owner == Some(bunker)).map(|r| r.id));
+        });
+        assert!(p.battle.combat.targets[flyer_target].alive, "the flyer stands");
+        ids.len()
+    };
+    play.enter_command(bunker);
+    assert_eq!(play.mode(), parkan_world::play::Mode::Command(bunker));
+    assert!(rounds(&mut play, 6.0) > 0, "the command view's own bunker fires on the enemy");
+    // A warbot taken over from the bunker's view (4 → 2).
+    let project = play.factories[0].projects[0].clone();
+    let at = glam::Vec3::new(1700.0, 300.0, 0.0);
+    let at = at.with_z(play.ground.below(at.x, at.y, 1.0e4).map_or(0.0, |h| h.point.z) + 1.0);
+    let bot = play.spawn(&project, play.player_clan, at, 0.0).unwrap();
+    play.tick(1000.0 / 60.0, [0.0; 2]);
+    assert!(play.telepresence(bot, 0));
+    assert!(rounds(&mut play, 6.0) > 0, "the bunker left for telepresence fires on its own");
+    // Back to the view (2 → 4), and out of command mode (4 → 0).
+    assert!(play.roll_back());
+    assert!(play.roll_back());
+    assert_eq!(play.mode(), parkan_world::play::Mode::OnFoot);
+    assert!(rounds(&mut play, 6.0) > 0, "and after command mode is left");
+    let _ = m;
+}
+
 /// The bar a building's guns must pass, and what the Small Bunker's flamers score on a flyer
 /// hovering where a flyer's walk points are, 15 m over the ground (docs/29, "How the AI fires").
 /// A building takes 0.85, its Type carrying the building bit; it takes no self-task, so it is

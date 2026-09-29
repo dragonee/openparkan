@@ -829,6 +829,16 @@ impl Behaviour {
         self.hurt_by = Some(firer);
     }
 
+    /// A hit on the unit gated as it arrives, whether or not the unit's takt runs: the hit
+    /// handler (slot 67, `0x100064b0`) asks for its reason-1 attack at once
+    /// (`0x10018060` → `0x100179c0`), so on a unit its takt does not run -- one the player
+    /// drives at auto-driver level 0 -- the gate's pause restarts now and the attack it lets
+    /// through waits on the stack until the takt runs again (docs/40, "What the AI does at
+    /// levels 1 and 2").
+    pub fn hurt_now(&mut self, firer: i32, senses: &Senses) {
+        self.retaliate(firer, senses);
+    }
+
     /// STAND-IN: docs/31-packages.md#what-each-package-does--read -- the behaviour's random
     /// source is not read: a 32-bit xorshift. 0..1.
     pub fn random(&mut self) -> f32 {
@@ -2636,5 +2646,27 @@ mod tests {
         assert_eq!(fire_bar(false, 0.0, WARBOT), FIRE_BAR_LOW);
         // A building has no speed, and its Type puts it at 0.85.
         assert_eq!(fire_bar(false, 0.0, BUNKER), FIRE_BAR_HIGH);
+    }
+
+    #[test]
+    fn a_hit_gated_at_once_puts_its_attack_on_the_stack_and_restarts_the_pause_before_any_takt() {
+        let firer = unit(11, 300.0, 0.0);
+        let other = unit(12, 200.0, 0.0);
+        let seen = [firer, other];
+        let mut b = Behaviour::new(7);
+        // A stopped unit, its takt not running: the gate lets the first hit through at once.
+        b.hurt_now(11, &senses(&seen, 5000.0, Vec3::ZERO, true));
+        assert!(b.hurt_by.is_none(), "nothing is left for a takt to answer");
+        assert!(matches!(b.task(), Task::Attack { target: Some(11), ordered: false, .. }), "{:?}", b.task());
+        let paused_until = b.interrupt_ms;
+        assert!(
+            (7000.0..=10_000.0).contains(&paused_until),
+            "2 s plus up to 3 s from the hit: {paused_until}"
+        );
+        // A second firer's hit inside the pause is refused, and the pause is not restarted.
+        b.hurt_now(12, &senses(&seen, 5500.0, Vec3::ZERO, true));
+        assert_eq!(b.tasks.len(), 2, "{:?}", b.tasks);
+        assert!(matches!(b.task(), Task::Attack { target: Some(11), .. }));
+        assert_eq!(b.interrupt_ms, paused_until);
     }
 }

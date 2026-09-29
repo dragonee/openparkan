@@ -24095,6 +24095,340 @@ def check_focus(check, game: Path) -> None:
           f"before createGame; each held byte of 0x1002a490 below 700 cleared and queued pressed 0")
 
 
+#: The CState handlers that clear the left button's four globals: every transition into a
+#: command view, by (front, new), with the site of their store to ``0x1010bf7c``.
+PRESS_CLEARED = {(1, 3): 0x10063A3A, (2, 3): 0x10063C0E, (3, 3): 0x10064920,
+                 (0, 4): 0x10063CD6, (4, 4): 0x10063E0D, (2, 4): 0x10063F5F,
+                 (6, 4): 0x100641CA, (6, 3): 0x100642CA, (3, 4): 0x10064893,
+                 (4, 3): 0x100647F8, (7, 3): 0x10064752}
+
+#: The Wizard's word writes of the mode handlers with mask ``0x20``: by site, the value, and
+#: the handler, (front, new), they sit in. Into mode 6 the player's 3, out of it and from a
+#: bunker left the AI's 1 (docs/40-command-mode.md, "What a bunker's guns do").
+GUN_WORD_WRITES = {0x1006401B: (3, (0, 6)), 0x10064357: (3, (2, 6)), 0x10064226: (3, (3, 6)),
+                   0x10064116: (3, (4, 6)), 0x100640A6: (1, (6, 0)), 0x100643D7: (1, (6, 2)),
+                   0x1006429D: (1, (6, 3)), 0x1006419D: (1, (6, 4)), 0x10063E33: (1, (4, 4)),
+                   0x10063EC2: (1, (4, 2))}
+
+
+def _ini(path: Path) -> dict[str, dict[str, str]]:
+    """An ``.ini``'s sections, keys upper-cased, values as written."""
+    out: dict[str, dict[str, str]] = {}
+    section = out.setdefault("", {})
+    if not path.exists():
+        return out
+    for line in path.read_text(encoding="latin-1").splitlines():
+        line = line.strip()
+        if line.startswith("[") and line.endswith("]"):
+            section = out.setdefault(line[1:-1].upper(), {})
+        elif "=" in line:
+            key, value = line.split("=", 1)
+            section[key.strip().upper()] = value.strip()
+    return out
+
+
+def check_command_views(check, game: Path) -> None:
+    """Command mode's other views and state: view state 4 and the second camera, cursor
+    states 7 and 8, the left button's globals, the display's slot 12, a bunker's guns, the
+    units the bind lets go, the game menu and the tooltip manager."""
+    path = game / "iron3d.dll"
+    if not path.exists():
+        return
+    iron = path.read_bytes()
+    at = _image_at(iron)
+    lo, size = 0x10001000, 0xCC000
+    text = at(lo, size)
+
+    def u32(va: int) -> int:
+        return struct.unpack("<I", at(va, 4))[0]
+
+    def f32(va: int) -> float:
+        return struct.unpack("<f", at(va, 4))[0]
+
+    def called(site: int) -> int | None:
+        if at(site, 1) != b"\xe8":
+            return None
+        return (site + 5 + struct.unpack("<i", at(site + 1, 4))[0]) & 0xFFFFFFFF
+
+    def handler(front: int, new: int) -> int:
+        return u32(0x10104B18 + 4 * (front * 8 + new))
+
+    def hexes(t: str) -> bytes:
+        return bytes.fromhex(t)
+
+    calls = _calls(at, lo, size)
+    jumps = [(lo + i, (lo + i + 5 + struct.unpack_from("<i", text, i + 1)[0]) & 0xFFFFFFFF)
+             for i in range(len(text) - 5) if text[i] == 0xE9]
+
+    # View state 4: the view-state setter handed 4, and the two direct writes.
+    fours = sorted(site for site, target in calls
+                   if target == 0x100A4F90 and _pushed_before(at, site, 16) == 4)
+    direct = sorted(lo + m.start() for m in
+                    re.finditer(rb"\xc7[\x80-\x87]\x10\x07\x00\x00\x04\x00\x00\x00", text))
+    placers = sorted(site for site, target in calls if target == 0x100A4E50)
+    placed = (at(0x100A4EB9, 6) == hexes("6a016a016a01") and called(0x100A4EC3) == 0x100A14D0
+              and at(0x100A4EC8, 6) == hexes("d8058c5c0e10") and f32(0x100E5C8C) == 16.0
+              and at(0x100A4ECE, 3) == hexes("8d7368") and called(0x100A4ED7) == 0x10037DD0
+              and called(0x100A4EE3) == 0x10036C10 and at(0x10036C1E, 2) == b"\x6a\x02"
+              and at(0x10036C21, 3) == hexes("ff511c")
+              and at(0x100A4EF6, 10) == hexes("c78310070000 04000000"))
+    gate = (at(0x10037A67, 3) == hexes("83ff04") and at(0x10037A70, 6) == hexes("8a91e4000000")
+            and at(0x10037A7A, 6) == hexes("8a88f50a0000"))
+    af5 = sorted((lo + i - 2, text[i - 2]) for i in range(2, len(text) - 4)
+                 if text[i:i + 4] == b"\xf5\x0a\x00\x00")
+    af5_ok = af5 == [(0x10037A7A, 0x8A), (0x100719C6, 0xC6), (0x100719DB, 0xC6),
+                     (0x100A1291, 0x88)] and at(0x100719CC, 1) == b"\x01"
+    debug = (at(0x1005C701, 1) == b"\x68"
+             and at(u32(0x1005C702), 14) == b"DEBUG_KEYS_ON\0"
+             and at(0x1005C73F, 9) == hexes("0f95c2 8896ea000000")
+             and at(0x1007182B, 6) == hexes("8a87ea000000")
+             and at(0x100A0EDF, 6) == hexes("81fd04010000") and called(0x100A0F13) == 0x100707F0
+             and at(0x100A0F1F, 3) == hexes("ff5020")
+             and u32(0x100E6490 + 8 * 4) == 0x10071710)
+    ini = _ini(game / "Iron_3D.ini").get("CS", {})
+    check("iron3d.dll: view state 4 is the second camera: the hero's loss, the auto-demo, "
+          "a debug key",
+          fours == [0x1002C673, 0x1002C6E0, 0x1002C73E, 0x1002C795, 0x1002CAA7, 0x100719BE]
+          and direct == [0x100A2971, 0x100A4EF6]
+          and placers == [0x1005FB05, 0x10075612, 0x100A3DA8]
+          and placed and gate and af5_ok and debug and "DEBUG_KEYS_ON" not in ini,
+          f"the setter handed 4 at {[hex(s) for s in fours]}, written direct at "
+          f"{[hex(s) for s in direct]}; 0x100a4e50 from {[hex(s) for s in placers]}: the matrix, "
+          f"16 over the surface found with (1, 1, 1), the camera at +0x68 let go, view state 4: "
+          f"{placed}; its update in state 4 only with +0xe4 or +0xaf5: {gate}; +0xaf5 read once, "
+          f"written by Alt+D's 1 and 0 and the constructor: {af5_ok}; Alt+D is WM_SYSKEYDOWN's "
+          f"slot 8 behind DEBUG_KEYS_ON: {debug}; the install's Iron_3D.ini sets it: "
+          f"{'DEBUG_KEYS_ON' in ini}")
+
+    # Cursor states 7 and 8: every call and jump to the setter, and the state loaded into ecx.
+    def loaded(site: int) -> int | None:
+        body = at(site - 16, 16)
+        i = body.rfind(b"\xb9")
+        return struct.unpack_from("<I", body, i + 1)[0] if 0 <= i <= 11 else None
+
+    setter = [site for site, target in calls + jumps if target == 0x100571A0]
+    states = {site: loaded(site) for site in setter}
+    sevens = sorted(s for s, v in states.items() if v == 7)
+    eights = sorted(s for s, v in states.items() if v == 8)
+    edges = (at(0x10037A8F, 7) == hexes("833d4841101007")
+             and at(0x10037A96, 6) == hexes("0f84b7020000")
+             and at(0x10037C52, 7) == hexes("833d4841101007")
+             and at(0x10037C59, 6) == hexes("0f84f4000000")
+             and called(0x10037D55) == 0x10037130)
+    check("iron3d.dll: cursor 7 is the band and 8 the building ghost; the band holds the edges",
+          len(setter) == 27 and sevens == [0x100714BF] and eights == [0x10079E74] and edges,
+          f"{len(setter)} calls of the state setter; 7 from the mouse-move handler at "
+          f"{[hex(s) for s in sevens]}, 8 from the Build row's pick at {[hex(s) for s in eights]}; "
+          f"in state 7 the camera's update skips the edge flags for the keys: {edges}")
+
+    # The left button's four globals and who writes them.
+    def refs(address: int) -> list[tuple[int, str]]:
+        needle = struct.pack("<I", address)
+        out = []
+        for m in re.finditer(re.escape(needle), text):
+            i = m.start()
+            if text[i - 1] in (0xA2, 0xA3):
+                out.append((lo + i - 1, "store"))
+            elif text[i - 2] in (0x88, 0x89) and text[i - 1] in (0x05, 0x0D, 0x15, 0x1D):
+                out.append((lo + i - 2, "store"))
+            elif text[i - 2] == 0xC6 and text[i - 1] == 0x05:
+                out.append((lo + i - 2, f"= {text[i + 4]}"))
+            elif text[i - 2] == 0xC7 and text[i - 1] == 0x05:
+                out.append((lo + i - 2, f"= {struct.unpack_from('<I', text, i + 4)[0]}"))
+            else:
+                out.append((lo + i - 2, "read"))
+        return out
+
+    held, unread, moved, stamp = (refs(a) for a in (0x1010BF7C, 0x1010BF7D, 0x1010BF7E, 0x1010BF80))
+    cleared = all(handler(*key) <= site < handler(*key) + 0x100
+                  for key, site in PRESS_CLEARED.items()) \
+        and handler(7, 4) == handler(7, 3)
+    held_ok = sorted(s for s, kind in held if kind == "store") == sorted(
+        [*PRESS_CLEARED.values(), 0x10070B74]) \
+        and [(s, k) for s, k in held if k != "store"] == [(0x10071488, "read"), (0x100714D7, "= 1")]
+    unread_ok = len(unread) == 11 and all(k == "store" for _, k in unread)
+    moved_ok = all(k != "read" for _, k in moved) and len(moved) == 15
+    stamp_reads = [s for s, k in stamp if k == "read"]
+    stamp_ok = stamp_reads == [0x1007149F] and len(stamp) == 15
+    check("iron3d.dll: every transition into a command view clears the left button's press",
+          cleared and held_ok and unread_ok and moved_ok and stamp_ok,
+          f"the eleven handlers' stores to 0x1010bf7c: {cleared}; held set 1 as the button goes "
+          f"down, 0 as it comes up, read by the band: {held_ok}; 0x1010bf7d written 11 times, "
+          f"read never: {unread_ok}; 0x1010bf7e never read: {moved_ok}; the stamp read by the "
+          f"band's 0.35 s alone: {stamp_ok}")
+
+    # The display's slot 12: services.dll's display, the driver's windowed flag, the setting.
+    services = game / "services.dll"
+    ngi = game / "Ngi32.dll"
+    display = False
+    if services.exists() and ngi.exists():
+        s_at = _image_at(services.read_bytes())
+        n_at = _image_at(ngi.read_bytes())
+        slots = [struct.unpack("<I", s_at(0x1003A1F8 + 4 * i, 4))[0] for i in (12, 13, 18, 21, 25)]
+        display = (slots == [0x10004C10, 0x10004C20, 0x10004D10, 0x10004EF0, 0x10001040]
+                   and s_at(0x10004C10, 7) == hexes("8a81fe040000c3")
+                   and s_at(0x10004EF0, 20) == hexes("8a442404 8881fe040000 8a81ff040000 84c0 7507")
+                   and s_at(0x10001161, 5) == hexes("a900001000")
+                   and s_at(0x100011E3, 18) == hexes("c644246000 885c2461 c644246200 88542463")
+                   and n_at(0x1000552D, 11) == hexes("8b869c020000 a900000800")
+                   and n_at(0x1000553A, 6) == hexes("81ca00001000")
+                   and n_at(0x10004E42, 6) == hexes("c7037c010000")
+                   and n_at(0x10004E50, 3) == hexes("ff512c"))
+    readers = 0
+    for site, target in calls:
+        if target == 0x100CD048 and re.match(rb"(?s).{0,12}?\xff[\x50-\x57]\x30", at(site + 5, 15)):
+            readers += 1
+    hands = (at(0x100614E8, 1) == b"\x68" and at(u32(0x100614E9), 22) == b"FORCE_SOFTWARE_CURSOR\0"
+             and at(0x1006151D, 5) == hexes("85f6 0f94c0") and called(0x10061526) == 0x100CD048
+             and at(0x10061534, 3) == hexes("ff5254"))
+    forced = ini.get("FORCE_SOFTWARE_CURSOR")
+    check("services.dll, Ngi32.dll, iron3d.dll: the system cursor is FORCE_SOFTWARE_CURSOR 0 "
+          "on a windowed device",
+          display and readers == 36 and hands and forced == "1",
+          f"slot 12 answers +0x4fe, slot 21 sets it unless +0x4ff, the driver record's byte from "
+          f"DDCAPS2_CANRENDERWINDOWED (dwCaps2 0x80000 -> caps 0x100000): {display}; "
+          f"{readers} readers of slot 12; iron3d.dll hands slot 21 the setting read as 0: "
+          f"{hands}; the install's Iron_3D.ini says {forced}")
+
+    # A bunker's guns: the mode handlers' writes of the gun word, and the constant word writes.
+    word = re.compile(rb"\x6a([\x00-\x03])(?:\x6a([\x00-\x7f])|\x68(.{4}))"
+                      rb"[\x50-\x57]\xff[\x50-\x57]\x24",
+                      re.S)
+    writes = {}
+    for m in word.finditer(text):
+        mask = m.group(2)[0] if m.group(2) is not None else struct.unpack("<I", m.group(3))[0]
+        writes[lo + m.start()] = (mask, m.group(1)[0])
+    wizard = {s: w for s, w in writes.items() if w[0] != 0}
+    guns = {s: v for s, (mask, v) in wizard.items() if mask == 0x20}
+    pairs = all(guns.get(site) == value and handler(*key) <= site < handler(*key) + 0x80
+                for site, (value, key) in GUN_WORD_WRITES.items()) and len(guns) == 10
+    takes = sorted(s for s in wizard if 0x10074FF0 <= s < 0x10075160)
+    created = False
+    world = game / "World3D.dll"
+    if world.exists():
+        w_at = _image_at(world.read_bytes())
+        created = (w_at(0x10007DAC, 6) == hexes("6a00 6a07 6a06")
+                   and w_at(0x10007DB3, 3) == hexes("ff5234"))
+    check("iron3d.dll, World3D.dll: a bunker's guns are its AI's all through command mode",
+          pairs and len(wizard) == 20 and len(takes) == 8 and created,
+          f"mask 0x20: 3 into mode 6, 1 out of it and from the bunker 4 -> 4 and 4 -> 2 left: "
+          f"{pairs}; {len(wizard)} constant writes of a Wizard word, {len(takes)} of them the "
+          f"take's; CreateObject sends every object (6, 7, 0): {created}")
+
+    # The units the bind lets go: the id's third byte, the level's number, the missions' clans.
+    bind = (at(0x10074D59, 6) == hexes("8bb8d40a0000") and at(0x10074D7E, 4) == hexes("8a54243e")
+            and at(0x10074D86, 4) == hexes("3bd7 7508") and called(0x10074D8D) == 0x10074FF0
+            and at(0x1005CBC7, 4) == hexes("8b4c2448")
+            and at(0x1005CBD4, 6) == hexes("8988d40a0000")
+            and at(0x1005CBDD, 10) == hexes("8b542448 8990d00a0000"))
+    ids = False
+    if world.exists() and (game / "ArealMap.dll").exists():
+        a_at = _image_at((game / "ArealMap.dll").read_bytes())
+
+        def a_called(site: int) -> int | None:
+            if a_at(site, 1) != b"\xe8":
+                return None
+            return (site + 5 + struct.unpack("<i", a_at(site + 1, 4))[0]) & 0xFFFFFFFF
+
+        # id = ((class & 0xf | 0x10) << 8 | player & 0xff) << 16 | index.
+        ids = (w_at(0x10005636, 3) == hexes("83e50f") and w_at(0x1000563E, 3) == hexes("83cd10")
+               and w_at(0x10005646, 6) == hexes("81e1ff000000")
+               and w_at(0x1000564C, 3) == hexes("c1e508")
+               and w_at(0x10005652, 2) == hexes("0be9") and w_at(0x10005659, 3) == hexes("c1e510")
+               and w_at(0x1000786A, 4) == hexes("8a44240a")
+               and w_at(0x10007876, 3) == hexes("83f808")
+               and w_at(0x1001418D, 11) == hexes("8b542474 a140590a10 8902")
+               and a_called(0x10015DC9) == 0x1002C8EE and a_called(0x10015DD0) == 0x1002C8E8)
+    single, units, heroes = [], Counter(), Counter()
+    multi = []
+    for data in sorted((game / "MISSIONS").rglob("data.tma")):
+        rel = data.relative_to(game / "MISSIONS").as_posix().upper()
+        m = mission.load(data)
+        clans = sorted(o.clan_id for o in m.objects if o.type_id == 0x1020000)
+        if rel.startswith("MULTI"):
+            multi.append(clans)
+            continue
+        if rel.startswith("AUTODEMO"):
+            continue
+        single.append(clans)
+        for o in m.objects:
+            if o.kind != mission.KIND_UNIT:
+                continue
+            cid = o.clan_id
+            if cid == 0:
+                kind = "player"
+            elif cid is not None and cid < len(m.clans):
+                kind = m.clans[cid].type
+            else:
+                kind = "?"
+            units[kind] += 1
+            heroes[o.type_id == 0x1020000] += 1
+    placed_units = (len(single) == 22 and all(c == [0] for c in single)
+                    and sorted(multi) == [[0, 1]] * 4 + [[0, 1, 2], [0, 1, 2, 3]]
+                    and units == Counter({"player": 55, 2: 144, 0: 28, 3: 22})
+                    and heroes[True] == 22)
+    check("iron3d.dll, World3D.dll: in single play the bind lets every unit go",
+          bind and ids and placed_units,
+          f"the bind lets go when its id's third byte is +0xad4, which the game stores with "
+          f"+0xad0 from one word: {bind}; World3D files an object under a player number in the "
+          f"third byte, stdInitGame hands back GetNetPlayerNum's, CreateObjectFromScheme files "
+          f"under it: {ids}; {len(single)} single-play missions' heroes all of clan 0, the Multi "
+          f"maps' {multi}; their {sum(units.values())} units {dict(units)}: {placed_units}")
+
+    # The game menu: mode 7's handlers, its box, its four buttons and what disables two.
+    strings = resources.strings(iron)
+    into = {(0, 7): 0x100645E0, (1, 7): 0x10064620, (2, 7): 0x10064620, (3, 7): 0x10064650,
+            (4, 7): 0x10064650, (5, 7): 0x100647A0, (6, 7): 0x10064680, (7, 0): 0x100646B0,
+            (7, 1): 0x10064700, (7, 2): 0x10064700, (7, 3): 0x10064730, (7, 4): 0x10064730,
+            (7, 5): 0x100647C0, (7, 6): 0x10064770}
+    table = all(handler(*k) == v for k, v in into.items())
+    box = (at(0x10065550, 4) == hexes("c744241c") and u32(0x10065554) == 200
+           and at(0x10065558, 4) == hexes("c7442420") and u32(0x1006555C) == 150
+           and at(0x10065564, 4) == hexes("c7442428") and u32(0x10065568) == 440
+           and at(0x1006556C, 4) == hexes("c744242c") and u32(0x10065570) == 330)
+    buttons = []
+    for site, string in ((0x100663C6, 3080), (0x100664BF, 3081), (0x100665BE, 3082),
+                         (0x100666BD, 3083)):
+        buttons.append(at(site, 1) == b"\x68" and u32(site + 1) == string)
+    rects = [(0x1006642A, (0xEB, 0x1AE, 0xD2, 0xD2)), (0x10066525, (0x104, 0x1AE, 0xEB, 0xD2)),
+             (0x10066624, (0x11D, 0x1AE, 0x104, 0xD2)), (0x10066726, (0x136, 0x1AE, 0x11D, 0xD2))]
+    laid = all(at(site, 1) == b"\x68" and u32(site + 1) == a and u32(site + 6) == b
+               and at(site + 10, 1) == b"\x68" and u32(site + 11) == c and u32(site + 16) == d
+               for site, (a, b, c, d) in rects)
+    titled = at(0x1006687B, 1) == b"\x68" and u32(0x1006687C) == 5085
+    names = [strings.get(i) for i in (5085, 3080, 3081, 3082, 3083)]
+    disabled = (at(0x1006678B, 6) == hexes("8a88e6000000")
+                and at(0x1006679A, 6) == hexes("8a88e4000000"))
+    paused = u32(0x100E61EC + 11 * 4) == 0x100656C0 and called(0x100656C6) == 0x1009B720 \
+        and called(0x100656D3) == 0x1005F620
+    drawn = (at(0x100658DC, 5) == hexes("6800000099") and at(0x10065916, 5) == hexes("b9328032cc")
+             and at(0x1008D20B, 3) == hexes("8a4820") and at(0x1008D24D, 3) == hexes("ff501c"))
+    check("iron3d.dll: the game menu, mode 7, pauses the game and draws alone",
+          table and box and all(buttons) and laid and titled and disabled and paused and drawn
+          and names == ["Game Menu", "Resume game", "Save game", "Load game", "Quit game"],
+          f"handlers into and out of 7: {table}; the box (200, 150)-(440, 330): {box}; "
+          f"{names} on (210, 210)-(430, 235) and down by 25: {all(buttons) and laid and titled}; "
+          f"Save and Load disabled by +0xe6 or +0xe4: {disabled}; shown, the game paused: "
+          f"{paused}; the screen at 0x99000000 and the box filled 0xcc328032, drawn alone: {drawn}")
+
+    # The tooltip manager: cleared each frame, handed a text by the widgets, run after the pass.
+    manager = [site for site, target in calls if target == 0x1009BBC0]
+    # All but the frame's clear, its timer and the game's delete (`0x1005f064`) store a text
+    # into the manager, at once or where a jump takes them.
+    others = sorted(set(manager) - {0x1005F064, 0x10060AAC, 0x10060C80})
+    handed = [site for site in others
+              if re.search(rb"\x89[\x08\x10\x18\x30\x38]|[\xe9\xeb]", at(site + 5, 14))]
+    deleted = called(0x1005F069) == 0x1009BC00
+    cleared_tip = at(0x10060AB1, 6) == hexes("c70000000000")
+    timer = called(0x10060C87) == 0x1009BC20 and at(0x10060C73, 6) == hexes("8a8292050000")
+    column = called(0x1009C401) == 0x1009BBC0 and at(0x1009C406, 6) == hexes("8b966c020000")
+    check("iron3d.dll: 23 widgets hand the tooltip manager their text; the frame clears it",
+          len(manager) == 26 and len(handed) == 23 and cleared_tip and timer and column and deleted,
+          f"{len(manager)} calls of 0x1009bbc0, {len(handed)} storing a text; cleared before the "
+          f"interface pass: {cleared_tip}; the timer after it, unless the objectives are up: "
+          f"{timer}; a column button hands its +0x26c: {column}")
+
+
 MISSION_04 = "MISSIONS/CAMPAIGN/CAMPAIGN.00/Mission.04"
 
 #: Every call of ``IsHQ`` (``0x10076f50``): the push's refusal, the three handlers into mode 3,
@@ -25738,6 +26072,7 @@ def run(game: Path) -> int:
         check_factory_screen,
         check_designer_screen,
         check_command_mode,
+        check_command_views,
         check_hq_command_mode,
         check_commander_panel,
         check_mission_04_research,

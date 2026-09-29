@@ -599,3 +599,127 @@ fn in_command_mode_the_cursor_is_the_one_thing_drawn_over_the_panels_text() {
     // The cursor's one quad, two triangles of three vertices.
     assert_eq!(drawn.batches[top[0]].vertices.len(), 6);
 }
+
+/// The game menu, `CState` mode 7 (docs/39, "The game menu"): F3 or Esc on foot, or the
+/// commander column's button, pushes it; the world stands still under it; it alone is drawn,
+/// its title and its four buttons, *Save game* and *Load game* grey in the training campaign;
+/// *Resume game* or F3 again rolls it back to the view under it, which it never left.
+#[test]
+#[ignore = "needs the game install"]
+fn the_game_menu_pauses_the_world_draws_alone_and_resume_returns_to_the_view_under_it() {
+    use glam::Mat4;
+    use parkan_world::cockpit::Cockpit;
+    use parkan_world::cockpit::game_menu::{self, Button};
+    use parkan_world::hud::{Pages, Space};
+    use parkan_world::play::Mode;
+    use parkan_world::text::GameFont;
+
+    let game = gamedir::find(None).expect("a Parkan install: set PARKAN_DIR");
+    let (mut play, m) = mission_03_play();
+    assert!(play.training, "Mission 03 is the training campaign's");
+    play_for(&mut play, 0.5, |_| {});
+
+    // On foot: the menu goes on top, and nothing moves while it is up.
+    assert!(play.game_menu());
+    assert_eq!((play.mode(), play.view_mode()), (Mode::GameMenu, Mode::OnFoot));
+    assert!(play.mode().shows_cursor());
+    let (clock, hero, builder) =
+        (play.hero.time_ms, play.hero.walker.body.position, play.robots[0].1.time_ms);
+    play_for(&mut play, 1.0, |_| {});
+    assert_eq!((play.hero.time_ms, play.hero.walker.body.position), (clock, hero), "the game is paused");
+    assert_eq!(play.robots[0].1.time_ms, builder);
+    // F3 again closes it; the game goes on.
+    assert!(play.game_menu());
+    assert_eq!(play.mode(), Mode::OnFoot);
+    play_for(&mut play, 0.1, |_| {});
+    assert!(play.hero.time_ms > clock);
+
+    // Over a bunker's view the world is still drawn from the command camera, and the menu is
+    // drawn alone: no page, no map, no message box.
+    let bunker = object_target(&play, &m, "sbunk01.dat");
+    play.units[bunker].clan = Some(play.player_clan);
+    play.enter_command(bunker);
+    play.command_frame(0.0, parkan_world::command::Edges::default());
+    let camera = play.eye();
+    assert!(play.game_menu());
+    assert_eq!(play.view_mode(), Mode::Command(bunker));
+    assert_eq!(play.eye(), camera, "the view under the menu is the command camera's");
+    let pages = Pages::open(&game).unwrap();
+    let mut cockpit = Cockpit::open(&game, &pages, &play).unwrap();
+    let (font, menu) = (GameFont::ui(&game, "GAME_FONT").unwrap(), GameFont::ui(&game, "MENU_FONT").unwrap());
+    cockpit.commander.cursor = Some([300.0, 220.0]);
+    let drawn = cockpit.draw(&play, Space::new(640.0, 480.0), &font, &menu, Mat4::IDENTITY);
+    let words: Vec<String> = drawn.text.iter().map(|r| r.text.clone()).collect();
+    let strings = |id: u32| cockpit.strings[&id].clone();
+    assert_eq!(
+        words,
+        [5085, 3080, 3081, 3082, 3083].map(strings),
+        "the title and the four buttons, nothing else in GAME_FONT"
+    );
+    let colour = |i: usize| drawn.text[i].colour;
+    let argb = parkan_world::cockpit::argb;
+    assert_eq!(colour(1), argb(game_menu::TEXT_HOVERED), "Resume game under the cursor");
+    assert_eq!(colour(2), argb(game_menu::TEXT_DISABLED), "Save game, grey in training");
+    assert_eq!(colour(3), argb(game_menu::TEXT_DISABLED), "Load game, grey in training");
+    assert_eq!(colour(4), argb(game_menu::TEXT), "Quit game");
+    // A click on Save game does nothing in training; Resume game rolls the menu back.
+    assert_eq!(game_menu::click(&play, [300.0, 240.0]), None);
+    assert_eq!(game_menu::click(&play, [300.0, 300.0]), Some(Button::Quit));
+    assert_eq!(game_menu::click(&play, [300.0, 220.0]), Some(Button::Resume));
+    assert!(play.roll_back());
+    assert_eq!(play.mode(), Mode::Command(bunker));
+}
+
+/// Tooltips (docs/37, "A tooltip"): each frame the manager is cleared, a widget under the
+/// cursor hands it its text as it is drawn -- the commander column's buttons, enabled or not,
+/// and the map's exit -- and once the cursor has rested within 2 pixels for more than 250 ms
+/// the text shows in `TOOL_FONT` on a pale yellow box 16 under the cursor.
+#[test]
+#[ignore = "needs the game install"]
+fn a_column_button_under_a_resting_cursor_shows_its_tooltip_after_a_quarter_second() {
+    use glam::Mat4;
+    use parkan_world::cockpit::{Cockpit, tooltip};
+    use parkan_world::hud::{Layer, Pages, Space};
+    use parkan_world::text::GameFont;
+
+    let game = gamedir::find(None).expect("a Parkan install: set PARKAN_DIR");
+    let (mut play, m) = mission_03_play();
+    let bunker = object_target(&play, &m, "sbunk01.dat");
+    play.units[bunker].clan = Some(play.player_clan);
+    play.enter_command(bunker);
+    let pages = Pages::open(&game).unwrap();
+    let mut cockpit = Cockpit::open(&game, &pages, &play).unwrap();
+    assert!(!cockpit.system_cursor, "the install's Iron_3D.ini forces the software cursor");
+    let fonts = ["GAME_FONT", "MENU_FONT", "TOOL_FONT"].map(|n| GameFont::ui(&game, n).unwrap());
+    let space = Space::new(640.0, 480.0);
+    cockpit.update(&mut play, 0.0);
+    let frame = |cockpit: &mut Cockpit, cursor: [f32; 2], clock: f64| {
+        cockpit.commander.cursor = Some(cursor);
+        cockpit.draw(&play, space, &fonts[0], &fonts[1], Mat4::IDENTITY);
+        cockpit.tooltip(space, &fonts[2], clock)
+    };
+    // The chat button, disabled in single play, still hands its text: 5038 *Chat*.
+    let chat = [20.0, 380.0];
+    assert!(frame(&mut cockpit, chat, 1000.0).1.is_empty(), "the rest starts");
+    assert!(frame(&mut cockpit, [21.0, 381.0], 1200.0).1.is_empty());
+    let (batches, text) = frame(&mut cockpit, [21.0, 381.0], 1251.0);
+    assert_eq!(text.len(), 1);
+    assert_eq!(text[0].text, cockpit.strings[&5038]);
+    assert!(!batches.is_empty() && batches.iter().all(|b| b.layer == Layer::Tip));
+    // Three pixels off, the wait starts again.
+    assert!(frame(&mut cockpit, [24.0, 381.0], 1300.0).1.is_empty());
+    // The Game menu button: 1302 *Game menu*.
+    let menu = [20.0, 440.0];
+    frame(&mut cockpit, menu, 2000.0);
+    let (_, text) = frame(&mut cockpit, menu, 2300.0);
+    assert_eq!(text[0].text, cockpit.strings[&1302]);
+    // Off every widget, nothing.
+    frame(&mut cockpit, [320.0, 240.0], 3000.0);
+    assert!(frame(&mut cockpit, [320.0, 240.0], 4000.0).1.is_empty());
+    // The box is the text's width and the font's height, each plus 8, 16 under the cursor.
+    let width = fonts[2].advance(&cockpit.strings[&1302]);
+    let [x0, y0, x1, y1] = tooltip::place(space, menu, width, fonts[2].line_height, tooltip::BELOW);
+    assert_eq!([x0, y0], [menu[0], menu[1] + 16.0]);
+    assert_eq!([x1 - x0, y1 - y0], [width + 8.0, fonts[2].line_height + 8.0]);
+    let _ = m;
+}

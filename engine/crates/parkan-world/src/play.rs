@@ -68,6 +68,11 @@ pub const BUILDING_RUINE: u32 = 0x8000_2000;
 /// within 20 across the ground (`0x10071fe7`).
 pub const CAPTURABLE_TYPES: u32 = 0x0103_e000;
 pub const CAPTURE_REACH: f32 = 20.0;
+/// How far over the highest surface under the fallen hero the level's second camera stands
+/// (`0x100e5c8c`, docs/40, "View state 4").
+pub const FALLEN_ABOVE: f32 = 16.0;
+/// The campaign at list position 0, which the campaign screen starts in launch mode 4.
+pub const TRAINING_CAMPAIGN: &str = "CAMPAIGN.00";
 pub use parkan_formats::mission::{
     CLAN_NATURE, CLAN_NEUTRAL, RELATION_ALLIED, RELATION_HOSTILE, RELATION_NEUTRAL,
 };
@@ -151,13 +156,16 @@ pub enum Mode {
     /// Mode 5 with the building that is target `t`: its screen, a factory's (docs/36) or a
     /// research centre's, the commander panel turned to page 4 (docs/41).
     Factory(usize),
+    /// Mode 7: the game menu over the world, which stands still under it (docs/39, "The game
+    /// menu").
+    GameMenu,
 }
 
 impl Mode {
-    /// A mode whose screens show the cursor, the world going on behind them: command mode
-    /// and a building's screen (docs/40, docs/36).
+    /// A mode whose screens show the cursor: command mode, a building's screen and the game
+    /// menu (docs/40, docs/36, docs/39).
     pub fn shows_cursor(self) -> bool {
-        matches!(self, Mode::HqCommand(_) | Mode::Command(_) | Mode::Factory(_))
+        matches!(self, Mode::HqCommand(_) | Mode::Command(_) | Mode::Factory(_) | Mode::GameMenu)
     }
 
     /// A command view, an HQ's (mode 3) or a bunker's (mode 4): they share their screens,
@@ -337,6 +345,13 @@ pub struct Play {
     /// While a briefing plays, every object but the hero is paused (property `0x20a`) and
     /// the clan scripts wait (docs/21-briefing.md, "The world meanwhile").
     pub paused: bool,
+    /// Once the hero is lost, the level's second camera the world is drawn from (view
+    /// state 4, [`Play::fallen_eye`]).
+    pub fallen: Option<crate::robot::Eye>,
+    /// A mission of the training campaign, `CAMPAIGN.00`: the launch mode 4 the campaign
+    /// screen writes for the campaign at list position 0, the game's `+0xe6` (docs/34, "The
+    /// parameter block's modes").
+    pub training: bool,
     /// The buildings with doors or a control pod.
     pub buildings: Vec<Building>,
     /// The interface's mode stack, its front last.
@@ -1013,6 +1028,8 @@ impl Play {
             progression: None,
             says: Vec::new(),
             paused: false,
+            fallen: None,
+            training: false,
             names,
             selector: Selector::default(),
             voice_pick: VoicePick::default(),
@@ -1147,6 +1164,10 @@ impl Play {
     /// Load the mission's progression from `mission_dir`: its player clan's script, its
     /// messages and objectives, and the designs its `mission.cfg` prebuilds.
     pub fn load_progression(&mut self, game: &Path, mission_dir: &Path, mission: &Mission) -> Result<()> {
+        self.training = mission_dir
+            .parent()
+            .and_then(|c| c.file_name())
+            .is_some_and(|c| c.to_string_lossy().eq_ignore_ascii_case(TRAINING_CAMPAIGN));
         self.progression = Some(Progression::load(game, mission_dir, mission, self.hero.object)?);
         crate::factory::prebuild(self, game, mission_dir).context("the prebuilt designs")?;
         // What the clans' `Init` handlers ordered: Mission 03's enemy patrol shut down.
@@ -1661,6 +1682,11 @@ impl Play {
     /// One tick: the hero, then every round that left one of its barrels, then the
     /// battle's frame, then the effects.
     pub fn tick(&mut self, dt_ms: f64, mouse: [f32; 2]) -> Vec<Event> {
+        // The game menu pauses the game (`0x100656c0` → `0x1005f620` with 1: the game's `+0xe8`
+        // and `World3D`'s game time stopped): the game frame is skipped whole (`0x1005ea7f`).
+        if self.mode() == Mode::GameMenu {
+            return Vec::new();
+        }
         self.sync_sensitivity();
         self.update_targets();
         self.refresh_present();
@@ -1974,6 +2000,35 @@ impl Play {
         self.modes.last().copied().unwrap_or(Mode::OnFoot)
     }
 
+    /// The mode the world is viewed in: the front, or under the game menu the mode below it,
+    /// whose view state the menu keeps (`0x100645e0`–`0x10064680` set none but 2 for a
+    /// command view, which it was already).
+    pub fn view_mode(&self) -> Mode {
+        self.modes.iter().rev().copied().find(|m| *m != Mode::GameMenu).unwrap_or(Mode::OnFoot)
+    }
+
+    /// `CMD_GAME_MENU` (748, F3, `0x10072359`), the commander column's Game menu button
+    /// (`0x10084674`) and Esc on foot: while the mission is played, and not while a building is
+    /// being placed (cursor state 8), mode 7 is pushed, or with the menu up the stack is rolled
+    /// back, closing it. Into 7 from on foot or a driven unit (`0x100645e0`, `0x10064620`) the
+    /// unit's manual controller is switched off and the keyboard cleared; from a command view
+    /// (`0x10064650`) only the menu shows. Showing it pauses the game.
+    pub fn game_menu(&mut self) -> bool {
+        if self.progression.as_ref().is_some_and(|p| p.progress.outcome.is_some())
+            || self.commander.ghost.is_some()
+        {
+            return false;
+        }
+        if self.mode() == Mode::GameMenu {
+            return self.roll_back();
+        }
+        if matches!(self.mode(), Mode::OnFoot | Mode::Driving(_)) {
+            self.release_keys();
+        }
+        self.modes.push(Mode::GameMenu);
+        true
+    }
+
     /// Roll the stack back one mode (`0x10062ff0`): a building's screen gives the hero back
     /// to the player. The bottom mode stays.
     pub fn roll_back(&mut self) -> bool {
@@ -1981,6 +2036,14 @@ impl Play {
             return false;
         }
         match self.mode() {
+            // Mode 7 → below (`0x100646b0`, `0x10064700`, `0x10064730`, `0x10064770`): the menu
+            // hidden and the game going on; the driven unit's controller back, and the keyboard
+            // cleared but into a command view, which clears the left button's press instead.
+            Mode::GameMenu => {
+                self.modes.pop();
+                self.release_keys();
+                return true;
+            }
             Mode::Driving(_) if self.driving.as_ref().is_some_and(|d| d.telepresence) => {
                 return self.end_telepresence();
             }
@@ -2253,7 +2316,9 @@ impl Play {
     pub fn command_key(&mut self, command: &str, down: bool) -> bool {
         use crate::command::Move;
         use parkan_formats::controls::*;
-        if !self.mode().commands() {
+        // The cases test the view state, which the game menu leaves at 2 over a command view
+        // (`0x10064650`): its keys still set and clear the camera's flags there.
+        if !self.view_mode().commands() {
             return false;
         }
         let key = match command {
@@ -2328,6 +2393,10 @@ impl Play {
     /// The eye the world is drawn from: command mode's camera, the outer camera, or the driven
     /// unit's.
     pub fn eye(&self) -> crate::robot::Eye {
+        // View state 4, once the hero is lost, replaces whatever view was up (`0x100a4e50`).
+        if let Some(fallen) = self.fallen {
+            return fallen;
+        }
         let own = self.own_eye();
         if !self.outer_shows() {
             return own;
@@ -2347,7 +2416,7 @@ impl Play {
 
     /// The driven unit's own eye, or command mode's camera: what the right button picks along.
     pub fn own_eye(&self) -> crate::robot::Eye {
-        if self.mode().commands() {
+        if self.view_mode().commands() {
             return self.command.eye();
         }
         self.driven().eye().unwrap_or_else(|| self.hero.eye())
@@ -2355,7 +2424,7 @@ impl Play {
 
     /// Whether the outer camera makes the view: turned on, in the mode it was turned on in.
     pub fn outer_shows(&self) -> bool {
-        self.outer.on() && self.mode() == self.outer_mode
+        self.outer.on() && self.view_mode() == self.outer_mode
     }
 
     /// `CMD_JAMES_OUTER_CAMERA` (`0x10072244`): in modes 0, 1 and 2, on the driven unit
@@ -3112,12 +3181,43 @@ impl Play {
         events
     }
 
-    /// The loss of the player's clan's hero fails the mission (`iron3d.dll:0x10075619`).
+    /// The loss of the player's clan's hero fails the mission (`iron3d.dll:0x10075619`), and
+    /// the world is drawn from then on from the level's second camera placed over where the
+    /// hero stood (`0x10075612` → `0x100a4e50`, view state 4): [`Play::fallen_eye`].
     fn hero_lost(&mut self) {
+        self.fallen = Some(self.fallen_eye());
         if let Some(p) = self.progression.as_mut() {
             p.progress.outcome = Some(false);
             let says = p.say(&Notice::MissionFailed);
             self.says.extend(says);
+        }
+    }
+
+    /// The level's second camera (`+0x68`) as the hero's loss places it (`0x100a4e50`): the
+    /// hero's world matrix handed to its view whole, but for its height, which is 16 over the
+    /// highest surface at the hero's x, y the level's query finds with mask `0x41a` -- the
+    /// landscape, a building, scenery or a unit (`0x100a14d0` with 1, 1, 1; `0x100e5c8c`). The
+    /// view looks along the matrix's first column (docs/40, "The frame"), the hero's own x
+    /// axis: level, to its right-hand side. It is made with the command camera's field, 1.04,
+    /// and near plane, 3 (`0x100a29c8`). Its update runs only in a network game or with the
+    /// level's `+0xaf5` set (`0x10037a70`), so in single play it holds still.
+    pub fn fallen_eye(&self) -> crate::robot::Eye {
+        let (at, yaw) = self.hero.walker.drawn(self.hero.time_ms);
+        let top = at.with_z(at.z + 10_000.0);
+        let bottom = at.with_z(at.z - 10_000.0);
+        let under = self
+            .battle
+            .combat
+            .first_hit(&self.ground, None, top, bottom, 0.0)
+            .map(|(s, _, _)| s.point.z)
+            .or_else(|| self.ground.below(at.x, at.y, 10_000.0).map(|h| h.point.z))
+            .unwrap_or(at.z);
+        crate::robot::Eye {
+            position: Vec3::new(at.x, at.y, under + FALLEN_ABOVE),
+            forward: Vec3::new(yaw.cos(), yaw.sin(), 0.0),
+            up: Vec3::Z,
+            fov_x: crate::command::FIELD,
+            near: crate::command::NEAR,
         }
     }
 
@@ -3252,13 +3352,13 @@ impl Play {
     /// (`0x100064f2`-`0x1000651f`), so at levels 1 and 2, where its takt runs, it turns on the
     /// firer (docs/40, "Telepresence").
     ///
+    /// The hit is gated as it arrives (`0x100179c0`). A unit whose takt runs asks at its next
+    /// one, a frame on; the unit the player drives at level 0, whose takt does not run, is
+    /// gated here and now, and the attack the gate lets through waits on its stack for the
+    /// letting-go (docs/40, "What the AI does at levels 1 and 2").
+    ///
     /// STAND-IN: docs/31-packages.md#a-hit-pulls-a-unit-in--read -- the call for help to the
     /// clan's warriors within 400 is not modelled.
-    ///
-    /// STAND-IN: docs/40-command-mode.md#what-the-ai-does-at-levels-1-and-2--read -- at level
-    /// 0, where the unit's takt does not run, the game's gate takes the hit at once and leaves
-    /// the attack on the stack for when the unit is let go; here the hit waits for the
-    /// behaviour's next takt, after the letting-go, and is gated then.
     pub fn hurt(&mut self, t: usize, owner: Option<usize>) {
         let firer = match owner {
             None => self.hero_id,
@@ -3267,10 +3367,40 @@ impl Play {
                 None => return,
             },
         };
-        if let Some((_, robot)) = self.robots.iter_mut().find(|(rt, _)| *rt == t) {
-            robot.behaviour.hurt(firer);
-            self.resent(t, owner);
+        let Some(r) = self.robots.iter().position(|(rt, _)| *rt == t) else { return };
+        let driven = self.driving.as_ref().is_some_and(|d| d.target == t);
+        if driven && !self.reach().ai_moves() {
+            let others = self.seen_by(t, &self.seen(), &[]);
+            let condition = self.condition(t);
+            let bounds = self.ground.bounds();
+            let graph = &self.graph;
+            let usable = |x: f32, y: f32| graph.as_ref().is_none_or(|g| g.usable(x, y));
+            let animal = self.units[t].type_word & CLASS_ANIMAL != 0;
+            let robot = &mut self.robots[r].1;
+            let now = robot.time_ms;
+            let senses = Senses {
+                now_ms: now,
+                position: robot.walker.body.position,
+                seen: &others,
+                places: &[],
+                docks: &[],
+                condition,
+                size_class: robot.size_class,
+                flyer: robot.flyer,
+                bounds,
+                usable: Usable(&usable),
+                has_weapon: !robot.guns.is_empty(),
+                walker_idle: robot.wizard.idle(now),
+                neutral: false,
+                building: false,
+                animal,
+                pastures: parkan_sim::behaviour::Pastures::NONE,
+            };
+            robot.behaviour.hurt_now(firer, &senses);
+        } else {
+            self.robots[r].1.behaviour.hurt(firer);
         }
+        self.resent(t, owner);
     }
 
     /// The attitude a hit costs: the victim's clan toward the firer's. The slot 67 handler

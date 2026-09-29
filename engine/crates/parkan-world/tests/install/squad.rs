@@ -1313,7 +1313,9 @@ fn a_bot_is_boarded_at_the_level_its_record_holds_and_the_key_keeps_the_players_
 /// A hit reaches a warbot's behaviour whoever drives it (`Behavior.dll:0x100064b0` asks
 /// nothing of the take), and its repair decision runs in its takt: at level 1, where flag
 /// `0x10` lets the takt run, it turns on the unit that fired and switches its repair system on
-/// under the player's hand; at level 0 neither happens while the player has it.
+/// under the player's hand. At level 0 the takt does not run, but the hit handler gates the
+/// hit as it arrives (`0x100179c0`): the attack goes on the stack at once and waits there,
+/// and no repair decision is taken while the player has it.
 #[test]
 #[ignore = "needs the game install"]
 fn a_warbot_taken_at_level_1_turns_on_its_firer_and_its_ai_switches_its_repair_on() {
@@ -1348,6 +1350,14 @@ fn a_warbot_taken_at_level_1_turns_on_its_firer_and_its_ai_switches_its_repair_o
         }
         play.hurt(bot, Some(firer));
         let id = play.units[firer].logical_id;
+        // At once, before any takt: the gate has run, whatever the level.
+        let robot = &play.robots.iter().find(|(t, _)| *t == bot).unwrap().1;
+        let at_once = robot.behaviour.hurt_by.is_none()
+            && robot
+                .behaviour
+                .tasks
+                .iter()
+                .any(|t| matches!(t, Task::Attack { target: Some(t), .. } if *t == id));
         let mut turned = false;
         let mut repair = false;
         play_for(&mut play, 2.0, |p| {
@@ -1369,10 +1379,18 @@ fn a_warbot_taken_at_level_1_turns_on_its_firer_and_its_ai_switches_its_repair_o
             .tasks
             .iter()
             .any(|t| matches!(t, Task::Attack { target: Some(t), .. } if *t == id));
-        (turned, repair, after)
+        (at_once, turned, repair, after)
     };
-    assert_eq!(run(1), (true, true, true), "level 1: the takt runs, so the hit and the repair decision act");
-    assert_eq!(run(0), (false, false, true), "level 0: the takt waits for the player to let it go");
+    assert_eq!(
+        run(1),
+        (false, true, true, true),
+        "level 1: the takt runs, so the hit is answered at its next one and the repair decision acts"
+    );
+    assert_eq!(
+        run(0),
+        (true, true, false, true),
+        "level 0: the gate puts the attack on the stack at once; the takt waits for the letting-go"
+    );
 }
 
 /// Where Mission 04's capturer is when a landing flag is set with building `id` picked: its

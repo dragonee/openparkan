@@ -304,10 +304,26 @@ fn a_lake_bed_kills_the_hero_and_a_warbot_within_a_second() {
     assert!(play.says.iter().any(|s| matches!(s, Say::Voice(_))), "VOICE_MISSION_FAIL: {:?}", play.says);
 
     let at = play.hero.walker.body.position;
+    // View state 4 (docs/40): the world is drawn from the level's second camera, placed over
+    // where the hero fell, 16 over the highest surface there, level, along the hero's own x
+    // axis, with the command camera's field; in single play it does not move.
+    let eye = play.eye();
+    assert_eq!(play.fallen, Some(eye));
+    assert!((eye.position.truncate() - at.truncate()).length() < 0.01, "{:?} over {at:?}", eye.position);
+    let under = play.ground.below(at.x, at.y, 1.0e4).map_or(f32::MIN, |h| h.point.z);
+    assert!(
+        eye.position.z >= under + parkan_world::play::FALLEN_ABOVE - 1e-3,
+        "{} over {under}",
+        eye.position.z
+    );
+    let (_, yaw) = play.hero.walker.drawn(play.hero.time_ms);
+    assert!((eye.forward - Vec3::new(yaw.cos(), yaw.sin(), 0.0)).length() < 1e-5, "{:?}", eye.forward);
+    assert_eq!((eye.up, eye.fov_x), (Vec3::Z, parkan_world::command::FIELD));
     for _ in 0..60 {
         play.tick(tick, [0.0; 2]);
     }
     assert_eq!(play.hero.walker.body.position, at, "a dead hero stays where it died");
+    assert_eq!(play.eye(), eye, "and the camera over it holds still");
 }
 
 #[test]

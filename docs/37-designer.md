@@ -638,11 +638,24 @@ whenever a project is pushed to the front: by an accepted design
 shows once the cursor has held within 2 pixels of where it was, in each axis,
 **for more than 250 ms** by `timeGetTime`; a move of more than 2 restarts the
 wait. The box is the text's width plus 8 by the font's height plus 8, in the
-game's `+0x18` font, at the cursor and 16 pixels × the vertical scale below it
-(12 while the display's slot 12 answers yes), turned to the cursor's left or
-above it where it would cross the screen's right or bottom edge. It is filled
-pale yellow `0xfff5f596`, outlined black `0xff000000`, and the text is black at
-(+5, +4). *Seen* at 155.5 s: *Accept to production*, black on pale yellow, above
+game's `+0x18` font, `TOOL_FONT` (`0x1005f9f2`; entry 7 of `ui/font.lib` at
+640 × 480, `ui/menu_resources.cfg`), at the cursor and 16 pixels × the vertical
+scale below it (12 while the display's slot 12 answers yes,
+[40-command-mode.md](40-command-mode.md#the-displays-slot-12-the-system-cursor--read-and-measured)),
+turned to the cursor's left or above it where it would cross the screen's right
+or bottom edge. It is filled pale yellow `0xfff5f596`, outlined black
+`0xff000000`, and the text is black at (+5, +4).
+
+**Who hands it the text** (*read*). The manager (`0x1009bbc0`, a singleton at
+`0x1010c3e4`) keeps one text. The game frame clears it before the interface
+pass (`0x10060aac`), each widget whose rectangle holds the cursor as it is
+drawn hands it its own (23 of the manager's 26 callers, *measured* by
+`check_command_views` as a call scan: the commander column's buttons,
+enabled or not, `0x1009c401`; the unit box's buttons; a building row's; the
+map's exit; the factory panel's, whose texts its constructor makes,
+`0x10096c5e`–`0x10096fce`; the tabs and buttons here), and the timer, after the
+pass, draws the last handed; with none handed it stamps nothing. It does not run
+while the objectives screen is up (`0x10060c7e`). *Seen* at 155.5 s: *Accept to production*, black on pale yellow, above
 and to the right of the cursor on accept, near the screen's foot; 0.3 s after
 the cursor settled.
 

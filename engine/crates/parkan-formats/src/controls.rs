@@ -214,6 +214,8 @@ pub const CMD_JAMES_MISSION_OBJ: &str = "CMD_JAMES_MISSION_OBJ";
 pub const CMD_JAMES_SATELLITE_MAP: &str = "CMD_JAMES_SATELLITE_MAP";
 pub const CMD_INC_MAP_ALPHA: &str = "CMD_INC_MAP_ALPHA";
 pub const CMD_DEC_MAP_ALPHA: &str = "CMD_DEC_MAP_ALPHA";
+/// The game menu, F3 (748, docs/39, "The game menu").
+pub const CMD_GAME_MENU: &str = "CMD_GAME_MENU";
 /// Command mode's camera moves and its zoom (docs/40, "Keys set velocities").
 pub const CMD_JAMES_HQ_MOVE_LEFT: &str = "CMD_JAMES_HQ_MOVE_LEFT";
 pub const CMD_JAMES_HQ_MOVE_RIGHT: &str = "CMD_JAMES_HQ_MOVE_RIGHT";
