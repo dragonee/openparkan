@@ -16057,6 +16057,43 @@ def check_construction(check, game: Path) -> None:
               f"{', '.join(f'{k} {v:.1f}' for k, v in others.items())} from the other clans' "
               f"bases, and the recording's mine there is green, so single play never applies it")
 
+        # 7b. what marks a clan joined: a player DirectPlay creates in the running session who is
+        #     not a departed one back by name and password (World3D.dll's pump), message 5
+        world_path = game / "World3D.dll"
+        if world_path.exists():
+            w3d = _image_at(world_path.read_bytes())
+            table = [struct.unpack("<I", iron(0x10060804 + 4 * k, 4))[0] for k in (5, 6, 7)]
+            handlers = (table == [0x1005FC93, 0x1005FDBD, 0x1005FB5E]
+                        # joined: the net manager's +8 cleared and +0x10 set, and the byte set
+                        and iron(0x1005FC93, 0x24) == bytes.fromhex(
+                            "e89ed306008b108bc8ff52388bac240c0100008bf8c6442f0800c6442f1001e87fd306"
+                            "00")
+                        # left: the clan's SuperAI (+0x774) slot 5 with 2, the host's +8 set
+                        and iron(0x1005FB6A, 15) == bytes.fromhex("8b9c18740700008b0b6a0253ff5114")
+                        and iron(0x1005FB98, 5) == bytes.fromhex("c6442f0801")
+                        # returns: slot 5 with 1, the host's +8 cleared
+                        and iron(0x1005FDF6, 5) == bytes.fromhex("c6442e0800")
+                        and [iron(a, 5) for a in (0x1005FCE3, 0x1005FDBD + 0x5A, 0x1005FBB9)]
+                        == [bytes.fromhex("681e180000"), bytes.fromhex("681d180000"),
+                            bytes.fromhex("681c180000")]
+                        and [strings.get(k) for k in (6172, 6173, 6174)]
+                        == ["%s left the game", "%s returns", "%s joined the game"])
+            pump = (w3d(0x10007039, 0x1F) == bytes.fromhex(
+                        "a1582a121083f8310f87640100000f844201000083e803747883e8020f85e7")
+                    and w3d(0x100070FE, 19) == bytes.fromhex(
+                        "8b0de451791085c974046a06eb026a0556ffd0")
+                    and w3d(0x10005A5B, 6) == bytes.fromhex("8935e4517910")
+                    and w3d(0x10005A71, 9) == bytes.fromhex("83bff847f4ff027535")
+                    and w3d(0x10005ADF, 17) == bytes.fromhex(
+                        "b901000000c1e0042bc65f890de4517910"))
+            check("iron3d.dll: a clan is marked joined when a new player takes its slot in play",
+                  handlers and pump,
+                  f"messages 5, 6, 7 {[hex(t) for t in table]}: joined clears the net manager's "
+                  f"computer flag and sets the player flag and the clan's +0x64, returns and left "
+                  f"hand the clan's SuperAI slot 5 a 1 or a 2 and leave the byte: {handlers}; "
+                  f"World3D.dll raises 5 on DirectPlay's create-player message (3) for a player "
+                  f"matching no departed slot, 6 for one that does: {pump}")
+
         # 8. a builder's building is on its clan's SuperAI list from the frame after it is made
         filed = (iron(0x100333F0, 9) == bytes.fromhex("8b17506a0257ff5210")
                  and iron(0x10060415, 6) == bytes.fromhex("6a0257ff5610")

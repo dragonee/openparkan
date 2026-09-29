@@ -175,6 +175,42 @@ or 2 turns to 0 within 400 across the ground of another clan's **base point**
   (`0x1005fccc`), the message that puts up string 6174, *"%s joined the game"*
   (*measured*); a sweep of every access through a clan index (`imul …, 0x68`)
   finds no other writer.
+- **"Joined" is a player taking the clan's slot in a running game** (*read*).
+  The game's network messages come through one callback, which `iron3d.dll`
+  hands `World3D.dll`'s `stdInitGame` (`0x1005ca5a`, stored at
+  `World3D.dll:0x1013b59c`) and which switches on the message
+  (`0x1005fa60`, table `0x10060804`) with the player's slot as the clan's index:
+  - **5, joined** (`0x1005fc93`): the net manager's session table has the slot's
+    computer flag (`+8`) cleared and its player flag (`+0x10`) set, the clan's
+    byte `+0x64` is set, and 6174 goes up;
+  - **6, returns** (`0x1005fdbd`) and **7, left** (`0x1005fb5e`): the clan's
+    SuperAI (`+0x774`, the record's `+0x50`) is handed 1 or 2 through its slot 5,
+    and when the net manager's slot 18 answers 1 (`0x1005fde3`, `0x1005fb85`)
+    the slot's computer flag is cleared or set; 6173 *"%s returns"* or 6172
+    *"%s left the game"* goes up. **Neither touches the byte**, so once set it
+    stays for the game.
+
+  `World3D.dll`'s message pump raises 5 and 6 on DirectPlay's create-player
+  message, system message 3 (`0x1000704d`, `0x100070ca`): it looks the new
+  player up among the slots a player has left (state 2) by name and password
+  (`0x10005a50`), and a match is 6, the player back in the old slot, and no
+  match 5 with the player given a free slot (`0x100070fe`–`0x1000710f`). So the
+  byte marks a clan whose slot a new player has taken while the game runs. The
+  callback is handed over as the world is created for the mission (`0x1005ca5a`,
+  [34-progression.md](34-progression.md#who-sends-the-game-message-3--read)),
+  after the `multi_login` screen; whether the players already in the session
+  then reach it as new ones is not established.
+- **Nothing else reads the byte** (*read*, by three sweeps with
+  `analysis/pe.py`). Of `iron3d.dll`'s 306,503 instructions, one carries the displacement
+  `0x788` (the level's `0x724` + `0x64`): the writer. Of the 98 pointers it
+  forms into the clan array (`lea` of `0x724` to `0x78b` off a base), one reads
+  a byte at the record's `+0x64` within 60 instructions: the walk's `[esi +
+  0x60]` off `+0x728` (`0x10033dd4`, `0x10033de4`). Of the 51 loops that step a
+  register by 0x68, the walk's is the one that reads it. The control is the
+  sweeps finding that writer and that reader. So the rule's only use of
+  "joined" is to pass over the clan: a network placement keeps 400 from the
+  base point of every other clan **except** one whose slot a joining player has
+  taken. Why the game drops it there is not read.
 - **`+0xe4` is the network game's byte.** It belongs to the one game object
   `createGame` makes (0xf0 bytes, `0x1005b640`), the object `getIGame`
   (`0x1005b580`) returns. It has two writers: the constructor's 0
@@ -1074,9 +1110,19 @@ laser (`e_gun_lc_03`, `e_gun_mc_20`).
 - What the seven other routines of `AniMesh.dll` that test bit 1 at `+0x14` leave out
   of, and so whether a hidden building still stops a ray or is struck
   ([Actions 1 and 2](#actions-1-and-2-hide-and-show-the-building--read)).
-- Why a clan whose byte `+0x64` is set — only *"%s joined the game"* sets it — no
+- ~~Why a clan whose byte `+0x64` is set — only *"%s joined the game"* sets it — no
   longer keeps a network placement 400 from its base point, while one no player has
-  joined does (`0x10033de4`); the byte's other readers are not followed.
+  joined does (`0x10033de4`); the byte's other readers are not followed.~~ —
+  **read**, narrowed: the byte has no other reader (one `0x788` displacement in
+  `iron3d.dll`, the writer; one read among the 98 pointers into the clan array and
+  the 51 loops stepping 0x68, the walk's). "Joined" is a player DirectPlay creates in
+  the running session who matches no departed player by name and password, taking a
+  free slot (`World3D.dll:0x100070ca`, `0x10005a50`): message 5, which also clears
+  the slot's computer flag. Returning (6) and leaving (7) hand the clan's SuperAI 1
+  or 2 and never clear the byte. So the rule spares only a clan a joining player
+  has taken; why, and whether the players present as the game starts count as
+  joining, is not read. Network play only: the engine plays single play and needs
+  nothing of it ([Its colour](#the-model-under-the-cursor)).
 - ~~How `StartCheckMaxBasementAngle` triangulates the basement between its
   rings.~~ — **read**: as the constrained Delaunay triangulation of the ring
   between the two `.bas` rings, their edges its only constraints, the faces
