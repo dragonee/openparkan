@@ -1095,11 +1095,17 @@ fn telepresence_at_level_1_lets_the_warbots_ai_walk_it_and_at_level_0_the_player
         let from = robot(&play, bot).walker.body.position;
         let goal = from + glam::Vec3::new(40.0, 0.0, 0.0);
         play.dispatch(Order { code: GO, parameter: 0, target: Target::Place(goal.to_array()) });
+        // The nearest it comes: over at its place, the go, its only order, leaves a patrol of
+        // radius 150 about it (docs/42, "Spreading a group").
+        let mut to = robot(&play, bot).walker.body.position;
         for _ in 0..(60 * 20) {
             play.update_input();
             play.tick(1000.0 / 60.0, [0.0; 2]);
+            let now = robot(&play, bot).walker.body.position;
+            if now.truncate().distance(goal.truncate()) < to.truncate().distance(goal.truncate()) {
+                to = now;
+            }
         }
-        let to = robot(&play, bot).walker.body.position;
         assert_eq!(robot(&play, bot).walker.body.command, [0.0; 3], "no key of the player's moved it");
         assert!(play.roll_back());
         assert_eq!(play.auto_driver(), 0, "on foot, the hero's level");
@@ -1324,10 +1330,19 @@ fn enter_aboard_mission_04s_hq_opens_its_command_view_whose_camera_rides_with_it
     // Route: the HQ drives off, and the camera goes with it. The goal is 70 m ahead of it, on the
     // walkable pad it stands on; the ground north of the pad is not walkable, and the walker
     // refuses a goal there (docs/24, "The global path").
+    // The drive is measured while the go runs: once over, the go, the HQ's only order, leaves a
+    // patrol of radius 150 about its place (docs/42, "Spreading a group").
     let goal = at + glam::Vec3::new(-44.0, -54.0, 0.0);
     play.dispatch(Order { code: parkan_sim::hq::GO, parameter: 0, target: Target::Place(goal.to_array()) });
     let mut worst: f32 = 0.0;
     command_frames(&mut play, 600, |p| {
+        let going = p
+            .robots
+            .iter()
+            .any(|(t, r)| *t == hq && matches!(r.behaviour.task(), parkan_sim::behaviour::Task::Go { .. }));
+        if !going {
+            return;
+        }
         let at = p.battle.combat.targets[hq].position;
         let across = (p.command.position - at).truncate().length();
         worst = worst.max((across - p.command.distance * p.command.tilt.sin()).abs());

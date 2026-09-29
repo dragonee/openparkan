@@ -147,6 +147,9 @@ pub const ANIMAL_FIXED_FIRE: f32 = 200.0;
 /// The go task's `Go_SpeedPercent`, and how near its place it is over (`0x1002b670`).
 pub const GO_SPEED: f32 = 1.0;
 pub const GO_ARRIVED: f32 = 30.0;
+/// The patrol a go to a place leaves behind when it was the unit's only order: its radius
+/// (`0x96`, `Behavior.dll:0x1002b8b0`).
+pub const GO_PATROL_RADIUS: i32 = 150;
 /// `Build_SpeedPercent` and `Transport_SpeedPercent` (`Behavior.dll:0x10016250`).
 pub const BUILD_SPEED: f32 = 1.0;
 pub const TRANSPORT_SPEED: f32 = 1.0;
@@ -867,6 +870,12 @@ impl Behaviour {
         true
     }
 
+    /// How many orders the unit's list holds (`IBehaviour` slot 4, `+0xa14`): its tasks, the
+    /// running one among them, but the empty stack's own stop.
+    pub fn orders_held(&self) -> usize {
+        self.tasks.len() - usize::from(self.tasks.first() == Some(&Task::Stop))
+    }
+
     /// The task running.
     pub fn task(&self) -> Task {
         self.tasks.last().copied().unwrap_or(Task::Stop)
@@ -1466,6 +1475,19 @@ impl Behaviour {
                     // go task's 30 is measured in three dimensions is not read: across the
                     // ground, as a script's place carries no height.
                     if at.truncate().distance(goal.truncate()) <= GO_ARRIVED {
+                        // Over at a place, a go that is the unit's only order appends a patrol
+                        // of radius 150 about that place, to the end, and then ends
+                        // (`Behavior.dll:0x1002b824`–`0x1002b8d7`: the task list's count,
+                        // `IBehaviour` slot 4, is 1). So a group sent to one place spreads out,
+                        // each unit on a loop of its own (docs/42, "Spreading a group").
+                        if self.orders_held() == 1 {
+                            let patrol = Order {
+                                code: orders::PATROL,
+                                parameter: GO_PATROL_RADIUS,
+                                target: Target::Place(goal.to_array()),
+                            };
+                            self.insert_order(&patrol, orders::INSERT_TO_END);
+                        }
                         return None;
                     }
                     walk = Walk::To(goal, GO_SPEED);
@@ -2490,16 +2512,55 @@ mod tests {
         let t = b.takt(&senses(&[], 0.0, Vec3::ZERO, true));
         assert_eq!((t.walk, t.fire_freely), (Walk::To(Vec3::new(500.0, 0.0, 0.0), 1.0), true));
         assert_eq!(b.takt(&senses(&[], 100.0, Vec3::new(100.0, 0.0, 0.0), false)).walk, Walk::Keep);
-        // Stopped short, it sets off again; stopped within 30, it is over.
+        // Stopped short, it sets off again; stopped within 30, it is over, and being the only
+        // order it leaves a patrol of radius 150 about its place.
         assert!(matches!(b.takt(&senses(&[], 200.0, Vec3::new(400.0, 0.0, 0.0), true)).walk, Walk::To(..)));
         b.takt(&senses(&[], 300.0, Vec3::new(475.0, 0.0, 9.0), true));
-        assert_eq!(b.task(), Task::Stop);
+        assert!(
+            matches!(
+                b.task(),
+                Task::Patrol { guarded: Guarded::Place(at), radius: 150.0, .. } if at == Vec3::new(500.0, 0.0, 0.0)
+            ),
+            "{:?}",
+            b.tasks
+        );
+        assert_eq!(b.tasks.len(), 1);
         // An enemy in reach does not pull it off its way.
         let enemy = Seen { hostile: true, ..unit(9, 50.0, 0.0) };
         let mut c = Behaviour::new(2);
         c.order(&order);
         c.takt(&senses(&[enemy], 0.0, Vec3::ZERO, true));
         assert!(matches!(c.task(), Task::Go { .. }));
+    }
+
+    /// Over at a place, a go that is the unit's only order appends a patrol of radius 150 about
+    /// the place (`Behavior.dll:0x1002b83b`–`0x1002b8d7`), so a group sent to one place spreads
+    /// out, each unit on its own loop; a go with another order behind it leaves nothing, and a
+    /// route's last go does.
+    #[test]
+    fn a_lone_go_ends_in_a_patrol_of_150_about_its_place_and_one_with_another_behind_does_not() {
+        let go = |x: f32| Order { code: orders::GO, parameter: 0, target: Target::Place([x, 0.0, 0.0]) };
+        let mut b = Behaviour::new(5);
+        assert!(b.insert_order(&go(100.0), orders::INSERT_REPLACE));
+        assert!(b.insert_order(&go(300.0), orders::INSERT_TO_END));
+        assert_eq!(b.orders_held(), 2);
+        b.takt(&senses(&[], 0.0, Vec3::ZERO, true));
+        b.takt(&senses(&[], 100.0, Vec3::new(90.0, 0.0, 0.0), true));
+        assert!(matches!(b.task(), Task::Go { goal, .. } if goal.x == 300.0), "the next go: {:?}", b.tasks);
+        assert_eq!(b.orders_held(), 1);
+        b.takt(&senses(&[], 200.0, Vec3::new(295.0, 0.0, 0.0), true));
+        let Task::Patrol { guarded: Guarded::Place(at), radius, .. } = b.task() else {
+            panic!("{:?}", b.tasks)
+        };
+        assert_eq!((at, radius), (Vec3::new(300.0, 0.0, 0.0), 150.0));
+        // Its loop is drawn about the place, within 150 on each axis.
+        let t = b.takt(&senses(&[], 300.0, Vec3::new(295.0, 0.0, 0.0), true));
+        let Walk::To(first, _) = t.walk else { panic!("{t:?}") };
+        assert!((first.x - 300.0).abs() <= 150.0 && first.y.abs() <= 150.0, "{first}");
+        // The empty stack's own stop is no order: a go put first on it is still the only one.
+        let mut c = Behaviour::new(6);
+        assert!(c.insert_order(&go(100.0), orders::INSERT_TO_START));
+        assert_eq!((c.tasks.len(), c.orders_held()), (2, 1));
     }
 
     #[test]

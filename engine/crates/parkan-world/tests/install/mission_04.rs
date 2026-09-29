@@ -304,6 +304,13 @@ fn mission_04_is_won_by_the_hq_the_helicopters_captures_research_a_large_flyer_a
         play.battle.combat.targets[flyer].position.truncate().distance(at.truncate()) < 30.0
     });
     assert!(by_hq, "the flyer comes to the HQ: {}", play.battle.combat.targets[flyer].position);
+    // Over there, the go, its only order, leaves a patrol of radius 150 about the HQ (docs/42,
+    // "Spreading a group"): the player stands it by to board it.
+    play.dispatch(parkan_sim::orders::Order {
+        code: parkan_sim::orders::STAYGROUND,
+        parameter: 0,
+        target: parkan_sim::orders::Target::NotDefined,
+    });
     play.roll_back_to_foot();
     assert_eq!(play.mode(), Mode::OnFoot);
     play_for(&mut play, 3.0, |_| {});
