@@ -1203,6 +1203,7 @@ impl App {
             }
             return;
         }
+        let mut manual = false;
         match (button, pressed) {
             (MouseButton::Left, true) => {
                 self.left_down = Some((Instant::now(), cursor));
@@ -1236,6 +1237,7 @@ impl App {
                         }
                     }
                 }
+                manual = matches!(play.mode(), parkan_world::play::Mode::Manual(_));
             }
             (MouseButton::Left, false) => {
                 let Some((_, anchor)) = self.left_down.take() else { return };
@@ -1277,6 +1279,12 @@ impl App {
                 }
             }
             _ => {}
+        }
+        // The Manual button took a building's turret (mode 6): the mouse turns it now, grabbed
+        // as on foot, and the press that took it grows no band.
+        if manual {
+            self.left_down = None;
+            self.grab(true);
         }
     }
 

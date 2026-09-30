@@ -1074,6 +1074,84 @@ fn explode_in_the_unit_box_blows_the_warbot_up_six_tenths_of_a_second_later() {
     assert!(events.contains(&Event::Staged { target: bot, part: 0, node: 0 }), "{events:?}");
 }
 
+/// The *Manual* button on a bunker's row of the commander panel's bunker page (`0x10086256`,
+/// docs/41, "The building pages") takes the bunker's turret: mode 6 goes on top of the command
+/// view it was pressed in, the player sees from the turret's camera, turns it with the mouse and
+/// fires its guns with the button, and Esc gives the guns back to its AI and the view back to
+/// command mode. With its turret shot off the button is inert (`0x10033e40`).
+#[test]
+#[ignore = "needs the game install"]
+fn the_manual_button_on_a_bunkers_row_takes_its_turret_and_esc_returns_to_command_mode() {
+    use parkan_world::cockpit::Cockpit;
+    use parkan_world::cockpit::commander::{
+        BUILDING_BUTTON, BUILDING_BUTTONS_X, BUILDING_ROWS_TOP, Click, ROW_HEIGHT,
+    };
+    use parkan_world::hud::Pages;
+    use parkan_world::play::{Mode, Play};
+
+    let game = gamedir::find(None).expect("a Parkan install: set PARKAN_DIR");
+    let (mut play, m) = mission_03_play();
+    let bunker = object_target(&play, &m, "sbunk01.dat");
+    play.units[bunker].clan = Some(play.player_clan);
+    play.enter_command(bunker);
+    let tick = |play: &mut Play, mouse: [f32; 2]| {
+        play.update_input();
+        play.tick(1000.0 / 60.0, mouse);
+    };
+    tick(&mut play, [0.0; 2]);
+    let pages = Pages::open(&game).unwrap();
+    let mut cockpit = Cockpit::open(&game, &pages, &play).unwrap();
+    let now = play.hero.time_ms;
+    cockpit.update(&mut play, now);
+    cockpit.commander.turn(&mut play, 7, now);
+    let command_eye = play.eye().position;
+
+    // Row 0's second button: Strategic control is the first on a bunker's row.
+    let manual = [BUILDING_BUTTONS_X + BUILDING_BUTTON + 17.0, BUILDING_ROWS_TOP + ROW_HEIGHT / 2.0];
+    let now = play.hero.time_ms;
+    assert_eq!(cockpit.commander.click(&mut play, &mut cockpit.map, manual, manual, now), Click::Taken);
+    assert_eq!(play.mode(), Mode::Manual(bunker), "the bunker's manual control");
+    assert_eq!(play.driven_target(), Some(bunker));
+    let eye = play.eye().position;
+    let at = play.battle.combat.targets[bunker].position;
+    assert!(eye.distance(at) < 30.0, "the turret's camera, at the bunker: {eye} by {at}");
+    assert!(eye.distance(command_eye) > 5.0, "not the command camera: {eye} and {command_eye}");
+
+    let aim = |play: &Play| play.emplacements.iter().find(|(e, _)| *e == bunker).unwrap().1.rig.aim;
+    // The yaw channel wraps at a whole turn, so the turn is summed tick by tick.
+    let mut turned = 0.0_f32;
+    for _ in 0..60 {
+        let before = aim(&play)[0];
+        tick(&mut play, [20.0, 0.0]);
+        let d = aim(&play)[0] - before;
+        turned += d - d.round();
+    }
+    assert!(turned.abs() > 0.2, "the mouse turns its turret: {turned} turns");
+    let rounds = |play: &Play| play.battle.combat.rounds.len();
+    let (mut most, fired_before) = (0, rounds(&play));
+    play.key("SCAN_LMOUSE", true);
+    for _ in 0..(3 * 60) {
+        tick(&mut play, [0.0; 2]);
+        most = most.max(rounds(&play));
+    }
+    play.key("SCAN_LMOUSE", false);
+    assert!(most > fired_before, "its guns fire at the button");
+
+    assert!(play.roll_back());
+    assert_eq!(play.mode(), Mode::Command(bunker), "Esc: back to command mode");
+    assert_eq!(play.driven_target(), None);
+
+    // Its turret shot off, the button does nothing.
+    let turret = play.emplacements.iter().find(|(e, _)| *e == bunker).unwrap().1.turret_part;
+    play.battle.combat.targets[bunker].parts[turret].life.as_mut().unwrap().hit(1, f32::MAX / 4.0);
+    play.economy.site_mut(bunker).unwrap().repair = None;
+    tick(&mut play, [0.0; 2]);
+    assert!(!play.manual_open(bunker));
+    let now = play.hero.time_ms;
+    cockpit.commander.click(&mut play, &mut cockpit.map, manual, manual, now);
+    assert_eq!(play.mode(), Mode::Command(bunker), "inert with its turret dead");
+}
+
 /// The commander's map closes on its title bar's exit button, the map's `+0x230` rectangle
 /// (605, 43)-(640, 63), which the column's click tests right after the lock
 /// (`0x10084343`-`0x1008437d`); the rest of the title bar takes a click and does nothing.

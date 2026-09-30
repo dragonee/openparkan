@@ -160,8 +160,8 @@ pub enum Mode {
     /// Mode 5 with the building that is target `t`: its screen, a factory's (docs/36) or a
     /// research centre's, the commander panel turned to page 4 (docs/41).
     Factory(usize),
-    /// Mode 6 with the tower that is target `t`: its manual control, the player at its guns
-    /// as at a boarded bot's (docs/27, "What the modes show").
+    /// Mode 6 with the tower or bunker that is target `t`: its manual control, the player at its
+    /// guns as at a boarded bot's (docs/27, "What the modes show").
     Manual(usize),
     /// Mode 7: the game menu over the world, which stands still under it (docs/39, "The game
     /// menu").
@@ -2424,26 +2424,46 @@ impl Play {
         self.modes.push(Mode::Command(t));
     }
 
-    /// Mode 0 → 6 with the tower that is target `t` (`iron3d.dll:0x10063fd0`; docs/27, "What
-    /// the modes show"): its manual control. A tower is refused while its first class-1 item,
-    /// its turret, has no life left (`0x10033e40`), or once it is destroyed. The outer camera
-    /// goes off and the hero is handed back where it stands, its keys let go; the tower's guns
-    /// go to the player: its Wizard's word for the turret and guns the player's (slot 9, mask
-    /// `0x20`, 3) and the take's message (6, 7, 1), so it is driven as a boarded bot is at
-    /// level 0 (docs/40, "What a bunker's guns do in command mode"), from the input table the
-    /// reader falls back to ([`crate::hero::DEFAULT_TABLE`]). The player's target goes to its
-    /// guns. A tower already on the stack is rolled back to.
+    /// Whether building `t` can be taken into its manual control (`0x10033e40`, docs/27, "What
+    /// `0x10033e40` refuses on a tower"): it still stands, and its first class-1 item, its
+    /// turret, has life left. The commander panel's *Manual* button is grey and inert while it
+    /// cannot (docs/41, "The building pages, 5 to 8").
+    pub fn manual_open(&self, t: usize) -> bool {
+        let Some(robot) = self.machine(t) else { return false };
+        self.battle.combat.targets.get(t).is_some_and(|x| x.alive && turret_alive(robot, x))
+    }
+
+    /// Mode 6 with the tower or bunker that is target `t` (`iron3d.dll:0x10063fd0` from mode 0,
+    /// and the handlers from the command views, 3 and 4; docs/27, "What the modes show"): its
+    /// manual control, which a tower's pod opens and the commander panel's *Manual* button on a
+    /// bunker's or a tower's row (`0x10086256`, docs/41). It is refused while the building's
+    /// first class-1 item, its turret, has no life left (`0x10033e40`), or once it is
+    /// destroyed. The outer camera goes off and the hero is handed back where it stands, its
+    /// keys let go; the building's guns go to the player: its Wizard's word for the turret and
+    /// guns the player's (slot 9, mask `0x20`, 3) and the take's message (6, 7, 1), so it is
+    /// driven as a boarded bot is at level 0 (docs/40, "What a bunker's guns do in command
+    /// mode"), from the input table the reader falls back to ([`crate::hero::DEFAULT_TABLE`]).
+    /// The player's target goes to its guns. Mode 6 goes on top of the mode it came from, so Esc
+    /// rolls back to the command view it was taken from. A building already on the stack is
+    /// rolled back to.
+    ///
+    /// STAND-IN: docs/27-ownership.md#what-the-modes-show--read -- mode 6 is entered from
+    /// telepresence (2) and the game menu (7) as well; the engine opens it from mode 0 and the
+    /// two command views alone, which are where its pod and the panel's button are reached.
     pub fn enter_manual(&mut self, t: usize) -> bool {
-        if !self.units.get(t).is_some_and(|u| TOWERS.contains(&u.type_word)) {
+        let type_word = self.units.get(t).map_or(0, |u| u.type_word);
+        if !TOWERS.contains(&type_word) && !crate::economy::BUNKERS.contains(&type_word) {
             return false;
         }
         if let Some(at) = self.modes.iter().position(|m| *m == Mode::Manual(t)) {
             self.modes.truncate(at + 1);
             return true;
         }
-        let Some(target) = self.battle.combat.targets.get(t).filter(|x| x.alive) else { return false };
-        let Some(robot) = self.machine(t).filter(|r| turret_alive(r, target)) else { return false };
-        if !matches!(self.mode(), Mode::OnFoot) {
+        if !self.manual_open(t) {
+            return false;
+        }
+        let Some(robot) = self.machine(t) else { return false };
+        if !matches!(self.mode(), Mode::OnFoot | Mode::Command(_) | Mode::HqCommand(_)) {
             return false;
         }
         let chassis = robot.parts[robot.chassis_part].record.clone();

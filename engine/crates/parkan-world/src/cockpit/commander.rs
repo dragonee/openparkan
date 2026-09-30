@@ -445,10 +445,18 @@ impl Panel {
                 if play.units[t].type_word == FACTORY {
                     self.page = 5;
                 }
-                // Strategic control, on a bunker's row (`0x100862d6`).
+                // Strategic control, on a bunker's row (`0x100862d6`), and Manual after it on a
+                // bunker's or a tower's (`0x10086256`), inert while the turret reads dead.
+                let type_word = play.units[t].type_word;
+                let bunker = hq::within(type_word, BUNKERS);
                 let strategic = [BUILDING_BUTTONS_X, y, BUILDING_BUTTONS_X + BUILDING_BUTTON, y + ROW_HEIGHT];
-                if hq::within(play.units[t].type_word, BUNKERS) && inside(strategic, left) {
+                if bunker && inside(strategic, left) {
                     play.enter_command(t);
+                }
+                let x = BUILDING_BUTTONS_X + if bunker { BUILDING_BUTTON } else { 0.0 };
+                let manual = [x, y, x + BUILDING_BUTTON, y + ROW_HEIGHT];
+                if (bunker || hq::within(type_word, TOWERS)) && inside(manual, left) {
+                    play.enter_manual(t);
                 }
                 return Click::Taken;
             }
@@ -1071,6 +1079,8 @@ fn building_rows(cockpit: &mut Cockpit, ink: &mut Ink, play: &Play, mask: u32, t
             pen += BUILDING_BUTTON;
         }
         if bunker || hq::within(type_word, TOWERS) {
+            // Grey `#808080` while its turret reads dead (`0x10033e40`).
+            let lit = factory::ICON_VARIANTS[if play.manual_open(t) { 1 } else { 0 }];
             cockpit.tip.hand([pen, y, pen + BUILDING_BUTTON, y + ROW_HEIGHT], cursor, STRING_MANUAL);
             put(
                 cockpit,
@@ -1079,13 +1089,7 @@ fn building_rows(cockpit: &mut Cockpit, ink: &mut Ink, play: &Play, mask: u32, t
                 [pen, y, pen + BUILDING_BUTTON, y + ROW_HEIGHT],
                 WHITE,
             );
-            put(
-                cockpit,
-                ink,
-                "buildscreen_hq_icon",
-                [pen + 10.0, y + 2.0, pen + 25.0, y + 17.0],
-                factory::ICON_VARIANTS[1],
-            );
+            put(cockpit, ink, "buildscreen_hq_icon", [pen + 10.0, y + 2.0, pen + 25.0, y + 17.0], lit);
             pen += BUILDING_BUTTON;
         }
         put(cockpit, ink, &format!("ccres_ray_emitter_{look}"), [pen, y, pen + 10.0, y + ROW_HEIGHT], WHITE);
