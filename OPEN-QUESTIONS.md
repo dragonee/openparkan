@@ -89,7 +89,17 @@ remainder a closed line names stays here as a line of its own.
   of up and carrying no flag at all. Two questions in one building, and both want the whole
   inside-a-building pass looked at rather than another bound guessed
   ([24-motion](docs/24-motion.md#collision-between-objects--read),
-  [07-objects](docs/07-objects.md#the-flags-word)).
+  [07-objects](docs/07-objects.md#the-flags-word)). **Seen again** 2026-09-30 on C02 M04's plateau
+  Light Tower (`mtow02`), reported from play: the enemy's small wheeled warrior (`24swele1`) sent to
+  take it back circles its entrance for minutes and never reaches the pod 21 m below, and a player's
+  `24swele1` ordered in does the same while an SSW-X walker takes it in 24 s. Driven down the way in
+  by hand, the wheels dip under a floor overhanging the ramp (faces 53 and 54, 0.5–1.0 m above
+  them), the up pass takes it within r₂ (2.59), the lift puts the machine on it, and it wedges at
+  z 146 under a face at 148 for good. *Read* since: the contacts' up pass does reach r₂ and runs
+  before the down pass ([24-motion](docs/24-motion.md#a-contacts-up-pass-reaches-the-node-spheres-radius--read-and-measured)),
+  so the engine follows the read at this step. Candidates for what differs: the hull's pitch,
+  which the engine leaves out (the M3 stand-in) and which nose-down would put the front wheels
+  lower under that floor; and the inside-a-building pass above.
 - [ ] **What keeps a walker upright on a building's floor under a low ceiling.** Raised
   2026-09-30 from checking C02 M03 against a recording. C02 M03's Small Warehouse is 6.3–7.5 m
   high inside, and the medium walker `22mwlk1` placed on its floor has a 5.87 m agent sphere

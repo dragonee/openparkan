@@ -607,17 +607,11 @@ impl Walker {
                 .filter_map(|c| feet.place(c.point, last).map(|at| (c.flags, c.point, at)))
                 .map(|(flags, point, at)| {
                     let p = self.body.position + self.body.to_world(at);
-                    // STAND-IN: docs/24-motion.md#not-established -- what a contact point's
-                    // own up pass tests against is not read: it compares with a triple the
-                    // pass builds from control `+0x2ec`, `+0x2fc` and `+0x30c`
-                    // (`0x1001aba7`, `0x1001ae12`). Here it is the body sphere's r2, the one
-                    // bound the pass *is* read to use. It had been the agent sphere's r, and
-                    // r2 is the smaller on 122 of the 148 unit models the campaign places:
-                    // on C02 Mission 03's Large Factory, a metre past the door, a wheel kept
-                    // finding the floor it had just left 2.9 m above itself, and the lift,
-                    // which is the largest rise over the contacts, hoisted the machine back
-                    // up the ramp into the structure over it -- where the collision pass put
-                    // the whole move back, every tick, for good.
+                    // A contact point's own up pass takes a face less than r2 above it, the
+                    // body sphere's own bound (`Control.dll:0x1001ae12`; docs/24, "A contact's
+                    // up pass reaches the node sphere's radius"): the pass copies r2 into the
+                    // fourth word of the record `0x1001aba7` fills from control `+0x2ec`,
+                    // `+0x2fc` and `+0x30c`, and compares with that word alone.
                     (flags, point, p, ground.search(p, self.node_radius))
                 })
                 .collect(),

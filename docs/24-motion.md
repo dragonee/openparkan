@@ -1367,7 +1367,24 @@ with legs, wheels or tracks falls under gravity 10, and every flyer holds its
 height. A mode-0 or mode-2 machine falls exactly when its state has contact
 points.
 
-#### A contact's up pass must not reach as far as r — *measured*
+#### A contact's up pass reaches the node sphere's radius — *read*, and *measured*
+
+**The bound is r₂** (*read*). The contact loop (`Control.dll:0x1001abcc` on)
+runs each contact's up query (axis and direction 6) first and takes its face
+when the normal's z is above 0.173648 and **the face's z less the contact's z
+is below the word at the frame's `+0xc8`** (`0x1001ae08`–`0x1001ae1e`); only
+then the down query (10). That word is r₂: `0x1001acac` reads the node
+sphere's radius out of interface `0x20` slot 3's answer at the frame's `+0xa4`
+— the same answer, held to 7.5 under 20 for the flag `0x1000000`, that the body
+sphere's search bounds its up pass by (`0x1001a51b`–`0x1001a58a`) — and
+`0x1001acb8` writes it into `+0xc8`. The two registers the function saves at
+`0x1001a5a5` and restores at `0x1001b3bc` stand between the frame and every
+offset after them, so `+0xc8` is the fourth word of the record `0x1001aba7`
+builds at `+0xbc` from control `+0x2ec`, `+0x2fc` and `+0x30c` (the
+translation column of a matrix at `+0x2e0`, `0x10003600` storing three
+floats). The compare reads that fourth word alone.
+
+**Why it matters** (*measured*).
 
 The lift is the largest rise over the flag-1 contacts, **whatever its height**,
 and a contact's own search takes the face above it before the one below when
@@ -3742,12 +3759,11 @@ patrol runs past it.
   and state bit `0x4` is what decides whether the machine falls
   ([Holding the body](#holding-the-body-on-the-ground--read-and-measured)).
   Still open beside it: which objects carry the flag `0x1000000` that holds r₂
-  to 7.5, and what the **contact points'** own up pass tests against — the body
-  sphere's is r₂, but each contact's compares with a triple the pass builds from
-  control `+0x2ec`, `+0x2fc` and `+0x30c` (`0x1001aba7`, `0x1001ae12`), which is
-  not read. **What a contact's bound may not be is r**, the agent sphere's
-  ([below](#a-contacts-up-pass-must-not-reach-as-far-as-r--measured)); the
-  engine takes r₂ until the triple is read.
+  to 7.5. ~~What the **contact points'** own up pass tests against~~ — **read**
+  2026-09-30: r₂, the body sphere's own bound, which the pass copies into the
+  fourth word of the record it builds from control `+0x2ec`, `+0x2fc` and
+  `+0x30c` and compares with alone
+  ([below](#a-contacts-up-pass-reaches-the-node-spheres-radius--read-and-measured)).
 - ~~Whether `PlaceObjectOnWorldFace`'s reparenting sends a collision object its
   message 21, so that a machine on a building's deck leaves the world's
   collision manager for the building's; and so whether a bridge's own faces

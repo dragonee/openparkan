@@ -1042,7 +1042,9 @@ tests, 1015 of 1015 checks, 509 engine tests and 201 install tests, `ruff` clean
   17.9 m/s. The bound is **r2**, the body sphere's, now: what a contact's own up pass tests
   against is read to be a triple built from control `+0x2ec`, `+0x2fc` and `+0x30c`
   (`0x1001aba7`, `0x1001ae12`) and is **still not read**, so r2 is a stand-in like r was — but r2
-  is the one bound the pass *is* read to use, and it is the smaller on 122 of the 148 unit models
+  is the one bound the pass *is* read to use (**read** 2026-09-30: it is r2 itself, copied into
+  the fourth word of that record at `0x1001acb8` and compared with alone — docs/24, "A contact's
+  up pass reaches the node sphere's radius"), and it is the smaller on 122 of the 148 unit models
   the campaign places. *Measured* over 18 AI captures on C02 M03, every small chassis against
   every enemy building: 15 taken before, 14 after, the Large Factory 5 s faster for a wheeled bot
   and 15 s for a walker, and one lost — below ([24-motion](docs/24-motion.md#holding-the-body-on-the-ground--read-and-measured)).
