@@ -938,7 +938,10 @@ fn c02_m04s_light_tower_taken_at_its_pod_hands_the_player_its_guns() {
     assert!((aim(&play, tower)[0] - still[0]).abs() < 0.2, "the mouse no longer turns it");
 
     // The valley tower with its turret shot off takes the hero's capture and opens nothing.
+    // Its own repair would hand the turret its first points within a second, and the component
+    // test asks only that it has some (docs/26, "Repair"), so here it has none to repair with.
     let valley = object_target(&play, &m, "mtow01.dat");
+    play.economy.site_mut(valley).unwrap().repair = None;
     let turret = play.emplacements.iter().find(|(e, _)| *e == valley).unwrap().1.turret_part;
     play.battle.combat.targets[valley].parts[turret].life.as_mut().unwrap().hit(1, f32::MAX / 4.0);
     assert!(play.stand_on_pod(valley));
@@ -950,6 +953,74 @@ fn c02_m04s_light_tower_taken_at_its_pod_hands_the_player_its_guns() {
     }
     assert_eq!(play.units[valley].clan, Some(player), "the valley tower is taken");
     assert_eq!(play.mode(), Mode::OnFoot, "and, its turret gone, opens no manual control");
+}
+
+/// A building repairs itself (docs/26, "Repair"): its own repair system, switched on by its
+/// takt's repair decision under 90% of its life, restores its rate a second to its nodes in
+/// index order, each whole before the next takes a point, and a building's takes destroyed
+/// nodes with the rest. So a tower whose turret is shot off rebuilds the turret first, then
+/// one gun, then the other, as the player remembers C02 M04's plateau Light Tower doing: its
+/// `mtow02` repairs 110 a second, its turret carries 3,506 and each `e_gun_fc_01` 6,000.
+#[test]
+#[ignore = "needs the game install"]
+fn c02_m04s_light_tower_rebuilds_its_turret_and_then_its_guns_one_by_one() {
+    use parkan_formats::mission;
+    use parkan_world::play::Play;
+
+    let game = gamedir::find(None).expect("a Parkan install: set PARKAN_DIR");
+    let dir = gamedir::resolve(&game, gamedir::C02_MISSION_04).unwrap();
+    let m = mission::parse(&std::fs::read(dir.join("data.tma")).unwrap(), "Mission.04").unwrap();
+    let mut play = campaign_play(gamedir::C02_MISSION_04);
+    let tower = object_target(&play, &m, "mtow02.dat");
+    let tick = |play: &mut Play| {
+        play.update_input();
+        play.tick(1000.0 / 60.0, [0.0; 2]);
+    };
+    for _ in 0..(6 * 60) {
+        tick(&mut play);
+    }
+    let (turret, socket) = play.machine(tower).and_then(|r| r.turret_life()).expect("a turret");
+    let part = |play: &Play, p: usize| play.battle.combat.targets[tower].parts[p].life.clone().unwrap();
+    let whole = |play: &Play, p: usize| part(play, p).nodes.iter().all(|n| n.life >= n.max);
+    let gone = |play: &Play, p: usize| part(play, p).nodes.iter().all(|n| n.destroyed && n.hidden());
+    let broken = |play: &Play| play.machine(tower).unwrap().guns.iter().filter(|g| g.broken).count();
+    assert!(!play.economy.site(tower).unwrap().repairing, "whole, its repair system is off");
+
+    // The turret shot off: its socket, what hangs on it and the guns it carries go with it.
+    play.battle.combat.targets[tower].parts[turret].life.as_mut().unwrap().lose(socket, 1.0e9);
+    for _ in 0..2 {
+        tick(&mut play);
+    }
+    let guns = [2, 3];
+    assert!(part(&play, turret).nodes[socket].hidden() && guns.iter().all(|&g| gone(&play, g)));
+    assert!(broken(&play) >= 2, "its cannons silent");
+
+    // Each part whole in turn, the next untouched until then.
+    let mut done: Vec<(usize, f64)> = Vec::new();
+    let order = [turret, guns[0], guns[1]];
+    for frame in 0..(200 * 60) {
+        tick(&mut play);
+        let t = f64::from(frame) / 60.0;
+        let next = order[done.len()];
+        if whole(&play, next) {
+            done.push((next, t));
+            if done.len() == order.len() {
+                break;
+            }
+        }
+        for &later in &order[done.len() + 1..] {
+            assert!(gone(&play, later), "part {later} waits for part {next} at {t:.1} s");
+        }
+    }
+    eprintln!("whole at {done:?}");
+    assert_eq!(done.iter().map(|d| d.0).collect::<Vec<_>>(), order, "turret, then one gun, then the other");
+    assert!(play.economy.site(tower).unwrap().repairing, "its repair system on");
+    let (turret_s, gun_s) = (done[0].1, done[1].1 - done[0].1);
+    assert!((25.0..45.0).contains(&turret_s), "3,506 at 110 a second: {turret_s:.1} s");
+    assert!((45.0..70.0).contains(&gun_s), "6,000 at 110 a second: {gun_s:.1} s");
+    assert!(!part(&play, turret).nodes[socket].hidden() && !gone(&play, guns[1]), "shown again");
+    tick(&mut play);
+    assert_eq!(broken(&play), 0, "and its guns fire again");
 }
 
 /// C02 Mission 03, *The Lost Key*: the enemy clan's planner, `c2m3e`'s, first takt. Its

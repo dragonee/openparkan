@@ -104,6 +104,9 @@ pub enum Change {
     Hidden(usize),
     /// It was knocked off, and flies from now (`0x100102a0`).
     KnockedOff(usize),
+    /// Its stage fell as it gained life back, shown again if its last stage had hidden it
+    /// (`0x100118d8`, `0x10011920` with 1).
+    Restored(usize),
 }
 
 /// An object's nodes' hit points.
@@ -195,6 +198,25 @@ impl Life {
         true
     }
 
+    /// `0x10010f30` with a gain, as a building's repair hands it one node at a time
+    /// (`0x10010d4f`): the node's life rises by `points`, held to its maximum, and a node with
+    /// life again is no longer destroyed (`0x1001111e`). What its life now says of its stage,
+    /// and whether it is attached and shown again, waits for the object's next [`Life::takt`].
+    /// Returns what it took.
+    pub fn gain(&mut self, node: usize, points: f32) -> f32 {
+        let Some(n) = self.nodes.get_mut(node) else { return 0.0 };
+        let give = points.min(n.max - n.life).max(0.0);
+        if give <= 0.0 {
+            return 0.0;
+        }
+        n.life += give;
+        if n.life > 0.0 {
+            n.destroyed = false;
+            n.status &= !STATUS_DESTROYED;
+        }
+        give
+    }
+
     fn destroy(&mut self, node: usize) {
         let n = &mut self.nodes[node];
         n.life = 0.0;
@@ -224,10 +246,12 @@ impl Life {
     /// 1. **Flights end** once their time is up: flying turns to down (`0x10013568`).
     /// 2. **Destroyed parts are knocked off**: a destroyed node with a parent, on an object
     ///    that is not a building, with none of the bars, flies for three seconds.
-    /// 3. **The walk** from the roots down: a node not flying takes its stage; a rise plays
-    ///    its explosion, and the last stage hides it unless it is never hidden. A node whose
-    ///    stage rose, or which is destroyed, destroys each child, carried along when it is
-    ///    flying and down where it stands otherwise.
+    /// 3. **The walk** from the roots down: a node that is not destroyed and was knocked off,
+    ///    carried or brought down with its parent is put back on it (`0x100112e8`); a node not
+    ///    flying takes its stage; a rise plays its explosion, and the last stage hides it
+    ///    unless it is never hidden, where a fall from the last shows it again
+    ///    (`0x100118cd`–`0x100118e2`). A node whose stage rose, or which is destroyed, destroys
+    ///    each child, carried along when it is flying and down where it stands otherwise.
     pub fn takt(&mut self, now_ms: f64) -> Vec<Change> {
         let mut changes = Vec::new();
         let (ended, flying): (Vec<_>, Vec<_>) = self.flights.iter().partition(|(_, end)| now_ms >= *end);
@@ -246,6 +270,12 @@ impl Life {
         }
         for i in self.walk_order() {
             let mut rose = false;
+            if !self.nodes[i].destroyed
+                && self.nodes[i].status & (STATUS_FLYING | STATUS_CARRIED | STATUS_DOWN) != 0
+            {
+                self.nodes[i].status &= !(STATUS_FLYING | STATUS_CARRIED | STATUS_DOWN);
+                self.flights.retain(|(n, _)| *n != i);
+            }
             if !self.nodes[i].flying() {
                 let (old, new) = (self.nodes[i].stage, self.nodes[i].stage_now());
                 if new != old {
@@ -258,6 +288,12 @@ impl Life {
                     if new == n.stages && n.status & (STATUS_NEVER_HIDDEN | STATUS_HIDDEN) == 0 {
                         n.status |= STATUS_HIDDEN;
                         changes.push(Change::Hidden(i));
+                    }
+                    if new < old {
+                        if old == n.stages {
+                            n.status &= !STATUS_HIDDEN;
+                        }
+                        changes.push(Change::Restored(i));
                     }
                 }
             }
@@ -507,6 +543,33 @@ mod tests {
         let mut end = life.takt(3000.0);
         end.sort_by_key(|c| format!("{c:?}"));
         assert_eq!(end, vec![Change::Hidden(2), Change::Hidden(3), Change::Staged(2), Change::Staged(3)]);
+    }
+
+    /// A building's repair hands a destroyed node life again (docs/26, "Repair"): it is no longer
+    /// destroyed at once, and the next takt puts it back on its parent, lowers its stage and
+    /// shows it again; a child brought down with it waits, hidden, for its own share.
+    #[test]
+    fn a_node_given_life_again_is_put_back_lowered_a_stage_and_shown() {
+        let mut life = dummy();
+        life.building = true;
+        assert!(life.hit(2, 800.0));
+        life.takt(0.0);
+        assert!(life.nodes[2].hidden() && life.nodes[3].destroyed && life.nodes[3].hidden());
+        assert!(life.nodes[3].status & STATUS_DOWN != 0, "brought down with its parent");
+
+        assert_eq!(life.gain(2, 100.0), 100.0);
+        assert!(!life.nodes[2].destroyed && life.nodes[2].status & STATUS_DESTROYED == 0);
+        assert_eq!(life.takt(10.0), vec![Change::Restored(2)], "its damaged block, shown");
+        assert!(!life.nodes[2].hidden() && life.nodes[2].block() == 1);
+        assert!(life.nodes[3].destroyed && life.nodes[3].hidden(), "the child keeps its place in line");
+
+        life.gain(2, 700.0);
+        assert_eq!(life.takt(20.0), vec![Change::Restored(2)], "whole: its first block");
+        assert_eq!(life.gain(3, 600.0), 600.0);
+        assert_eq!(life.takt(30.0), vec![Change::Restored(3)]);
+        let n = life.nodes[3];
+        assert!(!n.hidden() && !n.destroyed && n.status & STATUS_DOWN == 0 && n.stage == 0, "{n:?}");
+        assert_eq!(life.gain(3, 5.0), 0.0, "nothing past its maximum");
     }
 
     #[test]

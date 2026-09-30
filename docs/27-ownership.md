@@ -923,7 +923,13 @@ null-`this` guard, called where the record is known.
   (`o_bnt_mt_01.ctl`); both sit on node 1 of their own mesh, with **3,500** and
   **6,000** hit points in `o_bnt_la_01.ndp` and `o_bnt_ma_01.ndp`.
 - So **all 9 shipped towers can be entered** while they stand, and the refusal
-  is a condition of the battle, not of the files. The bunkers' turrets
+  is a condition of the battle, not of the files.
+- **It does not last** (*derived*). A tower's own repair system switches on
+  below 90% of its life, and a building's repair restores destroyed nodes in
+  index order. Its turret, the first to lack, has life again within the first
+  second ([26-damage.md](26-damage.md#repair-a-units-own-repair-unit-switched-on-and-off--read-and-measured)).
+  So the refusal holds only while the tower cannot repair: its batteries under
+  30%, or its repair system's own node destroyed. The bunkers' turrets
   (`e_bnt_lt_01` 3,500, `e_bnt_mt_01` 6,000, `e_bnt_bt_01` 9,000) carry life
   too, which is what lights the commander panel's *Manual* button
   ([41-commander.md](41-commander.md)).

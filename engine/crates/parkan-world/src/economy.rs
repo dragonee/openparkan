@@ -12,6 +12,10 @@ use parkan_sim::economy::{
     STEP_MS, STORAGE_MAX_ORE, ShiftJitter, WANT_FLOOR, share,
 };
 
+use parkan_sim::behaviour::repair_switch;
+use parkan_sim::damage::Life;
+use parkan_sim::power::{self, Repair};
+
 use crate::assembly::Assembly;
 use crate::play::Play;
 
@@ -40,6 +44,8 @@ pub const BUILDER: u32 = 0x0100_4000;
 pub const JITTER_SEED: u32 = 0x2545_f491;
 /// The efficiency component, `CICLS_` 26 (docs/23, "Efficiency is a building's size").
 pub const EFFICIENCY_TYPE: i32 = 26;
+/// A building's takt timer's floor: 64 ms, its word 1 of 64 (`Behavior.dll:0x10003995`).
+pub const TAKT_MS: f64 = 64.0;
 
 /// The behaviour profile a building's Type picks (`Behavior.dll:0x10008a80`).
 pub fn profile_of(type_word: u32) -> Option<&'static str> {
@@ -83,6 +89,14 @@ pub struct Site {
     /// Its mine's order, once running, and whether it digs yet.
     pub mine: Option<Mine>,
     pub digging: bool,
+    /// Its repair system, class 15 (the root's own, or the `i_rps_f` part fitted into its
+    /// slot), and the root node it sits on.
+    pub repair: Option<(Repair, Option<usize>)>,
+    /// What the building's repair decision last sent it: every repair system ships switched
+    /// off (`Control.dll:0x10022ae0`, docs/26).
+    pub repairing: bool,
+    /// When the building's takt next runs its repair decision.
+    pub next_takt_ms: f64,
 }
 
 impl Site {
@@ -111,6 +125,8 @@ pub struct Economy {
     /// `Control.dll`'s shift register, which every controller's power tick draws on.
     pub step_rand: ModuleRand,
     pub jitter: ShiftJitter,
+    /// The buildings' takt timers' `rand()`: a stream of their own, as the step has.
+    pub takt_rand: ModuleRand,
 }
 
 fn float(v: Value) -> f32 {
@@ -248,7 +264,7 @@ impl Economy {
             figure("Transfer_Ore_OffBoard"),
             figure("Transfer_Ore_OnBoard"),
         );
-        let (mut efficiency, mut capacity, mut output) = (None, 0.0_f32, 0.0_f32);
+        let (mut efficiency, mut capacity, mut output, mut repair) = (None, 0.0_f32, 0.0_f32, None);
         let controller = |assembly: &mut Assembly, record: &str| {
             let slot = assembly.library.record_slot(assembly.library.get(record), "ctl", 0)?;
             assembly
@@ -289,6 +305,14 @@ impl Economy {
                         }
                         output += k.power;
                     }
+                    control::REPAIR_TYPE => {
+                        let system = Repair {
+                            rate: k.values[crate::power::REPAIR_RATE],
+                            cost: k.values[crate::power::REPAIR_COST],
+                            power: k.power,
+                        };
+                        repair.get_or_insert((system, usize::try_from(k.node).ok()));
+                    }
                     _ => {}
                 }
             }
@@ -317,6 +341,9 @@ impl Economy {
             last_power_ms: now,
             mine: None,
             digging: false,
+            repair,
+            repairing: false,
+            next_takt_ms: now,
         });
     }
 }
@@ -372,22 +399,41 @@ impl Play {
         }
     }
 
-    /// The economy's tick at `now`, `dt` seconds after the last: every building's power tick
-    /// that is due, the mines' takt, and every clan's distribution step that is due.
+    /// The economy's tick at `now`, `dt` seconds after the last: every building's repair
+    /// decision and power tick that is due, the mines' takt, and every clan's distribution step
+    /// that is due.
     pub fn tick_economy(&mut self, now: f64, dt: f32) {
         self.join_sites();
+        self.decide_repairs(now);
         // A building's power tick (`Control.dll:0x1002d340`): its efficiency component draws
-        // 0.01 and its usage a second from its batteries, and KPD's level is what they serve.
+        // 0.01 and its usage a second from its batteries, and KPD's level is what they serve;
+        // then, on channel 0, its repair system what [`Repair::want`] says, and its points go to
+        // the building's nodes, destroyed ones and all (docs/26, "Repair").
         for i in 0..self.economy.sites.len() {
             if now < self.economy.sites[i].next_power_ms {
                 continue;
             }
             let jitter = self.economy.power_jitter();
-            let site = &mut self.economy.sites[i];
+            let Play { economy, battle, .. } = self;
+            let site = &mut economy.sites[i];
             let step = ((now - site.last_power_ms) / 1000.0) as f32;
             site.last_power_ms = now;
             site.next_power_ms = now + POWER_TICK_MS + jitter;
-            site.level = site.battery.spend(EFFICIENCY_POWER + site.usage, step).0;
+            let efficiency = (EFFICIENCY_POWER + site.usage) * step;
+            let target = battle.combat.targets.get_mut(site.target).filter(|x| x.alive);
+            let (Some((system, node)), Some(target)) = (site.repair, target) else {
+                site.level = site.battery.serve(&[efficiency], step).0[0];
+                continue;
+            };
+            let root = target.parts.first().and_then(|p| p.life.as_ref());
+            let condition = node.map_or(1.0, |n| crate::play::node_share(root, n).0);
+            let mut lives: Vec<&mut Life> = target.parts.iter_mut().filter_map(|p| p.life.as_mut()).collect();
+            let lack = power::lack(lives.iter().map(|l| &**l), true);
+            let want = system.want(site.repairing, step, condition, lack);
+            let (levels, _) = site.battery.serve(&[efficiency, want], step);
+            site.level = levels[0];
+            let points = system.points(site.repairing, levels[1], step, condition, lack);
+            power::restore(&mut lives, points, true);
         }
         for f in &mut self.factories {
             if let Some(site) = self.economy.sites.iter().find(|s| s.target == f.target) {
@@ -406,6 +452,29 @@ impl Play {
             let wait = self.economy.step_wait();
             self.economy.steps.insert(clan, (now + wait, now));
             self.distribute(clan, ((now - last) / 1000.0) as f32);
+        }
+    }
+
+    /// Each building's takt that is due, on its timer's 64 to 127 ms (`Behavior.dll:0x100054d4`,
+    /// the words 1 and 1 at `+0x930`): its repair decision (`0x10017c70`), a building needing
+    /// service under 90% of its life (docs/26, "What the AI does with the switch"). A neutral
+    /// clan's buildings run no takt (`0x10005070`).
+    fn decide_repairs(&mut self, now: f64) {
+        for i in 0..self.economy.sites.len() {
+            let site = &self.economy.sites[i];
+            if site.repair.is_none() || now < site.next_takt_ms {
+                continue;
+            }
+            let t = site.target;
+            let wait = TAKT_MS + self.economy.takt_rand.timer_share_ms(1);
+            self.economy.sites[i].next_takt_ms = now + wait;
+            let standing = self.battle.combat.targets.get(t).is_some_and(|x| x.alive);
+            if !standing || !self.thinks(self.units.get(t).and_then(|u| u.clan)) {
+                continue;
+            }
+            let condition = self.condition(t);
+            let site = &mut self.economy.sites[i];
+            site.repairing = repair_switch(site.repairing, &condition, true);
         }
     }
 

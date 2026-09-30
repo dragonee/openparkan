@@ -1139,7 +1139,8 @@ C02 M03 and M04.
   the unit records' does a unit's (docs/30, "The zoom"). The building moves nothing
   and its turret's takt runs with its own; its fire control steps aside while the player holds
   it. Esc rolls back to the hero standing on the pod, the guns back to the AI. A tower whose
-  turret is shot off is captured and opens nothing. *The Last Bastion*'s plateau tower,
+  turret is shot off is captured and opens nothing, until its own repair gives the turret its
+  first points back, which takes it a second. *The Last Bastion*'s plateau tower,
   taken at its pod, turns under the mouse and fires both its `L152mmMC` at the button.
 - **A fitted gun flashes and reports on each stroke** (docs/29, "What a shot plays"). The load
   group of a gun fitted as a part of its own (35 of the 117 fitted guns' controllers) creates its
@@ -1148,6 +1149,16 @@ C02 M03 and M04.
   their sound through the stroke, 0 to 0.5 to 1. The shot group the gun component names runs
   as each barrel starts its stroke: `smoke_gunf_m_gun` from a Huge Cannon, a laser's restart.
   So a tower's cannons, and every bot's fitted guns, sound, whoever holds them.
+- **A building repairs itself, part by part** (docs/26, "Repair"). Every building's own
+  repair system, class 15 (the root's, or the `i_rps_f` part in its slot), now runs as a unit's
+  does. The building's takt, every 64 to 127 ms, runs the AI's repair decision, and a building
+  needs service under 90% of its life, so it switches on once it is hurt that far and its
+  batteries are over 30%. Its power tick serves the efficiency first and the repair after it.
+  The points go to its nodes in index order, each whole before the next, and a building's
+  repair gives a destroyed node life again: it is put back on its parent and shown once its
+  stage falls from the last. *The Last Bastion*'s plateau tower, its turret shot off, has the
+  turret whole in 32 s at 110 a second, then one cannon at 86 s and the other at 141 s, as the
+  player remembers it; the guns fire again as each comes back.
 - **A machine is drawn where the ground contact holds it** (docs/24, "Collision between
   objects"). As read, a machine standing on a building takes a down push whole, after the
   ground contact. *The Lost Key*'s Small Warehouse is 6.3–7.5 m high inside, and its ceiling
@@ -1450,7 +1461,7 @@ a row here. A row leaves this table when research closes it.
 | M14 | Where a unit built in a factory joins the building's own paths, which the escape's 20-second check routes it out by ("LEAVE IS TOO !!!") | a bot made at a creation vertex counts as having walked in: it leaves along the hall way, as a unit sent in does | [31](../docs/31-packages.md#the-escape--read) |
 | M14 | A building's draws beyond its efficiency: its shield, deflector and guns on its batteries | a building's shield takes the level its batteries serve its efficiency at, its shield's and deflector's draws come out of no battery, and its guns' capacitors are full again every tick | [23](../docs/23-economy.md#bots-spend-power-through-the-same-code-priced-by-part--read-and-measured) |
 | M14 | When a unit's shield recharges against its power tick: the recharge is read on the power tick | the battery pays for the shield on the unit's power tick and the shield recharges every frame at the level that tick served | [26](../docs/26-damage.md#power--read) |
-| M14 | The AI's repair decision (`Behavior.dll:0x10017c70`) and camouflage, and what sends an AI unit short of charge to a dock | a unit the player does not drive keeps its repair system and camouflage off, and nothing sends it to charge | [26](../docs/26-damage.md#repair-a-units-own-repair-unit-switched-on-and-off--read-and-measured) |
+| M14 | The AI's camouflage switch, which the device manager's sibling sends as it sends the repair system's (`Behavior.dll:0x10019a10`) | a unit the player does not drive keeps its camouflage off | [26](../docs/26-damage.md#repair-a-units-own-repair-unit-switched-on-and-off--read-and-measured) |
 | M14 | A unit's parts share one life system in the game, the engine keeps a life per part: how a part hanging on a knocked-off socket flies with it | a part whose socket is destroyed, or steps up a stage, has its node 0 destroyed where it stands, so its nodes explode and go there rather than in the air | [26](../docs/26-damage.md#what-a-damaged-node-a-destroyed-part-and-a-dead-unit-draw--read-and-measured) |
 | M14 | That a shield flash rides on node 0 | it keeps its direction and follows the bubble's centre | [26](../docs/26-damage.md#what-a-shield-hit-draws--read-and-measured) |
 | M14 | Which of the effect frame's axes a type-9 dome's pole ends on, and how its texture runs over it | the first, so a shield flash bulges out of the bubble toward the hit, the round glow a recording shows; u around, v from rim to pole | [11](../docs/11-effects.md#not-resolved) |
@@ -1480,7 +1491,6 @@ a row here. A row leaves this table when research closes it.
 | M14 | Each task's priority for a refit, reason 3, beyond the route's, the patrol's and the capture's | every task that moves or fights takes the base's, which lets one through while a dock is reachable; standby, shutdown, the escape and a refit already running answer 0 | [31](../docs/31-packages.md#between-orders--read) |
 | M14 | Which door a walk into a building makes for, and how it gets there past the walls, the local path being unread | a door standing within 20 of the ground under it, the nearest by the whole way, and with none left the nearest anyway; where the straight line to it runs into a wall, the way round the building's ground contour, the way about with the fewer corners off walkable ground and then the shorter | [24](../docs/24-motion.md#not-established) |
 | M14 | Which dock a refit picks (`0x10023b60`), and when its walk is over | the nearest dock the unit's size fits — any for size class 1 or 2, a ground-level one alone above that, the size rule `MakeInsideDest` routes a unit inside by — walked to along that building's hall way, and it is there once it stands in the place itself, the cylinder that charges it. The game's own refit asks `MakeInsideDest` for the ground-level bit on every dock, so it would never send even a small bot indoors | [27](../docs/27-ownership.md#what-sends-a-bot-to-a-dock--read) |
-| M14 | A building's own repair decision and its repair system | a building never switches one on: only a unit's is modelled | [26](../docs/26-damage.md#repair-a-units-own-repair-unit-switched-on-and-off--read-and-measured) |
 | M14 | The landscape's own side of a building's cut: the insertion re-triangulates each cut face and keeps its triangles outside the outer contour; and why 4 placed buildings without the start flag stand up to 0.14 off their cut contour's mean, where the insertion sets them down (the other 12 off it carry the flag, which keeps them at their file height) | the landscape is cut to the outer contour by a mask, a texel at a time, not re-triangulated, and a buried apron 2 units past the contour, sunk 0.5, covers the mask's edge; every placed building stands at its mission height, and one the console's `bcreate` makes is set down on the mean | [03](../docs/03-terrain.md#for-an-engine) |
 | M14 | Which cells a building draws: beyond 1.3 × `PortalFarDist` ÷ the field of view a doorway's room is not drawn; the field of view the game plays at; the 57 `DEFAULT` batches with no portal bit, which the game draws black | no cell is culled: every node is drawn, and each portal quad draws by its read fade, so beyond far a doorway is the black wall standing in front of the room the game leaves out; the fade takes the eye's own field of view; the 57 are left out | [24](../docs/24-motion.md#a-building-is-drawn-cell-by-cell-through-its-portals--read) |
 | M15 | The gun total behind an object's strength — variable `0x204`'s `+4`, which the behaviour sums as `a ÷ b × rounds` over authored gun figures this engine does not model. The formula and the hit points are read: `(guns + 0.8) × hit points × 1e-5`, on the life left for the map's cached form and the life at full for the live one | the areal map prices nothing, so every object counts 1 and a candidate's score is how many enemy objects stand within the radius; it orders candidates but does not weigh them | [15](../docs/15-behaviour.md#what-a-strength-is--read-and-measured) |

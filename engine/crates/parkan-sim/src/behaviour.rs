@@ -301,6 +301,23 @@ impl Default for Condition {
     }
 }
 
+/// The AI's repair decision (`0x10017c70`, docs/26, "What the AI does with the switch"): the
+/// repair system last switched `on` is switched on while the object needs service or its life
+/// is under [`REPAIR_ON`], provided its charge is over [`REPAIR_CHARGE_ON`]; and off once it
+/// needs none and its life is over [`REPAIR_OFF`], or whenever its charge falls under
+/// [`REPAIR_CHARGE_OFF`]. A `building` needs service under 90% of its life.
+pub fn repair_switch(on: bool, c: &Condition, building: bool) -> bool {
+    let needs = c.needs_service(building);
+    let mut on = on;
+    if (needs || c.life < REPAIR_ON) && c.charge > REPAIR_CHARGE_ON {
+        on = true;
+    }
+    if (!needs && c.life > REPAIR_OFF) || c.charge < REPAIR_CHARGE_OFF {
+        on = false;
+    }
+    on
+}
+
 impl Condition {
     /// Whether the unit needs service (`0x10017d50`): its life or its charge under half, or its
     /// guns mostly dry; a building under 90% of its life.
@@ -1009,19 +1026,9 @@ impl Behaviour {
         true
     }
 
-    /// The AI's repair decision (`0x10017c70`, docs/26): it switches the unit's own repair
-    /// system on while the unit needs service or its life is under [`REPAIR_ON`], provided its
-    /// charge is over [`REPAIR_CHARGE_ON`]; and off once it needs none and its life is over
-    /// [`REPAIR_OFF`], or whenever its charge falls under [`REPAIR_CHARGE_OFF`].
+    /// The AI's repair decision (`0x10017c70`, docs/26), as [`repair_switch`] makes it.
     fn repair_decision(&mut self, senses: &Senses) {
-        let c = senses.condition;
-        let needs = c.needs_service(senses.building);
-        if (needs || c.life < REPAIR_ON) && c.charge > REPAIR_CHARGE_ON {
-            self.repair = true;
-        }
-        if (!needs && c.life > REPAIR_OFF) || c.charge < REPAIR_CHARGE_OFF {
-            self.repair = false;
-        }
+        self.repair = repair_switch(self.repair, &senses.condition, senses.building);
     }
 
     /// The interrupt gate's pause (step 7 of `0x100179c0`): whether it has run out, restarting

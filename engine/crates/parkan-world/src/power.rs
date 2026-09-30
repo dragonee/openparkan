@@ -152,7 +152,7 @@ impl Power {
             let want = if whole(lives, n) { figure * engine_share * dt } else { 0.0 };
             draws.push(Draw { channel: power::channel(control::ENGINE_TYPE), want });
         }
-        let lack = power::lack(lives.iter().filter_map(|l| l.as_deref()));
+        let lack = power::lack(lives.iter().filter_map(|l| l.as_deref()), false);
         // The repair system with its condition, and where its draw stands.
         let repair = self.repair.map(|(r, n)| (r, condition(lives, n), draws.len()));
         if let Some((r, c, _)) = repair {
@@ -182,7 +182,7 @@ impl Power {
         {
             let points = r.points(switches.repair, level, dt, c, lack);
             let mut own: Vec<&mut Life> = lives.iter_mut().filter_map(|l| l.as_deref_mut()).collect();
-            power::restore(&mut own, points);
+            power::restore(&mut own, points, false);
         }
         if let (Some(shield), Some((_, at))) = (shield, shielded)
             && let Some(level) = levels[at]

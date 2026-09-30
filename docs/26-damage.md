@@ -1102,6 +1102,38 @@ anybody else" below).
   next takes any (`0x10010cd4`–`0x10010d4d`).
   - A unit's repair skips destroyed parts; a kind-3 object's restores them
     (`0x10022b00`).
+- **How a building brings a part back** — *read*.
+  - The repair system's constructor sets `+0x94` when its owner's agent is of
+    kind 3 (`0x10022b0e`). It passes that byte both to what the object lacks
+    and to the node update (`0x10022c2e`, `0x10022c79`).
+  - With it set, the gain loop gives every node its share, a destroyed one
+    included (`0x10010d07`). Each node takes `min(its max − its life, what is
+    left)` through `0x10010f30`. The loop takes that off what is left and stops
+    once nothing is (`0x10010d47`–`0x10010d5c`).
+  - A node whose life is above 0 afterwards loses its destroyed bit, `0x10`
+    (`0x1001111e`).
+  - The stage walk from node 0 follows at once (`0x10010d78`):
+    - A node no longer destroyed that was flying, carried or brought down
+      with its parent (`0x1c0`) has those bits cleared. It is handed back to
+      its mesh (slot 8 with `0x101`, `0x100112e8`).
+    - Its stage is recomputed from its life. A stage falling from the last,
+      the one that hid it, shows it again (`0x100118d8`, `0x10011920` with 1).
+  - So **a building rebuilds what it lost one node at a time, in index
+    order**, each whole before the next gets a point. The parts a socket
+    carries come after the socket, so a turret comes back before the guns on
+    it.
+- **On C02 M04's plateau Light Tower** — *measured*, then *derived*. `mtow02`'s
+  repair system gives 110 a second. Its turret carries 3,506 hit points, and
+  each of its two `e_gun_fc_01` cannons 6,000. With the turret shot off:
+  - the turret is whole again in 32 s;
+  - the first cannon at 86 s;
+  - the second at 141 s.
+  - This is how the player remembers it: "first the turret then one of the
+    cannons, then another one" (reported from play, 2026-09-30).
+  - The turret has life again within the first second, and the component
+    test asks only that it has some
+    ([27-ownership.md](27-ownership.md#what-0x10033e40-refuses-on-a-tower--read-and-measured)).
+    So its pod opens the guns again almost at once.
 - **Running cost:** left on at full health it costs only its idle figure.
   Being a class-15 part, it draws on power channel 0, served second.
 - **No reach:** values 2–15 are zero on all 64 records (*measured*), so there

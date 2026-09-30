@@ -1870,7 +1870,9 @@ impl Play {
                     );
                 }
                 Event::KnockedOff { target, part, node } => self.knock_off(target, part, node, now),
-                Event::Staged { target, .. } | Event::Hidden { target, .. } => self.rebuild_solid(target),
+                Event::Staged { target, .. }
+                | Event::Hidden { target, .. }
+                | Event::Restored { target, .. } => self.rebuild_solid(target),
                 Event::Killed { target } if target == hero_index => self.hero_lost(),
                 Event::Hurt { target, owner } => self.hurt(target, owner),
                 Event::ShieldHit { target, point } => self.shield_flash(target, point, now),
@@ -3466,8 +3468,8 @@ impl Play {
     /// robot's, with the switches of the player driving it.
     ///
     /// STAND-IN: docs/26-damage.md#repair-a-units-own-repair-unit-switched-on-and-off--read-and-measured
-    /// -- the AI's repair decision (`Behavior.dll:0x10017c70`) and its camouflage are not
-    /// modelled: a unit the player does not drive keeps its repair system and camouflage off.
+    /// -- the AI's camouflage switch (the device manager's sibling, `Behavior.dll:0x10019a10`) is
+    /// not modelled: a unit the player does not drive keeps its camouflage off.
     fn tick_power(&mut self) {
         let jitter = |p: &mut Play| p.economy.power_jitter();
         // A paused world, a dead hero and a hero out of the world keep their tick's clock moving
@@ -3516,24 +3518,28 @@ impl Play {
     /// dock"): its life fraction over its whole control system (property `0x31`), its
     /// batteries' fill, the rounds its guns have left over their magazines, and whether more
     /// than [`SERVICE_GUNS`] of them are under [`SERVICE_MAGAZINE`] of theirs. A unit with no
-    /// battery reports a full one, and a gun of unlimited rounds counts as full.
-    fn condition(&self, t: usize) -> Condition {
+    /// battery reports a full one, and a gun of unlimited rounds counts as full. A building
+    /// reports its own batteries, and its guns if it carries any.
+    pub(crate) fn condition(&self, t: usize) -> Condition {
         let (life, full) = self.battle.combat.targets.get(t).map_or((0.0, 0.0), |x| {
             x.parts
                 .iter()
                 .filter_map(|p| p.life.as_ref())
                 .fold((0.0, 0.0), |(l, f), life| (l + life.total(), f + life.full()))
         });
-        let Some((_, robot)) = self.robots.iter().find(|(rt, _)| *rt == t) else {
-            return Condition::default();
+        let life = if full > 0.0 { life / full } else { 1.0 };
+        // A building's charge is its batteries' (docs/23), whether or not it carries guns.
+        let charge = self.battery(Some(t)).unwrap_or(1.0);
+        let Some(robot) = self.machine(t) else {
+            return Condition { life, charge, ..Condition::default() };
         };
         let counted: Vec<&parkan_sim::guns::Gun> = robot.guns.iter().filter(|g| g.magazine > 0).collect();
         let dry = counted.iter().filter(|g| (g.rounds as f32) < SERVICE_MAGAZINE * g.magazine as f32).count();
         let (rounds, magazines) =
             counted.iter().fold((0.0, 0.0), |(r, m), g| (r + g.rounds as f32, m + g.magazine as f32));
         Condition {
-            life: if full > 0.0 { life / full } else { 1.0 },
-            charge: robot.power.as_ref().map_or(1.0, crate::power::Power::fill),
+            life,
+            charge,
             ammo: if magazines > 0.0 { rounds / magazines } else { 1.0 },
             guns_dry: !counted.is_empty() && dry as f32 > SERVICE_GUNS * counted.len() as f32,
         }

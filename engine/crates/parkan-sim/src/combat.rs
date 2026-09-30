@@ -222,6 +222,9 @@ pub enum Event {
     Hidden { target: usize, part: usize, node: usize },
     /// A destroyed part was knocked off, and flies from now.
     KnockedOff { target: usize, part: usize, node: usize },
+    /// A node's stage fell as it gained life back, and it is in the world again if its last
+    /// stage had hidden it.
+    Restored { target: usize, part: usize, node: usize },
     /// A target died.
     Killed { target: usize },
     /// A hit reached a target, whatever it did to it (`0x1000ebdf`, `0x1000d1ed`): its
@@ -869,6 +872,7 @@ impl Combat {
                         }
                         Change::Hidden(node) => Event::Hidden { target: t, part: p, node },
                         Change::KnockedOff(node) => Event::KnockedOff { target: t, part: p, node },
+                        Change::Restored(node) => Event::Restored { target: t, part: p, node },
                     });
                 }
             }

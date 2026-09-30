@@ -92,28 +92,35 @@ impl Repair {
     }
 }
 
-/// What a unit's nodes lack of full, over those that still have life (`Control.dll:0x10010b10`).
-pub fn lack<'a>(lives: impl IntoIterator<Item = &'a Life>) -> f32 {
-    lives.into_iter().flat_map(|l| &l.nodes).filter(|n| n.life > 0.0).map(|n| n.max - n.life).sum()
+/// What an object's nodes lack of full (`Control.dll:0x10010b10`): a unit's, over those that
+/// still have life; a `building`'s, its whole life's maximum less its life, destroyed nodes and
+/// all (`0x10010b1c`), as the repair system of an agent of kind 3 asks (`0x10022b0e`).
+pub fn lack<'a>(lives: impl IntoIterator<Item = &'a Life>, building: bool) -> f32 {
+    lives
+        .into_iter()
+        .flat_map(|l| &l.nodes)
+        .filter(|n| building || n.life > 0.0)
+        .map(|n| n.max - n.life)
+        .sum()
 }
 
-/// `points` of repair handed to a unit's nodes (`0x10010ba0` with a gain, `0x10010cd4`): in
-/// index order, part by part, each node filled before the next, a destroyed node passed over
-/// (`0x10010d0b`). What a node's life now says of its stage waits for the next life takt.
-/// Returns what was given.
-pub fn restore(lives: &mut [&mut Life], points: f32) -> f32 {
+/// `points` of repair handed to an object's nodes (`0x10010ba0` with a gain, `0x10010cd4`): in
+/// index order, part by part, each node filled before the next. A unit's destroyed node is
+/// passed over (`0x10010d0b`); a `building`'s takes its share with the rest and has life
+/// again ([`Life::gain`]), so a building brings back the parts it lost one by one, each whole
+/// before the next begins. What a node's life now says of its stage waits for the next life
+/// takt. Returns what was given.
+pub fn restore(lives: &mut [&mut Life], points: f32, building: bool) -> f32 {
     let mut left = points.max(0.0);
     for life in lives.iter_mut() {
-        for n in &mut life.nodes {
+        for n in 0..life.nodes.len() {
             if left <= 0.0 {
                 break;
             }
-            if n.destroyed {
+            if life.nodes[n].destroyed && !building {
                 continue;
             }
-            let give = (n.max - n.life).max(0.0).min(left);
-            n.life += give;
-            left -= give;
+            left -= life.gain(n, left);
         }
     }
     points.max(0.0) - left
@@ -172,14 +179,14 @@ mod tests {
         hull.nodes[1].life = 0.0;
         hull.nodes[1].destroyed = true;
         hull.nodes[2].life = 40.0;
-        let lack = lack([&hull]);
+        let lack = lack([&hull], false);
         assert_eq!(lack, 50.0, "the destroyed node lacks nothing");
         assert_eq!(repair.want(false, 1.0, 1.0, lack), 0.0);
         assert!((repair.want(true, 1.0, 1.0, lack) - (0.1 + 0.04 * 15.0)).abs() < 1e-6);
         // Served whole: 15 points, node 0 filled first, the destroyed node passed over.
         let points = repair.points(true, 1.0, 1.0, 1.0, lack);
         assert!((points - 15.0).abs() < 1e-3);
-        assert!((restore(&mut [&mut hull], points) - 15.0).abs() < 1e-3);
+        assert!((restore(&mut [&mut hull], points, false) - 15.0).abs() < 1e-3);
         assert_eq!(hull.nodes[0].life, 100.0);
         assert_eq!(hull.nodes[1].life, 0.0);
         assert!((hull.nodes[2].life - 45.0).abs() < 1e-3);
@@ -189,5 +196,34 @@ mod tests {
         // Its node at half condition restores half as fast; a destroyed one, nothing.
         assert!((repair.points(true, 1.0, 1.0, 0.5, 45.0) - 7.5).abs() < 1e-3);
         assert_eq!(repair.points(true, 1.0, 1.0, 0.0, 45.0), 0.0);
+    }
+    #[test]
+    fn a_buildings_repair_brings_back_its_destroyed_parts_one_by_one_in_node_order() {
+        // A building's own repair system: 100 a second, 0.0002 a point, 0.01 idle.
+        let repair = Repair { rate: 100.0, cost: 0.0002, power: 0.01 };
+        let mut hull = life(&[400.0, 150.0, 120.0]);
+        hull.building = true;
+        hull.nodes[0].life = 380.0;
+        for n in [1, 2] {
+            hull.lose(n, 1000.0);
+        }
+        assert!(hull.nodes[1].destroyed && hull.nodes[2].destroyed);
+        let lack = lack([&hull], true);
+        assert_eq!(lack, 290.0, "a building lacks its destroyed nodes' life too");
+        // Each second fills the lowest node that lacks anything before the next takes a point.
+        let points = repair.points(true, 1.0, 1.0, 1.0, lack);
+        assert!((points - 100.0).abs() < 1e-3, "{points}");
+        restore(&mut [&mut hull], points, true);
+        assert_eq!(hull.nodes[0].life, 400.0);
+        assert!((hull.nodes[1].life - 80.0).abs() < 1e-3 && !hull.nodes[1].destroyed, "{:?}", hull.nodes[1]);
+        assert!(hull.nodes[2].destroyed && hull.nodes[2].life == 0.0, "the next waits its turn");
+        restore(&mut [&mut hull], 100.0, true);
+        assert_eq!(hull.nodes[1].life, 150.0);
+        assert!((hull.nodes[2].life - 30.0).abs() < 1e-3 && !hull.nodes[2].destroyed);
+        // A unit's passes the destroyed node over.
+        let mut unit = life(&[100.0, 50.0]);
+        unit.lose(1, 1000.0);
+        assert_eq!(restore(&mut [&mut unit], 40.0, false), 0.0);
+        assert!(unit.nodes[1].destroyed);
     }
 }

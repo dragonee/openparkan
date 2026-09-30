@@ -101,15 +101,31 @@ impl Battery {
     /// held to 1 (`0x1002dca0`); the charge falls by what was used. Returns the level and the
     /// charge used.
     pub fn spend(&mut self, need: f32, dt: f32) -> (f32, f32) {
+        let (levels, used) = self.serve(&[need * dt], dt);
+        (levels[0], used)
+    }
+
+    /// One power tick of `dt` seconds with draws wanting `wants` of charge over it, one channel
+    /// group each in the order they are served (`0x1002d3c1`–`0x1002d439`): each gets `min(1,
+    /// what is left ÷ what it wants)` of what it wants from what the batteries give, and the
+    /// charge falls by what was used. Returns each draw's level and the charge used.
+    pub fn serve(&mut self, wants: &[f32], dt: f32) -> (Vec<f32>, f32) {
         if self.capacity <= 0.0 {
-            return (1.0, 0.0);
+            return (vec![1.0; wants.len()], 0.0);
         }
-        let want = need * dt;
         let give = (self.output * self.charge * dt).min(self.capacity * self.charge);
-        let level = if want > 0.0 { (give / want).min(1.0) } else { 1.0 };
-        let used = want.min(give);
+        let mut left = give;
+        let levels = wants
+            .iter()
+            .map(|&want| {
+                let level = if want > 0.0 { (left / want).min(1.0) } else { 1.0 };
+                left -= level * want.max(0.0);
+                level
+            })
+            .collect();
+        let used = give - left;
         self.charge = (self.charge - used / self.capacity).max(0.0);
-        (level, used)
+        (levels, used)
     }
 
     /// What a unit's battery gives over `dt` seconds at `condition`, its node's life over its
