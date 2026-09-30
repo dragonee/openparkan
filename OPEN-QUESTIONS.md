@@ -76,8 +76,9 @@ remainder a closed line names stays here as a line of its own.
   interval's 12.5 Hz. Not read: who hands the manager its time, and whether an ambient effect — a
   load group's on a building, tree or stone, or a lode's plume — is updated on a slower clock. The
   engine runs those streams at half pace and every other at the read one (engine README,
-  *Stand-ins*). Seen alongside, not explained: the recording's plume is distinct billows over a
-  flame about twice the engine's, and its flame's brightness varies a third as much.
+  *Stand-ins*). Seen alongside: the recording's plume is distinct billows — the spawn's read
+  jitter of each particle's far ends, which the engine now draws — over a flame about twice
+  the engine's, whose brightness varies a third as much (not explained).
 - [ ] How Direct3D Sound places a sound between the speakers. (~~[M5] How a sound falls off between
   its near and far distances~~ — this half was **stale**: the game takes the Direct3D Sound path
   rather than its own mixer, so the law is DirectSound's — whole within the near distance, then
