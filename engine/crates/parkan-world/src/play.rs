@@ -1474,9 +1474,12 @@ impl Play {
                 }
                 false
             }
-            // In view state 1 only: the outer camera's view lets Z be (`0x10072428`).
+            // In view states 1 and 6, the driven unit's camera and a tower's in its manual
+            // control: the outer camera's view lets Z be (`0x10072428`, docs/30, "The zoom").
             CMD_JAMES_ZOOM_MODE => {
-                if !self.outer.on() && matches!(self.mode(), Mode::OnFoot | Mode::Driving(_)) {
+                if !self.outer.on()
+                    && matches!(self.mode(), Mode::OnFoot | Mode::Driving(_) | Mode::Manual(_))
+                {
                     let robot = self.driven_mut();
                     let widest = robot.rig.camera_values[2];
                     robot.zoom.toggle(widest);
@@ -2539,7 +2542,8 @@ impl Play {
     }
 
     /// A game frame's views (`0x1007d6e0`, `0x10038720`): the zoom of every unit of the player's
-    /// clan steps, the outer camera moves, or is turned off when its mode is left or its unit
+    /// clan steps, and of every building of it with a camera, a tower's gun (`0x1007db30` →
+    /// `0x10033417`); the outer camera moves, or is turned off when its mode is left or its unit
     /// lost, and the mouse filter takes the zoomed multiplier while the view is zoomed
     /// (`0x100a4fc0`).
     ///
@@ -2549,7 +2553,7 @@ impl Play {
         let widest = self.hero.rig.camera_values[2];
         self.hero.zoom.step(widest);
         let player = Some(self.player_clan);
-        for (t, robot) in &mut self.robots {
+        for (t, robot) in self.robots.iter_mut().chain(self.emplacements.iter_mut()) {
             if self.units.get(*t).is_some_and(|u| u.clan == player) {
                 let widest = robot.rig.camera_values[2];
                 robot.zoom.step(widest);

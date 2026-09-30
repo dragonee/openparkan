@@ -882,6 +882,32 @@ fn c02_m04s_light_tower_taken_at_its_pod_hands_the_player_its_guns() {
     let turned = (aim(&play, tower)[0] - before[0]).abs();
     assert!(turned > 0.2, "the mouse turns its turret: {turned}");
 
+    // Z zooms its camera, the building record's own zoom in view state 6, stepped 0.1 a frame
+    // to 0.2 by the building records' update, and slows the mouse to half (docs/30, "The zoom").
+    let press = |play: &mut Play, command: &str| {
+        let eye = play.own_eye();
+        let view = parkan_world::play::View {
+            eye: eye.position,
+            look: eye.forward,
+            view_proj: glam::Mat4::IDENTITY,
+            shift: false,
+        };
+        play.command(command, &view);
+    };
+    let wide = play.eye().fov_x;
+    press(&mut play, parkan_formats::controls::CMD_JAMES_ZOOM_MODE);
+    for _ in 0..30 {
+        tick(&mut play, [0.0; 2]);
+    }
+    let narrow = play.eye().fov_x;
+    assert!((narrow - 0.2).abs() < 0.05, "Z zooms the tower's camera from {wide} to 0.2: {narrow}");
+    assert!((play.driving.as_ref().unwrap().pilot.sensitivity - 0.5).abs() < 1e-6, "the mouse at half");
+    press(&mut play, parkan_formats::controls::CMD_JAMES_ZOOM_MODE);
+    for _ in 0..30 {
+        tick(&mut play, [0.0; 2]);
+    }
+    assert!((play.eye().fov_x - wide).abs() < 0.05, "and back out: {}", play.eye().fov_x);
+
     // The button fires its guns.
     let rounds = |play: &Play| play.battle.combat.rounds.len();
     let (mut most, before) = (0, rounds(&play));

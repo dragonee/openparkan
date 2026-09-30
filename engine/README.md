@@ -1133,8 +1133,10 @@ C02 M03 and M04.
   and a medium or large tower goes to mode 6 unless its turret has no life left. Its handler
   hands the tower's turret and guns to the player as a take hands a bot's at level 0, so the
   engine drives it through the boarded bot's machinery: the turret's camera and its cockpit,
-  the mouse on its turret, the number keys and the button on its guns, from `M1.TBL`, the table
-  the reader falls back to, since no building's chassis names one. The building moves nothing
+  the mouse on its turret, Z on its camera's zoom, the number keys and the button on its guns,
+  from `M1.TBL`, the table the reader falls back to, since no building's chassis names one. Z
+  zooms in view state 6 as in 1, and the building records' update steps a building's zoom as
+  the unit records' does a unit's (docs/30, "The zoom"). The building moves nothing
   and its turret's takt runs with its own; its fire control steps aside while the player holds
   it. Esc rolls back to the hero standing on the pod, the guns back to the AI. A tower whose
   turret is shot off is captured and opens nothing. *The Last Bastion*'s plateau tower,
