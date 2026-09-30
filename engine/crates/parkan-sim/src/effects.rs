@@ -185,6 +185,11 @@ struct Particle {
     /// The number drawn for it as it left (`Effect.dll:0x10011d84`), which its material's
     /// animation stands at for its whole life when the block's +32 is negative.
     drawn: f32,
+    /// Its own far ends, drawn as it left: the block's position high end +100 and size high
+    /// end +148, each axis moved by a uniform in ±half of the jitter 12 on, z first
+    /// (`0x10011e81`–`0x10011f7f`).
+    high: [f32; 3],
+    size_high: [f32; 3],
 }
 
 /// A type-8 emitter's ring of particles, and when it last emitted one.
@@ -517,7 +522,23 @@ impl Instance {
                     if seconds > then { ((next - then) / (seconds - then)).clamp(0.0, 1.0) } else { 1.0 };
                 let frame = Frame { origin: from.lerp(origin, share), ..self.frame };
                 let drawn = self.rng.unit();
-                stream.ring.push_back(Particle { born: next, frame, life: ring as f32 * interval, drawn });
+                let jittered = |rng: &mut Rng, high: usize| {
+                    let (end, spread) = (e.triple(high), e.triple(high + 12));
+                    let z = end[2] + rng.spread(spread[2]);
+                    let y = end[1] + rng.spread(spread[1]);
+                    let x = end[0] + rng.spread(spread[0]);
+                    [x, y, z]
+                };
+                let high = jittered(&mut self.rng, 100);
+                let size_high = jittered(&mut self.rng, 148);
+                stream.ring.push_back(Particle {
+                    born: next,
+                    frame,
+                    life: ring as f32 * interval,
+                    drawn,
+                    high,
+                    size_high,
+                });
                 if stream.ring.len() > ring as usize {
                     stream.ring.pop_front();
                 }
@@ -815,9 +836,10 @@ impl Instance {
     /// A type-8 stream's particles, each fading +4 + (+8 − +4) × age^+12 (`0x10012322`),
     /// its age running 0 to 1 over its life.
     ///
-    /// It sits at lerp(+88, +100) from where it left and is lerp(+136, +148) in size, each
-    /// axis by its age raised to that axis's exponent — +124..+132 for the position,
-    /// +172..+180 for the size (`0x100121f8`, `0x10012276`).
+    /// It sits at lerp(+88, its own +100) from where it left and is lerp(+136, its own +148)
+    /// in size, each axis by its age raised to that axis's exponent — +124..+132 for the
+    /// position, +172..+180 for the size (`0x100121f8`, `0x10012276`); its own high ends are
+    /// the block's jittered as it left.
     ///
     /// STAND-IN: docs/11-effects.md#bolts-streams-and-fades--read-and-measured -- both are
     /// taken in metres times the instance's scale, and its age in seconds since it
@@ -831,8 +853,8 @@ impl Instance {
         let Some(stream) = self.streams.iter().find(|s| s.emitter == index) else { return };
         for q in &stream.ring {
             let age = ((seconds - q.born) / q.life.max(f32::EPSILON)).clamp(0.0, 1.0);
-            let local = lerp3_axis(e.triple(88), e.triple(100), shaped(age, e.triple(124)));
-            let size = lerp3_axis(e.triple(136), e.triple(148), shaped(age, e.triple(172)));
+            let local = lerp3_axis(e.triple(88), q.high, shaped(age, e.triple(124)));
+            let size = lerp3_axis(e.triple(136), q.size_high, shaped(age, e.triple(172)));
             let alpha = fade(e.f(4), e.f(8), e.f(12), age);
             let since = (seconds - q.born).max(0.0) * 1000.0;
             // Its material's animation stands at age^+32, or at the number drawn for the
@@ -1418,6 +1440,65 @@ mod tests {
         // Long after, the ring has gone by: nothing stale is left to show.
         fx.update(5000.0);
         assert!(born(&fx).is_empty(), "{:?}", born(&fx));
+    }
+
+    /// Each stream particle draws its own far end and size as it leaves: a uniform in ±half
+    /// of the jitter triples at +112 and +160, added to the high ends at +100 and +148, z
+    /// first (`Effect.dll:0x10011e81`–`0x10011f7f`). So two particles of the same age stand
+    /// apart, and a plume breaks into puffs.
+    #[test]
+    fn a_stream_particle_draws_its_own_far_end_and_size_as_it_leaves() {
+        let floats = [
+            (16, 0.0),
+            (20, 1.0),
+            (24, 0.1),
+            (28, 0.1),
+            (4, 1.0),
+            (8, 1.0),
+            (108, 100.0),
+            (112, 20.0),
+            (116, 20.0),
+            (120, 60.0),
+            (136, 12.0),
+            (140, 12.0),
+            (144, 12.0),
+            (148, 80.0),
+            (152, 80.0),
+            (156, 80.0),
+            (160, 4.0),
+            (164, 4.0),
+            (168, 4.0),
+        ];
+        let plume = with_word(block(8, 248, &floats, "smoke"), 36, 10);
+        let frame = Frame::along(Vec3::ZERO, Vec3::X, 1.0);
+        let mut fx = Instance::new(effect(TIME_MANUAL, 0.0, 0, vec![plume]), frame, 10.0, 0.0, None, 7);
+        fx.value = 0.5;
+        // Ten particles, 0.1 s apart; at 1 s each has aged by its place in the ring.
+        for ms in (0..=1000).step_by(50) {
+            fx.update(f64::from(ms));
+        }
+        let mut out = Vec::new();
+        fx.sprites(1000.0, false, &mut out);
+        assert_eq!(out.len(), fx.streams[0].ring.len());
+        assert!(out.len() >= 8, "{}", out.len());
+        // Each particle's place over its age is its own far end: x and y within ±10, z
+        // within 100 ± 30. A particle only just out is left out, its age too near 0.
+        let ends: Vec<Vec3> = fx.streams[0]
+            .ring
+            .iter()
+            .zip(&out)
+            .map(|(q, s)| (1.0 - q.born, s.centre))
+            .filter(|(age, _)| *age > 0.2)
+            .map(|(age, centre)| centre / age)
+            .collect();
+        assert!(ends.len() >= 6, "{ends:?}");
+        assert!(ends.iter().all(|e| e.x.abs() <= 10.0 + 1e-2 && e.y.abs() <= 10.0 + 1e-2), "{ends:?}");
+        assert!(ends.iter().all(|e| (e.z - 100.0).abs() <= 30.0 + 1e-2), "{ends:?}");
+        let spread = |f: fn(&Vec3) -> f32| {
+            let v: Vec<f32> = ends.iter().map(f).collect();
+            v.iter().cloned().fold(f32::MIN, f32::max) - v.iter().cloned().fold(f32::MAX, f32::min)
+        };
+        assert!(spread(|e| e.x) > 2.0 && spread(|e| e.z) > 5.0, "every particle on one line: {ends:?}");
     }
 
     #[test]

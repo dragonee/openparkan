@@ -967,6 +967,16 @@ the 0.08 s interval's 12.5 Hz. Both put the game's ambient streams at about half
 the read pace; the column's shape — its width against its height — is the
 same, so what runs slow is the clock, not the geometry.
 
+**Each particle draws its own far ends as it leaves** (*read*, and *seen*).
+After the number for its material's phase (`0x10011d84`) the spawn draws the
+position jitter +112..+120, z first, and adds it to the high end +100..+108
+(`0x10011e81`–`0x10011f33`), then the size jitter +160..+168, z first, onto
++148..+156 (`0x10011f60`–`0x10011f7f`), each a uniform in ±half, and keeps both
+with the particle (`0x10012bf0`). The volcano's smoke ends 100 ± 30 m up and
+± 10 m to each side, a chimney's 50 ± 15 m up; so no two puffs travel the same
+line, and a plume breaks into the separate billows the recording shows (4:19.4
+on), where puffs all on one line had made a smooth cone.
+
 **A fade value.** A burst particle hands the renderer
 **+8 + (+12 − +8) × age^+16** (`0x100013c2`), a stream particle
 +4 + (+8 − +4) × age^+12 (`0x10012322`), a sprite +20 + (+24 − +20) ×

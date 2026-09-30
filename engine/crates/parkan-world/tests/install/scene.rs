@@ -601,12 +601,13 @@ fn a_chimneys_puff_leaves_orange_turns_black_and_its_plume_is_the_recordings_siz
         .expect("a puff older than 250 ms");
     assert!(old.iter().all(|&c| c < 90.0), "black smoke {age:.0} ms on: {old:?}");
 
-    // The plume: 50 m over the chimney, 10 to 30 m across, as lerp(+88, +100) and
-    // lerp(+136, +148) give in metres.
+    // The plume: 50 ± 15 m over the chimney, each puff's far end jittered by ±half of +120's
+    // 30 as it leaves, and 10 to 30 m across, as lerp(+88, +100) and lerp(+136, +148) give in
+    // metres.
     let over = |s: &parkan_sim::effects::Sprite| s.centre.z - chimney.origin.z;
     let top = smoke.iter().map(|(_, s)| over(s)).fold(f32::MIN, f32::max);
     let widths: Vec<f32> = smoke.iter().map(|(_, s)| s.width).collect();
-    assert!((0.0..=50.5).contains(&top) && top > 45.0, "the plume stands {top:.1} m over it");
+    assert!((0.0..=65.5).contains(&top) && top > 45.0, "the plume stands {top:.1} m over it");
     assert!(
         widths.iter().all(|&w| (9.5..=30.5).contains(&w)),
         "10 to 30 m across: {:.1}..{:.1}",

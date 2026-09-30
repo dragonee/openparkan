@@ -730,7 +730,9 @@ presses a hero standing at it down), and which of Mission 04's units holds no mi
   quarter of a second on, as the recording's plumes are. A stream's particle walks and grows in
   metres, the frame only turning it: the plume stands 50 m over the chimney and grows from 10
   to 30 m across, against about 29 and 31 measured off the recording, where the control points'
-  2.6-long axes had made it 130 and 78.
+  2.6-long axes had made it 130 and 78. Each particle draws its own far end and size as it
+  leaves, within the block's jitter (docs/11, "Bolts, streams and fades"), so a plume billows
+  in separate puffs, 50 ± 15 m up a chimney, rather than climbing one smooth cone.
 - **A building's ambience hums on** (docs/11, "Type 2 is a sound"). A loop stops when effect
   time leaves its window, and a looping mode's time comes round to 0 at the end of each period,
   below a window that starts at 0.001. The game's effect manager updates on wall time and lands
