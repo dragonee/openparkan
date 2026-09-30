@@ -144,8 +144,11 @@ def sheets(args: argparse.Namespace, w: Work) -> None:
     shutil.rmtree(frames)
     frames.mkdir()
     span = ["-ss", str(start)] + (["-to", str(seconds(args.end))] if args.end else [])
-    ffmpeg(*span, "-i", str(args.video), "-vf", w.filter(480, f"fps=1/{args.every}"), "-q:v", "3",
-           str(frames / "f_%05d.jpg"))
+    # `fps` keeps the last frame of each slot, and by default a slot runs half an interval either
+    # side of its time, so its frame came half an interval after the stamp; rounding up keeps
+    # the frame at the stamp itself.
+    ffmpeg(*span, "-i", str(args.video), "-vf", w.filter(480, f"fps=1/{args.every}:round=up"),
+           "-q:v", "3", str(frames / "f_%05d.jpg"))
     files = sorted(frames.glob("f_*.jpg"))
     per = args.cols * args.cols
     for n in range(0, len(files), per):
@@ -171,7 +174,8 @@ def burst(args: argparse.Namespace, w: Work) -> None:
     shutil.rmtree(frames)
     frames.mkdir()
     ffmpeg("-ss", str(t0), "-i", str(args.video), "-t", str(t1 - t0), "-vf",
-           w.filter(args.width, f"fps={args.fps}"), "-q:v", "3", str(frames / "b_%04d.jpg"))
+           w.filter(args.width, f"fps={args.fps}:round=up"), "-q:v", "3",
+           str(frames / "b_%04d.jpg"))
     files = sorted(frames.glob("b_*.jpg"))
     out = w.path(f"burst_{t0:.1f}-{t1:.1f}.jpg")
     tile(files, [stamp(t0 + i / args.fps) for i in range(len(files))], args.cols, out, args.width)
@@ -186,7 +190,7 @@ def fade(args: argparse.Namespace, w: Work) -> None:
     shutil.rmtree(frames)
     frames.mkdir()
     ffmpeg("-ss", str(t0), "-i", str(args.video), "-t", str(t1 - t0), "-vf",
-           w.filter(240, f"fps={args.fps}"), str(frames / "f_%04d.png"))
+           w.filter(240, f"fps={args.fps}:round=up"), str(frames / "f_%04d.png"))
 
     def mean(im: Image.Image) -> float:
         data = im.tobytes()
@@ -238,8 +242,8 @@ def ocr(args: argparse.Namespace, w: Work) -> None:
     shutil.rmtree(frames)
     frames.mkdir()
     span = ["-ss", str(start)] + (["-to", str(seconds(args.end))] if args.end else [])
-    ffmpeg(*span, "-i", str(args.video), "-vf", f"fps=1/{args.every},crop={args.box}", "-q:v", "2",
-           str(frames / "m_%05d.jpg"))
+    ffmpeg(*span, "-i", str(args.video), "-vf", f"fps=1/{args.every}:round=up,crop={args.box}",
+           "-q:v", "2", str(frames / "m_%05d.jpg"))
 
     def read(f: Path) -> tuple[int, list[str]]:
         r, g, b = Image.open(f).convert("RGB").split()
