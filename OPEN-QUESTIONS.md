@@ -1599,6 +1599,27 @@ tests, 1015 of 1015 checks, 509 engine tests and 201 install tests, `ruff` clean
   gorge wall, and it stands at 0 m/s for the rest of the mission — while from where the mission places
   it there is a 31-leg route over the bridge to the player's factory. What the game does with a patrol
   place off its own areal map, and what its walker does once stranded, are both unread.
+- [ ] **What the console's `create` does with its arguments.** Raised 2026-09-30 from checking C02
+  Mission 02 against a recording. Function 57 runs its mission's `script%d` line through the game's
+  debug console (*read*, [15-behaviour](docs/15-behaviour.md#channel-2-runs-a-line-of-the-missions-script-block--read-and-measured)),
+  and 18 of the install's 20 lines are `create(x, y, z, clan, file, 0)` — six values where the help
+  text names five. Unread: how `0x1003ca50` converts each argument and what becomes of the sixth (0
+  on every line); how the file (`22lwhl1.dat`, `23mfly.dat`, `m_crab.dat`, …) resolves to a unit under
+  `UNITS\`; whether `z` (10 on every line) is a height, a height over the ground or ignored; whether
+  the clan number indexes the mission's clan table as an object's `ClanID` does; the new object's
+  heading and logical id; and whether it joins its clan's lists and SuperAI, so that `c2m2e2`'s
+  `fn25(TAKE_ALL_FREE)` takes it and function 31 counts it. The callback's gate is not in the way: the
+  game object's `+0xe5` is set in mode 3 alone, which is the auto-demo (*Mission progression*,
+  below). **The engine answers function 57 with nothing**, so C02 Mission 02's three heavy warbots
+  never arrive after the HQ is taken, and its bonus objective, which waits for `Enm2` to have no
+  robots, completes without them; C02 Mission 03 and C05 Mission 01 call it too.
+- [ ] **What `bcreate` makes.** C04 Mission 02's `bcreate(1246, 1051, 10, 0, teleport.dat, 0)` is
+  how its Teleport objective puts the Teleport down: whether the building appears finished or goes
+  through the construction sphere, its owner, how it is set on the ground, and its logical id. The
+  engine has what it needs to place a building of any `.dat` in play (the builder's path).
+- [ ] **What `death(x, y, r, delay)` kills.** C04 Mission 02's `death(1246, 1051, 100, 0 )` clears
+  that ground first. Which objects within `r` of the place (units, buildings, scenery), by what (the
+  life system's kill, an explosion, a deletion), the unit of `delay`, and whether 0 is at once.
 
 ## Mission progression
 
@@ -1656,7 +1677,13 @@ tests, 1015 of 1015 checks, 509 engine tests and 201 install tests, `ruff` clean
   auto-demo** and **mode 4 the training campaign** (`0x1005c748`–`0x1005c766`), and **game message
   3** is `World3D.dll`'s network layer on `DPSYS_SESSIONLOST` or a failed send. The engine has no
   shell, so its row stays, reworded ([34-progression](docs/34-progression.md)).
-- [ ] Whether the hero reports its route from inside a boarded bot.
+- [x] ~~Whether the hero reports its route from inside a boarded bot~~ — **stale**, closed
+  2026-09-30: it does, and [39-boarding](docs/39-boarding.md#boarding--read) already has it *read*
+  and *seen*: the game frame keeps the hero's object on the bot, at its x and its y less its node
+  sphere's radius, so its route report follows the bot (engine since `a29793a`). Seen again in "Let's
+  Play - Parkan: Iron Strategy, Part 3": C02 Mission 02's *"Reach the last marker left by Ballen"*
+  completes at 19:25 with the hero aboard the LFW-2 over the last buoy, having been told *"Risk
+  area! Landing impossible."* at 19:23; the engine completes it the same way.
 - [ ] What the behaviour does with the message 6 it sends itself.
 - [x] ~~The ambient variations' schedule~~ — closed 2026-09-18: **one every 10 to 19 seconds, from
   the first frame.** Each frame the game asks `services.dll`'s `ITimer` for the seconds since its
