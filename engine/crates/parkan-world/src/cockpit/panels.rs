@@ -6,7 +6,7 @@
 
 use std::collections::BTreeMap;
 
-use glam::{Mat4, Quat, Vec3};
+use glam::{Mat4, Vec3};
 use parkan_formats::mission::{KIND_BUILDING, KIND_UNIT};
 use parkan_sim::behaviour::Task;
 use parkan_sim::damage::Life;
@@ -305,9 +305,9 @@ pub fn draw(
 /// the step's end, which jumps a stride at a time.
 fn hero_sphere(play: &Play) -> (Vec3, f32) {
     let unit = play.driven();
-    let (position, yaw) = unit.walker.drawn(unit.time_ms);
+    let (position, _) = unit.walker.drawn(unit.time_ms);
     let (centre, radius) = unit.collision;
-    (position + Quat::from_rotation_z(yaw) * centre, radius)
+    (position + unit.walker.drawn_turn(unit.time_ms) * centre, radius)
 }
 
 /// A panel for `side` (`0x10040f30`).
@@ -412,8 +412,7 @@ fn panel(
     let direction = if own {
         // The object's y column, as it is drawn.
         let unit = play.driven();
-        let h = unit.walker.drawn(unit.time_ms).1;
-        Vec3::new(-h.sin(), h.cos(), 0.0)
+        unit.walker.drawn_turn(unit.time_ms) * Vec3::Y
     } else {
         let mut d = (centre - hero_centre).normalize_or(Vec3::Y);
         if building && d.z > 0.0 {

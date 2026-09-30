@@ -1159,6 +1159,15 @@ C02 M03 and M04.
   stage falls from the last. *The Last Bastion*'s plateau tower, its turret shot off, has the
   turret whole in 32 s at 110 a second, then one cannon at 86 s and the other at 141 s, as the
   player remembers it; the guns fire again as each comes back.
+- **A hull rights itself along the ground** (docs/24, "The hull leans and rights itself"). Each
+  state step turns the hull by triple 5's share of the angle to its target: the world's up for a
+  state with bits `0xC0`, the averaged ground normal the lift last took for `0x30`, every state of
+  the six wheeled and tracked chassis and most of the Large Walking chassis's. Its pitch and roll
+  turn the contact points, the collision sphere, the drawn model, its turret and its camera. A
+  small wheeled bot noses down a building's ramp now rather than catch its front wheels under the
+  floor over it: C02 M03's Small Bunker and *The Last Bastion*'s plateau tower, which no wheeled
+  bot could take, fall to one in 17 to 41 s. The lean, which only the drawn body takes, is still
+  left out.
 - **A machine is drawn where the ground contact holds it** (docs/24, "Collision between
   objects"). As read, a machine standing on a building takes a down push whole, after the
   ground contact. *The Lost Key*'s Small Warehouse is 6.3–7.5 m high inside, and its ceiling
@@ -1356,7 +1365,6 @@ a row here. A row leaves this table when research closes it.
 | M1 | Whether the dome and its layers take the scene's fog, and what the game clears the frame to below the dome's rim | draw the dome at the camera, depth-tested without writing depth under a projection with no far plane, unfogged but for its rim; clear the frame to the fog colour | [10](../docs/10-sky.md#the-dome) |
 | M1 | Which views carry the mode that skips the sky's screen-wide quad (view slot 24 = 1, `0x1007a325`); the quad itself is read, and carries the scene colour | never drawn; the frame is cleared to the fog colour instead | [10](../docs/10-sky.md#the-skys-first-draw-is-a-screen-wide-quad-and-it-is-usually-skipped--read) |
 | M1 | The files' colours in a renderer that decodes textures to linear | sky, fog and dome colours and texture tints decoded from sRGB to linear; the lit colour (scene colour, material ambient and diffuse, both lights) formed from the files' values, held to 1, then decoded, so blends match the game's display-space ones | [10](../docs/10-sky.md#the-dome-the-fog-and-the-scene-colour--read-and-measured) |
-| M3 | The lean and the righting themselves; the vector bits `0x30` aim at is read — control `+0x348` is body `+0x194`, the averaged ground normal | the hull neither leans nor rights: the body has a yaw alone and takes only the turn about z | [24](../docs/24-motion.md#the-hull-leans-and-rights-itself--read-and-measured) |
 | M4 | Whether a target the hero's AI set before the player took over survives | none: nothing sets it while the player drives, so the plasma bolt and the missile fly straight | [29](../docs/29-weapons.md#not-established) |
 | M4 | How a **building's** gun capacitor refills; a unit's runs the read power tick | a gun on a building, or on a unit with no battery, is served at a level of 1 | [23](../docs/23-economy.md#bots-spend-power-through-the-same-code-priced-by-part--read-and-measured) |
 | M4 | Poses of other units for the hit test | their rest poses: other units' animation is not played | [24](../docs/24-motion.md#playing-a-state--read-and-measured) |
@@ -1509,7 +1517,7 @@ engine pass replaces each with what was read and removes its row.
 | M3 | the ground face is found fresh each step, by an up and a down pass over its cell | the walk starts in the held face and crosses at most 24 faces toward the centre, stopping on one too steep | [24](../docs/24-motion.md#finding-the-ground--read) |
 | M3 | D is the largest span of the velocity box's switched-on axes | the largest difference between an axis's absolute max and absolute min, over all three velocity axes; D = 0 leaves the weight at 1 (no shipped state's weight changes) | [24](../docs/24-motion.md#playing-a-state--read-and-measured) |
 | M3 | the invert constants (−1, +1) with an integrator that does not negate, and free look's yaw negated to undo the mirrored X; a turret's X row takes +1 | the game's mouse X invert is +1 and its integrator negates; on screen the two agree: mouse right turns right, mouse down lowers the sight, and Shift free look's vertical runs opposite | [14](../docs/14-controls.md#from-a-row-to-a-command--read-and-measured) |
-| M3 | only the turn about z is applied | triple 6 is the most the body leans on each axis, from the sources a state's `+0x08` picks; triple 5 is the share of the tilt taken back each step, toward world up (bits `0xC0`) or a vector (`0x30`); no hero state leans | [24](../docs/24-motion.md#the-hull-leans-and-rights-itself--read-and-measured) |
+| M3 | the hull does not lean: its pitch and roll are the righting's alone | triple 6 is the most the body leans on each axis, from the sources a state's `+0x08` picks, turned into a rotation the drawn body takes blended between steps; the six wheeled and tracked chassis squat as they pull away and lean out of a turn, the flyers bank into one; no hero state leans | [24](../docs/24-motion.md#the-hull-leans-and-rights-itself--read-and-measured) |
 | M4 | every effect instance updates on every tick | the manager updates an instance once 100 ms have passed since its last update | [11](../docs/11-effects.md#how-an-effect-runs--read) |
 | M6 | the engine keeps no navigation areals: only a move of more than 5 sends a report | a unit also reports when its navigation areal changes | [34](../docs/34-progression.md#who-stands-in-a-route--read) |
 | M6 | game time | the `Mission` handler is timed by `timeGetTime`, real time | [34](../docs/34-progression.md#when-the-mission-handler-runs--read) |

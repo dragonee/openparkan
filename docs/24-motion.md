@@ -695,6 +695,19 @@ So the wheeled and tracked chassis follow the slope and the rest stand upright
 — *read* now that `+0x348` is the averaged ground normal, where this page once
 called it *derived* from a guess.
 
+**What the slope does to a building's ramp** (*measured*, on the engine).
+- A wheeled bot holding its hull level on the way down a building's ramp dips
+  its front wheels under the floor over the ramp. The contacts' up pass takes
+  that floor within r₂, and the lift puts the machine on it.
+- `22swel1` held 45.8 m short on top of C02 M03's Small Bunker's ramp.
+  `24swele1` circled the entrance of C02 M04's plateau Light Tower for good.
+- Nose down along the ramp, they take the bunker in 17 s and 33 s, and the
+  tower in 41 s.
+- Over the 12 bots standing tilted at three mission starts, the tilt as
+  computed leaves the smallest spread in their running gear's height over the
+  ground in 11. The negated tilt leaves the largest. The one exception is a
+  tracked bot in motion, whose tilt lags the ground.
+
 **Which way a positive angle turns the hull** (*read*). The step's turn triple
 — spin × dt plus triple 5 × the settle angles, added (`0x10014b83`) — is built
 into three axis-angle quaternions about y, x and z (`0x100141c0`, axes pushed

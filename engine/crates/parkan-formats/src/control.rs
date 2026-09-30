@@ -54,6 +54,10 @@ pub const TRIPLE_AT: [usize; 6] = [20, 32, 44, 56, 68, 80];
 pub const TRIPLE_ACCELERATION: usize = 0;
 pub const TRIPLE_TOP_SPEED: usize = 2;
 pub const TRIPLE_TURN: usize = 3;
+/// Triple 5 (+68): the share of the hull's tilt the righting takes back each step, and triple 6
+/// (+80): the most it leans (docs/24, "The hull leans and rights itself").
+pub const TRIPLE_SETTLE: usize = 4;
+pub const TRIPLE_LEAN: usize = 5;
 pub const UNSET: u8 = 0xFF;
 /// A transition cost at or above this is no edge.
 pub const NO_EDGE: f32 = 1_000_000.0;

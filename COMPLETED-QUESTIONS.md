@@ -1049,6 +1049,26 @@ tests, 1015 of 1015 checks, 509 engine tests and 201 install tests, `ruff` clean
   every enemy building: 15 taken before, 14 after, the Large Factory 5 s faster for a wheeled bot
   and 15 s for a walker, and one lost — below ([24-motion](docs/24-motion.md#holding-the-body-on-the-ground--read-and-measured)).
 
+- [x] ~~C02 M03's Small Bunker (`l_bunk1`) cannot be captured by anything on wheels, and C02 M04's
+  plateau Light Tower (`mtow02`) by its small wheeled warrior (`24swele1`).~~ — closed 2026-09-30:
+  the hull **rights itself along the ground**, which the engine had left out. The read was already
+  in [24-motion](docs/24-motion.md#the-hull-leans-and-rights-itself--read-and-measured): a state
+  with bits `0x30`, every state of the six wheeled and tracked chassis, turns the hull each step by
+  triple 5's share of the angle to the averaged ground normal the lift last took, pitch and roll,
+  and the contact points are placed through that turn. Held level, a wheeled bot going down a
+  building's ramp dipped its front wheels under a floor overhanging the way down, the up pass took
+  that floor within r₂, and the lift put the machine on it: `22swel1` held 45.8 m short on top of
+  the bunker's ramp and `24swele1` circled the tower's entrance for good. Nose down, `22swel1` takes
+  the bunker in 17 s and `24swele1` in 33 s, and `24swele1` takes the tower in 41 s (*measured*,
+  each sent from 60 m out with the building's guns off; the control is the same run with the
+  righting taken out, which gives back the stall). The sign is checked on the running gear: over
+  the 12 bots standing tilted at three mission starts, the tilt as computed leaves the smallest
+  spread in their wheels', tracks' and feet's height over the ground in 11, the negated tilt the
+  largest, and the one exception is a tracked bot in motion whose tilt lags the ground. The lean
+  (state `+0x08`, triple 6), which only the drawn body takes, is still left out. What stops a small
+  walker at the bunker is another question and stays queued in
+  [OPEN-QUESTIONS](OPEN-QUESTIONS.md).
+
 ## Turrets, weapons and camera
 
 [29-weapons](docs/29-weapons.md#not-established), [30-turrets](docs/30-turrets.md#not-established),

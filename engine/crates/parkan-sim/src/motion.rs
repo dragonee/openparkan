@@ -196,15 +196,29 @@ pub fn horizontal(push: Vec3) -> Vec3 {
     flat * (push.length() / across).min(HORIZONTAL_SCALE_MOST)
 }
 
-/// A machine's place and motion.
+/// The righting bits of a state's `+0x04` word (`0x1000c3a2`): toward the world's up, toward
+/// the averaged ground normal, which of pitch and roll are taken, and the skip.
+pub const RIGHT_UP: u32 = 0xC0;
+pub const RIGHT_TO_GROUND: u32 = 0x30;
+pub const RIGHT_PITCH: u32 = 0x50;
+pub const RIGHT_ROLL: u32 = 0xA0;
+pub const RIGHT_SKIP: u32 = 0x40_0000;
+
+/// A hull's pitch and roll, `[pitch, roll]`, as a turn of the machine's frame: a positive pitch
+/// tips the nose down, about x, and a positive roll the top to the left, about y
+/// (`Ngi32.dll:0x10014450`, docs/24, "Which way a positive angle turns the hull").
+pub fn tilted(tilt: [f32; 2]) -> glam::Quat {
+    glam::Quat::from_rotation_x(-tilt[0]) * glam::Quat::from_rotation_y(-tilt[1])
+}
+
+/// A machine's place and motion: its yaw, and the pitch and roll its righting gives it
+/// ([`Body::right`]).
 ///
 /// STAND-IN: docs/24-motion.md#the-hull-leans-and-rights-itself--read-and-measured --
-/// the lean (state `+0x08`, triple 6) and the righting (bits `0x30`/`0xC0`, triple 5)
-/// are read but not modelled: the body has a yaw alone, takes only the turn about z, and
-/// neither leans nor rights. Every hero state leans on no axis and rights toward world up.
-/// The vector bits `0x30` right toward is read -- it is [`Body::ground_normal`] -- and a
-/// positive angle about x tips the nose down, about y the top to the left, about z the
-/// nose to the left (`Ngi32.dll:0x10014450` builds S.R.S with S = diag(1, 1, -1)).
+/// the lean (state `+0x08`, triple 6), a turn the drawn body takes on top of the hull's,
+/// blended between steps, is read but not modelled: a wheeled or tracked chassis does not
+/// squat as it pulls away or lean out of a turn, nor a flyer bank. Every hero state leans on
+/// no axis.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Body {
     /// World position of the object's origin.
@@ -248,6 +262,9 @@ pub struct Body {
     /// (`0x1000c439`). Its only writers are the body's constructor and the lift
     /// (`0x10015e47`); docs/24-motion.md, "The hull leans and rights itself".
     pub ground_normal: Vec3,
+    /// The hull's pitch and roll (`+0x21c`'s share taken each step): a positive pitch tips the
+    /// nose down, a positive roll the top to the left.
+    pub tilt: [f32; 2],
 }
 
 impl Body {
@@ -269,13 +286,45 @@ impl Body {
             strafe_change: 0.0,
             fall_speed: 0.0,
             ground_normal: Vec3::Z,
+            tilt: [0.0; 2],
         }
     }
 
     /// A vector in the machine's frame, turned into the world.
     pub fn to_world(&self, v: Vec3) -> Vec3 {
+        let v = tilted(self.tilt) * v;
         let (s, c) = self.yaw.sin_cos();
         Vec3::new(v.x * c - v.y * s, v.x * s + v.y * c, v.z)
+    }
+
+    /// A world vector in the machine's frame.
+    pub fn to_body(&self, v: Vec3) -> Vec3 {
+        let (s, c) = self.yaw.sin_cos();
+        let v = Vec3::new(v.x * c + v.y * s, -v.x * s + v.y * c, v.z);
+        tilted(self.tilt).inverse() * v
+    }
+
+    /// The righting (`0x1000c3a2`, docs/24, "The hull leans and rights itself"): the target, the
+    /// world's up for bits `0xC0` or the averaged ground normal for `0x30`, is taken into the
+    /// hull's frame, pitch as asin of its y where bit `0x10` or `0x40` is set and roll as asin of
+    /// its x negated where `0x20` or `0x80` is, and the hull turns by `share` (triple 5) of them.
+    /// Bit `0x400000` skips it.
+    pub fn right(&mut self, mode: u32, share: [f32; 3]) {
+        if mode & RIGHT_SKIP != 0 || mode & (RIGHT_UP | RIGHT_TO_GROUND) == 0 {
+            return;
+        }
+        let target = if mode & RIGHT_UP != 0 { Vec3::Z } else { self.ground_normal };
+        let t = self.to_body(target.normalize_or(Vec3::Z));
+        if mode & RIGHT_PITCH != 0 {
+            self.tilt[0] += share[0] * t.y.clamp(-1.0, 1.0).asin();
+        } else {
+            self.tilt[0] = 0.0;
+        }
+        if mode & RIGHT_ROLL != 0 {
+            self.tilt[1] += share[1] * (-t.x).clamp(-1.0, 1.0).asin();
+        } else {
+            self.tilt[1] = 0.0;
+        }
     }
 
     /// Where the unit looks once a step is done: the hull's yaw plus the turret's strafe
@@ -478,5 +527,41 @@ pub(crate) mod tests {
         let b = Body::new(Vec3::ZERO, -1.639);
         let f = b.forward();
         assert!((f.x - 0.9977).abs() < 1e-3 && (f.y + 0.068).abs() < 1e-3);
+    }
+
+    /// The righting (docs/24, "The hull leans and rights itself"): bits `0x30` stand the hull
+    /// along the averaged ground normal, a share of the way each step, a positive pitch the
+    /// nose down and a positive roll the top to the left.
+    #[test]
+    fn the_hull_settles_along_the_ground_nose_down_on_a_downhill_and_back_upright_on_the_flat() {
+        let a = 0.2_f32;
+        // Ground falling away ahead of a machine facing +y: its normal leans forward.
+        let mut b = Body::new(Vec3::ZERO, 0.0);
+        b.ground_normal = Vec3::new(0.0, a.sin(), a.cos());
+        b.right(RIGHT_TO_GROUND, [1.0; 3]);
+        assert!((b.tilt[0] - a).abs() < 1e-5 && b.tilt[1].abs() < 1e-6, "{:?}", b.tilt);
+        assert!(b.forward().z < -0.19, "nose down: {}", b.forward());
+        assert!((b.to_world(Vec3::Z) - b.ground_normal).length() < 1e-5, "its up is the normal");
+        b.right(RIGHT_TO_GROUND, [1.0; 3]);
+        assert!((b.tilt[0] - a).abs() < 1e-5, "and it stays there");
+
+        // Turned to face +x, the same slope falls away to its left: its left side goes down, the
+        // top to the left, and each step takes its share of what is left.
+        let mut b = Body::new(Vec3::ZERO, -std::f32::consts::FRAC_PI_2);
+        b.ground_normal = Vec3::new(0.0, a.sin(), a.cos());
+        for _ in 0..40 {
+            b.right(RIGHT_TO_GROUND, [0.15; 3]);
+        }
+        assert!(b.tilt[0].abs() < 1e-3 && (b.tilt[1] - a).abs() < 1e-3, "{:?}", b.tilt);
+        assert!((b.to_world(Vec3::Z) - b.ground_normal).length() < 1e-3);
+        let v = Vec3::new(0.3, -1.2, 2.0);
+        assert!((b.to_body(b.to_world(v)) - v).length() < 1e-5);
+
+        // Bits 0xC0 stand it back up whatever is under it; 0x400000 leaves it as it is.
+        let tilted = b.tilt;
+        b.right(RIGHT_TO_GROUND | RIGHT_SKIP, [1.0; 3]);
+        assert_eq!(b.tilt, tilted);
+        b.right(RIGHT_UP, [1.0; 3]);
+        assert!(b.tilt[0].abs() < 1e-5 && b.tilt[1].abs() < 1e-5, "{:?}", b.tilt);
     }
 }

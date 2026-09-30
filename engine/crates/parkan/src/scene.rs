@@ -596,9 +596,9 @@ fn unit_instances(
     match unit {
         None => {
             let hero = &play.hero;
-            let (position, yaw) = hero.walker.drawn(hero.time_ms);
+            let (position, _) = hero.walker.drawn(hero.time_ms);
             let placed = glam::Mat4::from_translation(position)
-                * glam::Mat4::from_quat(glam::Quat::from_rotation_z(yaw));
+                * glam::Mat4::from_quat(hero.walker.drawn_turn(hero.time_ms));
             let mount = hero.mount();
             for &(instance, part, node, variant) in &view.outside {
                 let index = match part {
@@ -913,7 +913,7 @@ pub fn place_own_view(
     play: &Play,
     outside: bool,
 ) {
-    use glam::{Mat4, Quat};
+    use glam::Mat4;
     // Aboard a bot the hero is out of the world, and the bot's cockpit is drawn in place of
     // its hull (docs/39, "Boarding"). In an HQ's command view the hero stays aboard, and the
     // HQ, driven by its AI, is drawn whole.
@@ -923,8 +923,8 @@ pub fn place_own_view(
     let outside = outside && !away;
     let hero = &play.hero;
     let t = hero.time_ms;
-    let (position, yaw) = hero.walker.drawn(t);
-    let unit = Mat4::from_translation(position) * Mat4::from_quat(Quat::from_rotation_z(yaw));
+    let (position, _) = hero.walker.drawn(t);
+    let unit = Mat4::from_translation(position) * Mat4::from_quat(hero.walker.drawn_turn(t));
     let mount = hero.mount();
     for &(instance, part, node) in &view.nodes {
         let pose = match part {

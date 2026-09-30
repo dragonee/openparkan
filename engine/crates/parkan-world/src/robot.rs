@@ -8,7 +8,7 @@
 use std::rc::Rc;
 
 use anyhow::{Context, Result};
-use glam::{Quat, Vec3};
+use glam::Vec3;
 use parkan_formats::control::{
     self, CAMERA_TYPE, CHANNEL_UNDRIVEN, Channel, Component, Controller, EFFICIENCY_TYPE, ENGINE_TYPE,
     GUN_TYPE, MAST_TYPE, RADAR_PERIOD, RADAR_RANGE, RADAR_TYPE, SIMPLE_TYPE, TRIPLE_TOP_SPEED, TURRET_TYPE,
@@ -1050,7 +1050,7 @@ impl Robot {
     pub fn point(&self, index: usize) -> Option<(Vec3, Vec3)> {
         let p = self.points.get(index)?;
         let (position, _) = self.walker.drawn(self.time_ms);
-        let heading = Quat::from_rotation_z(self.walker.drawn(self.time_ms).1);
+        let heading = self.walker.drawn_turn(self.time_ms);
         let pose = self.turret_node(&self.mount(), usize::try_from(p.nodes().0).ok()?);
         let f = |v: [f64; 3]| Vec3::new(v[0] as f32, v[1] as f32, v[2] as f32);
         let at = f(pose.apply(p.position.map(f64::from)));
@@ -1113,8 +1113,8 @@ impl Robot {
     pub fn fitted_point(&self, gun: usize, i: usize) -> Option<(Vec3, Vec3)> {
         let Some(Some(fitted)) = self.gun_parts.get(gun) else { return None };
         let point = fitted.points.get(i)?;
-        let (position, yaw) = self.walker.drawn(self.time_ms);
-        let heading = Quat::from_rotation_z(yaw);
+        let (position, _) = self.walker.drawn(self.time_ms);
+        let heading = self.walker.drawn_turn(self.time_ms);
         let pose = self.part_pose(fitted.part, usize::try_from(point.nodes().0).unwrap_or(0));
         let f = |v: [f64; 3]| Vec3::new(v[0] as f32, v[1] as f32, v[2] as f32);
         let at = f(pose.apply(point.position.map(f64::from)));
@@ -1196,8 +1196,8 @@ impl Robot {
 
     /// A chassis node in the world: where it is and its second axis.
     pub fn chassis_point(&self, node: usize) -> (Vec3, Vec3) {
-        let (position, yaw) = self.walker.drawn(self.time_ms);
-        let heading = Quat::from_rotation_z(yaw);
+        let (position, _) = self.walker.drawn(self.time_ms);
+        let heading = self.walker.drawn_turn(self.time_ms);
         let pose = self.chassis_pose(node);
         let f = |v: [f64; 3]| Vec3::new(v[0] as f32, v[1] as f32, v[2] as f32);
         let at = f(pose.apply([0.0; 3]));
@@ -1230,11 +1230,14 @@ impl Robot {
         }
     }
 
-    /// Where the robot is drawn now: its position and heading as a placement.
+    /// Where the robot is drawn now: its position and its hull's turn as a placement.
     pub fn placement(&self) -> Pose {
-        let (position, yaw) = self.walker.drawn(self.time_ms);
-        let half = f64::from(yaw) / 2.0;
-        Pose { translation: position.to_array().map(f64::from), rotation: [half.cos(), 0.0, 0.0, half.sin()] }
+        let (position, _) = self.walker.drawn(self.time_ms);
+        let q = self.walker.drawn_turn(self.time_ms);
+        Pose {
+            translation: position.to_array().map(f64::from),
+            rotation: [q.w, q.x, q.y, q.z].map(f64::from),
+        }
     }
 
     /// A turret node's pose in the unit's frame.
@@ -1253,7 +1256,7 @@ impl Robot {
     pub fn eye(&self) -> Option<Eye> {
         let (eye_point, look_point) = self.camera.as_ref()?;
         let (position, _) = self.walker.drawn(self.time_ms);
-        let heading = Quat::from_rotation_z(self.walker.drawn(self.time_ms).1);
+        let heading = self.walker.drawn_turn(self.time_ms);
         let mount = self.mount();
         let node = |p: &ControlPoint| usize::try_from(p.nodes().0).unwrap_or(0);
         let at = self.turret_node(&mount, node(eye_point));

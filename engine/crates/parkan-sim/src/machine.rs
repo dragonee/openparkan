@@ -14,7 +14,7 @@ use glam::{Quat, Vec3};
 use parkan_formats::control::{
     CONTACT_PLACE, CONTACT_PLACE_BY_POSE, CONTACT_PLANTED, CONTACT_SUPPORT, Controller, FIRST_REQUEST,
     PLACE_AXIS_WITHIN, PLANTED_WITHIN, STATE_FIXED, STATE_GROUND_CONTACTS, STATE_JITTER, State,
-    UNLIMITED_USES,
+    TRIPLE_SETTLE, UNLIMITED_USES,
 };
 use parkan_formats::cpt::ControlPoint;
 use parkan_formats::mesh::Mesh;
@@ -225,8 +225,9 @@ pub struct Walker {
     pub limits: Limits,
     pub body: Body,
     pub machine: Machine,
-    /// The body's position and yaw when the current step began, for drawing.
+    /// The body's position and yaw when the current step began, for drawing, and its tilt.
     pub from: (Vec3, f32),
+    pub from_tilt: [f32; 2],
     /// The unit's heading when the current step began.
     pub from_heading: f32,
     /// The body sphere's centre in the model's frame, its radius as the ground contact
@@ -353,6 +354,7 @@ impl Walker {
                 seed: 0x2545_F491,
             },
             from: (position, yaw),
+            from_tilt: [0.0; 2],
             from_heading: yaw,
             centre: Vec3::ZERO,
             radius,
@@ -447,6 +449,7 @@ impl Walker {
         self.machine.q_prev = self.machine.q;
         self.machine.q = 1.0;
         self.from = (self.body.position, self.body.yaw);
+        self.from_tilt = self.body.tilt;
         self.from_heading = self.body.heading();
         self.machine.step_start_ms = self.machine.clock_ms;
 
@@ -502,6 +505,7 @@ impl Walker {
         self.body.strafe_change = change;
         self.body.yaw = wrap_angle(self.body.yaw + turned[2] + change);
         self.body.spin = turned.map(|t| t / step);
+        self.body.right(state.mode, self.controller.triples[TRIPLE_SETTLE]);
         match self.drive {
             Some(d) => self.body.velocity = d.in_frame(self.body.yaw, self.limits.top_speed),
             None => {
@@ -784,6 +788,15 @@ impl Walker {
         let position = self.from.0.lerp(self.body.position, s) - Vec3::Z * self.dropped;
         let yaw = self.from.1 + wrap_angle(self.body.yaw - self.from.1) * s;
         (position, yaw)
+    }
+
+    /// The hull's turn drawn at `t_ms`: its drawn yaw, and its pitch and roll blended from the
+    /// step's start as the position is (docs/24, "The hull leans and rights itself").
+    pub fn drawn_turn(&self, t_ms: f64) -> glam::Quat {
+        let s = self.phase(t_ms);
+        let yaw = self.from.1 + wrap_angle(self.body.yaw - self.from.1) * s;
+        let tilt = [0, 1].map(|i| self.from_tilt[i] + (self.body.tilt[i] - self.from_tilt[i]) * s);
+        glam::Quat::from_rotation_z(yaw) * motion::tilted(tilt)
     }
 
     /// The unit's heading drawn at `t_ms`: the drawn hull's yaw plus the turret's strafe

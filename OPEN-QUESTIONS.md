@@ -78,28 +78,18 @@ remainder a closed line names stays here as a line of its own.
 [14-controls](docs/14-controls.md)
 
 - [ ] [M14] The walker's local path and its obstacle contours: how it goes round a tree's or a stone's hole, whether it widens it by the unit's size, how a walker in one walks out, and what it does with a goal in one; the sub-areals' shapes and whether the search measures one from its centre; whether every scenery object reaches the areal map, and the box of a mesh of several parts; how it drops the points a unit has passed (`MWalker::ClearMoverReachedPoint`); how a unit's place comes onto a building's map object and which vertex the search starts from; who calls `MHallWay` slot 11; a hall-way vertex's size gate (the unit's `+0x960`, the record's `+0x28`); the link flags `0x10000` and `0x20000`; how a walker goes to the point it finds off a non-walkable areal, and what it does when its search fails; and how a walk to a door gets past the building's own walls, which cut no areal (the engine: a door more than 20 over the ground under it is passed over, and a straight line into a wall goes round the building's ground contour) ([24-motion](docs/24-motion.md#not-established)).
-- [ ] **C02 M03's Small Bunker (`l_bunk1`) cannot be captured by anything on wheels, and since
-  the contact bound changed not by a walker either.** Raised 2026-09-20. A flyer takes it in 18 s;
-  a wheeled bot holds outside at the top of the ramp to its door in either configuration, and a
-  walker took it in 20 s with the up-pass bound at r and stalls 34 m short of the pod with it at
-  r2. The walker's stall is **not** the same mechanism — no lift over 0.5 and no segment stop at
-  the spot, so it is the AI's own legs rather than the contact — and the wheeled one is: there the
-  push-out keeps the ramp face the bot stands on, because the filter drops only the floors flagged
-  2 and docs/07 measures **1802 faces** of the first variant's level-0 slots pointing within 10°
-  of up and carrying no flag at all. Two questions in one building, and both want the whole
-  inside-a-building pass looked at rather than another bound guessed
-  ([24-motion](docs/24-motion.md#collision-between-objects--read),
-  [07-objects](docs/07-objects.md#the-flags-word)). **Seen again** 2026-09-30 on C02 M04's plateau
-  Light Tower (`mtow02`), reported from play: the enemy's small wheeled warrior (`24swele1`) sent to
-  take it back circles its entrance for minutes and never reaches the pod 21 m below, and a player's
-  `24swele1` ordered in does the same while an SSW-X walker takes it in 24 s. Driven down the way in
-  by hand, the wheels dip under a floor overhanging the ramp (faces 53 and 54, 0.5–1.0 m above
-  them), the up pass takes it within r₂ (2.59), the lift puts the machine on it, and it wedges at
-  z 146 under a face at 148 for good. *Read* since: the contacts' up pass does reach r₂ and runs
-  before the down pass ([24-motion](docs/24-motion.md#a-contacts-up-pass-reaches-the-node-spheres-radius--read-and-measured)),
-  so the engine follows the read at this step. Candidates for what differs: the hull's pitch,
-  which the engine leaves out (the M3 stand-in) and which nose-down would put the front wheels
-  lower under that floor; and the inside-a-building pass above.
+- [ ] **C02 M03's Small Bunker (`l_bunk1`) stops a small walker short of its pod.** Raised
+  2026-09-20; its wheeled half closed 2026-09-30 (the hull's righting, in
+  [COMPLETED-QUESTIONS](COMPLETED-QUESTIONS.md#motion-ground-and-controls)). With the up-pass bound
+  at r a walker took it in 20 s; at r₂, now read, `21swlk1` stalls 37.8 m short of the pod and
+  `22swlk1` never comes within 90 m, while the SSW-X walker takes it in 25 s (*measured*
+  2026-09-30, each sent from 60 m north with the bunker's guns off). It is **not** the contact's
+  mechanism — no lift over 0.5 and no segment stop at the spot, so it is the AI's own legs — and
+  walkers right toward the world's up, so the hull's tilt does not reach it. It wants the inside of
+  a building looked at as a whole: the push-out keeps any face under a mover that is not flagged 2,
+  and docs/07 measures **1802 faces** of the first variant's level-0 slots pointing within 10° of up
+  and carrying no flag at all ([24-motion](docs/24-motion.md#collision-between-objects--read),
+  [07-objects](docs/07-objects.md#the-flags-word)).
 - [ ] **What keeps a walker upright on a building's floor under a low ceiling.** Raised
   2026-09-30 from checking C02 M03 against a recording. C02 M03's Small Warehouse is 6.3–7.5 m
   high inside, and the medium walker `22mwlk1` placed on its floor has a 5.87 m agent sphere

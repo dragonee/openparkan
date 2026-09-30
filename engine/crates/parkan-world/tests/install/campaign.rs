@@ -1023,6 +1023,77 @@ fn c02_m04s_light_tower_rebuilds_its_turret_and_then_its_guns_one_by_one() {
     assert_eq!(broken(&play), 0, "and its guns fire again");
 }
 
+/// A wheeled chassis rights its hull along the ground (docs/24, "The hull leans and rights
+/// itself"): its states carry bits `0x30`, which stand the hull toward the averaged ground
+/// normal by triple 5's share each step, and its contact points are placed through that pitch
+/// and roll. Level, as the engine held every hull before, a small wheeled warrior sent at C02
+/// M04's plateau Light Tower dipped its wheels under a floor overhanging the way down, was
+/// lifted onto it and circled the entrance for good (reported from play, 2026-09-30); nose
+/// down, it drives down the ramp to the pod 21 m below and takes the tower.
+#[test]
+#[ignore = "needs the game install"]
+fn c02_m04s_small_wheeled_warrior_noses_down_the_plateau_towers_ramp_and_takes_it() {
+    use parkan_formats::mission;
+    use parkan_sim::orders::{CAPTURE, Order, Target};
+    use parkan_world::factory::Project;
+    use parkan_world::play::Play;
+
+    let game = gamedir::find(None).expect("a Parkan install: set PARKAN_DIR");
+    let dir = gamedir::resolve(&game, gamedir::C02_MISSION_04).unwrap();
+    let m = mission::parse(&std::fs::read(dir.join("data.tma")).unwrap(), "Mission.04").unwrap();
+    let mut play = campaign_play(gamedir::C02_MISSION_04);
+    let tower = object_target(&play, &m, "mtow02.dat");
+    let id = play.units[tower].logical_id;
+    let centre = play.battle.combat.targets[tower].position;
+    let pod = play.capture_places().into_iter().find(|p| p.id == id).and_then(|p| p.pod).expect("its pod");
+    let tick = |play: &mut Play| {
+        play.update_input();
+        play.tick(1000.0 / 60.0, [0.0; 2]);
+    };
+
+    // The enemy's own small wheeled warrior, the player's here, 60 m north of the tower, whose
+    // guns are taken off so that it lives to reach the pod.
+    let path = "UNITS\\UNITS\\BATTLE\\24swele1.dat".to_owned();
+    let data = gamedir::resolve(&game, &path).and_then(|p| std::fs::read(p).ok()).expect("24swele1.dat");
+    let project = Project {
+        path,
+        name: String::new(),
+        type_word: u32::from_le_bytes(data[4..8].try_into().unwrap()),
+        chassis_size: 2,
+        ore: 0.0,
+        power: 0.0,
+        lines: Vec::new(),
+        sphere: None,
+    };
+    let spot = centre + glam::Vec3::new(0.0, 60.0, 0.0);
+    let z = play.ground.below(spot.x, spot.y, 1.0e4).expect("ground north of the tower").point.z;
+    let t = play.spawn(&project, play.player_clan, spot.with_z(z + 1.0), 0.0).expect("the warrior");
+    play.emplacements.retain(|(e, _)| *e != tower);
+    for _ in 0..60 {
+        tick(&mut play);
+    }
+    let order = Order { code: CAPTURE, parameter: 0, target: Target::LogicId(id) };
+    play.robots.iter_mut().find(|(rt, _)| *rt == t).unwrap().1.behaviour.order(&order);
+
+    let (mut nosed, mut taken) = (0.0_f32, None);
+    for s in 0..(120 * 60) {
+        tick(&mut play);
+        let body = &play.robots.iter().find(|(rt, _)| *rt == t).unwrap().1.walker.body;
+        if body.position.z < pod.z + 15.0 {
+            nosed = nosed.max(body.tilt[0]);
+        }
+        if play.units[tower].clan == Some(play.player_clan) {
+            taken = Some(f64::from(s) / 60.0);
+            break;
+        }
+    }
+    let at = play.robots.iter().find(|(rt, _)| *rt == t).unwrap().1.walker.body.position;
+    let taken = taken
+        .unwrap_or_else(|| panic!("it never took the tower: at {at}, {:.1} from the pod", at.distance(pod)));
+    assert!(nosed > 0.1, "nose down on the way down: {nosed:.3} rad");
+    eprintln!("the tower taken {taken:.1} s after the order");
+}
+
 /// C02 Mission 03, *The Lost Key*: the enemy clan's planner, `c2m3e`'s, first takt. Its
 /// `Problems0` counts its free minds and its factories and raises `PBM_ROBOT_NEEDED` for a
 /// `ROBOT_BATTLEUNIT` by `SELECT_BEST_COMBAT`; the `_Start` pass finds the clan's
@@ -1160,6 +1231,11 @@ fn c02_m03s_enemy_sends_a_warbot_to_take_its_generator_back() {
         let at = step as f32 / 30.0;
         if taken.is_none() && play.units[generator].clan == Some(play.player_clan) {
             taken = Some(at);
+            // The hero steps off, as a player does: a pod stays with the one standing on it
+            // while it stays in the zone (docs/27, "Capture"), so an enemy on it beside the
+            // hero would take nothing back.
+            let c = play.battle.combat.targets[generator].position;
+            assert!(play.stand_at(c.x + 60.0, c.y, 0.0), "ground beside the generator");
         }
         if taken.is_some() && ordered.is_none() {
             ordered = play
