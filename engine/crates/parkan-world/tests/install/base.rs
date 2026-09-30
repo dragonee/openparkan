@@ -1614,3 +1614,60 @@ fn mission_04s_research_centre_opens_its_screen_and_researches_the_large_battle_
     let offered = large_flyer_turrets(&mut play);
     assert!(offered.iter().any(|p| p.eq_ignore_ascii_case("e_tur_bb_01")), "{offered:?}");
 }
+
+/// C03 M01's Energy row, as "Let's Play - Parkan: Iron Strategy, Part 5" (PfAg6zSe-yM) reads
+/// it with the player holding one of the map's two generators: 52% at 4:46, 54% at 7:15, 47%
+/// at 6:05, never at a steady half. The row divides the player's distributor totals by the
+/// map's, each clan's the `Transfer_Power_Out × dt` of its own last 192 to 255 ms step (docs/23,
+/// "What the HUD shows"), so the share wanders as the clans' steps fall.
+#[test]
+#[ignore = "needs the game install"]
+fn c03_m01s_energy_row_wanders_about_half_as_each_clans_step_falls() {
+    use parkan_formats::mission::KIND_BUILDING;
+
+    let mut play = campaign_play(gamedir::C03_MISSION_01);
+    // The row, not the planning, is under test.
+    play.progression = None;
+    let player = play.player_clan;
+    // The neutral clan's Small Bunker, as the recording's player takes it at 4:45.
+    let bunker = (0..play.units.len())
+        .find(|&t| {
+            play.units[t].kind == KIND_BUILDING
+                && play.units[t].type_word == 0x8001_0000
+                && play.units[t].clan == Some(2)
+        })
+        .expect("the neutral clan's Small Bunker");
+    play.units[bunker].clan = Some(player);
+    play_for(&mut play, 2.0, |_| {});
+    let mut energies = Vec::new();
+    play_for(&mut play, 30.0, |p| energies.push(p.resource_rows(player)[1]));
+    let (low, high) = (energies.iter().min().unwrap(), energies.iter().max().unwrap());
+    let mean = energies.iter().sum::<i32>() as f32 / energies.len() as f32;
+    assert!(*high > 51 && *low < 49, "the recording's row passes half both ways: {low} to {high}");
+    assert!((*low >= 42) && (*high <= 58), "a step of 192 to 255 ms against another: {low} to {high}");
+    assert!((48.0..=52.0).contains(&mean), "about the player's half of the map's power: {mean}");
+}
+
+/// C03 M01's enemy checks its spare power before it plans to take a generator: `c3m1e`'s
+/// `Problems0` raises `PBM_BUILDING_CAPTURE` on the player's generator only while function 3,
+/// the clan's power available less demanded at its distributor's last step (docs/15, "What the
+/// functions do"), stands at 0.5 or below. Holding its own generator it stands above that from
+/// its first step on, so the raise its first takt makes is not reloaded and runs out.
+#[test]
+#[ignore = "needs the game install"]
+fn c03_m01s_enemy_holding_its_generator_does_not_keep_planning_to_take_the_players() {
+    let mut play = campaign_play(gamedir::C03_MISSION_01);
+    let enemy = 1;
+    let capture = |play: &parkan_world::play::Play| {
+        let p = play.progression.as_ref().unwrap();
+        let clan = p.others.iter().find(|o| o.clan == enemy).expect("the enemy's script");
+        clan.planner.standing().find(|(_, q)| q.name == "PBM_BUILDING_CAPTURE").map(|(_, q)| q.life)
+    };
+    // Eight of its takts, 7 to 8 s apart.
+    play_for(&mut play, 60.0, |_| {});
+    let life = capture(&play);
+    assert!(
+        life.is_none_or(|l| l <= 25),
+        "a raise reloaded at every takt would stand at 25 + 24 a takt: {life:?}"
+    );
+}

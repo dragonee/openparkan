@@ -114,7 +114,11 @@ pub struct Economy {
     pub sites: Vec<Site>,
     /// Each clan's next distribution step and its last, ms.
     pub steps: HashMap<i64, (f64, f64)>,
-    /// Each clan's power out a second, and its batteries' lack a second, at its last step.
+    /// Each clan's distributor totals at its last step: the power its generators gave over
+    /// that step's own `dt`, `Transfer_Power_Out × dt`, and what its batteries lacked. Taken
+    /// as they stand, not over `dt`, by the HUD's Energy row and function 3 (docs/23, "What the
+    /// HUD shows"; docs/15, "What the functions do"), so a clan's share of the map's power moves
+    /// as the clans' 192 to 255 ms steps fall.
     pub power: HashMap<i64, (f32, f32)>,
     /// Each transport's round, by target.
     pub rounds: HashMap<usize, crate::transport::Round>,
@@ -541,9 +545,7 @@ impl Play {
                 self.economy.sites[i].battery.top_up(power_share);
             }
         }
-        if dt > 0.0 {
-            self.economy.power.insert(clan, (available / dt, lack / dt));
-        }
+        self.economy.power.insert(clan, (available, lack));
         // Ore.
         let mut offers = Vec::new();
         let mut wants = Vec::new();
@@ -574,7 +576,8 @@ impl Play {
 
     /// The Ore and Energy rows' targets for clan `clan`, whole percentages
     /// (`iron3d.dll:0x1006d8f0`): the ore its mines and storages hold over 4,500, and its power
-    /// out less its batteries' lack over every clan's power out.
+    /// out less its batteries' lack over every clan's power out, each clan's totals those of
+    /// its own last step.
     pub fn resource_rows(&self, clan: i64) -> [i32; 2] {
         let ore: f32 = self
             .economy

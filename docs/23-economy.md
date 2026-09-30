@@ -853,6 +853,18 @@ each clamped to 0..1 and shown as a whole percentage.
   from the file: the player starts with no mine there — the two mines belong
   to `Enm1` and a neutral clan, both empty — so it is a mine taken or built
   and left to fill to 500.
+- **The totals are each clan's last step's, as they stand** (*derived*, and
+  *seen*). The block at `+0x30` is what the distribution step wrote, and the
+  step totals `Transfer_Power_Out × dt` over its own `dt`, 192 to 255 ms
+  ([How often](#how-often-and-where-it-settles--read-with-a-derived-settle-point)),
+  so two clans with equal generators do not read a steady half: a step of
+  192 ms against one of 255 gives 43%, the reverse 57%. *Seen* on *The Silver
+  Eye* (`CAMPAIGN.03/Mission.01`), in "Let's Play - Parkan: Iron Strategy,
+  Part 5" (PfAg6zSe-yM): with the player holding one of the map's two
+  `gener01.dat` and the enemy the other, the row reads 52% at 4:46, 47% at
+  6:05, 51% at 6:25, 54% at 7:15 and 53% at 7:25. Function 3 answers the same
+  totals for its own clan, available less demanded
+  ([15-behaviour.md](15-behaviour.md#what-the-functions-do)).
 - **How the HUD reaches the distributor**, every link read. `iron3d.dll`
   keeps a 0x68-byte record per clan from `world + 0x724`, and its `+0x50` is
   the object `ai.dll`'s `CreateSuperAI` returns (stored at

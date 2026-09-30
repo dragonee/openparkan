@@ -4478,12 +4478,15 @@ impl Play {
             .iter()
             .map(|&c| (self.free_minds(c), self.reserved.get(&c).copied().unwrap_or(0)))
             .collect();
+        let spare: Vec<f32> =
+            clans.iter().map(|c| self.economy.power.get(c).map_or(0.0, |&(out, lack)| out - lack)).collect();
         let Some(p) = self.progression.as_mut() else { return };
         for (id, contact) in contacts {
             p.progress.refresh(id, contact);
         }
-        for (clan, (free, reserved)) in clans.into_iter().zip(free) {
+        for ((clan, (free, reserved)), spare) in clans.into_iter().zip(free).zip(spare) {
             p.set_free_minds(clan, free, reserved);
+            p.set_power(clan, spare);
         }
     }
 

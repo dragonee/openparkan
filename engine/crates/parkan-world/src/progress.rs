@@ -177,6 +177,9 @@ pub struct Progression {
     pub reserved: Vec<usize>,
     /// The clans whose takt swept their reservations since `Play` last looked.
     pub swept: Vec<i64>,
+    /// Each clan's power available less its demand at its distributor's last step, which
+    /// function 3 answers, as `Play` last counted it (docs/15, "What the functions do").
+    pub power: Vec<f32>,
     pub messages: Messages,
     pub sounds: Sounds,
     pub strings: BTreeMap<u32, String>,
@@ -233,6 +236,8 @@ struct Answers<'a> {
     minds: &'a mut [usize],
     /// The clan's free minds, function 49's answer.
     free_minds: usize,
+    /// The clan's power available less demanded, function 3's answer.
+    power: f32,
     /// The `dMax*` limits function 11 tests, as the script's variables stand.
     limits: Vec<(u32, usize)>,
 }
@@ -443,6 +448,11 @@ impl Host for Answers<'_> {
                 let held = self.progress.count_type(self.clan, type_word);
                 u32::from(self.limits.iter().any(|&(t, max)| t == type_word && held >= max))
             }
+            // The clan's power available less demanded, the distributor's totals at its last
+            // step as the HUD reads them (`Behavior.dll:0x10019e80`, docs/23). A clan's first
+            // step, as the level starts, is over no time and gives nothing, so its first takt
+            // reads 0 or less.
+            3 => self.power.to_bits(),
             12 => self.planner.current().map_or(0.0, |p| p.weight).to_bits(),
             13 | 14 => self.pick(args),
             // An order packet for the unit of any clan with that logical id (`0x10008054`).
@@ -734,8 +744,7 @@ impl Host for Answers<'_> {
             // STAND-IN: docs/15-behaviour.md#what-the-functions-do -- the engine answers the
             // functions the campaign's scripts need for their messages, objectives, orders,
             // targets and planning; any other call does nothing and answers 0. Left
-            // unanswered: 3, 16 and 17, the clan's power and resource totals a SuperAI asks
-            // for; 18 and 40, a building site and a mineral place, which want the place list
+            // unanswered: 16 and 17, the clan's resource totals a SuperAI asks for; 18 and 40, a building site and a mineral place, which want the place list
             // function 43 loads; 41, 56 and 65, flags of that same object; and the fourteen
             // no shipped script calls.
             other => {
@@ -897,6 +906,7 @@ impl Progression {
             relations: mission::relation_words(&mission.clans),
             reserved: vec![0; mission.clans.len()],
             swept: Vec::new(),
+            power: vec![0.0; mission.clans.len()],
             free_minds,
             messages,
             sounds: Sounds::open(game, mission_dir)?,
@@ -943,6 +953,7 @@ impl Progression {
             relations,
             unanswered,
             free_minds,
+            power,
             console_lines,
             console,
             next_ids,
@@ -978,6 +989,7 @@ impl Progression {
                 console,
                 next_ids,
                 free_minds: usize::try_from(clan).ok().and_then(|c| free_minds.get(c)).copied().unwrap_or(0),
+                power: usize::try_from(clan).ok().and_then(|c| power.get(c)).copied().unwrap_or(0.0),
                 minds: free_minds.as_mut_slice(),
                 limits,
             };
@@ -1016,6 +1028,14 @@ impl Progression {
         }
         if let Some(slot) = self.reserved.get_mut(c) {
             *slot = reserved;
+        }
+    }
+
+    /// Clan `clan`'s power available less demanded at its distributor's last step, which
+    /// function 3 answers, as `Play` last counted it.
+    pub fn set_power(&mut self, clan: i64, spare: f32) {
+        if let Some(slot) = usize::try_from(clan).ok().and_then(|c| self.power.get_mut(c)) {
+            *slot = spare;
         }
     }
 
