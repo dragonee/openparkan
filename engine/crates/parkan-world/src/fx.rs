@@ -18,6 +18,20 @@ use crate::textures::{Animation, Phase, TextureStore};
 /// The surfaces an `.exp` names a slot for: slot surface + 1 plays on surface 0..10.
 pub const SURFACES: u8 = 11;
 
+/// The pace an ambient effect's streams run at against the game's clock: the smoke and fire
+/// a building's, a tree's or a stone's load group hangs on it, and a lode's plume.
+///
+/// STAND-IN: docs/11-effects.md#bolts-streams-and-fades--read-and-measured -- a stream's clock
+/// is read as the seconds since its instance started (`Effect.dll:0x1000846c`), it emits one
+/// particle every interval and catches up (`0x10011bf5`–`0x1001201c`), and a particle ages
+/// one ring slot an emission (`0x1001209e`), all as the engine plays them. But "Let's Play -
+/// Parkan: Iron Strategy, Part 5" (PfAg6zSe-yM, 4:19.4–4:24.4) shows C03 M01's volcano smoke
+/// rising at about 0.63 of that speed against its own puffs' width, and its flame flickering
+/// at 5.3 Hz where the 0.08 s interval beats at 12.5 Hz: about half the pace on both. What
+/// slows it is not read. The construction sphere's streams, whose timing is measured right
+/// against The Field Base's recording, and every gun's and round's keep the read pace.
+pub const AMBIENT_STREAM_PACE: f32 = 0.5;
+
 /// What an instance hangs on.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Owner {
@@ -137,6 +151,23 @@ impl Fx {
         self.next_id += 1;
         self.instances.push((owner, instance));
         true
+    }
+
+    /// [`Fx::start`] for an ambient effect, its streams at [`AMBIENT_STREAM_PACE`].
+    pub fn start_ambient(
+        &mut self,
+        owner: Owner,
+        name: &str,
+        frame: Frame,
+        size: f32,
+        now_ms: f64,
+        mode: Option<u32>,
+    ) -> bool {
+        let started = self.start(owner, name, frame, size, now_ms, mode);
+        if started && let Some((_, instance)) = self.instances.last_mut() {
+            instance.stream_pace = AMBIENT_STREAM_PACE;
+        }
+        started
     }
 
     /// Restart every instance `owner` holds at `now_ms`, in `mode` or its own (action 10).

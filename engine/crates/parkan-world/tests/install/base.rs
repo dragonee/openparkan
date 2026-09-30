@@ -1723,3 +1723,40 @@ fn c03_m01s_burning_plant_and_volcanoes_play_their_trees_load_groups() {
     play_for(&mut play, 0.1, |_| {});
     assert!(named(&mut play, t).is_empty(), "its effects outlive it: {:?}", named(&mut play, t));
 }
+
+/// The smoke and fire a load group hangs on a building, a tree or a stone, and a lode's plume,
+/// run their streams at half the pace their blocks give: "Let's Play - Parkan: Iron Strategy,
+/// Part 5" (PfAg6zSe-yM, 4:19.4-4:24.4) shows C03 M01's volcano smoke rising at 0.63 of the
+/// engine's speed against its own puffs' width and flickering at 5.3 Hz, where its 0.08 s
+/// interval beats at 12.5 (docs/11, "Bolts, streams and fades"). So a volcano's particle
+/// lives 3.2 s, not the 1.6 its ring of 20 gives; the construction sphere's streams, whose
+/// timing is measured right, keep theirs.
+#[test]
+#[ignore = "needs the game install"]
+fn c03_m01s_volcano_smoke_rises_at_the_recordings_pace() {
+    use parkan_formats::mission::KIND_VEGETATION;
+    use parkan_world::fx::{AMBIENT_STREAM_PACE, Owner};
+
+    let mut play = campaign_play(gamedir::C03_MISSION_01);
+    let volcano = (0..play.units.len())
+        .find(|&t| {
+            play.units[t].kind == KIND_VEGETATION
+                && play.commander.paths[t].to_ascii_lowercase().ends_with("s_tree_33")
+        })
+        .expect("a volcano");
+    assert_eq!(AMBIENT_STREAM_PACE, 0.5);
+    let paces: Vec<f32> = play.fx.owned(Owner::Building(volcano, 1)).map(|i| i.stream_pace).collect();
+    assert_eq!(paces, [AMBIENT_STREAM_PACE], "the volcano's tree_light_33a");
+    // Its fire_smoke stream, a ring of 20 at 0.08 s, puffs every 0.16 s: 2 s in it has let out
+    // 13, where at the read pace its ring was full at 1.6 s. smoke_y_add's ring of 8 is full.
+    play_for(&mut play, 2.0, |_| {});
+    let now = play.hero.time_ms;
+    let i = play.fx.owned(Owner::Building(volcano, 1)).next().unwrap();
+    let mut sprites = Vec::new();
+    i.sprites(now, true, &mut sprites);
+    assert!(
+        (20..=21).contains(&sprites.len()),
+        "fire_smoke's 12 or 13 and smoke_y_add's 8: {}",
+        sprites.len()
+    );
+}

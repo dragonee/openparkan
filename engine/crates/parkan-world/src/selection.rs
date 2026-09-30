@@ -372,7 +372,7 @@ impl Play {
             } else if !covered && !shown {
                 let z = self.ground.below(lode.x, lode.y, 1.0e5).map_or(lode.z, |h| h.point.z);
                 let frame = parkan_sim::effects::Frame::along(Vec3::new(lode.x, lode.y, z), Vec3::X, 1.0);
-                self.fx.start(owner, LODE_PLUME, frame, 1.0, now_ms, None);
+                self.fx.start_ambient(owner, LODE_PLUME, frame, 1.0, now_ms, None);
             }
         }
     }

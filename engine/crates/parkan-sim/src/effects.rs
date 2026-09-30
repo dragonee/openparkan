@@ -245,8 +245,11 @@ pub struct Instance {
     /// The one-shots started, which may still be playing.
     sounding: Vec<usize>,
     streams: Vec<Stream>,
-    /// Seconds since the start, and where the effect was, at the last update.
+    /// Seconds on the streams' clock, and where the effect was, at the last update.
     updated: Option<(f32, Vec3)>,
+    /// What the streams' clock runs at against the instance's: 1 plays them as their blocks
+    /// read. Their emission, their particles' life and so their rise all scale with it.
+    pub stream_pace: f32,
 }
 
 /// A lerp whose parameter is given per axis, which is how a particle's channels move
@@ -412,6 +415,7 @@ impl Instance {
             sounding: Vec::new(),
             streams,
             updated: None,
+            stream_pace: 1.0,
         }
     }
 
@@ -494,7 +498,7 @@ impl Instance {
             self.jitter = self.rng.spread(spread);
         }
         let t = self.t(now_ms);
-        let seconds = self.seconds(now_ms);
+        let seconds = self.seconds(now_ms) * self.stream_pace;
         let origin = self.frame.origin;
         let (then, from) = self.updated.unwrap_or((seconds, origin));
         for stream in &mut self.streams {
@@ -636,7 +640,7 @@ impl Instance {
                 3 | 4 | 9 => self.sprite(e, p, age_ms, seconds, out),
                 5 => self.bolt(e, p, age_ms, seconds, out),
                 7 | 10 => self.burst(e, i as u32, p, age_ms, out),
-                8 => self.stream(i, e, seconds, out),
+                8 => self.stream(i, e, seconds * self.stream_pace, out),
                 _ => {}
             }
             // A beacon's own emitters carry no bit 8, so its glow is depth-tested like any

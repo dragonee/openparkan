@@ -1091,7 +1091,7 @@ impl Play {
             if let Some(part) = self.battle.combat.targets.get(t).and_then(|x| x.parts.get(effects.part)) {
                 for e in &effects.effects {
                     if let Some(frame) = effects.frame(part, e.on) {
-                        self.fx.start(Owner::Building(t, e.id), &e.name, frame, 1.0, now, None);
+                        self.fx.start_ambient(Owner::Building(t, e.id), &e.name, frame, 1.0, now, None);
                     }
                 }
                 for &(id, mode) in &effects.starts {

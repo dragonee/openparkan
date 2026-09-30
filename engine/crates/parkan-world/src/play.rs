@@ -1119,7 +1119,7 @@ impl Play {
             };
             for e in &b.effects {
                 if let Some(frame) = b.frame(part, e.on) {
-                    self.fx.start(Owner::Building(b.target, e.id), &e.name, frame, 1.0, 0.0, None);
+                    self.fx.start_ambient(Owner::Building(b.target, e.id), &e.name, frame, 1.0, 0.0, None);
                 }
             }
             for &(id, mode) in &b.starts {

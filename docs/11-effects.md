@@ -947,6 +947,26 @@ to 0.2 seconds — (0.08, 0.08) on 80, (0.05, 0.01) on 48 — rings of 6 to 40,
 and lives of 0.05 to 4.5 s; the hero cannon's smoke puffs every 0.05 s falling
 to 0.02, ten at a time, so each lives 0.5 s falling to 0.2.
 
+**The emission catches up, and the age counts emissions** (*read*). While the
+last emission plus the interval is before now, the loop steps the ring's head
+on (`0x10011bf5`, modulo +36), lays the particle out and moves the last emission
+on by one interval (`0x10011c72`), and tests again (`0x1001201c`). The draw
+(`0x10012030`) ages slot *i* as (head − *i*) ÷ +36, wrapped, plus (now − last)
+÷ (interval × +36) (`0x1001209e`–`0x10012147`), so a particle lives +36
+intervals of the stream's own clock, which is the context's first word: the
+seconds since the instance started (`0x1000846c`, where the manager builds the
+context it hands the emitter's update, the time argument less the start, times
+0.001).
+
+*Seen*, and not explained by that: C03 M01's volcano (`s_tree_33`,
+`tree_light_33a`) in "Let's Play - Parkan: Iron Strategy, Part 5"
+(PfAg6zSe-yM, 4:19.4–4:24.4). Measured frame by frame at 60 fps, its smoke rises
+120–125 px/s where 1.6 s lives give the same view about 190 px/s against the
+puffs' width, and the flame's brightness beats at 5.3 Hz with almost no power at
+the 0.08 s interval's 12.5 Hz. Both put the game's ambient streams at about half
+the read pace; the column's shape — its width against its height — is the
+same, so what runs slow is the clock, not the geometry.
+
 **A fade value.** A burst particle hands the renderer
 **+8 + (+12 − +8) × age^+16** (`0x100013c2`), a stream particle
 +4 + (+8 − +4) × age^+12 (`0x10012322`), a sprite +20 + (+24 − +20) ×
