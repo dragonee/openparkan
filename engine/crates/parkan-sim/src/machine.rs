@@ -268,6 +268,10 @@ pub struct Walker {
     /// What each step's move is multiplied by: 1, but for a god mode's hero. The states still
     /// play at the machine's own speed, so the one that applies is the one that would.
     pub stride_scale: f32,
+    /// How far pushes have dropped the body since the ground contact last held it: the parts of
+    /// pushes that point down, taken whole while the machine stands on a building
+    /// ([`Walker::take_push`]). The body is drawn that much higher ([`Walker::drawn`]).
+    pub dropped: f32,
 }
 
 impl Walker {
@@ -364,6 +368,7 @@ impl Walker {
             placed: Vec::new(),
             drive: None,
             stride_scale: 1.0,
+            dropped: 0.0,
         }
     }
 
@@ -583,6 +588,7 @@ impl Walker {
     /// (`0x1000c737`). Here it still runs after every state step, with the step as dt and
     /// the contacts on the step's last frames.
     fn hold(&mut self, ground: &Ground, state: &State, dt: f32) {
+        self.dropped = 0.0;
         let r = self.radius;
         let centre = self.body.position + self.body.to_world(self.centre);
         // The up pass takes a face only where it stands less than r₂ -- the node sphere's
@@ -731,6 +737,9 @@ impl Walker {
         // (`Control.dll:0x1000c9eb`, docs/24, "Collision between objects").
         let on_building = self.ground.is_some_and(|h| h.solid.is_some());
         let whole = !flat || (on_building && push.z <= 0.0);
+        if flat && whole {
+            self.dropped += push.z;
+        }
         self.body.position += if whole { push } else { motion::horizontal(push) };
     }
 
@@ -764,9 +773,21 @@ impl Walker {
 
     /// Where the body is drawn at `t_ms`: between the step's start and end by the phase
     /// (`0x10015a50`).
+    ///
+    /// STAND-IN: docs/24-motion.md#collision-between-objects--read -- the body is drawn where
+    /// the ground contact last held it, before the down pushes taken on a building since have
+    /// dropped it ([`Walker::dropped`]). Read, the frame runs the move, the collision pass, the ground
+    /// contact and then the push (message `0x1b`, `Control.dll:0x1000c9eb` taking a down push
+    /// whole on a building), and where the frame is drawn among them is not read. Drawn after
+    /// the push, C02 M03's medium walker stands with its hull at the Small Warehouse's floor:
+    /// the ceiling, 6.3-7.5 m up, presses its 5.87 m agent sphere 2.85 m down every tick and
+    /// the contact lifts it back. The recording shows it upright on its legs in every frame
+    /// ("Let's Play - Parkan: Iron Strategy, Part 4", 1:43 and 15:13-15:15 at 60 fps), which
+    /// the push drawn before it lands gives, and which moves nothing the simulation holds:
+    /// units still go down a ramp into a building by that push.
     pub fn drawn(&self, t_ms: f64) -> (Vec3, f32) {
         let s = self.phase(t_ms);
-        let position = self.from.0.lerp(self.body.position, s);
+        let position = self.from.0.lerp(self.body.position, s) - Vec3::Z * self.dropped;
         let yaw = self.from.1 + wrap_angle(self.body.yaw - self.from.1) * s;
         (position, yaw)
     }

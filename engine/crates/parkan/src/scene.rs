@@ -848,10 +848,10 @@ pub fn add_targets(
     play: &mut Play,
 ) -> Result<bool> {
     let mut added = std::mem::take(&mut play.added);
-    // A boarded bot's cockpit, the first time it is boarded.
+    // A boarded bot's cockpit, or a tower's in its manual control, the first time it is driven.
     if let Some(t) = play.driving.as_ref().map(|d| d.target)
         && !view.cockpits.iter().any(|c| c.1 == t)
-        && let Some((_, robot)) = play.robots.iter().find(|(rt, _)| *rt == t)
+        && let Some(robot) = play.machine(t)
     {
         for (p, part) in robot.parts.iter().enumerate() {
             for node in 0..part.mesh.mesh.nodes.len() {
@@ -935,7 +935,7 @@ pub fn place_own_view(
     }
     // From the outer camera a boarded bot is drawn whole, as any other unit.
     let driven = driven.filter(|_| !play.outer_shows());
-    let robot_of = |t: usize| play.robots.iter().find(|(rt, _)| *rt == t).map(|(_, robot)| robot);
+    let robot_of = |t: usize| play.machine(t);
     for &(instance, t, p, node) in &view.cockpits {
         let robot = (Some(t) == driven).then(|| robot_of(t)).flatten();
         let placed = robot.map(|r| models::pose_matrix(&r.placement().compose(&r.part_pose(p, node))));

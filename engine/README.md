@@ -1124,6 +1124,28 @@ out of the ground.
   and the machine stands at 0 m/s for the rest of the mission. Reaching the player's base on
   this mission waits on that, not on the planner.
 
+**M19.** A tower's guns in the player's hands, and a walker drawn on its legs under a low
+ceiling, as Part 4 of the Iron Strategy let's play has them on C02 M03 and M04.
+
+- **A tower's pod opens its manual control** (docs/27, "Capture" and "What the modes show").
+  The opening a pod runs for the player's own unit switches the view by the building's Type,
+  and a medium or large tower goes to mode 6 unless its turret has no life left. Its handler
+  hands the tower's turret and guns to the player as a take hands a bot's at level 0, so the
+  engine drives it through the boarded bot's machinery: the turret's camera and its cockpit,
+  the mouse on its turret, the number keys and the button on its guns, from `M1.TBL`, the table
+  the reader falls back to, since no building's chassis names one. The building moves nothing
+  and its turret's takt runs with its own; its fire control steps aside while the player holds
+  it. Esc rolls back to the hero standing on the pod, the guns back to the AI. A tower whose
+  turret is shot off is captured and opens nothing. *The Last Bastion*'s plateau tower,
+  taken at its pod, turns under the mouse and fires both its `L152mmMC` at the button.
+- **A machine is drawn where the ground contact holds it** (docs/24, "Collision between
+  objects"). As read, a machine standing on a building takes a down push whole, after the
+  ground contact. *The Lost Key*'s Small Warehouse is 6.3–7.5 m high inside, and its ceiling
+  presses the 5.87 m agent sphere of the medium walker placed on its floor 2.85 m down every
+  tick: drawn after the push, the walker stood with its hull at the floor and its legs through
+  it, where the recording has it upright in every frame. It is drawn before the push lands, and
+  the simulation keeps the push, which carries units down a ramp into a building.
+
 This directory also holds what the rest will follow:
 
 - **`docs/`** is the source of truth. Every behaviour the engine implements is
@@ -1244,7 +1266,9 @@ MISSIONS/CAMPAIGN/CAMPAIGN.00/Mission.04 --skip-briefing --hq --ticks 120 --page
 A research centre's pod opens its research screen once the centre is the player's, as
 command mode's page 4 shows it too: a row's button orders or cancels its research, the
 batch button orders every row, the arrows scroll, and exit or Esc closes the screen.
-`--pod einst01.dat --ticks 400` on Mission 04 draws the screen.
+`--pod einst01.dat --ticks 400` on Mission 04 draws the screen. A tower's pod puts the player
+at its guns (`--mission MISSIONS/CAMPAIGN/CAMPAIGN.02/Mission.04 --skip-briefing --pod
+mtow02.dat --ticks 600`), and Esc gives them back.
 
 Standing on a building's control pod captures it; `--pod NAME` starts the hero
 on the pod of the building whose path ends in NAME (`--pod lplant01.dat` on
@@ -1424,6 +1448,8 @@ a row here. A row leaves this table when research closes it.
 | M18 | The one float `SELECT_BEST_RANGE` scores, the design record's `+0x11c`, which the store's own fill never writes; the other five arms are read | it scores every design 0, so the ranking keeps the store's order. No shipped raise passes `SELECT_BEST_RANGE`: the corpus's 108 are 65 `SELECT_BEST_COMBAT`, 42 `SELECT_FASTEST` and one `SELECT_SMALLEST` | [15](../docs/15-behaviour.md#what-each-select_-scores--read) |
 | M18 | What a strength written into a `DWORD` looks like: the result slot is four bytes and a `DWORD` destination takes them as they stand, so either the handler leaves a whole number or the script reads a float's bit pattern | the strength truncated, since every `fn44`, `fn38` and `fn35` call site assigns to a `DWORD` and then compares it against a small authored number; bit patterns would make `dTemp3 < dPlaceProtectHits` false wherever anything at all stands there | [15](../docs/15-behaviour.md#what-the-functions-do) |
 | M18 | The second half of function 11's limit test, a per-type counter the brain keeps at `+0x3e0`..`+0x3f8`; and what functions 37 and 67 measure over, neither taking a radius | the `dMax*` variable alone, so a type no `dMax*` bounds — `ROBOT_BATTLEUNIT`, which is every robot the scripts build — is never at its limit; 37 and 67 measure over the clan's base radius | [15](../docs/15-behaviour.md#what-the-functions-do) |
+| M19 | Where the frame is drawn among the move, the collision pass, the ground contact and the push (message `0x1b`), which takes a down push whole on a building (`Control.dll:0x1000c9eb`); and what keeps a walker standing on a building's floor upright under a low ceiling: the recording shows *The Lost Key*'s warehouse walker upright in every frame at 60 fps, where the read push drops it 2.85 m a tick | the body is drawn where the ground contact last held it, the down pushes taken on a building since left out; the simulation keeps them | [24](../docs/24-motion.md#collision-between-objects--read) |
+| M19 | What pops mode 6 when its tower is destroyed | the stack rolls back to the hero, as telepresence rolls back when its unit is lost | [27](../docs/27-ownership.md#what-the-modes-show--read) |
 | M17 | Whether anything switches a bouncing item off: the two class-29 records carry switch word 9, and bit 8 is read to hold the progress at an end and swap the low bits, so both towers would raise their gun mast over five seconds and stow it over the next five, for ever. Nothing found switches it: the factory files every class in the timed list, `CBuilding` looks only for classes 12 and 13, and neither record names a section-5 group | an item whose word bounces is started as one that opens and stops, so a tower's mast comes up once and stays up, as the game has it | [28](../docs/28-chassis.md#every-component-is-stepped-not-only-a-device--read-and-measured) |
 | M17 | Whether a building's collision solid follows the nodes its own items turn: a mine's rotors, the Main Teleport's rings and the energy bridge's hub never stop | the solid is rebuilt for a door's channels, as before, and not for a running item's, which would rebuild it every tick on every one of them | [28](../docs/28-chassis.md#every-component-is-stepped-not-only-a-device--read-and-measured) |
 | M16 | What a contact point's own up pass tests against: it compares with a triple the pass builds from control `+0x2ec`, `+0x2fc` and `+0x30c`, which is not read | the body sphere's r₂, the one bound the pass is read to use; the agent sphere's r had a wheel grab the floor 2.9 m above it and hoist the machine back up a factory's ramp | [24](../docs/24-motion.md#not-established) |

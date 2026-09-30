@@ -1054,9 +1054,13 @@ impl App {
         let Some(play) = self.play.as_mut() else { return };
         // A building's screen has the hero handed away: its table takes no key
         // (`0x10074ff0` with 0, docs/36), and only the screens' commands act.
-        // The player drives the hero on foot, or the bot it boarded.
-        let on_foot =
-            matches!(play.mode(), parkan_world::play::Mode::OnFoot | parkan_world::play::Mode::Driving(_));
+        // The player drives the hero on foot, the bot it boarded, or a tower's guns (mode 6).
+        let on_foot = matches!(
+            play.mode(),
+            parkan_world::play::Mode::OnFoot
+                | parkan_world::play::Mode::Driving(_)
+                | parkan_world::play::Mode::Manual(_)
+        );
         // While the wingman selector is open a digit is its (`iron3d.dll:0x100710fa`).
         let digit = scan
             .strip_prefix("SCAN_W_")

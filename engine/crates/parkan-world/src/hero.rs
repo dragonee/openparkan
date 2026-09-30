@@ -91,14 +91,14 @@ impl Hero {
     }
 
     /// A pilot for a unit's own input table: its chassis record's `.tbl`
-    /// (docs/39-boarding.md, "Driving": `m2.tbl` for a flyer, `m1.tbl` for the rest).
+    /// (docs/39-boarding.md, "Driving": `m2.tbl` for a flyer, `m1.tbl` for the rest), or for a
+    /// chassis that names none, a building's, [`DEFAULT_TABLE`].
     pub fn pilot_for(assembly: &mut Assembly, chassis_record: &str) -> Result<Pilot> {
         let table = assembly
             .library
             .get(chassis_record)
             .and_then(|r| r.slots.iter().find(|s| s.suffix() == "tbl"))
-            .map(|s| s.member.clone())
-            .context("the chassis names no input table")?;
+            .map_or_else(|| DEFAULT_TABLE.to_owned(), |s| s.member.clone());
         let rows = controls::load(&gamedir::resolve(&assembly.game, &table).context("no input table")?)?;
         Ok(Pilot::new(rows, mouse_sensitivity(&assembly.game)))
     }
@@ -145,6 +145,11 @@ impl Hero {
         self.robot.eye().expect("the hero's turret has a camera")
     }
 }
+
+/// The input table the table reader defaults to (`World3D.dll:0x1000b3e0`, docs/14, "A row
+/// that stays down"). No building's chassis names a `.tbl`, so it is what a tower is driven by
+/// in its manual control (*derived*).
+pub const DEFAULT_TABLE: &str = "M1.TBL";
 
 /// What of a taken unit the player's input reaches, by its auto-driver level (record `+0x9c`):
 /// `iron3d.dll:0x10074ff0` writes the unit's `Wizard.dll` group words by it, and the Wizard
@@ -253,10 +258,23 @@ pub fn drive(
         pilot.selects.clear();
         return robot.takt(dt_ms);
     }
+    press_guns(robot, pilot, fire_held);
+    robot.takt(dt_ms)
+}
 
+/// The guns of a building the player drives (mode 6, docs/27, "What the modes show"): the mouse
+/// counts since the last tick to its turret, and the guns the number keys select and the button
+/// fires. A building does not move, and its turret's and guns' takt runs with its own
+/// (`Play::tick_emplacements`).
+pub fn drive_guns(robot: &mut Robot, pilot: &mut Pilot, fire_held: &mut bool, mouse: [f32; 2]) {
+    reached(robot, pilot, Reach::Whole, |pilot, hands| pilot.mouse(mouse, hands));
+    press_guns(robot, pilot, fire_held);
+}
+
+/// The player's number keys and button on a unit's guns.
+fn press_guns(r: &mut Robot, pilot: &mut Pilot, fire_held: &mut bool) {
     // `World3D.dll:0x100109f8`: a gun's number toggles it and sends its arm state 1
     // or 2; -1 selects and resets every gun and sends every arm `0x21`.
-    let r = robot;
     for n in std::mem::take(&mut pilot.selects) {
         if n < 0 {
             for g in &mut r.guns {
@@ -283,7 +301,6 @@ pub fn drive(
             g.state = state;
         }
     }
-    r.takt(dt_ms)
 }
 
 /// A key to a unit driven from `pilot`, as far as `reach` goes.

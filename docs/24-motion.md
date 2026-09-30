@@ -1929,6 +1929,24 @@ mover whose collision flags carry 8
 takes a push that points down whole (message `0x1b`). A bridge's deck pushes
 the hero crossing it, except where its faces are flagged 2.
 
+**A low ceiling and a walker on the floor under it** (*measured*, and *seen*
+against it). C02 M03's Small Warehouse (`sto_l_n1`) is 6.3–7.5 m high inside:
+its floor face stands at 36.62 and its ceiling's faces, on the interior node
+`i09`, at 42.88–44.08. The medium walker `22mwlk1` the mission places on that
+floor, logical id 28, has an agent sphere of 5.87 about a centre 0.41 above its
+origin, which stands 3.04 over its feet, so the ceiling's faces press the
+sphere 2.85 m down; the sphere the pass hands the push-out is that agent sphere,
+interface `0x18` slot 9 asked with 2 (`Control.dll:0x1001fef5`, copied into
+`+0x38`–`+0x50` at `0x1001ff36`). Taken whole after the ground contact, as read
+above, the push leaves the walker with its hull at the floor and its legs
+through it in every frame the push lands in. The recording shows it upright on
+its legs in the briefing and in play, and in **every** frame at 60 fps as the
+hero walks up to it, with no frame sunk ("Let's Play - Parkan: Iron Strategy,
+Part 4", 1:43, 15:13–15:15). What keeps it there is not read: where the frame
+is drawn among the move, the pass, the contact and the push would do it, and so
+would something that keeps the pair from pushing at all
+([Not established](#not-established)).
+
 **Doors** (*read*). `CBuilding` files each class-12 item as a door, with the
 nodes its channels play (`Terrain.dll:0x100583a2`–`0x100584e8`), and each
 class-13 item as a computer. A door has a state, the time it opened, a lock
@@ -3602,6 +3620,13 @@ patrol runs past it.
 
 ## Not established
 
+- What keeps a walker standing on a building's floor upright under a low
+  ceiling ([above](#collision-between-objects--read), "A low ceiling and a
+  walker on the floor under it"): where the frame is drawn among the move, the
+  collision pass, the ground contact and the push, or what keeps the pair from
+  pushing. Which message runs the collision object's sphere refresh
+  (`Control.dll:0x1001fec0`, case 0 of the switch at `0x1001f548`) is not read
+  either. A stand-in draws the body where the contact last held it.
 - How the velocity integrator's pull toward *command × top speed*, with the
   command left at 0, combines with a velocity the Wizard writes every frame.
   A stand-in takes the written velocity as the machine's own. ~~Whether the

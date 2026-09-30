@@ -731,6 +731,49 @@ fn c02_m03s_wheeled_warbot_drives_down_the_factorys_first_ramp_to_its_pod() {
     );
 }
 
+/// C02 Mission 03's Small Warehouse holds the warbot the mission is about, `22mwlk1`, logical
+/// id 28: a medium walker placed standing on the warehouse's floor, its feet at 36.63 on the
+/// floor face at 36.62, its origin 3.0 m over it.
+///
+/// The recording shows it upright on its legs, taller than the hero, in the briefing and in
+/// play ("Let's Play - Parkan: Iron Strategy, Part 4", 1:43 and 15:13–15:15, every frame at
+/// 60 fps). As read, the warehouse's ceiling, 6.3–7.5 m over the floor, presses its 5.87 m agent
+/// sphere down 2.85 m a tick, a machine standing on a building takes a down push whole, and the
+/// push lands after the ground contact (docs/24, "Collision between objects"): drawn after it,
+/// the walker's hull sat at the floor with its legs through it. It is drawn before it, where
+/// the contact holds it, and the simulation keeps the push.
+#[test]
+#[ignore = "needs the game install"]
+fn c02_m03s_warehouse_warbot_is_drawn_on_its_legs_under_the_ceiling() {
+    let mut play = campaign_play(gamedir::C02_MISSION_03);
+    let t = (0..play.units.len()).find(|&t| play.units[t].logical_id == 28).expect("the warbot, id 28");
+    fn robot(play: &parkan_world::play::Play, t: usize) -> &parkan_world::hero::Robot {
+        &play.robots.iter().find(|(r, _)| *r == t).unwrap().1
+    }
+    let placed = robot(&play, t).walker.body.position;
+    let floor = play.ground.below(placed.x, placed.y, placed.z).expect("the warehouse's floor").point.z;
+    assert!((placed.z - floor - 3.04).abs() < 0.1, "placed standing: {} over {floor}", placed.z);
+    let (mut drawn_lowest, mut posed_lowest) = (f32::MAX, f32::MAX);
+    for _ in 0..(10 * 60) {
+        play.update_input();
+        play.tick(1000.0 / 60.0, [0.0; 2]);
+        let r = robot(&play, t);
+        drawn_lowest = drawn_lowest.min(r.walker.drawn(r.time_ms).0.z - floor);
+        // What the renderer draws: the chassis's root node as the tick posed it.
+        let chassis = r.chassis_part;
+        let root = play.battle.combat.targets[t].parts[chassis].nodes[0].translation[2] as f32;
+        posed_lowest = posed_lowest.min(root - floor);
+    }
+    assert!(drawn_lowest > 2.9, "drawn {drawn_lowest:.2} m over its floor, its legs through it");
+    assert!(posed_lowest > 2.9, "posed {posed_lowest:.2} m over its floor, its legs through it");
+    let at = robot(&play, t).walker.body.position;
+    assert!(at.truncate().distance(placed.truncate()) < 3.0, "and it stays where it stood: {at}");
+    eprintln!(
+        "the warbot is drawn {drawn_lowest:.2} m over its floor at the lowest; its body is held {:.2}",
+        at.z - floor
+    );
+}
+
 /// A tower's gun mast stands in the ground until its class-29 item raises it.
 ///
 /// Nothing files that item: `CBuilding` looks for doors and control pods and no other class
@@ -779,6 +822,103 @@ fn c02_m04s_tower_raises_its_gun_mast_out_of_the_ground_and_leaves_it_up() {
     }
     assert!((z(&play, 0, 13) - held).abs() < 0.2, "the mast stays up: {}", z(&play, 0, 13));
     eprintln!("the mast rises {up:.2} m and holds");
+}
+
+/// C02 Mission 04's Light Towers, taken at their pods by the hero on foot. The pod's opening
+/// for the player's own unit switches the view by the building's Type, and a medium or large
+/// tower goes to state 6, its manual control, unless its first class-1 item, the turret, has
+/// no life left (`iron3d.dll:0x10062bc0`, `0x10033e40`; docs/27, "Capture" and "What the modes
+/// show"). The mode's handler hands the tower's guns to the player as a take hands a bot's
+/// (docs/40, "What a bunker's guns do in command mode"). The recording's player is at the
+/// valley tower's gun a second after *"Building is captured"*, shoots tanks with it and leaves
+/// with Esc to the pod room ("Let's Play - Parkan: Iron Strategy, Part 4", 26:04–26:14.5), and
+/// at the plateau tower's at 37:23.
+#[test]
+#[ignore = "needs the game install"]
+fn c02_m04s_light_tower_taken_at_its_pod_hands_the_player_its_guns() {
+    use parkan_formats::mission;
+    use parkan_world::play::{Mode, Play};
+
+    let game = gamedir::find(None).expect("a Parkan install: set PARKAN_DIR");
+    let dir = gamedir::resolve(&game, gamedir::C02_MISSION_04).unwrap();
+    let m = mission::parse(&std::fs::read(dir.join("data.tma")).unwrap(), "Mission.04").unwrap();
+    let mut play = campaign_play(gamedir::C02_MISSION_04);
+    let tower = object_target(&play, &m, "mtow02.dat");
+    let player = play.player_clan;
+    let tick = |play: &mut Play, mouse: [f32; 2]| {
+        play.update_input();
+        play.tick(1000.0 / 60.0, mouse);
+    };
+    fn aim(play: &Play, t: usize) -> [f32; 3] {
+        play.emplacements.iter().find(|(e, _)| *e == t).expect("the tower carries guns").1.rig.aim
+    }
+    // The mast up first, as the recording's tower stood.
+    for _ in 0..(6 * 60) {
+        tick(&mut play, [0.0; 2]);
+    }
+    assert!(play.stand_on_pod(tower));
+    tick(&mut play, [0.0; 2]);
+    let hero_eye = play.eye().position;
+    for _ in 0..(10 * 60) {
+        tick(&mut play, [0.0; 2]);
+        if play.units[tower].clan == Some(player) {
+            break;
+        }
+    }
+    assert_eq!(play.units[tower].clan, Some(player), "the pod takes the tower");
+    assert_eq!(play.mode(), Mode::Manual(tower), "and opens its manual control");
+    assert_eq!(play.driven_target(), Some(tower), "the view's own unit is the tower");
+    let eye = play.eye().position;
+    let top = play.battle.combat.targets[tower].position.z;
+    assert!(eye.z > top + 10.0, "the eye is the turret's, up the mast: {eye} over the tower at {top}");
+    assert!(eye.distance(hero_eye) > 10.0, "not the hero's: {eye} and {hero_eye}");
+
+    // Its turret follows the mouse, as a boarded bot's does (`m1.tbl`: mouse X is the turret's
+    // yaw, the table a tower's chassis names none of and the reader falls back to, docs/14).
+    let before = aim(&play, tower);
+    for _ in 0..60 {
+        tick(&mut play, [20.0, 0.0]);
+    }
+    let turned = (aim(&play, tower)[0] - before[0]).abs();
+    assert!(turned > 0.2, "the mouse turns its turret: {turned}");
+
+    // The button fires its guns.
+    let rounds = |play: &Play| play.battle.combat.rounds.len();
+    let (mut most, before) = (0, rounds(&play));
+    play.key("SCAN_LMOUSE", true);
+    for _ in 0..(3 * 60) {
+        tick(&mut play, [0.0; 2]);
+        most = most.max(rounds(&play));
+    }
+    play.key("SCAN_LMOUSE", false);
+    assert!(most > before, "its guns fire at the button: {before} rounds, then at most {most}");
+
+    // Esc (`CMD_ROLLBACK_STATE`, 6 → 0) gives the guns back to its AI and the view to the hero,
+    // still on the pod.
+    assert!(play.roll_back());
+    assert_eq!(play.mode(), Mode::OnFoot);
+    assert_eq!(play.driven_target(), None);
+    let back = play.eye().position;
+    assert!(back.distance(hero_eye) < 1.0, "the hero's view again, on the pod: {back} and {hero_eye}");
+    let still = aim(&play, tower);
+    for _ in 0..60 {
+        tick(&mut play, [20.0, 0.0]);
+    }
+    assert!((aim(&play, tower)[0] - still[0]).abs() < 0.2, "the mouse no longer turns it");
+
+    // The valley tower with its turret shot off takes the hero's capture and opens nothing.
+    let valley = object_target(&play, &m, "mtow01.dat");
+    let turret = play.emplacements.iter().find(|(e, _)| *e == valley).unwrap().1.turret_part;
+    play.battle.combat.targets[valley].parts[turret].life.as_mut().unwrap().hit(1, f32::MAX / 4.0);
+    assert!(play.stand_on_pod(valley));
+    for _ in 0..(10 * 60) {
+        tick(&mut play, [0.0; 2]);
+        if play.units[valley].clan == Some(player) {
+            break;
+        }
+    }
+    assert_eq!(play.units[valley].clan, Some(player), "the valley tower is taken");
+    assert_eq!(play.mode(), Mode::OnFoot, "and, its turret gone, opens no manual control");
 }
 
 /// C02 Mission 03, *The Lost Key*: the enemy clan's planner, `c2m3e`'s, first takt. Its

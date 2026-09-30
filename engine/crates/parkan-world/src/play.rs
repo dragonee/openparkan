@@ -112,6 +112,9 @@ pub const BUILDING_PLANT: u32 = 0x8000_0010;
 pub const BUILDING_GENERATOR: u32 = 0x8000_0002;
 /// The three bunkers' `Type`s, whose pods open command mode (`iron3d.dll:0x10062779`).
 pub const BUILDING_BUNKERS: [u32; 3] = [0x8001_0000, 0x8002_0000, 0x8004_0000];
+/// The medium and large towers' `Type`s, whose pods open their manual control, mode 6
+/// (`iron3d.dll:0x10062bc0`, docs/27, "Capture").
+pub const TOWERS: [u32; 2] = [0x8010_0000, 0x8020_0000];
 /// The System line an ownership change shows (`iron3d.dll:0x100a48a0`).
 pub const STRING_BUILDING_CAPTURED: u32 = 5039;
 /// What the player hears when a building changes hands: taken from a neutral or an ally,
@@ -157,6 +160,9 @@ pub enum Mode {
     /// Mode 5 with the building that is target `t`: its screen, a factory's (docs/36) or a
     /// research centre's, the commander panel turned to page 4 (docs/41).
     Factory(usize),
+    /// Mode 6 with the tower that is target `t`: its manual control, the player at its guns
+    /// as at a boarded bot's (docs/27, "What the modes show").
+    Manual(usize),
     /// Mode 7: the game menu over the world, which stands still under it (docs/39, "The game
     /// menu").
     GameMenu,
@@ -1382,7 +1388,9 @@ impl Play {
         let unit = self.driven().walker.body.position;
         let range = self.driven().radar.range;
         let now = self.hero.time_ms;
-        let radar = match driven.and_then(|t| self.robots.iter_mut().find(|(rt, _)| *rt == t)) {
+        let radar = match driven
+            .and_then(|t| self.robots.iter_mut().chain(self.emplacements.iter_mut()).find(|(rt, _)| *rt == t))
+        {
             Some((_, robot)) => &mut robot.radar,
             None => &mut self.hero.radar,
         };
@@ -1724,7 +1732,9 @@ impl Play {
         if let Some(d) = self.driving.as_ref()
             && !self.battle.combat.targets.get(d.target).is_some_and(|x| x.alive)
         {
-            if d.telepresence {
+            // STAND-IN: docs/27-ownership.md#what-the-modes-show--read -- nothing read pops mode
+            // 6 when its tower is destroyed; the view goes back to the hero.
+            if d.telepresence || matches!(self.mode(), Mode::Manual(_)) {
                 self.roll_back();
             } else {
                 self.leave();
@@ -2006,6 +2016,17 @@ impl Play {
         }
     }
 
+    /// Target `t`'s machine: a robot's, or the one a building that carries guns keeps for its
+    /// turret ([`Play::emplacements`]).
+    pub fn machine(&self, t: usize) -> Option<&Robot> {
+        self.robots.iter().chain(&self.emplacements).find(|(rt, _)| *rt == t).map(|(_, r)| r)
+    }
+
+    /// Target `t`'s machine, to change.
+    pub fn machine_mut(&mut self, t: usize) -> Option<&mut Robot> {
+        self.robots.iter_mut().chain(self.emplacements.iter_mut()).find(|(rt, _)| *rt == t).map(|(_, r)| r)
+    }
+
     /// The mode at the front of the interface's stack.
     pub fn mode(&self) -> Mode {
         self.modes.last().copied().unwrap_or(Mode::OnFoot)
@@ -2033,7 +2054,7 @@ impl Play {
         if self.mode() == Mode::GameMenu {
             return self.roll_back();
         }
-        if matches!(self.mode(), Mode::OnFoot | Mode::Driving(_)) {
+        if matches!(self.mode(), Mode::OnFoot | Mode::Driving(_) | Mode::Manual(_)) {
             self.release_keys();
         }
         self.modes.push(Mode::GameMenu);
@@ -2059,6 +2080,14 @@ impl Play {
                 return self.end_telepresence();
             }
             Mode::Driving(_) => return self.leave(),
+            // Mode 6 → 0 (`0x100640ab`): the tower's guns back to its AI (slot 9, mask `0x20`,
+            // 1, and message (6, 7, 0)) and the hero the player's again, where it stood.
+            Mode::Manual(_) => {
+                self.let_go();
+                self.modes.pop();
+                self.hero.release_keys();
+                return true;
+            }
             // Mode 3 → 1 (`0x10063ad0`): the HQ selected and taken back at auto-driver level 0
             // with the camera let go; or 3 → 4 and 3 → 3, back to the command view below.
             Mode::HqCommand(t) => {
@@ -2231,7 +2260,7 @@ impl Play {
     /// sensors' among them (`0x10075131`).
     fn let_go(&mut self) {
         if let Some(mut d) = self.driving.take()
-            && let Some((_, robot)) = self.robots.iter_mut().find(|(rt, _)| *rt == d.target)
+            && let Some(robot) = self.machine_mut(d.target)
         {
             let reach = Reach::of(robot.auto_driver, robot.sensors_taken);
             crate::hero::drive_input(robot, &mut d.pilot, true, reach);
@@ -2290,10 +2319,7 @@ impl Play {
     /// indicators show; the hero's is 0, as its bind and the briefing's end leave it
     /// (`0x10074dd2`, `0x1005e7f8`), and nothing steps it on foot.
     pub fn auto_driver(&self) -> u8 {
-        self.driving
-            .as_ref()
-            .and_then(|d| self.robots.iter().find(|(t, _)| *t == d.target))
-            .map_or(0, |(_, r)| r.auto_driver)
+        self.driving.as_ref().and_then(|d| self.machine(d.target)).map_or(0, |r| r.auto_driver)
     }
 
     /// What the player's input reaches of the unit it drives ([`Reach`]): the whole hero on
@@ -2301,8 +2327,8 @@ impl Play {
     pub fn reach(&self) -> Reach {
         self.driving
             .as_ref()
-            .and_then(|d| self.robots.iter().find(|(t, _)| *t == d.target))
-            .map_or(Reach::Whole, |(_, r)| Reach::of(r.auto_driver, r.sensors_taken))
+            .and_then(|d| self.machine(d.target))
+            .map_or(Reach::Whole, |r| Reach::of(r.auto_driver, r.sensors_taken))
     }
 
     /// Mode 0 → 4 with the bunker that is target `t` (`0x10063ca0`): the bunker selected, the
@@ -2320,6 +2346,45 @@ impl Play {
         let at = self.battle.combat.targets.get(t).map_or(Vec3::ZERO, |x| x.position);
         self.command.enter(at);
         self.modes.push(Mode::Command(t));
+    }
+
+    /// Mode 0 → 6 with the tower that is target `t` (`iron3d.dll:0x10063fd0`; docs/27, "What
+    /// the modes show"): its manual control. A tower is refused while its first class-1 item,
+    /// its turret, has no life left (`0x10033e40`), or once it is destroyed. The outer camera
+    /// goes off and the hero is handed back where it stands, its keys let go; the tower's guns
+    /// go to the player: its Wizard's word for the turret and guns the player's (slot 9, mask
+    /// `0x20`, 3) and the take's message (6, 7, 1), so it is driven as a boarded bot is at
+    /// level 0 (docs/40, "What a bunker's guns do in command mode"), from the input table the
+    /// reader falls back to ([`crate::hero::DEFAULT_TABLE`]). The player's target goes to its
+    /// guns. A tower already on the stack is rolled back to.
+    pub fn enter_manual(&mut self, t: usize) -> bool {
+        if !self.units.get(t).is_some_and(|u| TOWERS.contains(&u.type_word)) {
+            return false;
+        }
+        if let Some(at) = self.modes.iter().position(|m| *m == Mode::Manual(t)) {
+            self.modes.truncate(at + 1);
+            return true;
+        }
+        let Some(target) = self.battle.combat.targets.get(t).filter(|x| x.alive) else { return false };
+        let Some(robot) = self.machine(t).filter(|r| turret_alive(r, target)) else { return false };
+        if !matches!(self.mode(), Mode::OnFoot) {
+            return false;
+        }
+        let chassis = robot.parts[robot.chassis_part].record.clone();
+        let Ok(pilot) = crate::hero::Hero::pilot_for(&mut self.assembly, &chassis) else { return false };
+        self.outer.off();
+        self.hero.release_keys();
+        let current = self.targets.current;
+        let Some(robot) = self.machine_mut(t) else { return false };
+        robot.wizard.clear();
+        robot.auto_driver = 0;
+        robot.sensors_taken = true;
+        take_over(robot, true);
+        robot.fire_target = None;
+        robot.relink(current);
+        self.driving = Some(Driving { target: t, pilot, fire_held: false, telepresence: false });
+        self.modes.push(Mode::Manual(t));
+        true
     }
 
     /// A game command's key going down or up in command mode (`0x10071cd0`, `0x10072740`):
@@ -2378,25 +2443,29 @@ impl Play {
 
     /// The view's own unit: the bot the player drives or the hero rides in, or the hero.
     pub fn driven(&self) -> &Robot {
-        self.driven_target()
-            .and_then(|d| self.robots.iter().find(|(t, _)| *t == d))
-            .map_or(&self.hero.robot, |(_, r)| r)
+        self.driven_target().and_then(|d| self.machine(d)).unwrap_or(&self.hero.robot)
     }
 
     /// The unit whose guns take the player's target: the target list is the driven unit's, and
     /// `iron3d.dll:0x10091a80` hands its target to that unit's turret — the bot the player
     /// drives, else the hero.
     fn gunner_mut(&mut self) -> &mut Robot {
-        match self.driving.as_ref().and_then(|d| self.robots.iter().position(|(t, _)| *t == d.target)) {
-            Some(r) => &mut self.robots[r].1,
+        let driven = self.driving.as_ref().map(|d| d.target);
+        let found = driven
+            .and_then(|d| self.robots.iter_mut().chain(self.emplacements.iter_mut()).find(|(t, _)| *t == d));
+        match found {
+            Some((_, r)) => r,
             None => &mut self.hero.robot,
         }
     }
 
     /// The view's own unit, to change.
     fn driven_mut(&mut self) -> &mut Robot {
-        match self.driven_target().and_then(|d| self.robots.iter().position(|(t, _)| *t == d)) {
-            Some(r) => &mut self.robots[r].1,
+        let driven = self.driven_target();
+        let found = driven
+            .and_then(|d| self.robots.iter_mut().chain(self.emplacements.iter_mut()).find(|(t, _)| *t == d));
+        match found {
+            Some((_, r)) => r,
             None => &mut self.hero.robot,
         }
     }
@@ -2515,7 +2584,9 @@ impl Play {
         let reach = self.reach();
         match self.driving.as_mut() {
             Some(d) => {
-                if let Some((_, robot)) = self.robots.iter_mut().find(|(t, _)| *t == d.target) {
+                if let Some((_, robot)) =
+                    self.robots.iter_mut().chain(self.emplacements.iter_mut()).find(|(t, _)| *t == d.target)
+                {
                     crate::hero::drive_key(robot, &mut d.pilot, scan, pressed, reach);
                 }
             }
@@ -2530,7 +2601,9 @@ impl Play {
         let reach = self.reach();
         match self.driving.as_mut() {
             Some(d) => {
-                if let Some((_, robot)) = self.robots.iter_mut().find(|(t, _)| *t == d.target) {
+                if let Some((_, robot)) =
+                    self.robots.iter_mut().chain(self.emplacements.iter_mut()).find(|(t, _)| *t == d.target)
+                {
                     crate::hero::drive_input(robot, &mut d.pilot, true, reach);
                 }
             }
@@ -2543,7 +2616,9 @@ impl Play {
         let reach = self.reach();
         match self.driving.as_mut() {
             Some(d) => {
-                if let Some((_, robot)) = self.robots.iter_mut().find(|(t, _)| *t == d.target) {
+                if let Some((_, robot)) =
+                    self.robots.iter_mut().chain(self.emplacements.iter_mut()).find(|(t, _)| *t == d.target)
+                {
                     crate::hero::drive_input(robot, &mut d.pilot, false, reach);
                 }
             }
@@ -2894,6 +2969,8 @@ impl Play {
             self.modes.push(Mode::Factory(t));
         } else if BUILDING_BUNKERS.contains(&self.units[t].type_word) {
             self.enter_command(t);
+        } else if TOWERS.contains(&self.units[t].type_word) {
+            self.enter_manual(t);
         }
     }
 
@@ -3775,15 +3852,16 @@ impl Play {
             let now = robot.time_ms;
             self.launch(launched, now);
         }
-        self.tick_emplacements(dt_ms, &seen, &world);
+        self.tick_emplacements(dt_ms, &seen, &world, mouse);
     }
 
     /// Every building that carries guns on a turret: its game time moves on; while its clan
     /// thinks, its behaviour's fire control picks its target, its turret traces it and its
-    /// guns fire as an AI unit's do; then its turret's and guns' takt, and the turret and
-    /// what hangs on it are posed where they aim. A building does not move: no machine
-    /// steps, and its faces stay as placed.
-    fn tick_emplacements(&mut self, dt_ms: f64, seen: &[Sighting], world: &[Contact]) {
+    /// guns fire as an AI unit's do -- or, in its manual control, the player's mouse turns its
+    /// turret and the player's keys fire its guns; then its turret's and guns' takt, and the
+    /// turret and what hangs on it are posed where they aim. A building does not move: no
+    /// machine steps, and its faces stay as placed.
+    fn tick_emplacements(&mut self, dt_ms: f64, seen: &[Sighting], world: &[Contact], mouse: [f32; 2]) {
         let mut fired = Vec::new();
         for e in 0..self.emplacements.len() {
             let t = self.emplacements[e].0;
@@ -3791,7 +3869,9 @@ impl Play {
                 continue;
             }
             self.emplacements[e].1.time_ms += dt_ms;
-            if !self.paused && self.thinks(self.units[t].clan) {
+            if let Some(d) = self.driving.as_mut().filter(|d| d.target == t) {
+                crate::hero::drive_guns(&mut self.emplacements[e].1, &mut d.pilot, &mut d.fire_held, mouse);
+            } else if !self.paused && self.thinks(self.units[t].clan) {
                 let sensed = self.radar_ids(e, true, world);
                 let others = self.seen_by(t, seen, &sensed);
                 let type_word = self.units[t].type_word;
