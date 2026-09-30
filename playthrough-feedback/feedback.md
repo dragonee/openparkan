@@ -70,11 +70,11 @@ take-over already match the recording.
 ## Mission 02 - Ballen's Crossing
 
 - Mechanics
-  - [ ] The three heavy warbots never arrive after the HQ is captured
+  - [x] The three heavy warbots never arrive after the HQ is captured
     - The script calls function 57, which runs `mission.cfg`'s `script1`..`script3` - `create(918, 683, 10, 4, 22lwhl1.dat, 0)` and two more - and the engine leaves it unanswered
     - The bonus objective "Destroy enemy patrols" completes without them, since it counts Enm2's robots
     - The same function places the Teleport on C04M02, and is called on C02M03 and C05M01
-    - On hold until `create`, `bcreate` and `death` are researched: queued in OPEN-QUESTIONS.md, "AI, scripts, packages and economy"
+    - Researched and fixed 2026-09-30: the console's `create`, `bcreate` and `death` are read (docs/15, "What the console's `create`, `bcreate` and `death` do"); the three arrive for Enm2 on the ground at (917-919, 683-684), on its list before the bonus objective asks
 - Visuals
   - [ ] The last buoy (s_tree_28) is olive and orange, should be lilac with a pink cap and a blue beam (briefing, 10:16)
 

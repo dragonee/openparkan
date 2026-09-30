@@ -203,27 +203,6 @@ remainder a closed line names stays here as a line of its own.
   gorge wall, and it stands at 0 m/s for the rest of the mission — while from where the mission places
   it there is a 31-leg route over the bridge to the player's factory. What the game does with a patrol
   place off its own areal map, and what its walker does once stranded, are both unread.
-- [ ] **What the console's `create` does with its arguments.** Raised 2026-09-30 from checking C02
-  Mission 02 against a recording. Function 57 runs its mission's `script%d` line through the game's
-  debug console (*read*, [15-behaviour](docs/15-behaviour.md#channel-2-runs-a-line-of-the-missions-script-block--read-and-measured)),
-  and 18 of the install's 20 lines are `create(x, y, z, clan, file, 0)` — six values where the help
-  text names five. Unread: how `0x1003ca50` converts each argument and what becomes of the sixth (0
-  on every line); how the file (`22lwhl1.dat`, `23mfly.dat`, `m_crab.dat`, …) resolves to a unit under
-  `UNITS\`; whether `z` (10 on every line) is a height, a height over the ground or ignored; whether
-  the clan number indexes the mission's clan table as an object's `ClanID` does; the new object's
-  heading and logical id; and whether it joins its clan's lists and SuperAI, so that `c2m2e2`'s
-  `fn25(TAKE_ALL_FREE)` takes it and function 31 counts it. The callback's gate is not in the way: the
-  game object's `+0xe5` is set in mode 3 alone, which is the auto-demo (*Mission progression*,
-  below). **The engine answers function 57 with nothing**, so C02 Mission 02's three heavy warbots
-  never arrive after the HQ is taken, and its bonus objective, which waits for `Enm2` to have no
-  robots, completes without them; C02 Mission 03 and C05 Mission 01 call it too.
-- [ ] **What `bcreate` makes.** C04 Mission 02's `bcreate(1246, 1051, 10, 0, teleport.dat, 0)` is
-  how its Teleport objective puts the Teleport down: whether the building appears finished or goes
-  through the construction sphere, its owner, how it is set on the ground, and its logical id. The
-  engine has what it needs to place a building of any `.dat` in play (the builder's path).
-- [ ] **What `death(x, y, r, delay)` kills.** C04 Mission 02's `death(1246, 1051, 100, 0 )` clears
-  that ground first. Which objects within `r` of the place (units, buildings, scenery), by what (the
-  life system's kill, an explosion, a deletion), the unit of `delay`, and whether 0 is at once.
 
 ## Mission progression
 
@@ -255,12 +234,12 @@ remainder a closed line names stays here as a line of its own.
   ([19-descriptions](docs/19-descriptions.md)).)
 - [ ] What the word after `data.tma`'s map path was for — it marks the free-play maps, but `Single.02`
   disagrees with every reading. (~~what reads a building's start flag back, and the word after the map
-  path~~ — closed 2026-09-18, both negatively and with controls. **Nothing reads either.** `IMission`
+  path~~ — closed 2026-09-18, both negatively and with controls: *nothing reads either*. `IMission`
   slot 11 returns the map word and no module calls it; the mission pointer is never stored outside the
-  five frames that hold it. `IBuilding`'s start-flag getter has no caller either, and the field it reads —
-  `CBuilding +0xb8`, the building's object state, 1 by construction and 2 when the flag is set — is only
-  ever tested against zero, which a placed building never is. So the flag changes nothing
-  ([04-missions](docs/04-missions.md)).)
+  five frames that hold it. **The start flag's half was
+  wrong**, corrected 2026-09-30: the landscape insertion calls `IBuilding` slot 13 through an answer it
+  keeps on the stack, and the flag keeps a building at its file height
+  ([04-missions](docs/04-missions.md#the-start-flag-keeps-a-building-at-its-file-height--read-and-measured)).)
 - [ ] What the landscape, camera and atmosphere component constructors read.
 
 ## Mission 02, *The Constructor*
@@ -289,7 +268,7 @@ remainder a closed line names stays here as a line of its own.
 
 **Walking into the Large Factory**
 
-- [ ] [M14] The 16 of 167 placed buildings that do not stand on their cut contour's mean height — 8 of the 19 bridges and 8 campaign buildings — when the insertion sets a building down on that mean while `IBuilding` slot 13 answers 1 (`Terrain.dll:0x100147cc`; the constructor sets 1, `0x100569b4`), and who calls the flag's setter, slot 12 (`0x10056cb0`). *Measured*: 151 of 167 stand on the mean to 1 cm, where the mean of the ring's own corners matches 40. The engine keeps every building at its mission height, and cuts the landscape by a mask with a buried apron rather than re-triangulating it ([03-terrain](docs/03-terrain.md#not-established)).
+- [ ] [M14] Why 4 placed buildings whose start flag is clear stand 0.03 to 0.14 off their cut contour's mean, where the insertion sets such a building down: C01 Mission 01's bunker (0.14), C03 Mission 01's generator (0.14) and bunker (−0.07), and C04 Mission 02's generator (0.03). The other 12 of the 16 off their mean carry the flag, which keeps them at their file height ([COMPLETED-QUESTIONS](COMPLETED-QUESTIONS.md#mission-02-the-constructor)). The engine keeps every placed building at its mission height, sets down one the console's `bcreate` makes, and cuts the landscape by a mask with a buried apron rather than re-triangulating it ([03-terrain](docs/03-terrain.md#a-building-is-set-down-on-the-mean-of-its-contour--read-and-measured)).
 - [ ] [M11] ~~What reconciles two reads with the recordings: the slope brake on a building's faces, which kept the hero off Mission 04's teleport chamber~~ — **answered** 2026-09-22 for the brake: it acts only while body `+0x1aa` is set (`Control.dll:0x10015690`), and the ground contact clears that on any held face whose class carries 2 (`0x1001a9b4`–`0x1001a9be`, re-read by the coordinator): a building face's triangle word, where 2 marks a walk-through floor, and the landscape's class from flags `0x8000`, on **0 of 275,882** landscape faces where `0x2000` is on 6,102 and `0x4` on 32,450. Of `fortif.rlb`'s 15,562 walkable level-0 faces 4,534 are floors, and the stairs and the chamber are among them: the engine's hero now wins Mission 04 6.0 s after the landing, the recording's 4.6. **What is left: what keeps a flyer's sphere off a building's floor it is made on.** With the read walk-point heights Mission 02's L-2f climbs clear of the factory rather than onto its roof, but kept, the floors still push it 33 m up in its first frame, so no robot keeps them ([24-motion](docs/24-motion.md#the-ground-inside-a-building--read-in-part-and-measured)).
 - [ ] [M8] What holds a machine the AI drives on a slope, when the game never brakes one: the brake is passed over while a velocity the Wizard wrote stands (body `+0x1a8`, set by `SetTangSpeed`, `Control.dll:0x100044f1`, cleared by the command's setter, `0x1000442b`, tested at `0x1001566b`). Without the brake the engine's AI units walk up 40° faces and a small warbot's refit never reaches Mission 03's bunker dock, so the engine keeps braking them, filed under the README's "Read since the stand-in was written"; what does the holding in the game — the local path, the areals, the planner's anchor boxes — is not established ([24-motion](docs/24-motion.md#ground-and-slope--read)).
 - [ ] [M14] What the engine still draws that the portal fade would leave out, and two figures under it: every cell is drawn, so beyond far a black doorway covers a room the game skips; the field of view in play is taken as 1.3 rad, not read; and 57 non-portal `DEFAULT` batches — on trees, internal systems, turrets and lower detail levels — which the game draws black and openparkan leaves out ([24-motion](docs/24-motion.md#not-established)).

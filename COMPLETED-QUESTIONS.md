@@ -12,6 +12,27 @@ engine changed, and every premise of an earlier round it corrected.
 The two files were one until 2026-09-30, so where a round below says *this
 file* it means the queue as it then stood, closed lines and all.
 
+The console's three commands were worked on **2026-09-30**, raised by checking Campaign 2
+Mission 02 against a recording. All three closed, with the engine made to answer function 57:
+`create` makes a unit the way the mission loader does and files it with its clan before the script
+goes on; `bcreate` makes a building standing finished; `death` fells scenery. The negatives each
+carry their control. `bcreate` runs no construction sphere, against the builder's call that passes
+create bit 1 and gets one. `death` kills no unit or building, against the construction sphere's
+kill, whose `0x414` takes units through the same query. And the two dropped fields are read nowhere,
+against the four fields beside each that are read. **This work corrects two premises.**
+[04-missions](docs/04-missions.md#the-start-flag-keeps-a-building-at-its-file-height--read-and-measured)
+closed the start flag on 2026-09-18 as changing nothing, from a pass that found no caller of
+`IBuilding` slot 13. The landscape insertion calls it twice through an answer it keeps on the stack,
+and the flag keeps a building at its file height, which accounts for 12 of the 16 buildings
+[03-terrain](docs/03-terrain.md) had standing off their contour's mean. The earlier entry is rewritten
+where it stands. And [34-progression](docs/34-progression.md)'s table of every clan-table read
+followed by a slot-4 filing was two short, the console's own. A sweep of all 17 reads finds ten, the
+eight it had among them. [36-factory](docs/36-factory.md)'s *derived* "the construction is the only
+robot the game adds at run time" was wrong for the same reason, and what raises its ready voice is
+now read as a building's own callback. One thing ran the other way. The engine's `place_building`
+gave every building a builder puts up the same logical id, `0x80000000`, since scenery's −1 topped
+its count. It now counts past it.
+
 A round of twelve was worked on **2026-09-18**, four areas of three. Seven
 closed outright, four are answered as far as the shipped files allow — each
 with a control showing the search that found nothing would have found
@@ -1452,6 +1473,53 @@ tests, 1015 of 1015 checks, 509 engine tests and 201 install tests, `ruff` clean
   design cost 0 ore and 0 power. Fixed; the enemy now builds three small *SSW-X Warriors* it
   pays for ([15-behaviour](docs/15-behaviour.md#what-each-select_-scores--read)).
 
+- [x] ~~**What the console's `create` does with its arguments.**~~ — closed 2026-09-30, **and the
+  engine now answers function 57**. The console cuts the line at `(` and `)`, matches the name with
+  `_stricmp`, and the handler cuts the fields at commas, spaces and `)` and does nothing unless all six
+  are there; every number goes through `atol`, so they are **whole numbers**, and the **sixth is
+  converted and dropped** (`iron3d.dll:0x1003d280`–`0x1003d4d4`). The file is `units/auto/<file>`
+  (`0x10103ef4`): all **13** files the install's 19 `create` and `bcreate` lines name are in
+  `UNITS\AUTO`, of the 23 there. **The third field is not a height but the heading**: `0x10077520`
+  builds a turn about z from its cosine and sine, the unit's x axis to (cos *z*, sin *z*), as a placed
+  object's `rotation` does, and stands the unit on the level's probe for the highest landscape or
+  building surface **plus 2** (`0x10077562`; the loader's placer adds 1, `0x100774a7`). The clan is the
+  index into the level's clan table. The id is new (−1 passed, create bit 2 clear), there is no host
+  building, and **create flag 8 is set unless the game is the auto-demo** (`0x1007765a`), so the unit
+  takes a free mind of its clan and is not made without one. The handler files it on the clan's SuperAI
+  as slot 4's **event 1** (`0x1003d560`), the placed unit's event, **inside the call to function 57**, so
+  function 31 counts it and `TAKE_ALL_FREE` takes it. C02 Mission 02's `Mission` handler counts `Enm2`'s
+  robots in the same run as its three `create`s (`c2m2p` nodes 40–53). *Measured*: every shipped
+  `create` finds a mind free at the start, the two `Enm2`s having none placed. The engine files each
+  unit with its clan's list during the call and makes it as the run ends; the recording's
+  reinforcements now arrive for `Enm2`, and the bonus objective waits for them
+  ([15-behaviour](docs/15-behaviour.md#what-the-consoles-create-bcreate-and-death-do--read-and-measured)).
+- [x] ~~**What `bcreate` makes.**~~ — closed 2026-09-30. **A building standing finished, for the clan
+  the fourth field names, under a new id, set down on the ground whatever z it is given.** The matrix is
+  unturned with translation (x, y, z) as given, handed to the mission loader's building maker
+  (`0x10033cb0`) with the start flag 0 and id −1, and the handler files the building as slot 4's
+  **event 2** (`0x1003dad8`). **No construction sphere**: `CreateObjectFromScheme` gives order 18 only
+  on create bit 1 (`ArealMap.dll:0x10015df3`), which `0x10033cb0` never sets; the control is the
+  builder's call, which passes 2 (`Behavior.dll:0x10029268`) and gets the sphere. Sent no code, its
+  controller plans from the constructor's record to the code-0 anchor, and on **all 30** `fortif.rlb`
+  controllers the first state on that way runs **action 20**, placing it in the landscape at once, and
+  none runs action 1 (*measured* through the engine's planner). The insertion then **sets it down on
+  the mean of its cut contour**, its start flag clear: C04 Mission 02 asks for z 10 over ground at 51.1
+  (the map's lowest vertex 49.0), and the Teleport's origin comes to 47.82, its base on the mean, as
+  Tut_4's placed Main Teleport stands 3.7 under its ground. **This corrected
+  [04-missions](docs/04-missions.md#the-start-flag-keeps-a-building-at-its-file-height--read-and-measured)**,
+  below ([15-behaviour](docs/15-behaviour.md#what-the-consoles-create-bcreate-and-death-do--read-and-measured)).
+- [x] ~~**What `death(x, y, r, delay)` kills.**~~ — closed 2026-09-30. **Scenery alone, at once, by the
+  life system's kill.** The sphere is centred on the probe's surface at (x, y), with nothing added, and
+  has radius r. The world's slot 3 (`Terrain.dll:0x10025f40`) is asked for its objects with mask
+  **`0x400`**, and each gets interface `0x16` slot 7, the kill (`Control.dll:0x1000eb70`)
+  (`iron3d.dll:0x1003dcef`–`0x1003dda2`). The construction sphere's kill is the same with `0x414`. Bit
+  *n* is class *n* ([42-selection](docs/42-selection.md) reads `0xa` and `0x41a` so), so `0x400` is
+  **class 10, trees and stones**, taken when their own sphere meets the query's, and never a unit, a
+  building or the hero. **The delay is converted and never read.** *Measured*, engine: C04 Mission
+  02's line fells the stone on the site (radius 277, 20 off) and one tree (radius 88, 140 off), and
+  none of the other 15 pieces of scenery
+  ([15-behaviour](docs/15-behaviour.md#what-the-consoles-create-bcreate-and-death-do--read-and-measured)).
+
 ## Mission progression
 
 [34-progression](docs/34-progression.md#not-established)
@@ -1689,6 +1757,21 @@ Worked on 2026-09-22 as the eighth round, against `0715e11`: of the 9 still open
 - [x] ~~[M11] Whether the slope brake reads a building's stair faces, and who sets a collision object's flags, so which movers keep the floors in their push-out.~~ — closed 2026-09-21 by read. The collision object's slot 5 (`Control.dll:0x1001f670`) sets its flags, called only by the control dispatchers at the end of message 4 (`0x10007bd0`, `0x100319c5`) with the current state's word: flag 8 unless the word carries bit 4, flag 4 from `0x4000000`. None of the 206 controllers with states mixes bit 4 — 99 carry it in every state, the hero's `r_h_02` in 105 of 105, and 107 in none, all 9 flying chassis among them — so **walkers lack 8 and flyers keep the floors**. The slope brake reads a building's floors too, driven by the lift's averaged ground normal (body `+0x194`, `98dcfbb`). **Neither read is in the engine**, and the new line below says why ([24-motion](docs/24-motion.md#the-ground-inside-a-building--read-in-part-and-measured)).
 - [x] ~~[M14] Who calls `CBuilding::PortalDrawNotify` (`Terrain.dll:0x1005a5d0`) with a portal's face, and so which cells a building draws.~~ — closed 2026-09-22. **CShade's portal fade, `0x1002c4d0`**: `CBuilding` answers `IMesh2`'s interface `0x18` with its `+0x10` interface, whose slot 4 is the notify (`AniMesh`'s own is a bare `ret 4`, `0x10007e80`); CShade's mesh draw (`0x10044ea0`) sends every batch whose record's first dword carries 8 to the fade (`0x1004501e`–`0x1004502d`, re-read by the coordinator), which sets the primitive's alpha from the camera's distance to its first vertex and the field of view, and calls slot 4 or not (`0x1002c65e`). By the batch word: `0x10`, 66 green signs, fade in from √d = 2.6/f to 7.8/f, the room always drawn; `0x40`, 170 open quads, alpha 0, the room always drawn; neither, 397 doorways, fading to black between 1.3·`PortalNearDist`/f and 1.3·`PortalFarDist`/f (75 and 95 at 1.3 rad), the room not drawn beyond far. **A premise of docs/24 overturned**: `PortalNearDist` and `PortalFarDist` are not read by nothing — they are settings entries copied to CShade `+0x1660`/`+0x1664` (`0x10046d77`, `0x10046d8e`) and read by the fade. **The engine was wrong** and dropped every portal quad; it now draws signs and doorways translucent by the read fade, which shows the recording's green arrow signs in the corridor to the pod (98–99 s) ([24-motion](docs/24-motion.md#a-building-is-drawn-cell-by-cell-through-its-portals--read)).
 - [x] ~~[M14] Where the node matrix an action-3 effect takes as its frame (`Effect.dll:0x1000625a`, property 2) comes from.~~ — closed 2026-09-21: `IAnimation` (interface `0xb`) slot 4 asked with 2 (`AniMesh.dll:0x10005320`) returns the node's `+0x20`, the world matrix the pose walk builds — the object's world matrix times the node's chain of keyed poses. So **the game plays a door's sound at the node's origin**, 30.8 m from the three factories' side doors and more than 10 m off on 68 of the 112, and all but inaudible in the doorway. The engine had moved it to the level-0 sphere's centre and now follows the read; its audio install test is inverted to pin that. The sibling row, the matrix `AniMesh` slot `0x10` hands the effect manager for a beam's muzzle, closes with it: node 0's world pose was right ([13-control](docs/13-control.md#a-buildings-load-group--read-and-measured)).
+- [x] ~~[M14] The 16 of 167 placed buildings that do not stand on their cut contour's mean height, and
+  who calls the flag's setter, slot 12~~ — closed 2026-09-30, and **it overturned a premise**: this
+  queue had closed "what reads a building's start flag back" on 2026-09-18 as *nothing*. The insertion
+  asks the building for `IBuilding` at `Terrain.dll:0x1000e5fc` and keeps it on the stack (`[ebp-0x7ec]`),
+  and calls **slot 13** through it twice, at `0x10011147` and `0x100147cc`. The first lays the final
+  outer contour at its mean and the second takes the drop off the matrix, each **only on 1**.
+  `ArealMap.dll:0x10015a0d` calls slot 12 with 2 on the start flag, so **the flag keeps a building at
+  its file height**. The earlier pass followed an answer only while it stayed in a register.
+  *Measured*, with the engine's cut contour: **150 of the 154** buildings without the flag stand on
+  their mean to a centimetre, the other 4 within 0.14; **12 of the 13** with it stand off it by 0.2 to
+  5.2, the 13th 0.004. Those 12 are the 8 bridges and C02 Mission 03's two mines, factory and
+  generator. The setter's caller was already read
+  ([04-missions](docs/04-missions.md#the-start-flag-keeps-a-building-at-its-file-height--read-and-measured),
+  [03-terrain](docs/03-terrain.md#a-building-is-set-down-on-the-mean-of-its-contour--read-and-measured)).
+  The four unflagged ones are queued.
 
 ## Mission 03, *The Field Base*
 
