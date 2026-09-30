@@ -210,6 +210,16 @@ impl Cockpit {
                 self.commander.page = 0;
             }
             self.commander.entered = command;
+            // A factory panel that opens, from its pod or on page 5, or turns to another plant,
+            // shows the unit in production. The designer drawn over the screen keeps it open, so
+            // a design accepted there stays shown.
+            let open = factory::open(play, self.commander.page);
+            if open != self.factory.open
+                && let Some(t) = open
+            {
+                play.show_production(t);
+            }
+            self.factory.open = open;
         }
         if command {
             self.commander.update(play, now_ms);

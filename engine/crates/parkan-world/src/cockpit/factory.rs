@@ -70,11 +70,24 @@ pub enum Click {
     Exit,
 }
 
-/// What the screen keeps between frames: the Ore and Energy percentages as displayed.
+/// What the screen keeps between frames: the Ore and Energy percentages as displayed, and the
+/// plant whose panel was up at the last update.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Screen {
     pub shown: [i32; 2],
     pub stepped_ms: f64,
+    pub open: Option<usize>,
+}
+
+/// The plant whose panel is up in `play`: its own screen, or the commander's page 5 on the
+/// selected factory, whose panel it draws above the rows. `page` is the commander's page.
+pub fn open(play: &Play, page: u8) -> Option<usize> {
+    let factory = |t: usize| play.units.get(t).is_some_and(|u| u.type_word == crate::selection::FACTORY);
+    match play.mode() {
+        crate::play::Mode::Factory(t) => Some(t).filter(|&t| factory(t)),
+        mode if mode.commands() && page == 5 => play.selected.first().copied().filter(|&t| factory(t)),
+        _ => None,
+    }
 }
 
 /// The percentage the production row shows for a build's `progress`: rounded, and 0 in batch

@@ -204,6 +204,67 @@ fn c02_m01s_heavy_warbot_objective_completes_once_the_dead_warbot_is_deleted() {
     assert_eq!(state(&play), 1, "the objective is complete");
 }
 
+/// C02 Mission 01's Factory is the enemy's, and building, when the hero takes it from its pod:
+/// the build is dropped and the screen opens on the mission's prebuilt SWW-X Warrior with
+/// nothing in production, as the recording shows at 9:36. While a build of the player's runs, a
+/// recent project's button shows that design and the active project's the build, and the
+/// screen opened again goes back to the build.
+#[test]
+#[ignore = "needs the game install"]
+fn c02_m01s_captured_factory_drops_the_enemys_build_and_its_designs_can_be_looked_through_while_one_runs() {
+    use parkan_world::cockpit::Cockpit;
+    use parkan_world::cockpit::factory::Click;
+    use parkan_world::hud::Pages;
+    use parkan_world::play::{Mode, Play};
+
+    let game = gamedir::find(None).expect("a Parkan install: set PARKAN_DIR");
+    let mut play = campaign_play(gamedir::C02_MISSION_01);
+    let plant = play.units.iter().position(|u| u.type_word == 0x8000_0010).expect("the enemy's Factory");
+    let f = play.factories.iter().position(|f| f.target == plant).unwrap();
+    let shown = |play: &Play| play.factories[f].shown().map(|p| p.name.clone()).unwrap_or_default();
+    let building = |play: &Play| play.factories[f].build.as_ref().map(|b| b.project.name.clone());
+    play_for(&mut play, 30.0, |_| {});
+    assert!(building(&play).is_some(), "the enemy is building");
+
+    let pages = Pages::open(&game).unwrap();
+    let mut cockpit = Cockpit::open(&game, &pages, &play).unwrap();
+    let update = |cockpit: &mut Cockpit, play: &mut Play| {
+        let now = play.hero.time_ms;
+        cockpit.update(play, now);
+    };
+    assert!(play.stand_on_pod(plant));
+    play_for(&mut play, 6.0, |_| {});
+    update(&mut cockpit, &mut play);
+    assert_eq!(play.units[plant].clan, Some(play.player_clan));
+    assert_eq!(play.mode(), Mode::Factory(plant));
+    assert_eq!((building(&play), play.factories[f].batch), (None, false), "the enemy's build is dropped");
+    assert!(shown(&play).starts_with("SWW-X"), "{}", shown(&play));
+
+    // The player builds it, and accepts a second design while the build runs: the screen stays
+    // open over the designer, so the new design stays shown.
+    play.factory_click(plant, Click::Build);
+    let made = building(&play).expect("production starts");
+    let mut other = play.factories[f].projects[0].clone();
+    other.name = "SWW-Y Warrior".to_owned();
+    play.factories[f].accept(other);
+    update(&mut cockpit, &mut play);
+    assert_eq!(shown(&play), "SWW-Y Warrior");
+    play.factory_click(plant, Click::Active);
+    assert_eq!(shown(&play), made);
+    play.factory_click(plant, Click::Recent(0));
+    assert_eq!(shown(&play), "SWW-Y Warrior");
+    play_for(&mut play, 1.0, |_| {});
+    assert_eq!(building(&play).as_deref(), Some(made.as_str()), "the build runs on");
+
+    // Left and opened again, the screen shows the build, the active project's button lit.
+    play.factory_click(plant, Click::Exit);
+    update(&mut cockpit, &mut play);
+    assert_eq!(play.mode(), Mode::OnFoot);
+    play.modes.push(Mode::Factory(plant));
+    update(&mut cockpit, &mut play);
+    assert_eq!((play.factories[f].selected, shown(&play)), (None, made));
+}
+
 #[test]
 #[ignore = "needs the game install"]
 fn c02_m03s_neutral_mine_holds_its_pod_still_while_it_opens_and_the_hero_on_it_captures() {

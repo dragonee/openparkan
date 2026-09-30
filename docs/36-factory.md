@@ -616,6 +616,12 @@ when there are none (*derived*).
    | recent project i | select it (only if all its parts are researched); the view file always, the build file only while idle |
    | exit or Esc | pop mode 5 and give the hero back |
 
+   So a player looks through the recent projects while a build runs on, and the
+   active project's button goes back to it. *The engine's*: the panel opens on
+   the unit in production, its button lit, each time it comes up (from the pod,
+   or on the commander's page 5 or another plant's panel); what `+0x04` holds
+   across a closing and a reopening is not read.
+
 4. **Production:**
    - The factory runs order 12 with the design, by name. Mind, ore, power and
      time are docs/23's; a free bot is 1 power and the size-table time.
@@ -629,6 +635,10 @@ when there are none (*derived*).
      a warbot"* at the next Mission run.
    - Queue `VOICE_UNIT_READY` for the player's clan.
    - In batch, restart while a mind is free.
+   - A plant that changes owner drops its build (*seen*: C02 Mission 01's
+     enemy Factory, taken from its pod while building, opens on the mission's
+     prebuilt *SWW-X Warrior* with nothing in production — "Let's Play - Parkan:
+     Iron Strategy, Part 3", 9:36). How the capture ends order 12 is not read.
 5. **While up**, the mission runs on, the `Mission` handler included; neither the
    screen nor the designer pauses anything. The designer draws no world behind
    it, and puts the hero's night sight out. The pod's green glass stays around

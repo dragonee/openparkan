@@ -119,9 +119,38 @@ impl Factory {
         self.build.is_none()
     }
 
-    /// The project shown: the one in production, else the selected one.
+    /// The project shown: the selected recent project, else the one in production. A recent
+    /// project's button selects it and the active project's selects none, which shows the unit
+    /// in production (`0x100982a0`, `0x100985f0`), so a player looks through the designs while
+    /// a build runs on: one of the install's saved pairs shows an S-31 while an M-42t is built
+    /// (docs/36, "Projects").
     pub fn shown(&self) -> Option<&Project> {
-        self.build.as_ref().map(|b| &b.project).or_else(|| self.selected.and_then(|i| self.projects.get(i)))
+        self.selected.and_then(|i| self.projects.get(i)).or_else(|| self.build.as_ref().map(|b| &b.project))
+    }
+
+    /// Show the unit in production, as the active project's button does, when there is one: what
+    /// the panel opens on. The engine's choice; what the game keeps selected across a reopening
+    /// is not read (docs/36, "For an engine").
+    pub fn show_production(&mut self) {
+        if self.build.is_some() {
+            self.selected = None;
+        }
+    }
+
+    /// With recent projects and none shown, the panel selects project 0 (`0x10097a06`).
+    pub fn settle(&mut self) {
+        if self.shown().is_none() && !self.projects.is_empty() {
+            self.selected = Some(0);
+        }
+    }
+
+    /// The build dropped as the building changes owner, whether or not it was a batch: true
+    /// when there was one, whose reservation the old owner then frees.
+    pub fn abort(&mut self) -> bool {
+        let running = self.build.take().is_some();
+        self.batch = false;
+        self.settle();
+        running
     }
 
     /// A design accepted in the designer: the newest project, selected (`0x100517d2`).
@@ -171,9 +200,7 @@ impl Factory {
         }
         self.build = None;
         self.batch = false;
-        if self.selected.is_none() && !self.projects.is_empty() {
-            self.selected = Some(0);
-        }
+        self.settle();
         true
     }
 
@@ -477,5 +504,41 @@ mod tests {
         assert!(f.build.is_some());
         // A second order while one runs is refused too, and again queues nothing.
         assert!(!f.start(false, 1));
+    }
+
+    #[test]
+    fn a_recent_project_shows_while_a_build_runs_and_the_active_one_shows_the_build() {
+        let mut f = factory();
+        for name in ["p1", "p2"] {
+            f.prebuild(project(name));
+        }
+        assert!(f.start_project(project("made"), false, 1));
+        // The panel opens on what is being made, the active project's button lit.
+        f.show_production();
+        assert_eq!((f.selected, f.shown().map(|p| p.name.as_str())), (None, Some("made")));
+        // A recent project's button shows that design, and the build runs on.
+        f.selected = Some(1);
+        assert_eq!(f.shown().map(|p| p.name.as_str()), Some("p1"));
+        assert_eq!(f.build.as_ref().map(|b| b.project.name.as_str()), Some("made"));
+        // Opening the panel again goes back to the build.
+        f.show_production();
+        assert_eq!(f.shown().map(|p| p.name.as_str()), Some("made"));
+        // Idle, there is nothing to go back to: the selection stays.
+        f.selected = Some(1);
+        f.build = None;
+        f.show_production();
+        assert_eq!(f.selected, Some(1));
+    }
+
+    #[test]
+    fn a_capture_drops_the_build_and_the_panel_shows_project_0() {
+        let mut f = factory();
+        f.prebuild(project("p1"));
+        assert!(f.start_project(project("enemy"), true, 1));
+        f.show_production();
+        assert!(f.abort(), "a build was running");
+        assert_eq!((f.build.is_none(), f.batch), (true, false));
+        assert_eq!(f.shown().map(|p| p.name.as_str()), Some("p1"));
+        assert!(!f.abort(), "nothing left to drop");
     }
 }

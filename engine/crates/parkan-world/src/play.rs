@@ -2825,6 +2825,15 @@ impl Play {
         let owner = self.units[t].clan;
         if owner != Some(taker) {
             self.units[t].clan = Some(taker);
+            // A plant stops what it was making for its old owner, who gets the mind its start
+            // reserved back; the new owner's panel opens on its recent projects (*seen*, docs/36,
+            // "For an engine"; how the capture ends order 12 is not read).
+            if let Some(f) = self.factories.iter_mut().find(|f| f.target == t)
+                && f.abort()
+                && let Some(old) = owner
+            {
+                self.release_mind(old);
+            }
             if let Some(p) = self.progression.as_mut() {
                 let id = self.units[t].logical_id;
                 p.progress.captured(id, taker);
@@ -3019,12 +3028,23 @@ impl Play {
             }
             let free = self.free_minds(clan);
             let factory = &mut self.factories[f];
-            if factory.batch {
+            // A batch starts the design it has just made again, whatever the panel shows.
+            let restarted = factory.batch && {
                 factory.batch = false;
-                if factory.start(true, free) {
-                    self.reserve_mind(clan);
-                }
+                factory.start_project(project, true, free)
+            };
+            factory.settle();
+            if restarted {
+                self.reserve_mind(clan);
             }
+        }
+    }
+
+    /// The factory screen of the plant that is target `target` opens, from its pod or on the
+    /// commander's page 5: it shows the unit in production, when there is one.
+    pub fn show_production(&mut self, target: usize) {
+        if let Some(f) = self.factories.iter_mut().find(|f| f.target == target) {
+            f.show_production();
         }
     }
 
