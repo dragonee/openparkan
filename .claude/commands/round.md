@@ -15,8 +15,9 @@ group size so every agent gets a coherent area.
 
 ## 1. Pick the batch
 
-Read `OPEN-QUESTIONS.md` and pick unticked questions, grouped by the file's own
-area headings. Prefer, in this order:
+Read `OPEN-QUESTIONS.md` and pick questions, grouped by the file's own area
+headings. It holds only the open lines; closed ones, with their answers, are in
+`COMPLETED-QUESTIONS.md`. Prefer, in this order:
 
 1. **Questions the engine answers with a stand-in** — `[M1]`–`[M5]` in the queue,
    and the stand-ins table in `engine/README.md`. These give the agent something
@@ -33,8 +34,9 @@ Two constraints on the grouping:
   does not. Say in each brief which docs that agent owns, and name any doc a
   neighbour owns this round.
 - **Check the line is not already answered.** Queue lines go stale — an earlier
-  round sometimes answers a question and never ticks the file. Grep the docs and
-  `git log` for the subject before spending an agent on it.
+  round sometimes answers a question and never moves it out of the queue. Grep
+  the docs, `COMPLETED-QUESTIONS.md` and `git log` for the subject before
+  spending an agent on it.
 
 ## 2. Check the engine first
 
@@ -45,10 +47,11 @@ to an agent, look at how the engine implements it now: `codegraph explore
 subject's row in `engine/README.md`.
 
 - **Researched already.** The code cites a read for it — the addresses, or a
-  doc section marked *read* or *measured* — and no `STAND-IN` marks it. Mark
-  the question completed in the queue (`- [x] ~~…~~ — closed <date>: already in
-  the engine`, with the code's citation and the commit that brought it, found by
-  `git log -S`), research it no further, and pick another question in its place.
+  doc section marked *read* or *measured* — and no `STAND-IN` marks it. Move
+  the question to `COMPLETED-QUESTIONS.md`, under its section, as closed (`- [x]
+  ~~…~~ — closed <date>: already in the engine`, with the code's citation and the
+  commit that brought it, found by `git log -S`), research it no further, and
+  pick another question in its place.
 - **A stand-in.** The code marks it `// STAND-IN: docs/NN#section`, or its row
   still sits in the stand-ins table: the engine is guessing. Research it further
   — it goes to an agent, with the stand-in's current wording in the brief.
@@ -121,8 +124,8 @@ findings, the stand-in's current wording, the doc's own "next place to look").
 > shifting test counts, and once a compile error from a type that did not exist
 > in that tree.
 >
-> **Do not touch `OPEN-QUESTIONS.md`** — the coordinator updates the queue at the
-> end. Do not touch docs outside your list unless a fact genuinely belongs there;
+> **Do not touch `OPEN-QUESTIONS.md` or `COMPLETED-QUESTIONS.md`** — the
+> coordinator updates both at the end. Do not touch docs outside your list unless a fact genuinely belongs there;
 > if it does, keep the edit small and say so in your report.
 >
 > **Report back**: your branch name, your commits (hash + subject), and for each
@@ -160,14 +163,18 @@ cd engine && cargo test --workspace -- --ignored   # install-backed, ~2.5 min
 
 ## 6. Write up the queue
 
-`OPEN-QUESTIONS.md` is the coordinator's alone. For each question in the batch,
-replace the `- [ ]` line with a `- [x] ~~struck~~ — closed <date>:` entry
-carrying the finding, its counts and its control, and a link to the doc that now
-holds it. A question that did not close keeps its box and is **rewritten to say
-what is left**, not what was asked.
+`OPEN-QUESTIONS.md` and `COMPLETED-QUESTIONS.md` are the coordinator's alone.
+For each question in the batch that closed, remove its `- [ ]` line from the
+queue and add a `- [x] ~~struck~~ — closed <date>:` entry to
+`COMPLETED-QUESTIONS.md`, under the same section and subheading, carrying the
+finding, its counts and its control, and a link to the doc that now holds it. A
+remainder the answer names goes back into the queue as a line of its own. A
+question that did not close stays in the queue and is **rewritten to say what is
+left**, not what was asked.
 
-Then add a paragraph to the summary at the top of the file: what closed, which
-were negatives and what their controls were, where the engine changed, and —
+Then add a paragraph to *The rounds* at the top of `COMPLETED-QUESTIONS.md`: what
+closed, which were negatives and what their controls were, where the engine
+changed, and —
 most importantly — **any premise of an earlier round this one corrected**. A
 round that overturns an earlier count says so in the file, and the earlier entry
 is rewritten where it stands rather than quietly replaced. Recording which way
