@@ -528,8 +528,15 @@ shows it × 100 as the bar's `"%d%%"`, rounded to the nearest (`fistp`).
 - for the player's clan, when not loading (`+0xe5`), queues `VOICE_UNIT_READY`
   (`vc_u_ready.wav`) through `0x10061ac0`.
 
-That the construction is what raises the callback is *derived*: it is the only
-robot the game adds at run time. No text line is made.
+That the construction is what raises the callback was *derived* here from its
+being the only robot the game adds at run time, which it is not: the console's
+`create` adds robots too
+([15-behaviour.md](15-behaviour.md#what-the-consoles-create-bcreate-and-death-do--read-and-measured)).
+What is *read* is where the callback is registered. Each building record's first
+pass through the game frame registers it on the object at the record's `+0x44`,
+through that object's slot 37 with 2 (`0x1003338f`–`0x100333a0`). **So it is a
+building's callback.** A unit the console makes is filed by the handler itself
+and raises no `VOICE_UNIT_READY` (*derived*). No text line is made.
 
 **Batch.** Every frame the clan's factory list is walked (`0x100874b0`, from
 `0x1005edbe`):

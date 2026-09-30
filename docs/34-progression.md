@@ -796,6 +796,13 @@ followed by a call through slot 4 are:
 | `0x10077511` | 1 | a placed unit's record at the load |
 | `0x1006058d` | 1 | game message 1 for a class-4 id, in a network game |
 | `0x100334f5`, `0x1007204d` | 1 | a building's message-2 handler (`0x10033490`), and `0x10071cd0`, not followed |
+| `0x1003d560` | 1 | the console's `create`, the unit it has just made ([15-behaviour.md](15-behaviour.md#what-the-consoles-create-bcreate-and-death-do--read-and-measured)) |
+| `0x1003dad8` | 2 | the console's `bcreate`, the building it has just made |
+
+The last two were missing from this table as first written. A sweep of all 17
+reads of `+0x774` in `iron3d.dll`, each followed up to 30 instructions to a
+call through `+0x10`, finds these ten and no more. The eight above are the
+control.
 
 A builder's building comes through the third and fourth. `CreateObjectFromScheme`
 hands the new object to `World3D.dll`'s `AddObjectToGame`, which ends by sending the

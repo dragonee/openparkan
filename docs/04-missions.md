@@ -174,12 +174,13 @@ the scenery. `MisLoad.dll` hands it each record through `IMission` slot 10
   on. *Measured*: it marks **exactly one half of each of the nine bridge
   pairs** — always the half with the later logical id and the angle π further
   on — and 4 other buildings (two mines, a plant, a generator); 6 units and 4
-  trees set it to no effect. What the field is called, and that it changes
-  nothing, is [below](#the-start-flag-changes-nothing--read).
+  trees set it to no effect. What the field is called, and that it keeps the
+  building at its file height, is
+  [below](#the-start-flag-keeps-a-building-at-its-file-height--read-and-measured).
 - **The property table's leading word** is read into a local and dropped
   (`0x10003ab0`); it is 1 on all 864.
 
-### The start flag changes nothing — *read*
+### The start flag keeps a building at its file height — *read*, and *measured*
 
 `IBuilding`'s vtable is `Terrain.dll:0x1009b52c`, 22 slots. Slot 12
 (`0x10056cb0`, 2 arguments) writes the interface's `+0xac` and slot 13
@@ -187,38 +188,60 @@ the scenery. `MisLoad.dll` hands it each record through `IMission` slot 10
 `CBuilding +0xc`, so `+0xac` is `CBuilding +0xb8` — which is the offset this
 page already named.
 
-**Slot 13 has no caller.** Enumerating every `QueryInterface(0x17)` site in the
-install — `mov edx, 0x17` then `call [vtable]` with an out-pointer, **23 sites**
-across `AniMesh`, `ArealMap`, `Behavior`, `Control`, `Terrain` and `iron3d` —
-and every vtable offset then called on the answer, rejecting any call whose
-argument run does not match the slot's own `ret n`, gives: slot 3 (2 arguments)
-one caller, slot 12 (2) two, slot 14 (2) one, slot 15 (3) twelve, slot 16 (2)
-six, and **slot 13 (1) none**. The control is the writer of that same field:
-`ArealMap.dll:0x10015a0d` tests `dwCreateFlag` bit 0, asks for `0x17` and calls
-slot 12 with the literal `2` — the path described above — and the pass finds
-it. The arity check is what makes the pass trustworthy: without it the pass
-also reported two hits whose receiver register had its definition killed by an
-intervening call.
+**The field is the building's object state.** Every `+0xb8` memory operand in
+`Terrain.dll`, mapped to its enclosing function and named by the assertion
+string that function carries, gives five `CBuilding` sites and no more:
+`0x100569b4`, `CBuilding::CBuilding()`, writes **1**; `0x10056cb9`, slot 12,
+writes its argument; `0x10056cd6`, slot 13, reads; `0x10057868` and
+`0x1005797e`, both in `CBuilding::SendMsg()`, each `cmp [this+0xb8], 0`; and
+`0x10058993`, `CBuilding::SetObjectState()`, writes it from the **last**
+element of the object's state array, asserting that element's type code is 4.
+`SetObjectState` names the field: **`CBuilding +0xb8` is the building's object
+state**, 1 by construction and 2 when the mission's flag is set. `SendMsg`
+tests it only against zero, which a placed building never is.
 
-**But the field itself is read, and it has a name.** Every `+0xb8` memory
-operand in `Terrain.dll`, mapped to its enclosing function and named by the
-assertion string that function carries, gives five `CBuilding` sites and no
-more: `0x100569b4`, `CBuilding::CBuilding()`, writes **1**; `0x10056cb9`, slot
-12, writes its argument; `0x10056cd6`, slot 13, reads — no caller;
-`0x10057868` and `0x1005797e`, both in `CBuilding::SendMsg()`, each
-`cmp [this+0xb8], 0`; and `0x10058993`, `CBuilding::SetObjectState()`, writes
-it from the **last** element of the object's state array, asserting that
-element's type code is 4. `SetObjectState` names the field: **`CBuilding
-+0xb8` is the building's object state**, 1 by construction and 2 when the
-mission's flag is set.
+**Slot 13's reader is the landscape insertion.** `CLandscape::PlaceBuilding`'s
+insertion (`0x1000e430`) asks the building for `0x17` at `0x1000e5fc` and keeps
+the answer in a stack slot, `[ebp-0x7ec]`; thousands of instructions later it
+calls slot 13 through that slot twice, and acts only on an answer of 1
+([03-terrain.md](03-terrain.md#a-building-is-set-down-on-the-mean-of-its-contour--read-and-measured)):
+- at `0x10011147`, straight after the mean height of the cut outer contour is
+  taken, a 1 lays each edge of the final outer contour at that mean
+  (`0x1001115d`–`0x100113b1`, both ends given the value stored at
+  `0x10011132`); anything else takes another way (`0x100113c0`), not followed
+  here;
+- at `0x100147cc`, a 1 takes the difference between the base and that mean
+  off the building matrix's z (`0x100147d4`–`0x100147e0`) before the matrix
+  goes to the building's control and object.
 
-And `SendMsg` only ever tests it against zero — in two cases of a four-way
-switch on the per-item state at `[this+0x64] + i*0x6c + 0x50`, under message 1
-— while a placed building is never zero. **So the mission's flag reaches
-exactly one reader in the engine, and that reader cannot tell 1 from 2.** There
-is no `CBuilding::GetObjectState`; the ten `CBuilding::` names in the binary do
-not include one. What the mission file marks on nine bridge halves and four
-other buildings, the game does not act on.
+**So a building whose start flag is set keeps the height its mission gives it,
+and every other building is set down on the mean of its cut contour.**
+*Measured*, over the 167 placed buildings, with the engine's own cut contour:
+**150 of the 154 without the flag** stand on their mean to a centimetre, the
+other 4 within 0.14; **12 of the 13 with it** stand off it, by 0.2 to 5.2, and
+the 13th, Tut_1's flagged bridge half, is 0.004 off
+([engine test](../engine/crates/parkan-world/tests/install/scene.rs)). That is
+what the flag is for: a bridge half, which must meet its twin in the middle over
+a gorge, and four buildings of Campaign 2 Mission 03 — its two mines, its
+factory and its generator.
+
+**This page had the opposite.** It once read *"The start flag changes
+nothing"*: a pass over every `QueryInterface(0x17)` site in the install —
+`mov edx, 0x17` then `call [vtable]` with an out-pointer, **23 sites** across
+`AniMesh`, `ArealMap`, `Behavior`, `Control`, `Terrain` and `iron3d` — and every
+vtable offset then called on the answer, rejecting any call whose argument run
+does not match the slot's own `ret n`, gave slot 3 (2 arguments) one caller,
+slot 12 (2) two, slot 14 (2) one, slot 15 (3) twelve, slot 16 (2) six, and
+**slot 13 (1) none**. Its control was the writer of the same field,
+`ArealMap.dll:0x10015a0d`, which tests `dwCreateFlag` bit 0, asks for `0x17` and
+calls slot 12 with the literal `2`. The pass followed the answer while it stayed
+in a register. The insertion spills it to the stack, so its two calls were never
+seen, and the page concluded that the only reader, `SendMsg`, could not tell 1
+from 2. The pass is sound for what it followed. Its negative did not hold
+because it did not follow the answer through memory. The console's `bcreate`,
+which makes a building with the flag clear and a height of its own
+([15-behaviour.md](15-behaviour.md#what-the-consoles-create-bcreate-and-death-do--read-and-measured)),
+is what sent this page back to it.
 
 ### The rotation's sense
 

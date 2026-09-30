@@ -16,6 +16,7 @@ use parkan_sim::planner::{self, Action, Candidate, Planner, Problem};
 use parkan_sim::progression::{self, ClanTakt, Notice, Progress};
 use parkan_sim::script::{Args, Host, Interpreter};
 
+use crate::console::{self, Command};
 use crate::resources::{self, Messages, Sound, Sounds};
 
 /// The interface strings the progression shows (`iron3d.dll`'s string table).
@@ -183,6 +184,33 @@ pub struct Progression {
     pub unanswered: BTreeSet<i32>,
     /// Each objective's text as `mission.cfg` writes it, in script order.
     pub objective_texts: Vec<String>,
+    /// The mission's `script` block, each line as the console reads it.
+    pub console_lines: Vec<ConsoleLine>,
+    /// What function 57 ran that the play has not yet carried out.
+    pub console: Vec<ConsoleCall>,
+    /// The logical ids the next unit and the next building made in play take, as `Play` last
+    /// counted them: the areal map keeps one counter for robots and one for buildings, each
+    /// bumped before it is used (`ArealMap.dll:0x1002b305`, `0x1002b3e9`; docs/23).
+    pub next_ids: (i32, i32),
+}
+
+/// One line of a mission's `script` block: its key, `script1` and on, what the console makes
+/// of it, and the Type word of the file a `create` or `bcreate` names, the word after its
+/// magic.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ConsoleLine {
+    pub key: String,
+    pub command: Option<Command>,
+    pub type_word: u32,
+}
+
+/// A console line function 57 ran: the command, the Type word of its file, and the logical id
+/// its object is on its clan's list under already (0 for `death`).
+#[derive(Clone, Debug, PartialEq)]
+pub struct ConsoleCall {
+    pub command: Command,
+    pub type_word: u32,
+    pub id: i32,
 }
 
 /// The engine below the SuperAI, as the script's calls reach it.
@@ -198,6 +226,11 @@ struct Answers<'a> {
     notices: &'a mut Vec<Notice>,
     unanswered: &'a mut BTreeSet<i32>,
     orders: &'a mut Vec<ScriptOrder>,
+    console_lines: &'a [ConsoleLine],
+    console: &'a mut Vec<ConsoleCall>,
+    next_ids: &'a mut (i32, i32),
+    /// Every clan's free minds, which a `create` takes one of.
+    minds: &'a mut [usize],
     /// The clan's free minds, function 49's answer.
     free_minds: usize,
     /// The `dMax*` limits function 11 tests, as the script's variables stand.
@@ -224,6 +257,53 @@ impl Answers<'_> {
     /// The clan's own units and buildings, the list functions 13, 14, 25 and 38 pick from.
     fn own(&self) -> Vec<Candidate> {
         self.progress.own(self.clan)
+    }
+
+    /// A console line function 57 runs (docs/15, "What the console's `create`, `bcreate` and
+    /// `death` do"). The game runs it before the call returns, and `create` and `bcreate` file
+    /// their object on its clan's list as they make it (SuperAI slot 4, events 1 and 2,
+    /// `iron3d.dll:0x1003d560`, `0x1003dad8`), so the rest of the script's run counts it: C02
+    /// Mission 02's `Mission` handler asks whether `Enm2` has any robots straight after its three
+    /// `create`s. The object is filed here under the id it will have, and the play makes it
+    /// once the run is over.
+    fn run_console(&mut self, line: &ConsoleLine) {
+        let Some(command) = line.command.clone() else { return };
+        let id = match &command {
+            // Made with create flag 8 (`0x10077664`) unless the game is the auto-demo: it takes
+            // its clan's first free mind, and with none free it is not made at all
+            // (`ArealMap.dll:0x100152a9`-`0x10015307`; docs/23).
+            &Command::Create { x, y, clan, .. } => {
+                let Some(free) = usize::try_from(clan).ok().and_then(|c| self.minds.get_mut(c)) else {
+                    return;
+                };
+                if *free == 0 {
+                    return;
+                }
+                *free -= 1;
+                if i64::from(clan) == self.clan {
+                    self.free_minds = self.free_minds.saturating_sub(1);
+                }
+                let id = self.next_ids.0;
+                self.next_ids.0 += 1;
+                self.progress.join(
+                    id,
+                    i64::from(clan),
+                    line.type_word,
+                    Vec3::new(x as f32, y as f32, 0.0),
+                    0.0,
+                );
+                id
+            }
+            &Command::BCreate { x, y, z, clan, .. } => {
+                let id = self.next_ids.1;
+                self.next_ids.1 += 1;
+                let at = Vec3::new(x as f32, y as f32, z as f32);
+                self.progress.place_building(id, i64::from(clan), line.type_word, at);
+                id
+            }
+            Command::Death { .. } => 0,
+        };
+        self.console.push(ConsoleCall { command, type_word: line.type_word, id });
     }
 
     /// The place an order's target names, from operand `at` on: a logic id's object, or a
@@ -557,6 +637,18 @@ impl Host for Answers<'_> {
                 0
             }
             52 => self.progress.owner(args.dword(0) as i32),
+            // Channel 2 of the message callback (`ai.dll:0x1000e4f0`): the mission's `script%d`
+            // line for the first value, run as a console command; the second value is never
+            // read, and neither is the result (docs/15, "Channel 2 runs a line of the
+            // mission's `script` block").
+            57 => {
+                let key = format!("script{}", args.dword(0) as i32);
+                let lines = self.console_lines;
+                if let Some(line) = lines.iter().find(|l| l.key == key) {
+                    self.run_console(line);
+                }
+                0
+            }
             // The clan's seconds clock plus a delay, whole seconds (`ai.dll:0x1000e643`).
             59 => self.clock.wrapping_add(args.dword(0)),
             // 1 once that time has passed, else `ERROR` (`0x1000e6a0`): the comparison is
@@ -644,8 +736,8 @@ impl Host for Answers<'_> {
             // targets and planning; any other call does nothing and answers 0. Left
             // unanswered: 3, 16 and 17, the clan's power and resource totals a SuperAI asks
             // for; 18 and 40, a building site and a mineral place, which want the place list
-            // function 43 loads; 41, 56 and 65, flags of that same object; 57, the debug
-            // console's channel 2; and the fourteen no shipped script calls.
+            // function 43 loads; 41, 56 and 65, flags of that same object; and the fourteen
+            // no shipped script calls.
             other => {
                 self.unanswered.insert(other);
                 0
@@ -679,6 +771,43 @@ fn load_script(game: &Path, path: &str) -> Result<Interpreter> {
 /// Every handler name a script defines.
 fn handler_names(script: &Interpreter) -> Vec<String> {
     script.script.handlers.iter().map(|h| h.name.clone()).collect()
+}
+
+/// The mission's `script` block as the console reads it, each `create` and `bcreate` with
+/// its file's Type word.
+fn console_lines(game: &Path, mission_dir: &Path) -> Result<Vec<ConsoleLine>> {
+    let type_word = |file: &str| {
+        let path = gamedir::resolve(game, &format!("{}{file}", console::UNITS_AUTO))?;
+        let data = std::fs::read(path).ok()?;
+        parkan_formats::objects::parse_unit(&data, file).ok().map(|u| u.kind)
+    };
+    Ok(resources::console_lines(mission_dir)?
+        .into_iter()
+        .map(|(key, text)| {
+            let command = console::parse(&text);
+            let type_word = match &command {
+                Some(Command::Create { file, .. } | Command::BCreate { file, .. }) => {
+                    type_word(file).unwrap_or(0)
+                }
+                _ => 0,
+            };
+            ConsoleLine { key, command, type_word }
+        })
+        .collect())
+}
+
+/// The logical ids the next robot and the next building take after `ids`: one more than the
+/// highest of each counter, a building's carrying the top bit (docs/23).
+pub fn next_ids(ids: impl IntoIterator<Item = i32>) -> (i32, i32) {
+    let (mut robot, mut building) = (0, 0);
+    for id in ids {
+        if id >= 0 {
+            robot = robot.max(id);
+        } else if id != -1 {
+            building = building.max(id & 0x7fff_ffff);
+        }
+    }
+    (robot + 1, (0x8000_0000_u32 | (building as u32 + 1)) as i32)
 }
 
 impl Progression {
@@ -774,6 +903,9 @@ impl Progression {
             strings: resources::game_strings(game).unwrap_or_default(),
             unanswered: BTreeSet::new(),
             objective_texts: objectives.into_iter().map(|o| o.text).collect(),
+            console_lines: console_lines(game, mission_dir)?,
+            console: Vec::new(),
+            next_ids: next_ids(mission.objects.iter().map(|o| o.logical_id)),
         };
         me.run("Init");
         for i in 0..me.others.len() {
@@ -811,6 +943,9 @@ impl Progression {
             relations,
             unanswered,
             free_minds,
+            console_lines,
+            console,
+            next_ids,
             ..
         } = self;
         let (script, handlers, planner, clan, clock) = match which {
@@ -839,7 +974,11 @@ impl Progression {
                 notices: &mut notices,
                 unanswered,
                 orders,
+                console_lines: console_lines.as_slice(),
+                console,
+                next_ids,
                 free_minds: usize::try_from(clan).ok().and_then(|c| free_minds.get(c)).copied().unwrap_or(0),
+                minds: free_minds.as_mut_slice(),
                 limits,
             };
             run(script, &mut answers);

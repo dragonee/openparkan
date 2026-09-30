@@ -666,9 +666,17 @@ factory and generator (4.70, 0.33, 0.85, 1.02), `CAMPAIGN.01/Mission.01`'s
 bunker (0.14), `CAMPAIGN.03/Mission.01`'s generator and bunker (0.14, −0.07) and
 `CAMPAIGN.04/Mission.02`'s generator (0.03). One more, `CAMPAIGN.05/Mission.02`'s
 bridge, is on its mean only with the lake's own surface faces left out (0.0004
-against 0.024). What the game makes of the 16, whether the flag is 1 for them
-or the landscape under them has changed since they were placed, is **not
-established**; openparkan keeps every building at its mission height.
+against 0.024). ~~What the game makes of the 16, whether the flag is 1 for them
+or the landscape under them has changed since they were placed, is not
+established.~~ **Twelve of the 16 are the buildings whose start flag is set**:
+the flag makes slot 13 answer 2, and the insertion leaves them at their file
+height — the 8 bridges and Campaign 2 Mission 03's four
+([04-missions.md](04-missions.md#the-start-flag-keeps-a-building-at-its-file-height--read-and-measured)).
+The other four, all within 0.14 of their mean, carry no flag, and why they stand
+off it is **not established**. openparkan keeps every placed building at its
+mission height, which the drop leaves within 0.14 of where it would put it, and
+sets down a building the console's `bcreate` makes
+([15-behaviour.md](15-behaviour.md#what-the-consoles-create-bcreate-and-death-do--read-and-measured)).
 
 ### For an engine
 

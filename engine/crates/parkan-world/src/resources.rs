@@ -117,6 +117,16 @@ pub fn objectives(mission_dir: &Path) -> Result<Vec<Objective>> {
     }
 }
 
+/// The `mission.cfg` object whose `script%d` lines function 57 runs as console commands.
+pub const SCRIPT_BLOCK: &str = "script";
+
+/// A mission's `script` block, its lines by key (`script1`, `script2`, …); empty without a
+/// `mission.cfg` or a block (docs/15, "Channel 2 runs a line of the mission's `script` block").
+pub fn console_lines(mission_dir: &Path) -> Result<Vec<(String, String)>> {
+    let Some(p) = gamedir::resolve(mission_dir, "mission.cfg") else { return Ok(Vec::new()) };
+    Ok(read_cfg(&p)?.get(SCRIPT_BLOCK).map(|b| b.properties.clone()).unwrap_or_default())
+}
+
 /// One in-mission message, resolved.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Message {

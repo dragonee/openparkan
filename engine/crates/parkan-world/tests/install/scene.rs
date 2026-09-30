@@ -709,3 +709,49 @@ fn mission_02s_large_factorys_lit_batches_take_its_256_lightmap_page() {
     .expect("the hero");
     assert!(hero.groups.iter().all(|g| g.lightmap.is_none()));
 }
+
+#[test]
+#[ignore = "needs the game install"]
+fn a_start_flagged_building_keeps_its_mission_height_and_the_rest_stand_on_their_contours_mean() {
+    use parkan_formats::{landmesh, mission};
+    use parkan_world::assembly::Assembly;
+    use parkan_world::basement;
+
+    // docs/04, "The start flag keeps a building at its file height": the insertion sets a
+    // building down on the mean of its cut contour only while `IBuilding` slot 13 answers 1
+    // (`Terrain.dll:0x100147cc`), and the start flag makes it 2.
+    let game = gamedir::find(None).expect("a Parkan install: set PARKAN_DIR");
+    let mut assembly = Assembly::new(&game).unwrap();
+    let mut tally = std::collections::BTreeMap::<(bool, bool), usize>::new();
+    let mut flagged_off = Vec::new();
+    for dir in every_mission(&game) {
+        let raw = std::fs::read(gamedir::resolve(&dir, "data.tma").unwrap()).unwrap();
+        let Ok(m) = mission::parse(&raw, &dir.display().to_string()) else { continue };
+        let rings = basement::rings(&mut assembly, &m);
+        if rings.is_empty() {
+            continue;
+        }
+        let map = terrain::map_dir(&game, &m.map_path).unwrap();
+        let land = landmesh::load(&gamedir::resolve(&map, "Land.msh").unwrap()).unwrap();
+        let buildings: Vec<_> = m.objects.iter().filter(|o| o.kind == mission::KIND_BUILDING).collect();
+        assert_eq!(buildings.len(), rings.len());
+        for (o, (inner, outer)) in buildings.iter().zip(&rings) {
+            let edge = basement::contour(&land, outer, inner[0][2]);
+            let mean = edge.iter().map(|p| p[2]).sum::<f32>() / edge.len() as f32;
+            let off = inner[0][2] - mean;
+            let flagged = o.tail.0 != 0;
+            *tally.entry((flagged, off.abs() < 0.01)).or_default() += 1;
+            if flagged && off.abs() >= 0.01 {
+                flagged_off.push(off.abs());
+            }
+        }
+    }
+    // 150 of the 154 unflagged buildings stand on their mean to a centimetre, and the other
+    // four within 0.14; 12 of the 13 flagged stand off it, 0.2 to 5.2, and the one that does
+    // not, Tut_1's bridge half, stands 0.004 off by its authoring.
+    assert_eq!(
+        tally,
+        [((false, false), 4), ((false, true), 150), ((true, false), 12), ((true, true), 1)].into(),
+    );
+    assert!(flagged_off.iter().all(|&d| (0.2..5.2).contains(&d)), "{flagged_off:?}");
+}

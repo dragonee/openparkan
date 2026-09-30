@@ -48,6 +48,7 @@ use crate::assembly::Assembly;
 use crate::battle::{Battle, EffectCommand};
 use crate::building_fx::BuildingEffects;
 use crate::buildings::{Building, Child, Fired, Standing};
+use crate::console::{self, Command};
 use crate::factory::{Factory, Project, VOICE_UNIT_READY};
 use crate::fx::{Fx, Owner};
 use crate::hero::{Hero, Reach};
@@ -193,6 +194,9 @@ pub const BOARDABLE_SIZE: u8 = 4;
 /// flyer must be less than this above the place's ground (`0x1006347c`); the hero is dropped
 /// this far above the highest surface there (`0x100634e4`).
 pub const LEAVE_PLACES: usize = 8;
+/// Where the level's probe for the highest surface at an x, y starts looking down from: above
+/// any map's ground.
+pub const PROBE_TOP: f32 = 10_000.0;
 pub const LEAVE_FLYER_HEIGHT: f32 = 10.0;
 pub const LEAVE_DROP: f32 = 8.0;
 /// "Risk area! Landing impossible." (`0x10063542`), and its voice.
@@ -336,6 +340,9 @@ pub struct Play {
     anchors: HashMap<u64, (Option<usize>, [f64; 3])>,
     /// Dead units and when each is deleted; and each target deleted.
     pub deaths: Vec<(usize, f64)>,
+    /// What a kill outside the frame's own steps set off, the console's `death`: handled with
+    /// the next frame's events.
+    pub pending_events: Vec<Event>,
     /// The units whose *Explode!* is pending, each with when it was pressed: the unit
     /// record's `+0x135` and `+0x12c` (docs/41, "Explode!").
     pub exploding: Vec<(usize, f64)>,
@@ -1040,6 +1047,7 @@ impl Play {
             spent: Vec::new(),
             anchors: HashMap::new(),
             deaths: Vec::new(),
+            pending_events: Vec::new(),
             exploding: Vec::new(),
             deleted: vec![false; target_count],
             robots,
@@ -1172,6 +1180,7 @@ impl Play {
         crate::factory::prebuild(self, game, mission_dir).context("the prebuilt designs")?;
         // What the clans' `Init` handlers ordered: Mission 03's enemy patrol shut down.
         self.deliver_orders();
+        self.run_console();
         Ok(())
     }
 
@@ -1745,7 +1754,8 @@ impl Play {
             self.tick_research(dt_ms);
             self.check_research();
         }
-        let mut events = self.ground_damage(now);
+        let mut events = std::mem::take(&mut self.pending_events);
+        events.extend(self.ground_damage(now));
         events.extend(self.tick_explosions(now));
         if !self.paused {
             events.extend(self.tick_construction(now));
@@ -1877,6 +1887,7 @@ impl Play {
         if !self.paused {
             self.progress();
             self.deliver_orders();
+            self.run_console();
         }
         events
     }
@@ -3053,8 +3064,29 @@ impl Play {
     /// unit and name, joining its clan's list. Its target, or none when its design does not
     /// load as a robot.
     pub fn spawn(&mut self, project: &Project, clan: i64, at: Vec3, yaw: f32) -> Option<usize> {
-        let logical_id =
-            self.units.iter().map(|u| u.logical_id).chain([self.hero_id]).max().unwrap_or(0).max(0) + 1;
+        self.make_unit(&project.path, Some(&project.name), project.type_word, clan, at, yaw, None)
+    }
+
+    /// Make the unit at `path` of `type_word` for clan `clan` at `at`, turned to `yaw`: a new
+    /// target, robot, clan unit and name. `name` is a design's, numbered by its clan as a built
+    /// bot is; without one the unit takes its file's name, as a placed unit with none does.
+    /// `logical_id` is the id its clan's list has it under already; without one it takes the
+    /// next and joins the list.
+    #[allow(clippy::too_many_arguments)]
+    fn make_unit(
+        &mut self,
+        path: &str,
+        name: Option<&str>,
+        type_word: u32,
+        clan: i64,
+        at: Vec3,
+        yaw: f32,
+        logical_id: Option<i32>,
+    ) -> Option<usize> {
+        let filed = logical_id.is_some();
+        let logical_id = logical_id.unwrap_or_else(|| {
+            crate::progress::next_ids(self.units.iter().map(|u| u.logical_id).chain([self.hero_id])).0
+        });
         let property = |name: &str, value: Value| mission::Property {
             name: name.to_owned(),
             kind: 0,
@@ -3064,7 +3096,7 @@ impl Play {
         };
         let placed = mission::Object {
             kind: KIND_UNIT,
-            path: project.path.clone(),
+            path: path.to_owned(),
             unknown_q: 0,
             logical_id,
             position: at.to_array(),
@@ -3075,7 +3107,7 @@ impl Play {
             tail: (0, 0, 0, 0),
             properties: vec![
                 property("ClanID", Value::Int(clan as i32)),
-                property("Type", Value::Int(project.type_word as i32)),
+                property("Type", Value::Int(type_word as i32)),
             ],
         };
         let index = SPAWNED_OBJECTS + self.spawned;
@@ -3106,7 +3138,7 @@ impl Play {
         self.units.push(Unit {
             clan: Some(clan),
             named_clan: Some(clan),
-            type_word: project.type_word,
+            type_word,
             logical_id,
             kind: KIND_UNIT,
             announced: false,
@@ -3118,15 +3150,18 @@ impl Play {
         // new unit already.
         let named = self.units.iter().filter(|u| u.named_clan == Some(clan) && u.kind == KIND_UNIT).count()
             + usize::from(clan == self.player_clan);
-        let name = project.name.replacen("-X ", &format!("-{named} "), 1);
+        let name = match name {
+            Some(design) => design.replacen("-X ", &format!("-{named} "), 1),
+            None => path.rsplit(['\\', '/']).next().unwrap_or(path).to_owned(),
+        };
         self.names.push(name);
         self.deleted.push(false);
         let target = &self.battle.combat.targets[t];
         let solid = Solid::from_parts(&target.parts, target.centre, target.radius, false, |_, _| None);
         self.ground.solids.push(solid);
         self.robots.push((t, robot));
-        if let Some(p) = self.progression.as_mut() {
-            p.progress.join(logical_id, clan, project.type_word, at, self.hero.time_ms);
+        if !filed && let Some(p) = self.progression.as_mut() {
+            p.progress.join(logical_id, clan, type_word, at, self.hero.time_ms);
         }
         self.spawned += 1;
         self.added.push(t);
@@ -3836,6 +3871,42 @@ impl Play {
         }
     }
 
+    /// Carry out what function 57 ran (docs/15, "What the console's `create`, `bcreate` and
+    /// `death` do"), each object made under the id its clan's list has it under already. One
+    /// the engine cannot make is taken off the list again.
+    fn run_console(&mut self) {
+        let Some(p) = self.progression.as_mut() else { return };
+        for call in std::mem::take(&mut p.console) {
+            let path = |file: &str| format!("{}{file}", console::UNITS_AUTO);
+            let made = match call.command {
+                Command::Create { x, y, heading, clan, ref file } => {
+                    let (x, y) = (x as f32, y as f32);
+                    // The level's probe for the landscape and the buildings (`0x100a14d0`, mask
+                    // `0xa`), 0 where it finds nothing, and 2 over that.
+                    let ground = self.ground.below(x, y, PROBE_TOP).map_or(0.0, |h| h.point.z);
+                    let at = Vec3::new(x, y, ground + console::CREATE_LIFT);
+                    let clan = i64::from(clan);
+                    self.make_unit(&path(file), None, call.type_word, clan, at, heading as f32, Some(call.id))
+                }
+                Command::BCreate { x, y, z, clan, ref file } => {
+                    let at = Vec3::new(x as f32, y as f32, z as f32);
+                    self.stand_building(i64::from(clan), call.type_word, &path(file), at, call.id)
+                }
+                Command::Death { x, y, radius } => {
+                    let events = self.death(x as f32, y as f32, radius as f32);
+                    self.pending_events.extend(events);
+                    continue;
+                }
+            };
+            if made.is_none()
+                && let Some(p) = self.progression.as_mut()
+            {
+                p.progress.destroyed(call.id);
+                p.progress.deleted(call.id);
+            }
+        }
+    }
+
     /// A clan's `ORDER_BUILDING_CONSTRUCT` at the factory that is target `t` (docs/36,
     /// "Production"): its own design store picks a design of the robot type the order's
     /// parameter names, ranked by the `SELECT_*` its target carries and drawn over function
@@ -4251,7 +4322,9 @@ impl Play {
         // bot's place less its node sphere's radius in y (docs/39, "What becomes of the hero").
         at.insert(self.hero_id, self.hero_place());
         let now = self.hero.time_ms;
+        let ids = crate::progress::next_ids(self.units.iter().map(|u| u.logical_id).chain([self.hero_id]));
         let Some(p) = self.progression.as_mut() else { return };
+        p.next_ids = ids;
         let notices = p.tick(now, |id| at.get(&id).copied());
         // A clan's takt freed its reservations (`ai.dll:0x10006580`).
         for clan in std::mem::take(&mut p.swept) {

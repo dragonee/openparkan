@@ -578,7 +578,128 @@ install says so:
 So a mission's `script` block is a list of console commands and a script fires
 them by index: Campaign 4 Mission 02's `death(1246, 1051, 100, 0)` and
 `bcreate(1246, 1051, 10, 0, teleport.dat, 0)` are how its Teleport objective
-clears its ground and puts the Teleport there.
+clears its ground and puts the Teleport there. What each of the three does is
+[below](#what-the-consoles-create-bcreate-and-death-do--read-and-measured).
+
+## What the console's `create`, `bcreate` and `death` do — *read*, and *measured*
+
+**The line.** The dispatcher (`0x1003ca50`) cuts the line at every `(` and
+`)` with `strtok`, matches the first piece against the table's names with
+`_stricmp` (`0x100be600`), so without regard to case, and hands the second
+piece — the text between the brackets — to the command's handler: `create`
+`0x1003d280`, `delete` `0x1003d590`, `bcreate` `0x1003d6a0`, `death`
+`0x1003db10`. Each handler cuts its piece again at every comma, space and `)`
+(`0x10103f00`), and **does nothing unless every field it reads is there**:
+six for `create` and `bcreate`, four for `death`. Every field but the file
+name goes through the C library's `atol` (`0x100c1a60` → `0x100b4730`): white
+space, a sign, digits up to the first that is not one. **The numbers are whole
+numbers.** The last field of each — `create`'s and `bcreate`'s sixth, `death`'s
+`delay` — is converted and the result dropped: nothing reads it. The shipped
+lines' `0` is a placeholder, and `death`'s delay has no unit because it has no
+effect. The file is looked for under `units/auto/` (`0x10103ef4`, `%s%s`): all
+13 files the 19 `create` and `bcreate` lines name are in the install's
+`UNITS\AUTO`, of the 23 there (*measured*).
+
+**`create(x, y, heading, clan, file, …)` makes a unit the way the mission loader
+does.** It goes through `0x10077520`, which is the mission's own unit placer
+(`0x10077480`, [23-economy.md](23-economy.md)) with different inputs:
+- **The clan** is the fourth field, taken as the index into the level's clan
+  table, as a placed object's clan word is ([04-missions.md](04-missions.md)):
+  it is handed to `CreateObjectFromScheme` and indexes the clan's SuperAI at
+  `+0x774`.
+- **The place** is (x, y) and, for its height, the level's probe for the highest
+  landscape or building surface there (`0x100a14d0` with mask `0xa`, 0 where it
+  finds none; [39-boarding.md](39-boarding.md)) **plus 2** (`0x10077562`, the
+  float at `0x100e5c0c`). The mission placer adds 1 (`0x100774a7`).
+- **The third field is not a height.** The help text calls it `<z>`, but
+  `0x10077520` takes its cosine and sine and builds a turn about z from it,
+  alongside a second angle compiled as 0 (`0x100e5d70`), so the unit's own x
+  axis points to (cos *z*, sin *z*): **the third field is the heading in
+  radians**, the turn a placed object's `rotation` gives
+  ([04-missions.md](04-missions.md)). All 18 shipped `create`s pass 10, so
+  every unit they make faces 10 rad, 213°.
+- **No host building, no given id**: the vertex pair is −1, −1, and the id −1,
+  so `CreateObjectFromScheme`'s bit 2 is clear and the areal map gives the next
+  robot id.
+- **Create flag 8 unless the game is the auto-demo** (`+0xe5`, `0x1007765a`),
+  as the loader's: **the unit takes one of its clan's free minds, and with none
+  free it is not made** ([23-economy.md](23-economy.md)). The handler does not
+  test what it gets back; it goes on to ask the object for interface `0x10`
+  (`0x1003d54e`).
+- **It is filed on its clan's list at once**: the handler asks the new object
+  for its id (interface `0x10` slot 12) and sends the clan's SuperAI slot 4
+  event 1 with it (`0x1003d560`), the event a unit placed at the load is filed
+  with ([34-progression.md](34-progression.md)). So function 31 counts it, and
+  function 25's `TAKE_ALL_FREE` takes it.
+
+All of that happens **inside the call to function 57**, before the script's
+next statement: the callback is called directly. Campaign 2 Mission 02's
+`Mission` handler depends on it. It runs its three `create`s and, in the same
+run, completes its bonus objective once neither `Enm` nor `Enm2` has a robot
+(`c2m2p` nodes 40–53); the three are `Enm2`'s first.
+
+**`bcreate(x, y, z, clan, file, …)` makes a building standing finished.** It
+builds an unturned matrix whose translation is **(x, y, z) as the fields give
+them** — no probe — and hands it to the mission loader's building maker
+(`0x10033cb0`, [23-economy.md](23-economy.md)) with the clan, id −1, the start
+flag 0 and no filing of its own; the handler then files the building on its
+clan's SuperAI as slot 4's event 2 (`0x1003dad8`). What follows from those
+inputs:
+- **No construction sphere.** `CreateObjectFromScheme` gives a building order 18
+  only when create flag bit 1 is set (`ArealMap.dll:0x10015df3`, the same test
+  `Behavior.dll`'s copy makes at `0x1001dfa3`). `0x10033cb0` sets bit 0 for the
+  start flag and bit 2 for an id, never bit 1. The control is the builder's
+  `CreateBuilding`, which passes 2 (`Behavior.dll:0x10029268`) and gets the
+  sphere ([32-builder.md](32-builder.md)).
+- **It is placed in the landscape at once.** Sent no code, a building's
+  controller plans from its constructor's record to its code-0 anchor, and on
+  **all 30** `fortif.rlb` building controllers the first state on that way runs
+  action 20, `CLandscape::PlaceBuilding`, at the moment it is made. None runs
+  action 1, which hides the building (*measured*, through the engine's planner,
+  which [32-builder.md](32-builder.md#what-the-buildings-controller-does-with-the-codes--read-and-measured)
+  measured against the same 30).
+- **So its z does not matter.** With the start flag clear, the insertion sets the
+  building down on the mean of its cut contour
+  ([03-terrain.md](03-terrain.md#a-building-is-set-down-on-the-mean-of-its-contour--read-and-measured),
+  [04-missions.md](04-missions.md#the-start-flag-keeps-a-building-at-its-file-height--read-and-measured)).
+  Campaign 4 Mission 02's line asks for z = 10 where the ground stands at 51.1,
+  and the map's lowest vertex at 49.0 (*measured*). Set down, the Teleport's
+  origin comes to 47.82: its base on the contour's mean, the origin 3.3 below the
+  ground, as Tut_4's placed Main Teleport stands 3.7 below its own (*measured*,
+  engine).
+
+**`death(x, y, r, delay)` fells scenery.** Its sphere is centred on the probe's
+surface at (x, y) — `0x100a14d0` again, with nothing added — and has radius r.
+It asks the world's slot 3 (`Terrain.dll:0x10025f40`) for the objects in it with
+mask **`0x400`**, and calls each one's interface `0x16` slot 7, the life system's
+kill (`Control.dll:0x1000eb70`). That is the construction sphere's kill
+([32-builder.md](32-builder.md#the-construction-sphere--read-and-measured)) with
+one class in its mask where the sphere's `0x414` has three. The mask is a class
+set, bit *n* for class *n*: [42-selection.md](42-selection.md) reads `0xa` as
+classes 1 and 3 and `0x41a` as 1, 3, 4 and 10. **So `0x400` is class 10 alone,
+the scenery**: trees and stones, taken when their own sphere meets the query's,
+and never a unit, a building or the hero. The kill is made in the call; the
+delay is not read. *Measured*, engine: Campaign 4 Mission 02's line fells the
+stone standing 20 off the site, whose sphere's radius is 277, and a tree 140
+off whose radius is 88, and no other of the mission's 17 pieces of scenery.
+
+**Where the shipped lines lead** (*measured*: each clan's minds against the
+robots it is placed with):
+
+| mission | line | clan | minds, placed robots |
+|---|---|---|---:|
+| C02 Mission 02 | three `create`s: `22lwhl1`, `22lwhl2` (warriors), `22ltrk1` (an HQ) | 4, `Enm2` | 5, 0 |
+| C02 Mission 03 | `create` `23mfly` (only above the lowest level) | 5, `Enm2` | 5, 0 |
+| | `create` `23sfly1`, `23sfly2` | 1, `enemy` | 11, 8 |
+| C04 Mission 02 | `death`, `bcreate` `teleport` | 0, `Plr` | — |
+| | three `create` `42_mtp` (HQs) | 1, `Enm1` | 12, 7 |
+| C05 Mission 01 | `create` `51W_trans`, two `51_trans` | 0, `Player` | 6, 1 |
+
+Every `create` finds a mind free at the start. C02 Mission 03's `enemy` is the
+one clan whose factories could take them first. The two dead blocks would too:
+C03 Mission 02's `Enm2` (6, 4) and Multi 03's `Plr1` (8, 2). Campaign 5
+Mission 01's transformers are the **player's**, made by the enemy's script
+`c5m1e`.
 
 ## Function 69 sets how sloppy the AI's design pick is — *read*, and *measured*
 
@@ -1330,7 +1451,10 @@ capturer — which is why the table stops one call deep.
   function 69 stores.~~ Both are now read. Channel 2 runs `mission.cfg`'s
   `script`*a* as a debug-console command, and the 14 calls name only lines
   their own missions declare ([Channel 2 runs a
-  line](#channel-2-runs-a-line-of-the-missions-script-block--read-and-measured));
+  line](#channel-2-runs-a-line-of-the-missions-script-block--read-and-measured)),
+  and what the three commands they ship do is read too ([What the console's
+  `create`, `bcreate` and `death`
+  do](#what-the-consoles-create-bcreate-and-death-do--read-and-measured));
   `+0x41c` is the design store's spread, how far below the best the AI's next
   build may fall, and the 7 calls set it from `fDifficulty` ([Function
   69](#function-69-sets-how-sloppy-the-ais-design-pick-is--read-and-measured)).

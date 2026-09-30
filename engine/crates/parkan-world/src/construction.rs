@@ -327,6 +327,17 @@ pub struct Construction {
     pub hidden: HashSet<usize>,
 }
 
+/// How a building made in play comes into the world.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Coming {
+    /// In build mode, create flag bit 1: the construction sphere's `phases` run on it, and its
+    /// controller places it in the landscape when they are done.
+    Built(&'static [Phase]),
+    /// Finished, as a mission's building stands: its controller places it on its first step,
+    /// and its clan's list has it under this logical id already.
+    Standing(i32),
+}
+
 /// A building made in play, not yet placed in the landscape (action 20,
 /// `CLandscape::PlaceBuilding`): not in the world's faces, not struck and not in the way of a
 /// sight ray, the landscape not cut under it and its load group's effects not shown. Whether it
@@ -757,7 +768,8 @@ impl Play {
         let (clan, type_word) = (self.units.get(b)?.clan?, self.units.get(b)?.type_word);
         let ore = self.economy.held(b);
         self.remove_building(b);
-        let made = self.place_building(clan, type_word, &path, at, yaw, now, &UPGRADED, false)?;
+        let made =
+            self.place_building(clan, type_word, &path, at, yaw, now, Coming::Built(&UPGRADED), false)?;
         if ore > 0.0 {
             let most = self.economy.most(made);
             self.economy.add_ore(made, if most > 0.0 { ore.min(most) } else { ore });
@@ -868,13 +880,33 @@ impl Play {
         now: f64,
     ) -> Option<usize> {
         let path = self.placement_model(type_word)?;
-        self.place_building(clan, type_word, &path, at, yaw, now, &NEW_BUILDING, true)
+        self.place_building(clan, type_word, &path, at, yaw, now, Coming::Built(&NEW_BUILDING), true)
+    }
+
+    /// The building at `path` for `clan`, standing finished at `at` unturned: the console's
+    /// `bcreate` (`iron3d.dll:0x1003d6a0`, docs/15), under the logical id its clan's list has it
+    /// under already. Made through the mission loader's own maker (`0x10033cb0`) with no
+    /// create flag, it is refused where its sphere meets another building's, as any building
+    /// is; it runs no construction sphere, which only create flag bit 1 gives
+    /// (`ArealMap.dll:0x10015df3`); and its controller, sent no code, places it in the
+    /// landscape on its first step, which sets it down on the mean of its cut contour since its
+    /// start flag is clear (docs/04, "The start flag keeps a building at its file height").
+    pub fn stand_building(
+        &mut self,
+        clan: i64,
+        type_word: u32,
+        path: &str,
+        at: Vec3,
+        logical_id: i32,
+    ) -> Option<usize> {
+        let now = self.hero.time_ms;
+        self.place_building(clan, type_word, path, at, 0.0, now, Coming::Standing(logical_id), true)
     }
 
     /// The building `path` puts up for `clan` at `at` turned `yaw`: a new target with its unit,
-    /// name, ground, doors and pod, factory and load group, on its clan's list, and the sphere
-    /// `phases` started on it. `clear` asks for the ground to be free of another building's
-    /// sphere, which an upgrade standing where its own building stood does not.
+    /// name, ground, doors and pod, factory and load group, on its clan's list, and as it
+    /// `comes`. `clear` asks for the ground to be free of another building's sphere, which an
+    /// upgrade standing where its own building stood does not.
     #[allow(clippy::too_many_arguments)]
     fn place_building(
         &mut self,
@@ -884,11 +916,24 @@ impl Play {
         at: Vec3,
         yaw: f32,
         now: f64,
-        phases: &'static [Phase],
+        comes: Coming,
         clear: bool,
     ) -> Option<usize> {
         let path = path.to_owned();
         let plan = self.plan(&path);
+        let at = match comes {
+            Coming::Standing(_) => {
+                let lift = crate::basement::set_down(
+                    &self.ground.land,
+                    &plan.inner,
+                    &plan.outer,
+                    at.to_array(),
+                    yaw,
+                );
+                at + Vec3::Z * lift
+            }
+            Coming::Built(_) => at,
+        };
         if let Some((mid, reach)) = plan.contour_sphere().filter(|_| clear) {
             let [cx, cy] = placed(mid, at, yaw);
             let others: Vec<usize> = self.construction.placements.keys().copied().collect();
@@ -901,8 +946,10 @@ impl Play {
                 }
             }
         }
-        let low = self.units.iter().filter(|u| u.logical_id < 0).map(|u| u.logical_id & 0x7fff_ffff).max();
-        let logical_id = (0x8000_0000_u32 | (low.unwrap_or(0) as u32 + 1)) as i32;
+        let logical_id = match comes {
+            Coming::Standing(id) => id,
+            Coming::Built(_) => crate::progress::next_ids(self.units.iter().map(|u| u.logical_id)).1,
+        };
         let property = |name: &str, value: Value| mission::Property {
             name: name.to_owned(),
             kind: 0,
@@ -1006,10 +1053,15 @@ impl Play {
         // record, and message 1's building case or the record's first pass through the frame
         // files it as slot 4's event 2 (`iron3d.dll:0x10060418`, `0x100333f6`; docs/34, "A
         // builder's building is filed as it is made").
-        if let Some(p) = self.progression.as_mut() {
-            p.progress.place_building(logical_id, clan, type_word, at);
+        match comes {
+            Coming::Built(phases) => {
+                if let Some(p) = self.progression.as_mut() {
+                    p.progress.place_building(logical_id, clan, type_word, at);
+                }
+                self.start_sphere(t, phases, now);
+            }
+            Coming::Standing(_) => self.place_in_landscape(t, now),
         }
-        self.start_sphere(t, phases, now);
         self.spawned += 1;
         self.added.push(t);
         Some(t)
@@ -1189,8 +1241,7 @@ impl Play {
     fn kill_inside(&mut self, building: usize, centre: Vec3, radius: f32) -> Vec<Event> {
         let mut events = Vec::new();
         let robots = self.robots.iter().map(|(t, _)| *t).filter(|&t| !self.invulnerable(t));
-        let scenery = (0..self.units.len())
-            .filter(|&t| matches!(self.units[t].kind, mission::KIND_VEGETATION | mission::KIND_ROCK));
+        let scenery = self.scenery();
         let meets = |x: &parkan_sim::combat::Target| x.centre.distance(centre) <= x.radius + radius;
         let inside: Vec<usize> = robots
             .chain(scenery)
@@ -1206,6 +1257,29 @@ impl Play {
             parkan_sim::damage::share_loss(&mut lives, f32::MAX / 4.0);
         }
         events
+    }
+
+    /// Every target that is scenery, a tree or a stone: the objects of class 10.
+    fn scenery(&self) -> impl Iterator<Item = usize> + '_ {
+        (0..self.units.len())
+            .filter(|&t| matches!(self.units[t].kind, mission::KIND_VEGETATION | mission::KIND_ROCK))
+    }
+
+    /// The console's `death` (`iron3d.dll:0x1003db10`, docs/15): every object of class 10 alone
+    /// (the world query's mask `0x400`, `IWorld` slot 3) whose own sphere meets the sphere of
+    /// `radius` about the ground at (x, y) is killed through its life system's slot 7, as the
+    /// construction sphere's kill kills (docs/32), at once. The sphere stands on the level's
+    /// probe for the landscape and the buildings there, 0 where it finds nothing. So it fells
+    /// trees and stones, and passes over units, buildings and the hero.
+    pub(crate) fn death(&mut self, x: f32, y: f32, radius: f32) -> Vec<Event> {
+        let ground = self.ground.below(x, y, crate::play::PROBE_TOP).map_or(0.0, |h| h.point.z);
+        let centre = Vec3::new(x, y, ground);
+        let meets = |x: &parkan_sim::combat::Target| x.centre.distance(centre) <= x.radius + radius;
+        let inside: Vec<usize> = self
+            .scenery()
+            .filter(|&t| self.battle.combat.targets.get(t).is_some_and(|x| x.alive && meets(x)))
+            .collect();
+        inside.into_iter().flat_map(|t| self.battle.combat.ground_loss(t, f32::MAX / 4.0)).collect()
     }
 
     /// Whether target `t`'s life system refuses its kill, slot 7: its invulnerability byte

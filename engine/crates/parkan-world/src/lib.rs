@@ -9,6 +9,7 @@ pub mod capture;
 pub mod cdt;
 pub mod cockpit;
 pub mod command;
+pub mod console;
 pub mod construction;
 pub mod designs;
 pub mod dump;

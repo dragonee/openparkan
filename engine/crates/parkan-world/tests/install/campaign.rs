@@ -985,3 +985,143 @@ fn c02_m03s_enemy_reads_the_game_level_through_f_difficulty() {
     let expected = if difficulty <= 0.0 { 100 } else { (100.0 - 40.0 * difficulty) as u32 };
     assert_eq!(hits, expected);
 }
+
+/// Ballen's Crossing: once the neutral HQ, logical id 11, is no longer its own clan's, a timer
+/// runs, and when it is up the player's script says `C02M02_I01` and runs `script1` to
+/// `script3` through function 57: three heavy warbots `create`d for `Enm2`, clan 4, which the
+/// mission places no robot for. Each stands 2 over the ground at its x, y, on its clan's list
+/// before the handler goes on, so the bonus objective, which the same run completes once
+/// neither `Enm` nor `Enm2` has a robot, waits for them to fall (docs/15, "What the console's
+/// `create`, `bcreate` and `death` do").
+#[test]
+#[ignore = "needs the game install"]
+fn c02_m02s_reinforcements_are_created_for_enm2_on_its_list_before_the_bonus_objective_asks() {
+    use parkan_world::play::{CLASS_ROBOT, PROBE_TOP, Play};
+
+    let mut play = campaign_play(gamedir::C02_MISSION_02);
+    let robots = |play: &Play, clan: i64| {
+        play.progression.as_ref().unwrap().progress.robots(clan, i64::from(CLASS_ROBOT))
+    };
+    let bonus = |play: &Play| play.progression.as_ref().unwrap().progress.objectives[1].state;
+    // `Enm`'s robots all destroyed first: the bonus then waits on `Enm2` alone.
+    let kill = |play: &mut Play, t: usize| {
+        play.battle.combat.targets[t].parts[0].life.as_mut().unwrap().hit(0, f32::MAX / 4.0);
+    };
+    let enemy: Vec<usize> = (0..play.units.len())
+        .filter(|&t| play.units[t].clan == Some(1) && play.units[t].logical_id > 0)
+        .collect();
+    assert!(!enemy.is_empty());
+    for &t in &enemy {
+        kill(&mut play, t);
+    }
+    play_for(&mut play, 1.0, |_| {});
+    assert_eq!((robots(&play, 1), robots(&play, 4), bonus(&play)), (0, 0, 0), "the timer has not run");
+
+    // The HQ taken: `fn52(11) != 2` starts the timer, at most 40 + 40 s on the easiest level.
+    play.progression.as_mut().unwrap().progress.captured(11, 0);
+    let units = play.units.len();
+    let mut made = None;
+    for tick in 0..(100 * 60) {
+        play.tick(1000.0 / 60.0, [0.0; 2]);
+        if play.units.len() > units {
+            made = Some(tick);
+            break;
+        }
+    }
+    assert!(made.is_some(), "the reinforcements arrive");
+    let new: Vec<usize> = (units..play.units.len()).collect();
+    assert_eq!(new.len(), 3);
+    let paths: Vec<String> = new.iter().map(|&t| play.commander.paths[t].clone()).collect();
+    assert_eq!(paths, ["UNITS\\AUTO\\22lwhl1.dat", "UNITS\\AUTO\\22lwhl2.dat", "UNITS\\AUTO\\22ltrk1.dat"]);
+    for (&t, (x, y)) in new.iter().zip([(918.0, 683.0), (919.0, 684.0), (917.0, 683.0)]) {
+        assert_eq!(play.units[t].clan, Some(4));
+        let at = play.battle.combat.targets[t].position;
+        let ground = play.ground.below(x, y, PROBE_TOP).unwrap().point.z;
+        assert_eq!((at.x, at.y), (x, y), "{paths:?}");
+        assert!((at.z - (ground + 2.0)).abs() < 0.01, "{at} over {ground}");
+    }
+    assert_eq!(robots(&play, 4), 3, "on Enm2's list");
+    assert_eq!(bonus(&play), 0, "the same run counted them");
+    let ids: Vec<i32> = new.iter().map(|&t| play.units[t].logical_id).collect();
+    assert!(ids.windows(2).all(|w| w[1] == w[0] + 1) && ids[0] > 17, "{ids:?}");
+
+    // They fall: the bonus objective completes.
+    for &t in &new {
+        kill(&mut play, t);
+    }
+    play_for(&mut play, 3.0, |_| {});
+    assert_eq!((robots(&play, 4), bonus(&play)), (0, 1));
+}
+
+/// The Dead City: the hero in the ruins, route 0, completes objective 2 and runs `script1` to
+/// `script5`. `death(1246, 1051, 100, 0)` fells the stone standing on the Teleport's site and
+/// the one tree whose sphere reaches it, 140 off with a radius of 88, and no unit or building;
+/// `bcreate(1246, 1051, 10, 0, teleport.dat, 0)` puts the player's Teleport there
+/// finished, no construction sphere run, set down on the mean of its contour though the line
+/// asks for z 10, 41 under the ground; and three `42_mtp` go to `Enm1` (docs/15, "What the
+/// console's `create`, `bcreate` and `death` do").
+#[test]
+#[ignore = "needs the game install"]
+fn c04_m02s_ruins_clear_the_teleports_ground_and_put_it_down_standing_for_the_player() {
+    use parkan_formats::mission;
+
+    let mut play = campaign_play(gamedir::C04_MISSION_02);
+    let scenery: Vec<usize> = (0..play.units.len())
+        .filter(|&t| matches!(play.units[t].kind, mission::KIND_VEGETATION | mission::KIND_ROCK))
+        .collect();
+    // The two by their name and place: the mission has another `s_tree_44` far off.
+    let named = |name: &str, x: f32, y: f32| {
+        *scenery
+            .iter()
+            .find(|&&t| {
+                let p = play.battle.combat.targets[t].position;
+                play.names[t] == name && (p.x - x).abs() < 0.1 && (p.y - y).abs() < 0.1
+            })
+            .expect(name)
+    };
+    let (stone, tree) = (named("s_stone_10", 1258.2, 1066.385), named("s_tree_44", 1210.032, 1185.813));
+    let (units, buildings) = (play.units.len(), play.construction.placements.len());
+    assert!(play.stand_at(380.0, 1360.0, 0.0), "the ruins");
+    let mut made = false;
+    for _ in 0..(10 * 60) {
+        play.tick(1000.0 / 60.0, [0.0; 2]);
+        if play.units.len() > units {
+            made = true;
+            break;
+        }
+    }
+    assert!(made, "the ruins' objective runs the block");
+    assert_eq!(play.progression.as_ref().unwrap().progress.objectives[2].state, 1);
+    play_for(&mut play, 0.1, |_| {});
+
+    // `death`: the stone on the site and the tree whose sphere reaches in; no other scenery.
+    let felled: Vec<usize> =
+        scenery.iter().copied().filter(|&t| !play.battle.combat.targets[t].alive).collect();
+    assert_eq!(felled, [stone, tree]);
+    assert!(
+        play.battle.combat.targets[..units].iter().enumerate().all(|(t, x)| x.alive || scenery.contains(&t))
+    );
+
+    // `bcreate`: the Teleport, the player's, standing on the ground there and placed.
+    let teleport = (units..play.units.len())
+        .find(|&t| play.commander.paths[t].eq_ignore_ascii_case("UNITS\\AUTO\\teleport.dat"))
+        .expect("the Teleport");
+    assert_eq!(play.units[teleport].clan, Some(0));
+    assert_eq!(play.construction.placements.len(), buildings + 1);
+    assert!(play.placed(teleport) && play.construction.spheres.iter().all(|s| s.target != teleport));
+    let at = play.battle.combat.targets[teleport].position;
+    assert_eq!((at.x, at.y), (1246.0, 1051.0));
+    // Its base on the mean of its cut contour, the origin 3.3 under the ground at 51.1, as
+    // Tut_4's placed Main Teleport's stands 3.7 under its own; not left at 10.
+    assert!((at.z - 47.82).abs() < 0.01, "{at}");
+    let id = play.units[teleport].logical_id;
+    assert!(id < 0, "a building's id carries the top bit: {id:#x}");
+    assert_eq!(play.progression.as_ref().unwrap().progress.owner(id), 0);
+
+    // `create` three times: `Enm1`'s mobile HQs.
+    let hqs: Vec<usize> = (units..play.units.len())
+        .filter(|&t| play.commander.paths[t].eq_ignore_ascii_case("UNITS\\AUTO\\42_mtp.dat"))
+        .collect();
+    assert_eq!(hqs.len(), 3);
+    assert!(hqs.iter().all(|&t| play.units[t].clan == Some(1)));
+}

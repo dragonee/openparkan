@@ -73,9 +73,10 @@ pub const SKIRT: f32 = 1.5;
 /// STAND-IN: docs/03-terrain.md#for-an-engine -- the insertion re-triangulates each landscape
 /// face the contour cuts and keeps exactly its part outside the contour, so its ground meets
 /// the band on the contour itself. Here the landscape is cut by a mask instead and this apron
-/// covers the mask's edge. And every building stands at its mission height, where the
-/// insertion sets it down on the mean of its cut contour, which 151 of the 167 placed ones
-/// already are.
+/// covers the mask's edge. And every placed building stands at its mission height, where the
+/// insertion sets one whose start flag is clear down on the mean of its cut contour: 150 of the
+/// 154 such already stand there, and the other 4 within 0.14 ([`set_down`]; docs/04, "The
+/// start flag keeps a building at its file height").
 pub const APRON: f32 = 2.0;
 pub const APRON_SINK: f32 = 0.5;
 
@@ -205,6 +206,22 @@ fn facet(corners: [Vertex; 3]) -> Facet {
         corner.normal = normal;
     }
     facet
+}
+
+/// How far the insertion moves a building placed at `at` turned `yaw` up or down: the mean
+/// height of its cut outer contour less its base, its inner ring's first corner
+/// (`Terrain.dll:0x1001166d`, taken from the matrix's z at `0x100147cc`–`0x100147e0`; docs/03,
+/// "A building is set down on the mean of its contour"). It does so only while the building's
+/// start flag is clear (docs/04, "The start flag keeps a building at its file height"). 0 for
+/// a plan with no rings.
+pub fn set_down(land: &LandMesh, inner: &[[f32; 3]], outer: &[[f32; 3]], at: [f32; 3], yaw: f32) -> f32 {
+    let (inner, outer) = (place(inner, at, yaw), place(outer, at, yaw));
+    let Some(base) = inner.first().map(|p| p[2]) else { return 0.0 };
+    let edge = contour(land, &outer, base);
+    if edge.is_empty() {
+        return 0.0;
+    }
+    edge.iter().map(|p| p[2]).sum::<f32>() / edge.len() as f32 - base
 }
 
 /// A ring's corners placed by a building's position and its turn about z.

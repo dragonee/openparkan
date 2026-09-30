@@ -37,12 +37,14 @@ few fields are carried through without being understood:
   are scaled, and the engine applies it to them (218 placements carry a value
   other than 1, 0.2 to 21; see [04-missions.md](04-missions.md#the-scale)).
   Uniform on all 864, so the data still does not exercise the axis order.
-- ~~What reads a building's start flag back~~ — **answered, negatively**:
-  `IBuilding` slot 13 has no caller anywhere in the install, but `CBuilding
-  +0xb8` is read — `CBuilding::SetObjectState` names it the building's
-  **object state** and `CBuilding::SendMsg` tests it against zero, which a
-  placed building never is. So the flag changes nothing through the only
-  reader the engine has. See [04-missions.md](04-missions.md#the-start-flag-changes-nothing--read).
+- ~~What reads a building's start flag back~~ — **answered**, and the first
+  answer here was wrong. It said *negatively*: `IBuilding` slot 13 had no caller
+  and the flag changed nothing. The landscape insertion calls slot 13 twice
+  through an answer it keeps on the stack (`Terrain.dll:0x10011147`,
+  `0x100147cc`), and sets a building down on the mean of its cut contour only
+  while it reads 1: **the flag keeps a building at its file height**, which 12
+  of the 13 flagged buildings stand at, off their mean. See
+  [04-missions.md](04-missions.md#the-start-flag-keeps-a-building-at-its-file-height--read-and-measured).
 - ~~The word after the map path~~ — **half answered**: **nothing reads it**
   (`IMission` slot 11 is called nowhere; the control finds the slot 12 and 13
   calls a caller would have looked like). What it *means* is still open. It is
