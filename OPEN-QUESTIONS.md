@@ -118,6 +118,12 @@ remainder a closed line names stays here as a line of its own.
   item as one that opens and stops. What is left to find is the switch: the likely places are
   the fire control that owns a tower's turret and whatever handles a building finishing
   construction ([28-chassis](docs/28-chassis.md#every-component-is-stepped-not-only-a-device--read-and-measured)).
+  *Seen* 2026-09-30 in "Let's Play - Parkan: Iron Strategy, Part 4" (Qqs8_i9IeUU): the valley's
+  Light Tower keeps its mast up through the 40 s of the hero's attack from 20:42, its target
+  silhouette sampled every 3 s, so the game's mast does not bounce on a ten-second period; its
+  turret's node shows red from 21:27, and the mast sinks to a stub by 21:36. So the mast stays up
+  while the turret lives and is stowed once it is lost — what switches it is still to find, and
+  the engine keeps it up either way.
 - [ ] **Whether a building's collision mesh follows the nodes its own items turn.** Raised
   2026-09-21 alongside the above. Nine class-26 records turn nodes that never stop — the three
   mines' rotors, the Main Teleport's twenty-eight rings, `fr_e_brige`'s hub — and the engine
@@ -171,6 +177,16 @@ remainder a closed line names stays here as a line of its own.
   `Type` comes from the turret either way ([38-designs](docs/38-designs.md#not-established),
   [30-turrets](docs/30-turrets.md)).
 - [ ] Where the unit constructor's page item names (`+0xc4`) come from.
+- [ ] **What killed the hero in C02 M04's valley Light Tower.** Raised 2026-09-30 from checking
+  C02 M04 against a recording ("Let's Play - Parkan: Iron Strategy, Part 4", Qqs8_i9IeUU, 21:53.5).
+  The hero, its own panel's life arcs full, walks up to the pod of `mtow01` at (591, 1502), whose
+  turret it has shot off — the target panel shows the turret red from 21:27 and the mast sunk by
+  21:36 — and whose shield ring is red. One white flash, the view left on a white glare, and the
+  mission fails; on the reload the same tower is captured whole (26:04). *Seen*, not read: whether
+  the tower died then and its death killed who stood inside, or another gun reached the room.
+  Nothing read kills a unit inside a building — a building whose node 0 dies becomes a shell with
+  its model standing ([26-damage](docs/26-damage.md)) — and the engine leaves a hero standing
+  there unharmed.
 
 ## AI, scripts, packages and economy
 
@@ -341,7 +357,12 @@ remainder a closed line names stays here as a line of its own.
 
 **The Main Teleport**
 
-- [ ] What the teleport's class-25 parts do with the power byte's state `0x20`, and its class-29 parts with 1.
+- [ ] What the teleport's class-25 parts do with the power byte's state `0x20`, and its class-29 parts with 1. *Seen*
+  2026-09-30 in C02 M04's briefing ("Let's Play - Parkan: Iron Strategy, Part 4", Qqs8_i9IeUU,
+  16:18.5, briefing time 49.5 s), the enemy holding the teleport and both generators: the tower's
+  mast is closed, a blue-violet shaft under a blue cylinder, and the arch's opening a pale
+  blue-white face, where the engine spreads three red vanes on a grey shaft and puts an orange glow
+  at the arch's foot. Which of those the power byte drives is not read.
 - [ ] What building interface `0xb` slot 16 asks about a place's node; what property `0x208` is (a network mirror flag is a guess); whether anything sets `pTeleFunc`.
 - [ ] Whether a player-driven small unit can take the Teleport's pod.
 - [ ] [M14] The places besides a dock's and a main teleport's (loading places) do not tick by the place rule yet; the place timer's random source; whether a destroyed generator stays in `World3D.dll`'s queue 3.
