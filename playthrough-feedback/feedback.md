@@ -52,6 +52,15 @@ Checked against "Let's Play - Parkan: Iron Strategy, Part 3" (UfyUzq8k2kY). Both
 the objectives, the captures, the route triggers, the HQ's command mode and the flyer's
 take-over already match the recording.
 
+Missions 03 and 04 checked against "Let's Play - Parkan: Iron Strategy, Part 4" (Qqs8_i9IeUU)
+and its bonus "Part 4.5" (C9kZR__WpIQ), which plays Mission 04 again. Both briefings' black
+lead-in, camera, cuts and subtitles, both objectives screens, the first cockpits' wingmen and
+weapons, the captures and their messages (C02M03's *"Well done!"*, C02M04's road and Outpost
+lines), function 57's three flyers, the vacant MTW-1 Warrior announcing itself at 397-399 m,
+C02M04's objective completing on the second generator, the plateau tower killing the hero on
+foot from 120-137 m, and both wins (the warehouse warbot taken at 5 m, the teleport's field)
+already match the recording.
+
 ## Mission 01 - The Iron Monster
 
 - Mechanics
@@ -78,3 +87,38 @@ take-over already match the recording.
 - Visuals
   - [ ] The last buoy (s_tree_28) is olive and orange, should be lilac with a pink cap and a blue beam (briefing, 10:16)
 
+## Mission 03 - The Lost Key
+
+- Mechanics
+  - [ ] The warbot hidden in the Warehouse (22mwlk1, id 28) sits sunk in the Warehouse's floor
+    - The recording shows it upright on its legs, taller than the hero, in the briefing (1:43, briefing time 71 s) and as the hero walks up to it (15:13-15:15)
+    - The engine holds its body 0.16 m over the floor face it stands on (z 36.6), so only the top of its hull shows over the ledge; the same unit put on open ground stands 3.02 m over it, as C02M04's 24mwlke1 does (3.04)
+    - So a walker standing on a building's floor loses its legs' height, where on the landscape it keeps it
+- Visuals
+  - [ ] The target panel's name box stays empty for every building
+    - The recording names them: "Small Bunker" at the first cockpit (1:50), "Small Generator" (2:45), "Small Warehouse" (15:08), "Light Tower" on C02M04 (16:27)
+    - The engine fills the panel's names for units only; docs/35's building names (strings 6031-6098 by Type and size) are used by command mode alone
+  - [ ] The Small Factory (splant01) is dim and its pad unlit (briefing time 32 s, 1:04)
+    - The recording shows the pad's octagonal border solid lime-green and the factory's roof wing lit yellow-green, crisp through the haze
+    - The engine draws the border dark with four yellow lights at its corners and green ones at the door, and the roof orange-brown under heavy haze
+  - [ ] As on Mission 01, the clouds carry bright yellow streaks and a sun glare, and the ground is washed out, in every briefing pair
+
+## Mission 04 - The Last Bastion
+
+- Mechanics
+  - [ ] Capturing a Light Tower does not put the player at its gun
+    - In the recording, a second after *"Building is captured"* the view is the tower's gun, the own panel reads "Light Tower", and the player shoots tanks with it until Esc: the valley's tower (mtow01) at 26:04-26:15, the plateau's (mtow02) at 37:23-37:42
+    - docs/27 ("Capture", "What the modes show") reads it: standing on the pod of one's own tower switches the view to state 6, the tower's manual control, unless its turret is gone
+    - The engine captures the tower and leaves the hero on foot in the pod room: it has no mode 6
+  - [ ] The valley's Light Tower keeps its gun mast up after its turret is shot off
+    - In the recording the target panel's silhouette shows the mast up through the 40 s of the hero's attack from 20:42, the turret red from 21:27, and the mast sunk to a stub by 21:36
+    - The engine raises every tower's mast once and keeps it up (a stand-in; queued)
+  - [ ] Unexplained: the hero dies in the valley Light Tower's pod room (21:53.5)
+    - At full life, walking up to the pod of the tower whose turret it has shot off, it is lost in one white flash and the mission fails; on the reload it captures the same tower (26:04)
+    - The engine: nothing harms a hero standing there. What killed it is not read (queued)
+- Visuals
+  - [ ] The target panel's name box stays empty for buildings (see Mission 03): the first cockpit's target reads "Light Tower", 358 m, in the recording (16:27) and nothing in the engine
+  - [ ] The Main Teleport's tower and arch look different (briefing time 49.5 s, 16:18.5)
+    - The recording shows the tower's mast closed, a blue-violet shaft capped by a blue cylinder, and the arch's opening a pale blue-white face
+    - The engine spreads three red vanes on a grey shaft and puts an orange glow at the arch's foot
+  - [ ] As on Mission 01: the Outpost's facade carries a teal diamond in the recording and an orange light in the engine (briefing time 11-16.3 s, 15:40-15:45); the Generator's core is a small green light in the recording and a large yellow-green glow in the engine (43.5 s, 16:12.5); and the clouds and washed-out ground
