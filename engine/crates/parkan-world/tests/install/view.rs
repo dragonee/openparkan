@@ -356,6 +356,60 @@ fn every_unit_named_raises_its_clans_count_and_the_small_towers_robots_are_tiny_
     assert_eq!((robots, tiny, walking_warriors), (267, 28, 28));
 }
 
+/// A building is named on the target panel as a unit is, from the string its behaviour holds:
+/// the building record's slot 1 hands it `iron3d.dll:0x100338d0`'s, by its Type and its size
+/// class (docs/35, "Name and status"), and the panel prints no status under it. The recording
+/// names every building it points at so ("Let's Play - Parkan: Iron Strategy, Part 4"): on *The
+/// Lost Key* the Small Bunker (1:50), the Small Generator (2:45), the Medium Mine (4:47), the
+/// Large Factory (9:07) and the Small Warehouse (15:08); on *The Last Bastion* the Light Tower
+/// (16:27), the Small Outpost (18:50) and the Teleport (38:37).
+#[test]
+#[ignore = "needs the game install"]
+fn a_building_is_named_on_the_target_panel_by_its_type_and_size_class() {
+    use glam::{Mat4, Vec3};
+    use parkan_formats::mission;
+    use parkan_world::cockpit::Cockpit;
+    use parkan_world::cockpit::panels::Panels;
+    use parkan_world::hud::{Pages, Space};
+    use parkan_world::text::GameFont;
+
+    let game = gamedir::find(None).expect("a Parkan install: set PARKAN_DIR");
+    let strings = parkan_world::resources::game_strings(&game).unwrap();
+    let names = |path: &str, of: &[&str]| {
+        let dir = gamedir::resolve(&game, path).unwrap();
+        let m = mission::parse(&std::fs::read(dir.join("data.tma")).unwrap(), "mission").unwrap();
+        let play = campaign_play(path);
+        let panels = Panels::new(&play, &strings);
+        of.iter().map(|dat| panels.names[object_target(&play, &m, dat)].clone()).collect::<Vec<_>>()
+    };
+    let buildings = ["sbunk02.dat", "gener01.dat", "mmine01.dat", "lplant01.dat", "sto_l_n1.dat"];
+    assert_eq!(
+        names(gamedir::C02_MISSION_03, &buildings),
+        ["Small Bunker", "Small Generator", "Medium Mine", "Large Factory", "Small Warehouse"]
+    );
+    assert_eq!(
+        names(gamedir::C02_MISSION_04, &["mtow02.dat", "shang03.dat", "mtp_m_n1.dat"]),
+        ["Light Tower", "Small Outpost", "Teleport"]
+    );
+
+    // And drawn on the panel, the Small Bunker targeted from the hero's place in it.
+    let dir = gamedir::resolve(&game, gamedir::C02_MISSION_03).unwrap();
+    let m = mission::parse(&std::fs::read(dir.join("data.tma")).unwrap(), "Mission.03").unwrap();
+    let mut play = campaign_play(gamedir::C02_MISSION_03);
+    let bunker = object_target(&play, &m, "sbunk02.dat");
+    let pages = Pages::open(&game).unwrap();
+    let mut cockpit = Cockpit::open(&game, &pages, &play).unwrap();
+    play.targets.set(Some(bunker));
+    let (font, menu) = (GameFont::ui(&game, "GAME_FONT").unwrap(), GameFont::ui(&game, "MENU_FONT").unwrap());
+    let eye = play.hero.eye();
+    let view_proj = Mat4::perspective_infinite_reverse_rh(1.0, 4.0 / 3.0, 0.5)
+        * Mat4::look_to_rh(eye.position, eye.forward, Vec3::Z);
+    let drawn = cockpit.draw(&play, Space::new(640.0, 480.0), &font, &menu, view_proj);
+    let texts: Vec<&str> = drawn.text.iter().map(|r| r.text.as_str()).collect();
+    assert!(texts.contains(&"Small Bunker"), "the name line: {texts:?}");
+    assert!(!texts.iter().any(|t| t.starts_with('[')), "and no status under it: {texts:?}");
+}
+
 #[test]
 #[ignore = "needs the game install"]
 fn leaving_the_window_lets_shift_up_and_the_free_look_centres_on_foot_and_aboard() {

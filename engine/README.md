@@ -1124,8 +1124,9 @@ out of the ground.
   and the machine stands at 0 m/s for the rest of the mission. Reaching the player's base on
   this mission waits on that, not on the planner.
 
-**M19.** A tower's guns in the player's hands, and a walker drawn on its legs under a low
-ceiling, as Part 4 of the Iron Strategy let's play has them on C02 M03 and M04.
+**M19.** A tower's guns in the player's hands, a walker drawn on its legs under a low ceiling,
+and buildings named on the target panel, as Part 4 of the Iron Strategy let's play has them on
+C02 M03 and M04.
 
 - **A tower's pod opens its manual control** (docs/27, "Capture" and "What the modes show").
   The opening a pod runs for the player's own unit switches the view by the building's Type,
@@ -1145,6 +1146,13 @@ ceiling, as Part 4 of the Iron Strategy let's play has them on C02 M03 and M04.
   tick: drawn after the push, the walker stood with its hull at the floor and its legs through
   it, where the recording has it upright in every frame. It is drawn before the push lands, and
   the simulation keeps the push, which carries units down a ramp into a building.
+- **A building is named on the target panel** (docs/35, "Name and status"). Its record hands
+  its behaviour the string its Type and size class pick, and the panel prints it as a unit's,
+  with no status under it; the engine had named units alone, so every building's name box
+  stood empty. *The Lost Key*'s Small Bunker, Small Generator, Medium Mine, Large Factory and
+  Small Warehouse and *The Last Bastion*'s Light Tower, Small Outpost and Teleport read as the
+  recording has them, a building put up in play too, and a tower's own panel in its manual
+  control reads "Light Tower".
 
 This directory also holds what the rest will follow:
 

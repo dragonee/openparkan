@@ -1446,9 +1446,18 @@ impl App {
                 self.end_briefing();
             }
         }
-        // A unit a factory made is drawn from now on, and named on the HUD.
+        // A unit a factory made, or a building a builder put up, is drawn from now on, and named
+        // on the HUD.
         if let (Some(play), Some(view)) = (self.play.as_mut(), self.view.as_mut()) {
-            let names: Vec<String> = play.added.iter().map(|&t| play.names[t].clone()).collect();
+            let strings = self.hud.as_ref().map(|h| &h.cockpit.strings);
+            let names: Vec<String> = play
+                .added
+                .iter()
+                .map(|&t| match strings {
+                    Some(s) => parkan_world::cockpit::panels::target_name(play, t, s),
+                    None => play.names[t].clone(),
+                })
+                .collect();
             let added = scene::add_targets(&mut self.world.objects, &mut self.world.store, view, play)
                 .and_then(|added| {
                     if added {

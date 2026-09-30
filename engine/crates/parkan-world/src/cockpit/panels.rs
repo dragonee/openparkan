@@ -168,6 +168,17 @@ pub fn name(
     format!("{size}{chassis}{class}-{number} {}", string(word))
 }
 
+/// Target `t`'s name as a target made in play takes it: a building's is the string its
+/// record's slot 1 hands its behaviour (`0x10033720` → `0x100338d0`), by its Type and its size
+/// class ([`Play::building_name`], docs/35, "Name and status"), which the target panel prints as
+/// it prints a unit's; a unit's is the one its build gave it ([`Play::names`]).
+pub fn target_name(play: &Play, t: usize, strings: &BTreeMap<u32, String>) -> String {
+    match play.units.get(t) {
+        Some(u) if u.kind == KIND_BUILDING => play.building_name(t, strings),
+        _ => play.names.get(t).cloned().unwrap_or_default(),
+    }
+}
+
 /// The status string of an order (docs/31-packages.md, "The orders"), by its number.
 pub fn order_status(order: i32) -> u32 {
     match order {
@@ -201,11 +212,12 @@ pub fn life_share<'a>(lives: impl Iterator<Item = &'a Life>) -> f32 {
 }
 
 impl Panels {
-    /// Every unit of `play` named, each clan counting its own in file order. The name raises
-    /// its clan's count for every unit it names, whichever string it gives: the hero's "Human",
-    /// an animal's "Animal" and a *Tiny Tower*'s too (`0x10075eb2`). So the player's first bot
-    /// after the hero is its clan's second: *seen*, Mission 03's builder is **SWB-2** and
-    /// *Outflanking Maneuver*'s wingman **SWW-2** (docs/35, "Name and status").
+    /// Every unit and building of `play` named. Each clan counts its own units in file order,
+    /// and the name raises its clan's count for every unit it names, whichever string it gives:
+    /// the hero's "Human", an animal's "Animal" and a *Tiny Tower*'s too (`0x10075eb2`). So the
+    /// player's first bot after the hero is its clan's second: *seen*, Mission 03's builder is
+    /// **SWB-2** and *Outflanking Maneuver*'s wingman **SWW-2** (docs/35, "Name and status"). A
+    /// building is named by its Type and its size class alone ([`target_name`]).
     pub fn new(play: &Play, strings: &BTreeMap<u32, String>) -> Panels {
         // The units in the mission's order, the hero among them at its own place.
         let mut order: Vec<(usize, Option<usize>)> = play
@@ -226,6 +238,11 @@ impl Panels {
             if let Some(t) = t {
                 let u = &play.units[t];
                 names[t] = name(u.type_word, u.designation, *count, strings);
+            }
+        }
+        for (t, u) in play.units.iter().enumerate() {
+            if u.kind == KIND_BUILDING {
+                names[t] = target_name(play, t, strings);
             }
         }
         Panels {
