@@ -52,6 +52,14 @@ remainder a closed line names stays here as a line of its own.
   2 is the walkable surface, all 6166 in a level-0 slot and 6100 above the engine's own cos-80° threshold,
   a chosen subset; 16 is the broad face of a door leaf, all 384 vertical on 52 interior nodes
   ([07-objects](docs/07-objects.md)).)
+- [ ] **How the weather is drawn.** Raised 2026-09-30 from checking C03 M01 against a recording
+  ("Let's Play - Parkan: Iron Strategy, Part 5", PfAg6zSe-yM). The keyframes' opcodes start and stop
+  rain, snow and lightning, and `Terrain.dll`'s factory makes a RAIN, a SNOW and a LIGHTNING object
+  for them (*read*); this map snows all day with `DUST_ADD` (`DUST.0`, cell 0, blend 2) in its snow
+  slot, and lightning runs 00:01–23:58. The recording shows red dust falling through every frame of
+  the briefing and of play (0:55 on) and a lightning bolt at 1:55. Not read: what the three objects
+  draw — how many particles, in what box about the camera, how fast and how large they fall, and how
+  a bolt is made, where and how often. The engine draws no weather ([10-sky](docs/10-sky.md)).
 
 ## Effects and sound
 
@@ -324,6 +332,13 @@ remainder a closed line names stays here as a line of its own.
 **Left by the eleventh round** (2026-09-29)
 
 - [ ] [M12] The game menu's save page — its draw (`iron3d.dll:0x10066d50`), its six slots' records and what the level's `0x100a1590` writes under `/save/` — and the shell that *Load game* and *Quit game* hand the mission to (exit codes 1 and 3). The engine takes *Save game* and *Load game* and does nothing, and *Quit game* closes the window; Mission 03 disables the first two ([39-boarding](docs/39-boarding.md#the-game-menu--read)).
+- [ ] What the quick save and the quick load do: `CMD_QUICK_SAVE` on F7 and `CMD_QUICK_LOAD` on F8
+  (`ui_other.man`, `addition.man`). Raised 2026-09-30 from checking C03 M01 against a recording
+  ("Let's Play - Parkan: Iron Strategy, Part 5", PfAg6zSe-yM, 3:09): in play the message box shows
+  *"from: System / Game saved..."* (`iron3d.dll` string 6246, beside 6245 *"Quick Save"*) and play
+  goes on. Not read: where the save goes — one of the save page's six slots or a slot of its own, and
+  its file under `/save/` — and what F8 loads. The engine binds neither
+  ([14-controls](docs/14-controls.md), [17-saves](docs/17-saves.md)).
 - [ ] A *Tiny Tower*'s battery of capacity −1: `Power::load` drops a negative battery, so the engine's battery arc follows the tower's fitted 31,000, where the game's id 1 answers 1 whenever any capacity is negative (`Control.dll:0x1002b42b`). How the power tick spends a −1 battery on a unit is not read ([41-commander](docs/41-commander.md#the-box), [23-economy](docs/23-economy.md)).
 - [ ] What a building going up is still reached by: whether a blast's hit, which hurts every object whose bounds reach it and then each node by its sphere (`0x10010030`), passes a node hidden by action 1, which is not a destroyed node; and whether Behavior's hall-way searches pass over a building in the second between its showing at 40 s and its sphere's end at 41 s ([26-damage](docs/26-damage.md#not-established)).
 - [ ] Whether the HQ camera's ride holds while an HQ patrols. Since a lone go leaves a patrol of 150, Mission 03's HQ ride test measures only while the go runs: once over, the patrolling HQ put the engine's camera 14 m behind the ride's figure, which nothing now checks ([40-command-mode](docs/40-command-mode.md#an-hqs-command-mode-mode-3--read-and-seen)).
