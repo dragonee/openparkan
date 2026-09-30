@@ -36,6 +36,7 @@
   - [x] Warbot escaped from factory passing through the wall. Make it respect collisions and door opening
 - Visuals
   - [x] Factory chimney animation is too fast and yellow instead of black smoke
+    - 2026-09-30: its streams also run at half pace now, and each puff takes its own far end and size, as C03 M01's volcano was measured against Part 5 of the let's play (see Campaign 03)
   - [x] Interior icons - computer, charging station - should be glowing green, are grey now
   - [x] Lights in Factory do not lie on normals of the building, see (factory-lights.png)
   - [x] The interiors of Factory lie beneath a black color. Until you step in you don't see the next segment
@@ -45,6 +46,13 @@
   - [x] Charging station has its own effect and sound
 - Bot Designer Screen
   - [x] Quality of life - on each tab (weapons, ammo, systems), selecting an item by choosing an item should cycle the list on the left to the next item. So I pick 1st weapon, left list changes to slot 2
+
+## Mission 03
+
+- Visuals
+  - [x] The Large Factory's chimney smoke shows dark and crisp through the lode's plume in front of it (seen in play, 2026-09-30)
+    - The engine drew every additive effect sprite first and every see-through one after, whatever their distance, and effect sprites write no depth
+    - Fixed 2026-09-30: every effect sprite is drawn far to near, as the game's type-3 layer 6 files them (docs/11, "Effect sprites are drawn far to near"), so the nearer plume lies over the smoke
 
 # Campaign 02
 
@@ -159,6 +167,14 @@ its narrowed radar cone; and the win on the Research Center's capture already ma
     - The recording shows the dish-shaped plant by the bridge (`s_tree_31` at (634, 914)) under an orange flame and a column of smoke (briefing time 34–38 s, 1:21–1:25), and the volcanoes' craters (`s_tree_33`, on the peaks at z 105–160) glowing under black smoke (4:10–4:25, 7:35, 19:20–20:10)
     - The engine starts no effect for a placed tree or stone. docs/13 reads the loader running block entry 0's group whatever the owner: `s_tree_a_31.ctl`'s makes `tree_flame_30`, its sound and `tree_smoke_31`, and `s_tree_a_33.ctl`'s `tree_light_33a` and `_33b`
     - Fixed 2026-09-30: trees and stones run their load groups as buildings do (222 in 18 missions), and a felled one takes its effects with it
+  - [x] The volcano's smoke rises and flickers about twice as fast as the recording's (seen in play, 2026-09-30)
+    - Measured frame by frame at 60 fps (4:19.4–4:24.4): the recording's smoke rises at about 0.63 of the engine's speed against its own puffs' width, and its flame beats at 5.3 Hz where the engine's 0.08 s interval beat at 12.5 Hz
+    - The engine plays a stream's clock, emission and ageing as `Effect.dll` reads; what slows the game's is not read (queued)
+    - Fixed 2026-09-30 as a stand-in: the streams of every load group's effects and of a lode's plume run at half pace; the construction sphere's and every gun's and round's keep theirs
+  - [x] The plume climbs one smooth cone where the recording's billows in separate puffs (4:19–4:24)
+    - The spawn gives each particle its own far end and size, a uniform in ±half of the block's jitter (`Effect.dll:0x10011e81`–`0x10011f7f`), which the engine left out, so every puff took one line
+    - Fixed 2026-09-30: each stream particle draws its own far ends as it leaves; the volcano's smoke ends 100 ± 30 m up and ± 10 m aside
+  - [ ] The crater's flame is about twice as large in the recording, and its brightness varies a third as much as the engine's (4:19–4:24; queued with the stream's pace)
   - [ ] No weather: the recording's red dust falls the whole mission (the sky's snow spell 00:00–23:59 with `DUST_ADD` in its slot, e.g. 0:55–1:35 and every cockpit frame after), and lightning strikes at 1:55; the engine draws neither (queued: how the weather is drawn)
   - [ ] The engine draws a grey-brown cloud layer with hard, stepped edges over the upper sky, in every briefing shot from briefing time 15 s and in play; the recording's sky is a smooth red, magenta later, with faint wisps at most (0:57–1:25, 2:40, 12:20)
   - [ ] The orb the two standing figures hold is a small orange ball in the recording and a large rayed orange glow in the engine (briefing time 10–19 s, 0:57–1:06), as Campaign 02's generator core
