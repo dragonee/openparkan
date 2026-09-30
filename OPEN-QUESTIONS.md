@@ -52,6 +52,12 @@ remainder a closed line names stays here as a line of its own.
   2 is the walkable surface, all 6166 in a level-0 slot and 6100 above the engine's own cos-80° threshold,
   a chosen subset; 16 is the broad face of a door leaf, all 384 vertical on 52 interior nodes
   ([07-objects](docs/07-objects.md)).)
+- [ ] What a type-1, 2 or 5 pass does with its items' order. The effect sprites' layer 6 is a type-3
+  `CCamDistSortLayerVB`, read to draw far to near (`Terrain.dll:0x1003e090`, `0x1003e1d0`;
+  [11-effects](docs/11-effects.md#effect-sprites-are-drawn-far-to-near--read-and-seen)); the see-through
+  surfaces' layer 5 is type 1, and group 1's layers 0–4, 8, 10 and 13 are type 2 and layer 12 type 5
+  ([10-sky](docs/10-sky.md#the-dome)), whose render slots are not read. Narrowed 2026-09-30 out of
+  [07-objects](docs/07-objects.md)'s note on the queue's sort types.
 - [ ] **How the weather is drawn.** Raised 2026-09-30 from checking C03 M01 against a recording
   ("Let's Play - Parkan: Iron Strategy, Part 5", PfAg6zSe-yM). The keyframes' opcodes start and stop
   rain, snow and lightning, and `Terrain.dll`'s factory makes a RAIN, a SNOW and a LIGHTNING object
