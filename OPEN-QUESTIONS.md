@@ -90,6 +90,20 @@ remainder a closed line names stays here as a line of its own.
   inside-a-building pass looked at rather than another bound guessed
   ([24-motion](docs/24-motion.md#collision-between-objects--read),
   [07-objects](docs/07-objects.md#the-flags-word)).
+- [ ] **What keeps a walker upright on a building's floor under a low ceiling.** Raised
+  2026-09-30 from checking C02 M03 against a recording. C02 M03's Small Warehouse is 6.3–7.5 m
+  high inside, and the medium walker `22mwlk1` placed on its floor has a 5.87 m agent sphere
+  0.41 above its origin: the ceiling's faces (interior node `i09`, 42.88–44.08) press it 2.85 m
+  down. *Read*: the sphere the pair hands the push-out is that agent sphere (interface `0x18`
+  slot 9 with 2, `Control.dll:0x1001fef5`, into `+0x38`–`+0x50` at `0x1001ff36`); a machine
+  standing on a building takes a down push whole (`0x1000c9eb`); the push lands after the
+  ground contact. So drawn after the push the walker stands with its hull at the floor, and the
+  recording shows it upright in **every** frame at 60 fps ("Let's Play - Parkan: Iron Strategy,
+  Part 4", 1:43, 15:13–15:15). Not read: where the frame is drawn among move, pass, contact
+  and push, which message runs the sphere's refresh (`0x1001fec0`, case 0 of `0x1001f548`), and
+  whether anything keeps the pair from pushing. The engine draws the body where the contact
+  last held it and keeps the push in the simulation, which three install tests need to carry
+  units down a ramp into a building ([24-motion](docs/24-motion.md#not-established)).
 - [ ] **What lets a mover past a face flagged `0x20`.** Raised 2026-09-20 from play on C02 M04,
   *The Last Bastion*. The collision's own two filters take a triangle mask of **4**
   (`Control.dll:0x1001dbad` for the segment, `0x1001dbce` for the push-out) where a round's takes

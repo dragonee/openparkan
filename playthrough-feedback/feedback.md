@@ -90,10 +90,11 @@ already match the recording.
 ## Mission 03 - The Lost Key
 
 - Mechanics
-  - [ ] The warbot hidden in the Warehouse (22mwlk1, id 28) sits sunk in the Warehouse's floor
+  - [x] The warbot hidden in the Warehouse (22mwlk1, id 28) sits sunk in the Warehouse's floor
     - The recording shows it upright on its legs, taller than the hero, in the briefing (1:43, briefing time 71 s) and as the hero walks up to it (15:13-15:15)
     - The engine holds its body 0.16 m over the floor face it stands on (z 36.6), so only the top of its hull shows over the ledge; the same unit put on open ground stands 3.02 m over it, as C02M04's 24mwlke1 does (3.04)
     - So a walker standing on a building's floor loses its legs' height, where on the landscape it keeps it
+    - Fixed 2026-09-30 as a stand-in: the Warehouse's ceiling presses its 5.87 m agent sphere down 2.85 m a tick, and the read push lands after the ground contact; the body is now drawn where the contact holds it, and the simulation keeps the push (queued: what keeps it upright in the game)
 - Visuals
   - [ ] The target panel's name box stays empty for every building
     - The recording names them: "Small Bunker" at the first cockpit (1:50), "Small Generator" (2:45), "Small Warehouse" (15:08), "Light Tower" on C02M04 (16:27)
@@ -106,10 +107,11 @@ already match the recording.
 ## Mission 04 - The Last Bastion
 
 - Mechanics
-  - [ ] Capturing a Light Tower does not put the player at its gun
+  - [x] Capturing a Light Tower does not put the player at its gun
     - In the recording, a second after *"Building is captured"* the view is the tower's gun, the own panel reads "Light Tower", and the player shoots tanks with it until Esc: the valley's tower (mtow01) at 26:04-26:15, the plateau's (mtow02) at 37:23-37:42
     - docs/27 ("Capture", "What the modes show") reads it: standing on the pod of one's own tower switches the view to state 6, the tower's manual control, unless its turret is gone
     - The engine captures the tower and leaves the hero on foot in the pod room: it has no mode 6
+    - Fixed 2026-09-30: the pod opens mode 6; the tower is driven from its turret's camera and cockpit with `M1.TBL`, its guns fire at the button, and Esc hands them back; a tower whose turret is gone opens nothing
   - [ ] The valley's Light Tower keeps its gun mast up after its turret is shot off
     - In the recording the target panel's silhouette shows the mast up through the 40 s of the hero's attack from 20:42, the turret red from 21:27, and the mast sunk to a stub by 21:36
     - The engine raises every tower's mast once and keeps it up (a stand-in; queued)
