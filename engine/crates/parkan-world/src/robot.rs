@@ -61,12 +61,88 @@ pub struct RobotPart {
 }
 
 /// A gun fitted as a part of its own (`e_gun_*` on a turret socket, docs/29): the part,
-/// and its controller's channels and control points, which its barrels name.
+/// and its controller's channels and control points, which its barrels name; what its load
+/// group creates and starts, and what its shot group does.
 #[derive(Clone, Debug)]
 pub struct GunPart {
     pub part: usize,
     pub channels: Vec<Channel>,
     pub points: Vec<ControlPoint>,
+    pub effects: Vec<GunEffect>,
+    pub starts: Vec<EffectStart>,
+    pub shot: Vec<ShotAct>,
+    /// Whether its load group's effects are running.
+    pub running: bool,
+}
+
+/// An effect a fitted gun's controller creates on three of its control points (action 4,
+/// `Control.dll:0x10002a8d`), under its record's id. Its **node** is what a time-mode-4 effect
+/// takes its time from: action 4 hands the instance the node its first control point hangs
+/// on (`0x10002ad8`–`0x10002b1b`), and an action 14 names another in its place
+/// (`0x10003031`, docs/11, "Time mode 4 is a node's animation value"). A gun's barrel point
+/// hangs on the node its barrel channel plays, so its flash and its report run through each
+/// stroke: `L152mmMC`'s `gun_can152_fx` on node 3, which its barrel channel plays.
+#[derive(Clone, Debug, PartialEq)]
+pub struct GunEffect {
+    pub name: String,
+    pub points: [usize; 3],
+    pub id: i32,
+    pub node: i32,
+}
+
+/// An action-10 start: the id of the effect it restarts, and the time mode it restarts it in.
+pub type EffectStart = (i32, Option<u32>);
+
+/// What a gun's shot group does as a barrel starts its stroke (the section-5 group its gun
+/// component names at `+0xc`, docs/29, "What a shot plays"): action 4 creates an effect on
+/// three control points, as `L152mmMC`'s creates `smoke_gunf_m_gun`, and action 10 starts one
+/// its load group created, as a laser's restarts its flash.
+#[derive(Clone, Debug, PartialEq)]
+pub enum ShotAct {
+    Create(GunEffect),
+    Start(EffectStart),
+}
+
+/// A fitted gun's load group, and the shot group its gun component `c` names.
+fn gun_part_effects(
+    ctl: &Controller,
+    c: &Component,
+    points: &[ControlPoint],
+) -> (Vec<GunEffect>, Vec<EffectStart>, Vec<ShotAct>) {
+    let node_of = |p: i32| usize::try_from(p).ok().and_then(|p| points.get(p)).map_or(-1, |p| p.nodes().0);
+    let effect = |r: &control::Reference| {
+        let [.., v4, v5, v6, v7, _] = r.values;
+        GunEffect {
+            name: r.resource.member.clone(),
+            points: [v4, v5, v6].map(|v| usize::try_from(v).unwrap_or(0)),
+            id: v7,
+            node: node_of(v4),
+        }
+    };
+    let (mut effects, mut starts) = (Vec::new(), Vec::new());
+    let load = ctl.group(control::ENTRY_LOAD);
+    for r in control::run_group(&load, &[false; control::CONDITIONS]) {
+        match r.action() {
+            control::ACT_EFFECT_POINTS if !r.resource.member.is_empty() => effects.push(effect(r)),
+            control::ACT_START_EFFECT => starts.push((r.values[4], u32::try_from(r.values[5]).ok())),
+            _ => {}
+        }
+    }
+    for r in load.iter().filter(|r| r.action() == control::ACT_EFFECT_TIME_POINT) {
+        if let Some(e) = effects.iter_mut().find(|e| e.id == r.values[4]) {
+            e.node = r.values[5];
+        }
+    }
+    let shots = if c.group < 0 { Vec::new() } else { ctl.group_at(c.group) };
+    let shot = control::run_group(&shots, &[false; control::CONDITIONS])
+        .into_iter()
+        .filter_map(|r| match r.action() {
+            control::ACT_EFFECT_POINTS if !r.resource.member.is_empty() => Some(ShotAct::Create(effect(r))),
+            control::ACT_START_EFFECT => Some(ShotAct::Start((r.values[4], u32::try_from(r.values[5]).ok()))),
+            _ => None,
+        })
+        .collect();
+    (effects, starts, shot)
 }
 
 /// The profile whose chassis flies: `CanFly` without `WalkChassis` is on it alone of the
@@ -751,10 +827,15 @@ impl Robot {
                 gun.selected = true;
                 self.guns.push(gun);
                 self.rounds.push(kind);
+                let (effects, starts, shot) = gun_part_effects(&ctl, c, &points);
                 self.gun_parts.push(Some(GunPart {
                     part: p,
                     channels: ctl.channels.clone(),
                     points: points.clone(),
+                    effects,
+                    starts,
+                    shot,
+                    running: false,
                 }));
                 self.gun_nodes.push(usize::try_from(c.node).ok().map(|n| (p, n)));
             }
@@ -1024,7 +1105,14 @@ impl Robot {
     pub fn gun_muzzle(&self, gun: usize, barrel: usize) -> Option<(Vec3, Vec3)> {
         let barrel = self.guns.get(gun)?.barrels.get(barrel)?;
         let Some(Some(fitted)) = self.gun_parts.get(gun) else { return self.muzzle(barrel.channel) };
-        let point = fitted.points.get(usize::try_from(fitted.channels.get(barrel.channel)?.point).ok()?)?;
+        self.fitted_point(gun, usize::try_from(fitted.channels.get(barrel.channel)?.point).ok()?)
+    }
+
+    /// Control point `i` of fitted gun `gun`'s own part in the world, as its node is posed now:
+    /// where it is and its direction.
+    pub fn fitted_point(&self, gun: usize, i: usize) -> Option<(Vec3, Vec3)> {
+        let Some(Some(fitted)) = self.gun_parts.get(gun) else { return None };
+        let point = fitted.points.get(i)?;
         let (position, yaw) = self.walker.drawn(self.time_ms);
         let heading = Quat::from_rotation_z(yaw);
         let pose = self.part_pose(fitted.part, usize::try_from(point.nodes().0).unwrap_or(0));

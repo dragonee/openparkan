@@ -1175,6 +1175,76 @@ impl Play {
         }
     }
 
+    /// Each fitted gun's effects (docs/29, "What a shot plays"): its load group's, created and
+    /// started the first time the gun is seen, follow their control points, and a time-mode-4
+    /// one reads the value of the barrel channel that plays its node, so a cannon's flash and
+    /// its report run through each stroke; as a barrel starts its stroke the gun's shot group
+    /// runs. A deleted unit's go with it (`World3D.dll!KillGameObject`).
+    fn follow_gun_effects(&mut self, now: f64) {
+        let Play { robots, emplacements, fx, deleted, battle, .. } = self;
+        for (t, robot) in robots.iter_mut().chain(emplacements.iter_mut()) {
+            let t = *t;
+            if deleted.get(t).copied().unwrap_or(false) || battle.combat.targets.get(t).is_none() {
+                if robot.gun_parts.iter().flatten().any(|f| f.running) {
+                    fx.retain(|o, _| !matches!(o, Owner::Gun(x, _, _) | Owner::Shot(x, _) if *x == t));
+                    robot.gun_parts.iter_mut().flatten().for_each(|f| f.running = false);
+                }
+                continue;
+            }
+            for g in 0..robot.guns.len() {
+                let strokes = std::mem::take(&mut robot.guns[g].stroked).len();
+                let Some(Some(fitted)) = robot.gun_parts.get(g) else { continue };
+                // An effect whose points the gun's part does not carry is not made.
+                let frame = |e: &crate::robot::GunEffect| {
+                    let [a, b, c] = e.points.map(|i| robot.fitted_point(g, i));
+                    Some(Frame::from_points([a?, b?, c?]))
+                };
+                if !fitted.running {
+                    for e in &fitted.effects {
+                        if let Some(frame) = frame(e) {
+                            fx.start(Owner::Gun(t, g, e.id), &e.name, frame, 1.0, now, None);
+                        }
+                    }
+                    for &(id, mode) in &fitted.starts {
+                        fx.restart(Owner::Gun(t, g, id), now, mode);
+                    }
+                }
+                for e in &fitted.effects {
+                    let value = robot.guns[g]
+                        .barrels
+                        .iter()
+                        .find(|b| fitted.channels.get(b.channel).is_some_and(|c| c.node == e.node))
+                        .map_or(0.0, |b| b.value(robot.time_ms));
+                    let Some(frame) = frame(e) else { continue };
+                    for instance in fx.owned(Owner::Gun(t, g, e.id)) {
+                        instance.frame = frame;
+                        instance.value = value;
+                    }
+                }
+                for _ in 0..strokes {
+                    for act in &fitted.shot {
+                        match act {
+                            crate::robot::ShotAct::Create(e) => {
+                                if let Some(frame) = frame(e) {
+                                    fx.start(Owner::Shot(t, g), &e.name, frame, 1.0, now, None);
+                                }
+                            }
+                            &crate::robot::ShotAct::Start((id, mode)) => {
+                                fx.restart(Owner::Gun(t, g, id), now, mode)
+                            }
+                        }
+                    }
+                }
+                if let Some(Some(fitted)) = robot.gun_parts.get_mut(g) {
+                    fitted.running = true;
+                }
+            }
+        }
+        for g in &mut self.hero.guns {
+            g.stroked.clear();
+        }
+    }
+
     /// Load the mission's progression from `mission_dir`: its player clan's script, its
     /// messages and objectives, and the designs its `mission.cfg` prebuilds.
     pub fn load_progression(&mut self, game: &Path, mission_dir: &Path, mission: &Mission) -> Result<()> {
@@ -1839,6 +1909,7 @@ impl Play {
             }
         }
         self.follow_building_effects();
+        self.follow_gun_effects(now);
         self.follow_shield_flashes();
         self.tick_views();
         // Flight effects follow their rounds. A round whose flight is over stays where it

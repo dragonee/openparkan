@@ -12629,6 +12629,45 @@ def check_firing(check, game: Path) -> None:
           f"arms on {arms_where}; record +0xc names a group on {shot_groups[True]} of "
           f"{sum(shot_groups.values())} guns, holding only actions {dict(group_actions)}")
 
+    # A fitted gun's own load group hangs its flash and its report on its barrel: action 4
+    # hands the effect the node its first control point sits on (Control.dll:0x10002ad8),
+    # and time mode 4 reads that node's animation value, which the barrel channel writes.
+    guns_rlb = NResArchive.open(game / "guns.rlb")
+    in_guns = {e.name.lower() for e in guns_rlb}
+    fx_library = effects.EffectLibrary(game / "effects.rlb")
+    records = objects.ObjectLibrary(game / "objects.rlb").records.values()
+    seen: set[str] = set()
+    fitted = with_fx = on_barrel = made = 0
+    fx_modes: Counter[int] = Counter()
+    for record in records:
+        ctl_ref, cpt_ref = record.slot_with_suffix("ctl"), record.slot_with_suffix("cpt")
+        if not ctl_ref or ctl_ref.member.lower() not in in_guns or ctl_ref.member.lower() in seen:
+            continue
+        seen.add(ctl_ref.member.lower())
+        c = control.parse(guns_rlb.read_name(ctl_ref.member), names)
+        comps = [p for p in c.components if p.type_id == control.GUN_TYPE]
+        if not comps:
+            continue
+        fitted += 1
+        cpt = cpt_ref.member.lower() if cpt_ref else ""
+        points = objmesh.parse_control_points(guns_rlb.read_name(cpt)) \
+            if cpt in in_guns else []
+        barrel_nodes = {c.channels[e].node for p in comps for e in p.entries}
+        load = control.run_group(c.group(control.ENTRY_LOAD), [False] * control.CONDITIONS)
+        created = [r for r in load if r.action == control.ACT_EFFECT_POINTS and r.resource.member]
+        with_fx += bool(created)
+        for r in created:
+            made += 1
+            on_barrel += 0 <= r.args[0] < len(points) and points[r.args[0]].nodes[0] in barrel_nodes
+            fx = fx_library.get(r.resource.member)
+            fx_modes[fx.mode if fx else -1] += 1
+    check("guns.rlb: a fitted gun's load group hangs its shot effects on its barrel, time mode 4",
+          fitted and with_fx and made == on_barrel and list(fx_modes) == [effects.TIME_POINT],
+          f"{with_fx} of {fitted} fitted guns' controllers create {made} effects at load, "
+          f"{on_barrel} with their first control point on a node a barrel channel plays; "
+          f"their header time modes {dict(fx_modes)}.  So the flash and the report run "
+          f"through each stroke, 0 -> 0.5 -> 1, as the hero's hero_cannon does")
+
     turrets = NResArchive.open(game / "turrets.rlb")
     tur = control.parse(turrets.read_name("o_tur_ht_02.ctl"), names)
     points = [q.name for q in objmesh.parse_control_points(turrets.read_name("o_tur_ht_02.cpt"))]

@@ -754,6 +754,19 @@ fade steps and its last step can land up to 0.1 s later.
   It runs when a barrel starts its stroke and holds only actions 10 (start an
   effect), 4 (create one) or 10 with 11 (*measured*). An example is the
   builder's `gunf_builder`.
+- **A fitted gun's own load group hangs its flash and its report on its
+  barrel.**
+  - 35 of the 117 fitted guns' controllers create 50 effects at load
+    (action 4). All 50 are in time mode 4, and every one's first control
+    point sits on a node a barrel channel plays (*measured*).
+  - Action 4 hands the instance the node its first control point hangs on
+    (`Control.dll:0x10002ad8`–`0x10002b1b`), unless an action 14 names another
+    (*read*). So the effect takes its time from the barrel, as `hero_cannon`
+    does below.
+  - The Huge Cannon's `gun_can152_fx` holds two flash sprites and
+    `gun_can_03.wav` (audible 12 to 100 m) from 0.01 to 1. So a tower's or a
+    bot's cannon flashes and reports through each stroke. Its shot group adds
+    `smoke_gunf_m_gun` (action 4, time mode 1, 3 s).
 - **The hero's guns name none.**
   - The turret's load group creates `hero_cannon`, `hero_prifle` and
     `hero_redlaser` at the barrel points, and the `*_sfx` effects at the

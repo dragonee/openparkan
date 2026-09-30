@@ -908,9 +908,12 @@ fn c02_m04s_light_tower_taken_at_its_pod_hands_the_player_its_guns() {
     }
     assert!((play.eye().fov_x - wide).abs() < 0.05, "and back out: {}", play.eye().fov_x);
 
-    // The button fires its guns.
+    // The button fires its guns, and each stroke of the cannon's barrel plays its report:
+    // `L152mmMC`'s load group hangs `gun_can152_fx` on the barrel's point, in time mode 4 on the
+    // node the barrel channel plays (docs/29, "What a shot plays").
     let rounds = |play: &Play| play.battle.combat.rounds.len();
     let (mut most, before) = (0, rounds(&play));
+    play.cues.clear();
     play.key("SCAN_LMOUSE", true);
     for _ in 0..(3 * 60) {
         tick(&mut play, [0.0; 2]);
@@ -918,6 +921,8 @@ fn c02_m04s_light_tower_taken_at_its_pod_hands_the_player_its_guns() {
     }
     play.key("SCAN_LMOUSE", false);
     assert!(most > before, "its guns fire at the button: {before} rounds, then at most {most}");
+    let sounds: Vec<String> = play.cues.iter().map(|c| c.sound.to_ascii_lowercase()).collect();
+    assert!(sounds.iter().any(|s| s.starts_with("gun_can")), "the cannon sounds as it fires: {sounds:?}");
 
     // Esc (`CMD_ROLLBACK_STATE`, 6 → 0) gives the guns back to its AI and the view to the hero,
     // still on the pod.

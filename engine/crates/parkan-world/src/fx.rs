@@ -32,6 +32,10 @@ pub enum Owner {
     Chassis(i32),
     /// One of a building's load-group effects: the building's target, and its record's id.
     Building(usize, i32),
+    /// One of a fitted gun's load-group effects: the target, the gun, and its record's id.
+    Gun(usize, usize, i32),
+    /// An effect a fitted gun's shot group created as a stroke started: the target and the gun.
+    Shot(usize, usize),
     /// A mineral lode's plume, by the lode's index.
     Lode(usize),
     /// One of the three instances of a target's shield effect a hit plays (`0x10025ca0`).

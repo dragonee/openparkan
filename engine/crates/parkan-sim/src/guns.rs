@@ -161,6 +161,9 @@ pub struct Gun {
     /// Its node has no life left (slot 2, `0x10021820`), which the owner keeps from the node:
     /// it starts no stroke and reports 5 (`0x10029cc3`), though one under way finishes.
     pub broken: bool,
+    /// The barrels whose stroke has started since the owner last took them: a gun's shot group
+    /// runs as a barrel starts its stroke (docs/29, "What a shot plays").
+    pub stroked: Vec<usize>,
     last_wake_ms: f64,
     start_ms: f64,
     next_ms: f64,
@@ -211,6 +214,7 @@ impl Gun {
             round_flags: 0,
             lock_share: 0.0,
             broken: false,
+            stroked: Vec::new(),
             last_wake_ms: 0.0,
             start_ms: 0.0,
             next_ms: 0.0,
@@ -396,6 +400,7 @@ impl Gun {
             if self.salvo { (0..self.barrels.len()).collect() } else { vec![self.current] };
         for b in firing {
             self.barrels[b].step = STROKE;
+            self.stroked.push(b);
             self.advance(b, t, shots);
         }
     }

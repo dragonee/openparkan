@@ -805,7 +805,9 @@ impl Play {
         self.construction.placements.remove(&b);
         self.economy.sites.retain(|s| s.target != b);
         self.economy.ore.remove(&b);
-        self.fx.retain(|o, _| !matches!(o, Owner::Building(t, _) if *t == b));
+        self.fx.retain(
+            |o, _| !matches!(o, Owner::Building(t, _) | Owner::Gun(t, _, _) | Owner::Shot(t, _) if *t == b),
+        );
         self.selected.retain(|&t| t != b);
         if let (Some(unit), Some(p)) = (self.units.get(b), self.progression.as_mut()) {
             p.progress.deleted(unit.logical_id);

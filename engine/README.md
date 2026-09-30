@@ -1141,6 +1141,13 @@ C02 M03 and M04.
   it. Esc rolls back to the hero standing on the pod, the guns back to the AI. A tower whose
   turret is shot off is captured and opens nothing. *The Last Bastion*'s plateau tower,
   taken at its pod, turns under the mouse and fires both its `L152mmMC` at the button.
+- **A fitted gun flashes and reports on each stroke** (docs/29, "What a shot plays"). The load
+  group of a gun fitted as a part of its own (35 of the 117 fitted guns' controllers) creates its
+  effects on its control points, each in time mode 4 on the node its first point hangs on, which
+  its barrel channel plays: `gun_can152_fx`, `gunf_laser_b` and their like run their flash and
+  their sound through the stroke, 0 to 0.5 to 1. The shot group the gun component names runs
+  as each barrel starts its stroke: `smoke_gunf_m_gun` from a Huge Cannon, a laser's restart.
+  So a tower's cannons, and every bot's fitted guns, sound, whoever holds them.
 - **A machine is drawn where the ground contact holds it** (docs/24, "Collision between
   objects"). As read, a machine standing on a building takes a down push whole, after the
   ground contact. *The Lost Key*'s Small Warehouse is 6.3–7.5 m high inside, and its ceiling
