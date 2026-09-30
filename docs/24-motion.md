@@ -507,7 +507,7 @@ is not the command's x axis. Each strafe key keeps a held flag (globals
 - **So backing up mirrors the angle.** `S` then `A` turns the hull π/4 to the
   right and walks it backwards: back and to the left, 225° clockwise from the
   heading. `S` then `D` goes back and to the right, 135°. The player sees the
-  same in the game (*seen*, `user-feedback` on Mission 01).
+  same in the game (*seen*, `playthrough-feedback` on Mission 01).
 
 **A walk key while strafing** (`0x100101b2`, `0x100102b9`). The handler first
 keeps W's and S's flags. A walk key coming up while the other is still held

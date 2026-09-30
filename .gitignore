@@ -22,4 +22,6 @@ dist/
 # the CodeGraph index
 /.codegraph/
 .DS_Store
-/user-feedback
+# the playthrough notes are kept; the frames they point at are the game's own, and stay local
+/playthrough-feedback/*.png
+/playthrough-feedback/*.gif
