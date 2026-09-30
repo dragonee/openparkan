@@ -145,17 +145,20 @@ its narrowed radar cone; and the win on the Research Center's capture already ma
   - [ ] F7's quick save says nothing and saves nothing
     - At 3:09 the message box reads *"from: System / Game saved..."* (string 6246, beside 6245 *"Quick Save"*) and play goes on
     - `ui_other.man` and `addition.man` bind `CMD_QUICK_SAVE` to F7 and `CMD_QUICK_LOAD` to F8; the engine binds neither (queued: what they write and read)
-  - [ ] The Energy row holds still at 50% where the recording's wanders about it
+  - [x] The Energy row holds still at 50% where the recording's wanders about it
     - With the player holding one of the map's two generators, the recording reads above half at 4:46 (52%), 6:25 (51%), 7:15 (54%) and 7:25 (53%), and 47–48% between; the engine never passes 50.0%, the player's 10.07 of the map's 20.14
     - docs/23 reads the row off each clan's distributor totals, and the step totals `Transfer_Power_Out × dt` over its own 192–255 ms, so the player's share should run 43–57% as the two clans' steps fall (*derived*); the engine divides each clan's totals by its dt first, which pins the share
-  - [ ] The enemy plans to capture the player's generator from its first takt
+    - Fixed 2026-09-30: each clan's totals are its last step's as they stand; the row runs 43–57% about 50% with the bunker held
+  - [x] The enemy plans to capture the player's generator from its first takt
     - `c3m1e`'s `Problems0` compares function 3 with `fPlentyEnergyLevel` 0.5 and, at or below it, raises `PBM_BUILDING_CAPTURE` (0.8) on the generator function 71 finds, the player's at (1271, 494)
     - docs/15 reads function 3 as the clan's power available minus demanded, which the enemy's own generator keeps above 0.5; the engine leaves 3 unanswered (`progress.rs`'s STAND-IN) and answers 0
     - Found checking the scripts; the recording does not show the enemy going for that generator
+    - Fixed 2026-09-30: function 3 answers the clan's power available less demanded at its last step; the raise the first takt makes, before any step has given, is not reloaded and runs out
 - Visuals
-  - [ ] The burning plant and the smoking volcanoes are drawn cold
+  - [x] The burning plant and the smoking volcanoes are drawn cold
     - The recording shows the dish-shaped plant by the bridge (`s_tree_31` at (634, 914)) under an orange flame and a column of smoke (briefing time 34–38 s, 1:21–1:25), and the volcanoes' craters (`s_tree_33`, on the peaks at z 105–160) glowing under black smoke (4:10–4:25, 7:35, 19:20–20:10)
     - The engine starts no effect for a placed tree or stone. docs/13 reads the loader running block entry 0's group whatever the owner: `s_tree_a_31.ctl`'s makes `tree_flame_30`, its sound and `tree_smoke_31`, and `s_tree_a_33.ctl`'s `tree_light_33a` and `_33b`
+    - Fixed 2026-09-30: trees and stones run their load groups as buildings do (222 in 18 missions), and a felled one takes its effects with it
   - [ ] No weather: the recording's red dust falls the whole mission (the sky's snow spell 00:00–23:59 with `DUST_ADD` in its slot, e.g. 0:55–1:35 and every cockpit frame after), and lightning strikes at 1:55; the engine draws neither (queued: how the weather is drawn)
   - [ ] The engine draws a grey-brown cloud layer with hard, stepped edges over the upper sky, in every briefing shot from briefing time 15 s and in play; the recording's sky is a smooth red, magenta later, with faint wisps at most (0:57–1:25, 2:40, 12:20)
   - [ ] The orb the two standing figures hold is a small orange ball in the recording and a large rayed orange glow in the engine (briefing time 10–19 s, 0:57–1:06), as Campaign 02's generator core
