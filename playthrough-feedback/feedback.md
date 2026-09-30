@@ -96,9 +96,10 @@ already match the recording.
     - So a walker standing on a building's floor loses its legs' height, where on the landscape it keeps it
     - Fixed 2026-09-30 as a stand-in: the Warehouse's ceiling presses its 5.87 m agent sphere down 2.85 m a tick, and the read push lands after the ground contact; the body is now drawn where the contact holds it, and the simulation keeps the push (queued: what keeps it upright in the game)
 - Visuals
-  - [ ] The target panel's name box stays empty for every building
+  - [x] The target panel's name box stays empty for every building
     - The recording names them: "Small Bunker" at the first cockpit (1:50), "Small Generator" (2:45), "Small Warehouse" (15:08), "Light Tower" on C02M04 (16:27)
     - The engine fills the panel's names for units only; docs/35's building names (strings 6031-6098 by Type and size) are used by command mode alone
+    - Fixed 2026-09-30: a building is named by its Type and size class on the target panel, with no status under it, a building put up in play too
   - [ ] The Small Factory (splant01) is dim and its pad unlit (briefing time 32 s, 1:04)
     - The recording shows the pad's octagonal border solid lime-green and the factory's roof wing lit yellow-green, crisp through the haze
     - The engine draws the border dark with four yellow lights at its corners and green ones at the door, and the roof orange-brown under heavy haze
@@ -119,7 +120,7 @@ already match the recording.
     - At full life, walking up to the pod of the tower whose turret it has shot off, it is lost in one white flash and the mission fails; on the reload it captures the same tower (26:04)
     - The engine: nothing harms a hero standing there. What killed it is not read (queued)
 - Visuals
-  - [ ] The target panel's name box stays empty for buildings (see Mission 03): the first cockpit's target reads "Light Tower", 358 m, in the recording (16:27) and nothing in the engine
+  - [x] The target panel's name box stays empty for buildings (see Mission 03): the first cockpit's target reads "Light Tower", 358 m, in the recording (16:27) and nothing in the engine
   - [ ] The Main Teleport's tower and arch look different (briefing time 49.5 s, 16:18.5)
     - The recording shows the tower's mast closed, a blue-violet shaft capped by a blue cylinder, and the arch's opening a pale blue-white face
     - The engine spreads three red vanes on a grey shaft and puts an orange glow at the arch's foot
