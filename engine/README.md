@@ -24,11 +24,11 @@ has been checked.
 | | M02 *The Arrival* | 30% | Playable |
 | | M03 *Outflanking Maneuver* | 30% | Playable |
 | | M04 *Unstable Equilibrium* | 30% | Playable |
-| **C02** *The Alari Gorge* | M01 *The Iron Monster* | — | Untested |
-| | M02 *Ballen's Crossing* | — | Untested |
+| **C02** *The Alari Gorge* | M01 *The Iron Monster* | 30% | Playable |
+| | M02 *Ballen's Crossing* | 30% | Playable |
 | | M03 *The Lost Key* | 30% | Playable |
-| | M04 *The Last Bastion* | — | Untested |
-| **C03** *The Flame of Logy* | M01 *The Silver Eye* | — | Untested |
+| | M04 *The Last Bastion* | 30% | Playable |
+| **C03** *The Flame of Logy* | M01 *The Silver Eye* | 30% | Playable |
 | | M02 *The Convoy* | — | Untested |
 | | M03 *Interception* | — | Untested |
 | | M04 *Foggy Island* | — | Untested |
@@ -1377,7 +1377,7 @@ a row here. A row leaves this table when research closes it.
 | M4 | Poses of other units for the hit test | their rest poses: other units' animation is not played | [24](../docs/24-motion.md#playing-a-state--read-and-measured) |
 | M4 | When each of a burst's particles spawns | every particle of a type-7 or type-10 burst is as old as the emitter's progress through the window over +28, so they fly as one | [11](../docs/11-effects.md#a-channel-is-a-low-high-jitter-exponent-run--read-and-measured) |
 | M4 | How an effect sprite fogs: the game puts a factor linear in the *squared* distance in its specular alpha (`Terrain.dll:0x1004bf20`) | the renderer's own fog, linear in the distance itself, as every other pipeline takes it | [11](../docs/11-effects.md#how-an-effect-sprite-is-coloured--read-and-measured) |
-| M4 | The owner values of time modes 9–14, now that each is read: the spin over the top spin, and one minus the owner's life fraction (property `0x31`) | nothing sets either, so a mode-9-to-12 effect holds *t* at 0 and a mode-14 one reads its owner as undamaged; of the 923 only the 8 burning trees and wrecks are mode 14, and none is 9–13 | [11](../docs/11-effects.md#how-an-effect-runs--read) |
+| M4 | The owner values of time modes 9–14, now that each is read: the spin over the top spin, and one minus the owner's life fraction (property `0x31`) | nothing sets either, so a mode-9-to-12 effect holds *t* at 0 and a mode-14 one reads its owner as undamaged; of the 923 only the 8 burning trees and wrecks are mode 14, and none is 9–13. A tree's load group makes its fire switched off (header flag `0x40`) for block entry 6, a machine's critical damage, to switch on, and entries 6 and 7 are not run (docs/13, "Critical damage"): nothing burns, and a shot tree never catches fire | [11](../docs/11-effects.md#how-an-effect-runs--read) |
 | M4 | How a sprite whose material says opaque blends | alpha-blended, so its fade shows | [07](../docs/07-objects.md#how-a-material-draws-is-in-the-archive-directory) |
 | M4 | How the shade lights with a type-1 light, now that `EmulatePointLights` is read: it projects a textured disc of radius sqrt(range² − d²) onto each lit triangle, never reads the attenuation, and never sets a Direct3D light either — the shade switches all eight off | none yet: an effect light lights nothing, and the sprites of the effect that carries it are all that shows | [11](../docs/11-effects.md#what-a-light-does-to-a-surface--read-and-measured) |
 | M4 | When a stream emits its first particle | on its first update inside its window | [11](../docs/11-effects.md#bolts-streams-and-fades--read-and-measured) |

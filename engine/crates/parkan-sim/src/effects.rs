@@ -225,7 +225,9 @@ pub struct Instance {
     /// minus (`0x10005f2d`). 1 is undamaged, and a mode-14 effect then holds *t* at 0.
     ///
     /// STAND-IN: docs/11-effects.md#how-an-effect-runs--read -- nothing sets it: the eight
-    /// mode-14 effects are the burning trees and wrecks, which nothing here starts.
+    /// mode-14 effects are the burning trees' and wrecks' fires, which a load group makes
+    /// switched off (header flag 0x40) for a machine's critical damage, block entry 6, to
+    /// switch on, and that entry is not run (docs/13-control.md#critical-damage-block-entries-6-and-7--read-and-measured).
     pub life: f32,
     /// Where a bolt starts: where the effect was when it started, or the manager's target
     /// point, which its owner hands it every tick when the header asks ([`FX_TARGET_POINT`]).
