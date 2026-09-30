@@ -66,6 +66,18 @@ remainder a closed line names stays here as a line of its own.
 [11-effects](docs/11-effects.md#not-resolved)
 
 - [ ] [M4] When a stream emits its first particle, and where burst and stream particles go.
+- [ ] **What slows an ambient stream.** Raised 2026-09-30 from checking C03 M01 against a recording
+  ("Let's Play - Parkan: Iron Strategy, Part 5", PfAg6zSe-yM, 4:19.4–4:24.4). A stream's clock is
+  read as the seconds since its instance started (`Effect.dll:0x1000846c`, the context's first word),
+  it emits every interval and catches up (`0x10011bf5`–`0x1001201c`, `last += interval`), and a
+  particle ages one ring slot an emission (`0x1001209e`): `tree_light_33a`'s `fire_smoke`, a ring of
+  20 at 0.08 s, lives 1.6 s and rises 100 m. The recording's volcano smoke rises at about 0.63 of
+  that against its own puffs' width, and its flame flickers at 5.3 Hz with almost nothing at the
+  interval's 12.5 Hz. Not read: who hands the manager its time, and whether an ambient effect — a
+  load group's on a building, tree or stone, or a lode's plume — is updated on a slower clock. The
+  engine runs those streams at half pace and every other at the read one (engine README,
+  *Stand-ins*). Seen alongside, not explained: the recording's plume is distinct billows over a
+  flame about twice the engine's, and its flame's brightness varies a third as much.
 - [ ] How Direct3D Sound places a sound between the speakers. (~~[M5] How a sound falls off between
   its near and far distances~~ — this half was **stale**: the game takes the Direct3D Sound path
   rather than its own mixer, so the law is DirectSound's — whole within the near distance, then
