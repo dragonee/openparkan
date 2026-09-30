@@ -1159,9 +1159,15 @@ sends the batch to the portal fade
 ([24-motion.md](24-motion.md#a-building-is-drawn-cell-by-cell-through-its-portals--read)),
 so the 2953 batches carrying either — every one of the 633 carries `0x100`
 as well, and 1430 more are two-sided `0x102` ones — are the ones tested;
-which sort type each of the queue's layers is created with (`CreatePrimLayer`,
+~~which sort type each of the queue's layers is created with (`CreatePrimLayer`,
 `0x10031760`, takes 0 to 5, and type 3 is `CCamDistSortLayerVB`, whose render is
-`0x1003e1d0`), and so whether a layer's items are drawn in distance order.
+`0x1003e1d0`), and so whether a layer's items are drawn in distance order~~ —
+**read** for the layers that matter here: the types are the descriptors'
+([10-sky.md](10-sky.md#the-dome)), so group 1's layers 6 and 7 are type 3, and
+every effect sprite is filed in layer 6
+([11-effects.md](11-effects.md#effect-sprites-are-drawn-far-to-near--read-and-seen)),
+whose items are drawn far to near; what a type-1, 2 or 5 layer does with its
+items' order — the see-through surfaces' layer 5 among them — is not read.
 
 ### The class byte is the ground's surface id
 

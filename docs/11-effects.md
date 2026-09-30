@@ -1074,6 +1074,35 @@ entries carry an ambient alpha of 1.0**, so the fade is the whole of a sprite's 
 not one entry has an ambient component above 1, so the knee never fires on a shipped
 effect; 1583 of the 1598 carry a black diffuse, which this path would not read anyway.
 
+### Effect sprites are drawn far to near — *read*, and *seen*
+
+**Every effect sprite goes into one sorted list.** The renderer that draws an
+effect sprite (`Terrain.dll:0x10028220`) files its item under the renderer's
+group and layer at `+0x1724` and `+0x1728` (`0x100284ab`–`0x100284e5`), which
+the shade's render setup sets to **group 1, layer 6** (`0x10042202`–
+`0x1004221d`). That layer's descriptor is **type 3**, a `CCamDistSortLayerVB`
+([10-sky.md](10-sky.md#the-dome)):
+
+- its add slot (`0x1003e090`) passes over an item whose fade value (item
+  `+0x90`) is 0, asks the item for its distance from the camera (item slot 5,
+  with the camera at the layer's `+0xc4`), and inserts it into the layer's list
+  by a binary search that puts a nearer item **further down**
+  (`0x1003e0fa`–`0x1003e1bc`);
+- its render (`0x1003e1d0`) walks that list from the top.
+
+So a far sprite is drawn before a near one **whatever each blends with**:
+additive, see-through and bit-8 sprites share the one list, and bit 8 only
+turns the depth test off for its own item. Nothing writes depth, so the order
+is all that decides which lies over which.
+
+*Seen*, on Mission 03, *The Field Base*: with the lode's plume
+(`env_mineral`, additive `smoke_r2_add`) between the camera and the Large
+Factory, the engine drew the chimneys' black `fire_smoke` crisp through the
+nearer plume, because it drew every additive sprite first. Drawn far to near,
+the plume lies over the smoke. The engine files a construction dome's pieces
+under the dome's one distance and keeps them in their own order; how the game
+draws a dome inside its item is not read here.
+
 ## Which effects run: the settings switch — *read*, and *measured*
 
 Header +0x14 is a **settings id**. `Effect.dll` registers a settings page with

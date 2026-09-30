@@ -31,6 +31,23 @@ pub struct Quad {
     /// Each corner's (u, v) across the look's cell, where the quad is a piece of a larger
     /// shape; `None` spans the cell.
     pub uv: Option<[[f32; 2]; 4]>,
+    /// How far its sprite stands from the eye: the key the effects' layer files it by, one
+    /// for every piece of a larger shape.
+    pub depth: f32,
+}
+
+/// The order an effect's quads are drawn in: far to near across every look and blend mode.
+///
+/// Every effect sprite is filed in group 1, layer 6 (`Terrain.dll:0x10042202`–`0x1004221d`),
+/// a type-3 `CCamDistSortLayerVB` (docs/10, "The dome"), whose add slot (`0x1003e090`) keeps
+/// its list sorted by the item's distance from the camera (item slot 5), nearer items further
+/// down, and whose render (`0x1003e1d0`) walks it from the top. So a far sprite is drawn
+/// before a near one whatever either blends with; an item whose fade is 0 is not filed. The
+/// sort is stable, so the pieces of one shape keep their own order.
+pub fn draw_order(quads: &[Quad]) -> Vec<&Quad> {
+    let mut sorted: Vec<&Quad> = quads.iter().filter(|q| q.alpha != 0.0).collect();
+    sorted.sort_by(|a, b| b.depth.total_cmp(&a.depth));
+    sorted
 }
 
 /// The quads a hemisphere is cut into: about `centre`, its rim spanning `axes[0]` and
@@ -308,7 +325,7 @@ impl SpriteRenderer {
         Self { camera, camera_group, pipelines, looks, vertices: None, capacity: 0, draws: Vec::new() }
     }
 
-    /// Upload this frame's quads, grouped by look.
+    /// Upload this frame's quads, far to near ([`draw_order`]), a run of one look drawn at once.
     pub fn prepare(
         &mut self,
         device: &wgpu::Device,
@@ -326,8 +343,8 @@ impl SpriteRenderer {
         let [r, g, b] = lighting.scene_colour;
         camera[28..32].copy_from_slice(&[r, g, b, 1.0]);
         queue.write_buffer(&self.camera, 0, bytemuck::cast_slice(&camera));
-        let mut sorted: Vec<&Quad> = quads.iter().filter(|q| q.look < self.looks.len()).collect();
-        sorted.sort_by_key(|q| (q.overlay, self.looks[q.look].0, q.look));
+        let sorted: Vec<&Quad> =
+            draw_order(quads).into_iter().filter(|q| q.look < self.looks.len()).collect();
         let mut vertices = Vec::with_capacity(sorted.len() * 6);
         self.draws.clear();
         for q in sorted {
@@ -379,6 +396,32 @@ impl SpriteRenderer {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A near additive plume is drawn after a far alpha-blended smoke, so it lies over it,
+    /// and the pieces of a dome keep their order.
+    #[test]
+    fn effect_quads_are_drawn_far_to_near_whatever_they_blend_with() {
+        let quad = |look: usize, depth: f32, alpha: f32| Quad {
+            look,
+            corners: [Vec3::ZERO; 4],
+            alpha,
+            overlay: false,
+            uv: None,
+            depth,
+        };
+        let quads = [
+            quad(0, 50.0, 1.0),  // the lode's plume, additive, near
+            quad(1, 300.0, 1.0), // a chimney's smoke, see-through, far
+            quad(2, 120.0, 0.5), // a dome's first piece
+            quad(2, 120.0, 0.5), // and its second
+            quad(1, 10.0, 0.0),  // faded out: not filed
+        ];
+        let order: Vec<(usize, f32)> = draw_order(&quads).iter().map(|q| (q.look, q.depth)).collect();
+        assert_eq!(order, [(1, 300.0), (2, 120.0), (2, 120.0), (0, 50.0)]);
+        let pieces: Vec<*const Quad> =
+            draw_order(&quads).into_iter().filter(|q| q.look == 2).map(|q| q as *const Quad).collect();
+        assert_eq!(pieces, [&quads[2] as *const Quad, &quads[3] as *const Quad]);
+    }
 
     #[test]
     fn a_square_faces_the_eye_and_a_streak_turns_about_its_length() {

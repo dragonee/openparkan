@@ -686,6 +686,7 @@ pub fn sync(
                         alpha: s.alpha,
                         overlay: s.overlay,
                         uv: Some(uv),
+                        depth: s.centre.distance(eye),
                     })
                     .collect::<Vec<_>>();
             }
@@ -699,6 +700,7 @@ pub fn sync(
                 alpha: s.alpha,
                 overlay: s.overlay,
                 uv: None,
+                depth: s.centre.distance(eye),
             }]
         })
         .collect();
