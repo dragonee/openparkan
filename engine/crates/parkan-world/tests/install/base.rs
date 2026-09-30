@@ -1671,3 +1671,55 @@ fn c03_m01s_enemy_holding_its_generator_does_not_keep_planning_to_take_the_playe
         "a raise reloaded at every takt would stand at 25 + 24 a takt: {life:?}"
     );
 }
+
+/// A tree's or a stone's controller runs its load group as a building's does: the loader runs
+/// block entry 0 whatever the owner (`Control.dll:0x10009408`, docs/13). C03 M01's dish-shaped
+/// plant by the bridge, `s_tree_31`, burns under `tree_flame_30` and `tree_smoke_31`, and its
+/// volcanoes, `s_tree_33`, glow under `tree_light_33a` and `_33b`, as "Let's Play - Parkan:
+/// Iron Strategy, Part 5" (PfAg6zSe-yM) shows them (briefing time 34-38 s; 4:10-4:25). A felled
+/// one takes them with it once it is gone.
+#[test]
+#[ignore = "needs the game install"]
+fn c03_m01s_burning_plant_and_volcanoes_play_their_trees_load_groups() {
+    use parkan_formats::mission::KIND_VEGETATION;
+    use parkan_world::fx::Owner;
+
+    let mut play = campaign_play(gamedir::C03_MISSION_01);
+    let named = |play: &mut parkan_world::play::Play, t: usize| -> Vec<String> {
+        (0..8)
+            .flat_map(|id| {
+                play.fx.owned(Owner::Building(t, id)).map(|i| i.effect.name.clone()).collect::<Vec<_>>()
+            })
+            .collect()
+    };
+    let trees = |play: &parkan_world::play::Play, name: &str| -> Vec<usize> {
+        (0..play.units.len())
+            .filter(|&t| {
+                play.units[t].kind == KIND_VEGETATION
+                    && play.commander.paths[t].to_ascii_lowercase().ends_with(name)
+            })
+            .collect()
+    };
+    let plant = trees(&play, "s_tree_31");
+    let volcanoes = trees(&play, "s_tree_33");
+    assert_eq!((plant.len(), volcanoes.len()), (2, 4), "the mission's two plants and four volcanoes");
+    for &t in &plant {
+        let mut on = named(&mut play, t);
+        on.sort();
+        assert_eq!(on, ["tree_flame_30", "tree_flame_sound_30", "tree_smoke_31"], "the plant {t}");
+    }
+    for &t in &volcanoes {
+        let mut on = named(&mut play, t);
+        on.sort();
+        assert_eq!(on, ["tree_light_33a", "tree_light_33b"], "the volcano {t}");
+    }
+    // A plant felled, as a construction sphere or the console's `death` fells it, goes, and its
+    // fire with it.
+    let t = plant[0];
+    let events = play.battle.combat.ground_loss(t, f32::MAX / 4.0);
+    assert!(!events.is_empty(), "the plant dies");
+    play.battle.combat.targets[t].alive = false;
+    play.deaths.push((t, 0.0));
+    play_for(&mut play, 0.1, |_| {});
+    assert!(named(&mut play, t).is_empty(), "its effects outlive it: {:?}", named(&mut play, t));
+}

@@ -893,6 +893,22 @@ factories' side-door sounds play 30.8 m from their doors as the game's do. The
 same slot, asked with 2, is what carries a beam's muzzle with its shooter
 ([29-weapons.md](29-weapons.md#a-beam-outlives-its-round--read-and-measured)).
 
+**Trees and stones run theirs too** (*measured*, and *seen*). The loader does
+not ask what the owner is, and `static.rlb`'s controllers carry load groups as
+`fortif.rlb`'s do: of the placed trees and stones of the 29 missions, **222**
+in 18 missions reach one with effects, through **47** controllers — the
+route pointers of eight missions (`s_tree_29`, `PointerCircle` and
+`PointerLight`) and two buoys (`s_tree_28`), burning plants (`s_tree_04`, `_05`, `_30`, `_31`, `_40`
+to `_43`, `tree_flame*`), volcanoes (`s_tree_33`, `tree_light_33a` and `_33b`),
+smoke stacks, the prologue's farm and ship lights (`s_tree_81` to `_94`).
+*Seen* on *The Silver Eye* in "Let's Play - Parkan: Iron Strategy, Part 5"
+(PfAg6zSe-yM): the dish-shaped plant by the bridge (`s_tree_31`) burns under
+an orange flame and smoke in the briefing (1:21–1:25), and the volcanoes'
+craters glow under black smoke in play (4:10–4:25, 19:20–20:10); and on *The
+Prologue* in "Part 1" (9_rcJkRzgZQ), the farm's lamps on their posts
+(2:52–3:08). Those effects hang on the object's own nodes and points as a
+building's do, and go when it is felled and removed.
+
 **For an engine:** when a building is placed, run its controller's load group
 as the hero's turret's is run. That means the effects of actions 3 and 4 on
 the building's nodes and control points, each placed through the building's

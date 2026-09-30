@@ -1891,6 +1891,12 @@ impl Play {
         for (target, _) in due {
             self.deleted[target] = true;
             self.flights.retain(|f| f.target != target);
+            // A tree's or a stone's load group goes with it, as a building's does
+            // (`remove_building`).
+            if matches!(self.units.get(target).map(|u| u.kind), Some(KIND_VEGETATION | KIND_ROCK)) {
+                self.building_effects.retain(|(b, _)| b.target != target);
+                self.fx.retain(|o, _| !matches!(o, Owner::Building(t, _) if *t == target));
+            }
             self.killed.push(self.battle.objects[target]);
             // No object answers a deleted unit's id any more: function 52 gives `ERROR`.
             if let (Some(unit), Some(p)) = (self.units.get(target), self.progression.as_mut()) {

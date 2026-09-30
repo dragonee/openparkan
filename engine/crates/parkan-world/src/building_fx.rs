@@ -20,6 +20,11 @@ use crate::assembly::Assembly;
 pub const MODE_RISING: u32 = 16;
 pub const MODE_FALLING: u32 = 17;
 
+/// The placed objects whose controller's load group is run as they are placed: buildings, and
+/// the trees and stones, whose `static.rlb` controllers the loader runs as it runs any other,
+/// not asking what the owner is (`Control.dll:0x10009408`, docs/13, "A building's load group").
+pub const LOADED_KINDS: [u32; 3] = [mission::KIND_BUILDING, mission::KIND_VEGETATION, mission::KIND_ROCK];
+
 /// Where a load-group effect hangs.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum On {
@@ -72,7 +77,7 @@ impl BuildingEffects {
         object: usize,
         target: usize,
     ) -> Option<BuildingEffects> {
-        let placed = mission.objects.get(object).filter(|o| o.kind == mission::KIND_BUILDING)?;
+        let placed = mission.objects.get(object).filter(|o| LOADED_KINDS.contains(&o.kind))?;
         let parts = assembly.parts(placed.kind, &placed.path);
         let (p, part) = parts.iter().enumerate().find(|(_, p)| p.host == -1)?;
         let ctl = assembly.library.record_slot(assembly.library.get(&part.record), "ctl", 0)?;

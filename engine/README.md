@@ -309,7 +309,9 @@ that builds what the warbot designer draws, and a warbot the hero boards.
   faces, so the hero walks in by the Large Factory's west side door and down its
   ramps and stairs to the pod. Lightmaps light a
   building's lit batches, and each building runs its load group: the Large
-  Factory's lamps, screens and chimney smoke, Mission 01's bridge lights.
+  Factory's lamps, screens and chimney smoke, Mission 01's bridge lights. So does
+  each tree and stone, and a felled one takes its effects with it: C03 M01's
+  burning plant and smoking volcanoes, the prologue's farm lights, the route pointers.
 - The factory screen, laid out as docs/36 reads it, replaces the HUD in view
   mode 5: the Ore and Energy rows, the header and exit, the project box with its
   icons, free minds and turning preview, and the production row. Build and
