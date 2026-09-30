@@ -25,3 +25,5 @@ dist/
 # the playthrough notes are kept; the frames they point at are the game's own, and stay local
 /playthrough-feedback/*.png
 /playthrough-feedback/*.gif
+# analysis/playthrough.py's work: frames and sheets cut from a recording
+/.playthrough/

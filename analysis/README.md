@@ -34,6 +34,18 @@ Swept across the whole installation, `World3D.dll` and `iron3d.dll` are the
 only binaries that carry a resolver chain at all; the `GMSG_*` and `VOICE_*`
 identifiers elsewhere are log strings and lookup keys, not compare cases.
 
+## `playthrough.py`, for recordings of the game
+
+A recording is the other witness besides the binaries: what the game *did*, where
+a read says what it *does*. `playthrough.py` cuts one up for `/playthrough`
+(`.claude/commands/playthrough.md`) — contact sheets stamped with their times,
+single frames and bursts, the briefing's fade-in, the video beside the engine's
+own briefing at the same moment, and the message box read by `tesseract` into a
+timestamped log. It declares its one dependency, Pillow, inline, so `uv run
+analysis/playthrough.py` needs no group; it wants `ffmpeg` and `tesseract` on the
+path. Everything it writes goes under `.playthrough/`, which git ignores: the
+frames are the game's own.
+
 ## `coverage.py`, and reading all of it
 
 ```
