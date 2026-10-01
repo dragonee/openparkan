@@ -3242,11 +3242,21 @@ impl Play {
         let Some(t) = self.factories.get(f).map(|f| f.target) else { return false };
         let clan = self.units.get(t).and_then(|u| u.clan).unwrap_or(self.player_clan);
         let free = self.free_minds(clan);
-        let started = self.factories[f].start(batch, free);
+        let researched = self.factories[f].shown().is_some_and(|p| self.technology(clan, &p.path));
+        let started = self.factories[f].start(batch, free, researched);
         if started {
             self.reserve_mind(clan);
         }
         started
+    }
+
+    /// Whether clan `clan`'s tree has researched every part of the design at `path`, which a
+    /// factory asks of a paid bot as its build starts (`Behavior.dll:0x1002a11c`): a design
+    /// that will not open, or a clan with no tree, has not.
+    fn technology(&self, clan: i64, path: &str) -> bool {
+        let parts = self.assembly.records(path);
+        !parts.is_empty()
+            && self.research.catalogue(clan).is_some_and(|c| crate::factory::researched(&c, &parts))
     }
 
     /// A build of clan `clan` started: it takes a free entry and marks it reserved
@@ -3347,11 +3357,12 @@ impl Play {
                 }
             }
             let free = self.free_minds(clan);
+            let researched = self.technology(clan, &project.path);
             let factory = &mut self.factories[f];
             // A batch starts the design it has just made again, whatever the panel shows.
             let restarted = factory.batch && {
                 factory.batch = false;
-                factory.start_project(project, true, free)
+                factory.start_project(project, true, free, researched)
             };
             factory.settle();
             if restarted {
@@ -4231,7 +4242,10 @@ impl Play {
     /// "Production"): its own design store picks a design of the robot type the order's
     /// parameter names, ranked by the `SELECT_*` its target carries and drawn over function
     /// 69's spread, and the factory starts it. The store is loaded on the first such order,
-    /// priced against that clan's own research tree.
+    /// priced against that clan's own research tree, and that is when it marks the designs
+    /// the clan may build: the game marks them as function 43 loads the store and again each
+    /// time function 41 asks for a research, which no clan's script reaches here (docs/15,
+    /// "What the store holds").
     fn ai_build(&mut self, t: usize, type_word: u32, mode: u32) -> bool {
         let Some(f) = self.factories.iter().position(|f| f.target == t) else { return false };
         let Some(clan) = self.units[t].clan else { return false };
@@ -4246,13 +4260,19 @@ impl Play {
                 crate::factory::Store::load(&game, &mut self.assembly, catalogue, grade).unwrap_or_default();
             self.stores.insert(clan, store);
         }
-        let draw = self.progression.as_mut().map_or(0, |p| p.draw(clan));
+        // `SELECT_SMALLEST` makes no draw at all (`ai.dll:0x10010aab`).
+        let draw = if mode == parkan_sim::planner::SELECT_SMALLEST {
+            0
+        } else {
+            self.progression.as_mut().map_or(0, |p| p.draw(clan))
+        };
         let Some(project) = self.stores.get(&clan).and_then(|s| s.pick(type_word, mode, draw)).cloned()
         else {
             return false;
         };
         let free = self.free_minds(clan);
-        let started = self.factories[f].start_project(project, false, free);
+        let researched = self.technology(clan, &project.path);
+        let started = self.factories[f].start_project(project, false, free, researched);
         if started {
             self.reserve_mind(clan);
         }
@@ -4562,42 +4582,41 @@ impl Play {
     /// the strength on the life its nodes have left and the one on the life they could have,
     /// its size class, its live top speed and the order it is running.
     ///
-    /// STAND-IN: docs/15-behaviour.md#what-a-strength-is--read-and-measured -- the gun total
-    /// is `MBehaviour`'s own, `sum(a ÷ b × rounds)` over each gun's rounds left and two
-    /// authored figures at the row's `+0x0c` and `+0x28` that are **not read**. The engine
-    /// divides the rounds left by the gun's interval in seconds, the two figures the game's
-    /// own refresh fills the row with. That the pair is a *rate* is what the scale demands,
-    /// not a guess about which fields: unarmed, every object in the install prices between
-    /// 0.06 and 0.53, and the scripts keep a strength in a `DWORD` — so every comparison one
-    /// reaches (`fn38(clan) > 0` gating the whole capture plan, `dTemp3 < dPlaceProtectHits`
-    /// over the authored 10 to 500, the `TAKE_BY_HITS` amounts of 25) would read 0 and the
-    /// clan would never plan at all. With the rate in, an armed warbot prices in the tens,
-    /// which is the range those numbers are written for
-    /// (docs/15, "What a `TAKE_BY_HITS` amount is worth").
+    /// The hit points are properties 38 and 54 (`Control.dll:0x100138b0`): the nodes' life,
+    /// left or at full, over the share of a small hit the armour keeps, plus the shield as it
+    /// stands or full. The gun total is `MBehaviour`'s own (`Behavior.dll:0x1001ccb0`): each
+    /// gun's round's damage ÷ its magazine × its rounds left, so a unit prices lower as it
+    /// shoots its magazines off and an unlimited gun always counts one round. A gun shot off
+    /// still counts: the sum reads the damage the row took when it was filled, and what a dead
+    /// gun's node zeroes is the refreshed copy beside it (`0x1001c376`). Both figures are
+    /// *measured* on the design store's records, which are filled by the same two questions
+    /// (docs/15, "What a strength is").
+    ///
+    /// A building is priced like any other object: its id carries the top bit, and only an
+    /// object with no id at all, −1, is on no clan's map.
     fn refresh_contacts(&mut self) {
+        use parkan_sim::progression::{gun_worth, hit_points};
+
         let mut contacts: Vec<(i32, parkan_sim::progression::Contact)> = Vec::new();
         for (t, unit) in self.units.iter().enumerate() {
-            if unit.logical_id < 0 {
+            if unit.logical_id == -1 {
                 continue;
             }
             let (left, full) = self.battle.combat.targets.get(t).map_or((0.0, 0.0), |x| {
-                x.parts
+                let (left, full) = x
+                    .parts
                     .iter()
                     .filter_map(|p| p.life.as_ref())
-                    .fold((0.0, 0.0), |(l, f), life| (l + life.total(), f + life.full()))
+                    .fold((0.0, 0.0), |(l, f), life| (l + life.total(), f + life.full()));
+                // One control system holds every part's nodes, so the one armour covers them.
+                let kept = x.parts.iter().filter_map(|p| p.life.as_ref()).find_map(|l| l.armour).map(|a| a.0);
+                let (held, held_full) = x.shield.as_ref().map_or((0.0, 0.0), |s| (s.held(), s.held_full()));
+                (hit_points(left, kept, held), hit_points(full, kept, held_full))
             });
             let robot = self.robots.iter().chain(&self.emplacements).find(|(rt, _)| *rt == t);
             let factory = self.factories.iter().find(|f| f.target == t);
             let guns: f32 = robot.map_or(0.0, |(_, r)| {
-                r.guns
-                    .iter()
-                    .filter(|g| !g.broken && g.interval_ms > 0.0)
-                    // An unlimited magazine (−1) never runs down; it counts one round's rate.
-                    .map(|g| {
-                        let held = if g.magazine < 0 { 1.0 } else { g.rounds.max(0) as f32 };
-                        held * 1000.0 / g.interval_ms
-                    })
-                    .sum()
+                r.guns.iter().map(|g| gun_worth(g.round_damage, g.magazine, g.rounds)).sum()
             });
             contacts.push((
                 unit.logical_id,

@@ -152,8 +152,12 @@ pub struct Rating {
     pub offence: f32,
     /// The gun total a strength is multiplied by, `IGameObject` variable `0x204`'s `+4`
     /// (docs/15, "What a strength is"), which the AI's design store reads off a real object
-    /// built from the scheme. See [`Designer::rate`] for the stand-in behind it.
+    /// built from the scheme: one round's damage from every gun, a whole unit's magazines
+    /// being full.
     pub guns: f32,
+    /// The life at full the strength multiplies the guns by, property 54
+    /// ([`Assembled::hit_points`]).
+    pub hit_points: f32,
     /// The fitted radar's range (property 0x50), 0 with none.
     pub sensor_range: f32,
 }
@@ -736,35 +740,34 @@ impl Designer {
         let engines: f32 = a.of_type(control::ENGINE_TYPE).map(|d| d.values[0]).sum();
         let ratio = if a.payload != 0.0 { spare / a.payload } else { 0.0 };
         let speed = a.top_speed.min(a.top_speed * engines * (1.0 + ratio) / 2.0);
-        let mut offence = 0.0;
-        let guns: Vec<(String, f32)> = a
+        // The gun total is `Behavior.dll:0x1001ccb0`'s: over every gun whose magazine is not 0,
+        // the damage of the round its link made ÷ its magazine × its rounds left. A design is
+        // whole, so each counts one round's damage -- an unlimited gun too, whose −1 is read
+        // unsigned on both sides of the division (docs/15, "What a strength is"). The
+        // division comes first and in single precision, which is why the game's own figure
+        // for two 500-point guns of 60 rounds is 999.99994.
+        let (mut offence, mut total) = (0.0, 0.0);
+        let guns: Vec<(String, f32, f32)> = a
             .of_type(control::GUN_TYPE)
             .filter(|g| !g.resource.member.is_empty())
-            .map(|g| (g.resource.member.clone(), g.values[GUN_INTERVAL]))
+            .map(|g| {
+                (g.resource.member.clone(), g.values[GUN_INTERVAL], g.values[parkan_sim::guns::MAGAZINE])
+            })
             .collect();
-        for (member, interval) in guns {
+        for (member, interval, magazine) in guns {
             if let Some(round) = self.round(assembly, &member) {
                 offence += round.damage * 1000.0 / interval.max(1.0);
+                total += parkan_sim::progression::gun_worth(round.damage, magazine as i32, magazine as i32);
             }
         }
-        // STAND-IN: docs/15-behaviour.md#what-a-strength-is--read-and-measured -- the gun
-        // total is `sum(a ÷ b × rounds)` over two authored figures that are not read; the
-        // rounds a gun holds over its interval in seconds, as the play prices a live one.
-        let guns: f32 = a
-            .of_type(control::GUN_TYPE)
-            .map(|g| {
-                let held = g.values[parkan_sim::guns::MAGAZINE];
-                let held = if held < 0.0 { 1.0 } else { held };
-                held * 1000.0 / g.values[GUN_INTERVAL].max(1.0)
-            })
-            .sum();
         Some(Rating {
             mass,
             spare,
             speed,
             defence: a.defence(),
             offence,
-            guns,
+            guns: total,
+            hit_points: a.hit_points(),
             sensor_range: a
                 .of_type(control::RADAR_TYPE)
                 .next()
@@ -1010,6 +1013,29 @@ impl Assembled {
             + self.devices.iter().map(|d| d.mass).sum::<f32>();
         let body = self.nodes.iter().filter(|n| n.root).map(|n| n.density * n.volume).sum();
         (total, body)
+    }
+
+    /// Property 54 (`Control.dll:0x100138b0`, asked for the maximum): every node's life at
+    /// full, over the share of a small hit the fitted armour keeps (its value 1), plus the
+    /// shield with every sector full -- the deflector's six coefficients summed, times the
+    /// generator's sector maximum (device query 15). An armour that keeps nothing answers
+    /// `FLT_MAX` (`0x1001391c`).
+    ///
+    /// *Measured* against the game's own figures: `preload.lda`, which the game writes into
+    /// its directory each time a clan loads its design store, holds this float for every
+    /// design in `UNITS\UNITS\AI\`, and all 70 robots among the 77 agree to 1 part in 10
+    /// million (docs/15, "What a strength is").
+    pub fn hit_points(&self) -> f32 {
+        let life: f32 = self.nodes.iter().map(|n| n.life).sum();
+        let kept = self.of_type(ARMOUR_TYPE).last().map(|d| d.values[1]);
+        let shield = match (
+            self.of_type(control::FIGHT_SHIELD_TYPE).next(),
+            self.of_type(control::DEFLECTOR_TYPE).next(),
+        ) {
+            (Some(shield), Some(deflector)) => deflector.values[..6].iter().sum::<f32>() * shield.values[0],
+            _ => 0.0,
+        };
+        parkan_sim::progression::hit_points(life, kept, shield)
     }
 
     /// Property 177 (`Control.dll:0x10013940`): the life of the first node with any area

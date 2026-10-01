@@ -26462,6 +26462,107 @@ def check_selection(check, game: Path) -> None:
           f"Mission 03's objects stand in {stands}")
 
 
+#: The trees of the clans whose scripts build by name, and how many of the 59 warrior
+#: designs in ``UNITS\UNITS\AI`` each has researched whole (docs/15, "What each clan may
+#: build"): the designs the AI's store lets that clan's build orders pick.
+STORE_TREES = {"data": 7, "c1m4e": 27, "c2m1e": 28, "c2m3e": 11, "c3m1e": 27,
+               "c3m2e": 44, "c3m2e2": 44, "c4m2e2": 43, "scream": 7}
+#: The trees written for one enemy clan: a design they have not researched whole has a
+#: part that is out of the tree, so there is nothing left for the clan to research.
+STORE_CLOSED_TREES = ("c1m4e", "c2m1e", "c2m3e", "c3m1e", "c3m2e", "c3m2e2")
+#: One record of ``preload.lda``, the store as the game itself fills and writes it
+#: (``ai.dll:0x10010c30``, ``0x1001071b``).
+STORE_RECORD = 0x124
+
+
+def check_design_store(check, game: Path) -> None:
+    """The AI's design store, and the clan's research that gates it (docs/15)."""
+    folder = game / "UNITS" / "UNITS" / "AI"
+    if not folder.is_dir():
+        return
+    files = sorted((p for p in folder.iterdir() if p.suffix.lower() == ".dat"),
+                   key=lambda p: p.name.upper())
+    schemes = {p.name.lower(): objects.load_unit(p) for p in files}
+    warriors = [n for n, u in schemes.items() if u.kind == objects.TYPE_WARRIOR]
+
+    # 1. The byte at a record's +0x104: every part researched in the clan's tree.
+    whole = research.STATE_IN_TREE | research.STATE_RESEARCHED | research.STATE_AVAILABLE
+    counts, worst, unlisted = {}, {}, 0
+    for name in STORE_TREES:
+        path = game / "MISSIONS" / "SCRIPTS" / f"{name}.trf"
+        if not path.exists():
+            continue
+        tree = research.read(path)
+        state = {part.lower(): tree[index].category for part, index in tree.parts.items()}
+        ok, reasons = 0, Counter()
+        for n in warriors:
+            states = [state.get(c.ref.member.lower()) for c in schemes[n].components]
+            unlisted += sum(1 for s in states if s is None)
+            if all(s is not None and s & whole == whole for s in states):
+                ok += 1
+                continue
+            for key in (None, 0, research.STATE_IN_TREE,
+                        research.STATE_IN_TREE | research.STATE_AVAILABLE):
+                if key in states:
+                    reasons[key] += 1
+                    break
+        counts[name], worst[name] = ok, reasons
+    closed = all(set(worst[t]) == {0} for t in STORE_CLOSED_TREES if t in worst)
+    check("UNITS\\UNITS\\AI: a clan's tree has researched whole 7 to 44 of the 59 warriors",
+          len(warriors) == 59 and counts == STORE_TREES and unlisted == 0 and closed,
+          f"{len(files)} designs, {len(warriors)} warriors; every part researched and in the "
+          f"tree on {counts}; no part unlisted; on {list(STORE_CLOSED_TREES)} every other "
+          f"design has a part out of the tree ({[sum(worst[t].values()) for t in worst]} fail)")
+
+    # 2. The two floats a strength multiplies, against the game's own: the store it writes
+    #    into its directory each time a clan loads one.  Absent where the game has not run.
+    cache = game / "preload.lda"
+    if not cache.exists():
+        return
+    data = cache.read_bytes()
+    count = struct.unpack_from("<i", data, 0)[0]
+    shop = units.Workshop(game)
+    names, life_ok, guns_ok, robots, types_ok = [], 0, 0, 0, 0
+    for i in range(count):
+        record = data[4 + i * STORE_RECORD:4 + (i + 1) * STORE_RECORD]
+        name = record[:0x104].split(b"\0")[0].decode("latin-1").rsplit("\\", 1)[-1].lower()
+        kind, size = struct.unpack_from("<Ii", record, 0x108)
+        life, guns, _speed = struct.unpack_from("<3f", record, 0x110)
+        names.append(name)
+        unit = schemes.get(name)
+        if unit is None:
+            continue
+        types_ok += unit.kind == kind
+        total = 0.0
+        for weapon in shop.describe(folder / name).weapons:
+            if weapon.gun.type_id != control.GUN_TYPE:
+                continue
+            magazine = weapon.clip.rounds if weapon.clip else weapon.gun.magazine
+            shot = shop.armoury.round(weapon.clip.round) if weapon.clip else weapon.gun.round
+            if magazine and shot:
+                total += shot.damage
+        guns_ok += abs(total - guns) < 0.01
+        built = shop.assemble(unit)
+        if built is None or unit.is_building:
+            continue
+        robots += 1
+        armour = built.of_type(control.ARMOUR_TYPE)
+        shields = built.of_type(control.FIGHT_SHIELD_TYPE)
+        deflectors = built.of_type(control.DEFLECTOR_TYPE)
+        full = sum(n.life for n in built.nodes)
+        if armour:
+            full /= armour[-1].values[1]
+        if shields and deflectors:
+            full += sum(deflectors[0].values[:6]) * shields[0].values[0]
+        life_ok += abs(full - life) <= 1e-5 * life
+    check("preload.lda: the game's own store holds the two floats the parts derive",
+          len(data) == 4 + count * STORE_RECORD and names == [p.name.lower() for p in files]
+          and types_ok == count and guns_ok == count and robots and life_ok == robots,
+          f"{count} records in the files' upper-case order; the Type on {types_ok}; the gun "
+          f"total, one round's damage a gun, on {guns_ok}; property 54, the nodes' life over "
+          f"what the armour keeps plus the full shield, on {life_ok} of {robots} robots")
+
+
 def run(game: Path) -> int:
     """Run every check against ``game``.  Returns a process exit code."""
     results: list[tuple[str, bool, str]] = []
@@ -26512,7 +26613,7 @@ def run(game: Path) -> int:
         check_quick_save,
         check_vocabulary, check_resources, check_briefing, check_briefing_screen,
         check_progression, check_mission_02, check_mission_03, check_mission_04,
-        check_main_teleport, check_convoy_raids, check_outcome,
+        check_main_teleport, check_convoy_raids, check_design_store, check_outcome,
     check_push_out_and_ground_contact, check_beam_rounds,
         check_hud_top,
         check_hud_radar,

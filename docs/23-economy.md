@@ -705,7 +705,11 @@ CPUs" in the game's own interface (`iron3d.dll` string 3067).
   "Reported that Order Done" (`0x10005560`) — removes it, and starts the next
   order in the queue, skipping any that fail in turn (`0x10034a30`). Nothing in
   the factory waits for a mind to come free: a new order has to come from the
-  player or the clan's AI.
+  player or the clan's AI. The mind is the first of four things the start
+  refuses — a scheme that will not open, a chassis too big or of no known size,
+  and for a paid bot a part not researched are the others, and none of them is
+  ore or power ([36-factory.md](36-factory.md#what-the-start-refuses--read)) —
+  and each is dropped the same way.
 - **When the refusal is seen** — *read*. An order to the end of a factory's
   queue starts at once only if it is then the only task (`0x100178c0`); an
   order to the start, or replacing, always starts at once. A start that fails
@@ -722,11 +726,18 @@ CPUs" in the game's own interface (`iron3d.dll` string 3067).
   [15-behaviour.md](15-behaviour.md#values-one-type-into-another--read)) — so
   both guards read the same way: **the problem is marked solved when the order
   was not taken**.
+- **What the order names** — *read*, and *measured*. Not a design the script
+  chose: a `SELECT_*`, which the clan's design store turns into one of the
+  files in `UNITS\UNITS\AI\` — drawn among the designs **whose every part the
+  clan's own research tree has researched**, 7 to 44 of the 59 warriors over
+  the nine scripts
+  ([15-behaviour.md](15-behaviour.md#what-each-clan-may-build--measured)).
 - **What `fn15` answers** — *read*. Its handler (`ai.dll:0x10008054`, the
   table's fifteenth slot) gives the order through the unit's `AddOrder` and
   leaves 1 in the interpreter's result (`+0x50`) when `AddOrder` returns
   non-zero, 0 when it returns 0, and 5 when no object answers the id
-  (`0x10008376`).
+  (`0x10008376`). A build by name with no candidate design gives no order at
+  all and leaves 0 (`0x10008692`).
 - **A build the AI cannot place is dropped too** — *read*, and *measured*, and
   the opposite of what this page derived before. The executor writes a call's
   result slot into the call's destination (`0x100122e5`), so `dT3` is `fn15`'s
@@ -808,11 +819,18 @@ size (`0x1002a000`), in seconds —
 | large | 10 | 20 | 40 | 60 |
 
 — and 20 for anything else. The mission's `FreeConstructionTime` plays no part.
+It is spared one thing more: **its technology**. A paid bot is refused for any
+part its clan's tree has not researched (`0x1002a385`, "Failed to create … due
+to technology"), and the free branch returns before the tree is read
+([36-factory.md](36-factory.md#what-the-start-refuses--read)). The ore and
+power a paid bot costs are summed in that same walk of its parts, each part's
+two build figures whether it is researched or not.
 
 **Sizes are letters in names** — *read*, and *measured*. A chassis's third
 character is its size (`t` 1, `l` and `h` 2, `m` 3, `b` 4) and a building's
 fourth (`l` 2, `m` 3, `b` 4, `e` 5), read at `0x10029e10` and `0x1000cee0`. A
-factory refuses a chassis bigger than itself — "Robot SizedType not match". The
+factory refuses a chassis bigger than itself — "Robot SizedType not match" —
+and one whose letter is none of those (`0x10029eef`). The
 letters agree with the model codes in the labels: `R_T_` chassis are `T-`,
 `R_L_` `S-`, `R_M_` `M-`, `R_B_` `L-`, on all 299 that carry one, and `fr_l_`,
 `fr_m_`, `fr_b_`, `fr_e_` buildings are -17, -30, -47 and -67. So a small
@@ -1376,6 +1394,16 @@ construction slows research.
   (`Terrain.dll:0x10057b55`), whose attach is a robot's
   (`AniMesh.dll:0x10001468`)
   ([A building's batteries](#a-buildings-batteries-are-the-parts-fitted-into-its-slots--read-and-measured)).
+- ~~Whether a clan whose design pick the factory refuses builds at all, and
+  what the factory refuses.~~ **Read**, and *measured*: a mind, a scheme that
+  will not open, a size, and a paid bot's technology — never ore or power — and
+  a refused order ends the problem as solved, so the clan draws again at its
+  next want. The pick is already kept to the designs the clan's tree has
+  researched, and over the 9 by-name clans placed with a factory every design
+  within the spread fits it, so neither the size nor the technology refuses a
+  shipped clan's own pick
+  ([36-factory.md](36-factory.md#what-the-start-refuses--read),
+  [15-behaviour.md](15-behaviour.md#what-each-clan-may-build--measured)).
 - **The 13 s a recorded transport round takes** beyond two walks at full speed:
   its held speed on Tut_3's slopes and the distance between its two places are
   not measured.

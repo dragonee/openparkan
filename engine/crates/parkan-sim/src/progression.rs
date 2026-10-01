@@ -124,8 +124,9 @@ impl Areals {
 pub const UNARMED_GUNS: f32 = 0.8;
 
 /// A unit's strength (`ai.dll:0x1000fc70`): `(guns + 0.8) × hit_points × 1e-5`, where
-/// `hit_points` is what the control system sums over the object's nodes and `guns` the total
-/// the behaviour recomputes over the unit's gun table.
+/// `hit_points` is what the control system sums over the object's nodes, over what its armour
+/// keeps of a small hit, plus its shield ([`hit_points`]), and `guns` the total the behaviour
+/// recomputes over the unit's gun table ([`gun_worth`]).
 ///
 /// The areal map's cached form and the live one take *different* hit points: what the clan
 /// map caches for a contact is `ILifeSystem` property `0x26`, the life its nodes have **left**
@@ -135,6 +136,32 @@ pub const UNARMED_GUNS: f32 = 0.8;
 /// would be at full.
 pub fn strength(guns: f32, hit_points: f32) -> f32 {
     (guns + UNARMED_GUNS) * hit_points * 1e-5
+}
+
+/// What one gun adds to the total a strength multiplies (`Behavior.dll:0x1001ccb0`, over the
+/// rows `0x1001b4b0` fills and `0x1001c1a0` refreshes): **the damage of the round its link
+/// made ÷ its magazine × the rounds it has left**, and nothing for a magazine of 0. The row's
+/// `+0x0c` is the gun's value 6 — its `+0x174`, the round's damage — taken once when the row
+/// is filled; `+0x28` its magazine (query `0x800`) and `+0x3c` its rounds left (`0x700`), both
+/// read as unsigned words. So an unlimited gun's −1 is 4,294,967,295 on both sides of the
+/// division and it counts one round's damage whole, a full gun the same, and a gun that has
+/// shot its magazine off counts nothing. The division comes first, in single precision.
+pub fn gun_worth(damage: f32, magazine: i32, rounds: i32) -> f32 {
+    let (magazine, rounds) = (magazine as u32 as f32, rounds as u32 as f32);
+    if magazine > 0.0 { damage / magazine * rounds } else { 0.0 }
+}
+
+/// The hit points a strength multiplies (`Control.dll:0x100138b0`, properties 38 and 54): the
+/// nodes' summed life **over the share of a small hit the armour keeps** — an armour that
+/// keeps nothing answers `FLT_MAX` — **plus the shield**: device query 14 for the life left,
+/// the sectors' mean fill × the deflector's six coefficients summed × the sector maximum, and
+/// query 15 for the life at full, the same without the fill.
+pub fn hit_points(life: f32, kept: Option<f32>, shield: f32) -> f32 {
+    match kept {
+        Some(0.0) => f32::MAX,
+        Some(kept) => life / kept + shield,
+        None => life + shield,
+    }
 }
 
 /// The strength an object counts for until a caller prices it with
@@ -467,12 +494,9 @@ impl Progress {
     /// objects the areal map holds inside that circle, and asked for no clan in particular it
     /// counts the enemy's alone — how strongly a place is held against the clan asking.
     ///
-    /// STAND-IN: docs/15-behaviour.md#what-a-strength-is-read-and-measured -- the formula is
-    /// [`strength`], and the hit points behind it are the ones this engine's [`crate::damage::Life`]
-    /// already sums; the gun total is `MBehaviour`'s own, which is not modelled here. Nothing
-    /// prices an object yet, so every one counts [`UNPRICED`] and this is how many stand there.
-    /// Only the order between candidates is used below, and a count leaves the least defended
-    /// one least.
+    /// The formula is [`strength`], over the life each object has left and its guns as the
+    /// play last refreshed them ([`Progress::refresh`]); an object no caller has priced counts
+    /// [`UNPRICED`].
     pub fn strength_near(&self, hostile: impl Fn(i64) -> bool, x: f32, y: f32, radius: f32) -> f32 {
         let near = |at: [f32; 2]| (at[0] - x).hypot(at[1] - y) < radius;
         let units = self
@@ -872,12 +896,34 @@ mod tests {
 
     #[test]
     fn a_strength_is_the_guns_plus_a_fifth_over_the_hit_points() {
-        // `ai.dll:0x1000fc70`. Mission 01's hero sums 7362 hit points over its `.ndp` tables,
-        // so it is worth 0.0589 of itself before a gun is counted.
+        // `ai.dll:0x1000fc70`: 7362 hit points and no gun are worth 0.0589.
         assert!((strength(0.0, 7362.0) - 0.058_896).abs() < 1e-6);
         // The 0.8 is a fifth of the way to a gun total of 4: an unarmed machine is not nothing.
         assert!((strength(4.0, 7362.0) / strength(0.0, 7362.0) - 6.0).abs() < 1e-5);
         assert_eq!(strength(0.0, 0.0), 0.0, "a wreck with no life left holds nothing");
+    }
+
+    #[test]
+    fn a_gun_is_worth_its_rounds_damage_over_its_magazine_times_the_rounds_left() {
+        // `Behavior.dll:0x1001ccb0`. `41mtrk1`'s two guns throw 500 a round from clips of 60,
+        // and the game's own figure for the pair is 999.99994: the division comes first.
+        assert_eq!(gun_worth(500.0, 60, 60) + gun_worth(500.0, 60, 60), 999.999_94);
+        assert_eq!(gun_worth(500.0, 60, 30), 249.999_98, "half the clip shot off");
+        assert_eq!(gun_worth(500.0, 60, 0), 0.0, "and all of it");
+        // An unlimited gun's −1 is read unsigned on both sides, so it counts one round whole.
+        assert_eq!(gun_worth(235.0, -1, -1), 235.0);
+        assert_eq!(gun_worth(235.0, 0, 0), 0.0, "a magazine of 0 is passed over");
+    }
+
+    #[test]
+    fn hit_points_are_the_life_over_what_the_armour_keeps_plus_the_shield() {
+        // `Control.dll:0x100138b0`, on the game's own figure for `speed_c1`: 1,314 points of
+        // nodes under an armour that keeps 0.7389 of a small hit, and a 1,500-point shield
+        // behind a deflector of six 0.7s.
+        let kept = 1314.0 / (8078.25 - 6300.0);
+        assert!((hit_points(1314.0, Some(kept), 6.0 * 0.7 * 1500.0) - 8078.25).abs() < 1e-2);
+        assert_eq!(hit_points(1314.0, None, 0.0), 1314.0, "no armour and no shield: the nodes' own");
+        assert_eq!(hit_points(1314.0, Some(0.0), 6300.0), f32::MAX, "an armour that keeps nothing");
     }
 
     #[test]

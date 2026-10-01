@@ -519,9 +519,9 @@ An earlier reading of this page called the score a distance and these functions
 | 60 | 20 | time | 1 once that time has passed — the clock strictly above it, compared unsigned — else `ERROR` |
 | 70 | 1 | *n* | a random number below *n* |
 | 32 | 62 | *route*, *id* | 1 when the unit with logical id *id* was last reported inside route *route*, the system areal map's tactical areal of that id (slot 33). Read here once as two clans; 36 of 36 resolved calls pass a route id and a unit's logical id ([34-progression.md](34-progression.md)) |
-| 43 | 10 | — | load the files in `UNITS\UNITS\AI\` into the object at `+0x40c`, which also keeps the place list function 40 reads |
-| 41 | 2 | *id* | a test of the unit through that object; `FALSE` ends `PBM_MAKE_RESEARCH_Start` as solved |
-| 65, 56 | 1, 2 | — | a flag of that object (`dLargeResearched = fn65()`); the byte at `+0x431` |
+| 43 | 10 | — | load the files in `UNITS\UNITS\AI\` into the design store at `+0x40c`, which also keeps the place list function 40 reads, and mark the designs the clan's tree has researched ([below](#what-the-store-holds--read-and-measured)) |
+| 41 | 2 | *id* | mark them again, then order the building *id* to research the cheapest design the clan cannot build yet (order 16, `TARGET_BY_NAME`): 1 taken, 0 not — which ends `PBM_MAKE_RESEARCH_Start` as solved — `ERROR` for no such building ([below](#the-byte-at-0x104-is-the-clans-research--read)) |
+| 65, 56 | 1, 2 | — | 1 when the clan may build a medium or large design with 105,000 of guns, a winged missile's carrier (`dLargeResearched = fn65()`); the byte at `+0x431` |
 | 69 | 7 | *n* | store *n* at `+0x41c`, the design store's own `+0x10`: **how far down its ranking the AI's next build may reach** ([below](#function-69-sets-how-sloppy-the-ais-design-pick-is--read-and-measured)). Negative is ignored; the result is 1 |
 | 53 | — | *clan* | an entry of that clan's place list |
 | 0, 1, 9 | 6, —, 8 | | stubs: 0 sets the result to 1, 1 reads a float and drops it, 9 does nothing |
@@ -737,27 +737,43 @@ whose six targets are read here one at a time:
 | 3 | `SELECT_BEST_RANGE` | `0x100108d7` | `+0x11c`, which the store's fill never writes |
 | 4 | `SELECT_FASTEST` | `0x1001095b` | `+0x118`, property 145's live top speed |
 | 5 | `SELECT_BEST_COMBAT` | `0x1001099d` | `0x1000fc70(+0x110, +0x114)` — **the strength formula** |
-| 6 | `SELECT_SMALLEST` | `0x100109eb` | the same strength, and then the **last** of the ranking |
+| 6 | `SELECT_SMALLEST` | `0x100109eb` | the same strength, and then **the best-ranked design of a small chassis** |
 
 An earlier reading of this page said `SELECT_BEST_COMBAT` and `SELECT_FASTEST`
-"rank by hit points and by speed". Only the second half was right, and the
-mistake matters: **"best combat" is `(guns + 0.8) × hit points × 1e-5`, guns
-over armour**, and it is `SELECT_BEST_ARMOR` that ranks by hit points alone. On
-the 59 warrior designs in `UNITS\UNITS\AI\` the difference is the whole
-character of an enemy clan's force (*measured*): by hit points the top five are
-all large chassis, the first of them `AI_LS_10` at 93,008 points; by the
-strength formula the top three are the size-2 `23_swlk1`, `wswlk12` and
-`wswlk13` at 228.6 against its 207.2 — 5,715 hit points apiece and four
-thousand of guns. A clan asking for `SELECT_BEST_COMBAT` builds **small,
-heavily armed** warbots, not the biggest hull it can.
+"rank by hit points and by speed". Only the second half was right: **"best
+combat" is `(guns + 0.8) × hit points × 1e-5`**, and it is `SELECT_BEST_ARMOR`
+that ranks by hit points alone. A second reading then put numbers on it — the
+small `23_swlk1` at 228.6 over the large `AI_LS_10` — that were the engine's
+stand-ins for the two floats and not the game's. The game's own are in
+[What the store holds](#what-the-store-holds--read-and-measured): `23_swlk1` is
+worth **50.7** and `AI_LS_10` **4,146**, and by strength a bigger chassis beats
+a smaller one almost throughout.
 
-`SELECT_SMALLEST`, 6, skips the draw altogether and takes the last of the
-ranking (`0x10010aab`, `0x10010b65`) — the *weakest* by that same strength, not
-the least chassis.
+**The sort** is a selection sort that exchanges (`0x10010a37`–`0x10010aa5`):
+for each place in turn it finds the first of what is left that scores
+*strictly* more than any before it and swaps the two entries, in the index
+array and the score array alike. It is not stable — the entry swapped out of a
+place lands wherever the larger one stood — and that exchange is all that
+orders equal scores.
+
+**`SELECT_SMALLEST`, 6, is not the weakest.** It skips the draw (`0x10010aab`)
+and starts from the last of the ranking (`0x10010b65`), which is what this page
+read before and stopped at. The loop that follows (`0x10010b73`–`0x10010b96`)
+walks the ranking **from the best down** and takes the first design whose
+`+0x10c`, its size class, is **at most 2** — a small or a tiny chassis — and
+only when there is none does the last of the ranking stand. So "smallest" is
+*the strongest warbot the clan can build on a small chassis*. The one raise in
+the corpus that asks for it is `c3m2e2`'s, and that is what its clan builds on
+every recording ([below](#what-the-recordings-name--seen)).
 
 **The candidates** are every design whose `+0x108` Type **equals** the order's —
-an equality, not a mask (`0x10010833`) — whose `+0x104` byte is set and whose
-Type does not carry `CLASS_BUILDING` (`0x1001083d`).
+an equality, not a mask (`0x10010833`) — whose `+0x104` byte is set
+(`0x10010837`) and whose Type does not carry `CLASS_BUILDING` (`0x1001083d`).
+The byte is **the clan's research**: it is set when every part of the design is
+researched in the clan's own tree, and it is what decides an enemy clan's whole
+force ([below](#the-byte-at-0x104-is-the-clans-research--read)). With no
+candidate the pick answers −1, `0x10010be0` turns that into no design, and
+function 15 gives no order and leaves 0, *refused* (`0x10008692`).
 
 **The factory-size gate is dead code** (*read*). Before the draw, `0x10006820`
 walks the clan's own object list for every entry of type `BUILDING_PLANT`, asks
@@ -767,7 +783,9 @@ clan owns. Its answer is then thrown away: `or eax, 0xffffffff` at
 have used it, so that comparison tests a size class against `0xffffffff`
 unsigned and always passes. The pick applies no size limit; a design too big
 for the factory is refused later, when `M_Task_Construct` starts
-([36-factory.md](36-factory.md#production--read)).
+([36-factory.md](36-factory.md#what-the-start-refuses--read)). `SELECT_SMALLEST`'s
+own loop is the same shape with a 2 where the factory's size would have gone
+(`0x10010b73`), and that one is live.
 
 The scripts pass the mode as the `TARGET_BY_NAME` target of
 their `ORDER_BUILDING_CONSTRUCT`, out of the problem's third parameter
@@ -795,6 +813,204 @@ the three that never call 69 — `c1m3e`, `c1m4e`, `scream` — keep the spread 
 **Neither function's result is ever read**: 0 of the 14 calls of 57 and 0 of
 the 7 of 69 name a destination, so what 69 leaves in the result slot goes
 nowhere.
+
+### What the store holds — *read*, and *measured*
+
+The store's fields run to `+0x2c` (its constructor is `0x10010480`): the record count at
+`+4`, the records at `+8`, an index at `+0xc`, the spread at `+0x10`, a latch
+at `+0x14`, the place list function 40 reads at `+0x18` and `+0x1c`, **the
+clan's research tree at `+0x20`**, a *loaded* byte at `+0x24`, an *everything
+is researched* byte at `+0x25` and the SuperAI at `+0x28`.
+
+**Loading** (`0x100104e0`, which function 43 calls once: the loaded byte ends
+it). It counts `<directory>*.dat` with `FindFirstFileA` and `FindNextFileA`, and
+then tries to read a cache, **`<directory>preload.lda`**: a count and that many
+records, taken whole when the count is the files'. Without one it allocates the
+records and, for each file, copies the path into a new record with `+0x104`
+cleared (`0x10010780`) and fills it (`0x10010c30`). Then it **writes the count
+and the records out as `preload.lda` with no directory in front**
+(`0x1001071b`–`0x10010765`). The cache is looked for under `UNITS\UNITS\AI\`
+and written into the game's own directory, so it is never found, every load
+fills the store afresh, and every load leaves the file behind. *Measured*: the
+install's `UNITS\UNITS\AI\` holds 77 `.dat` and no `preload.lda`, and its root
+holds one of 22,488 bytes, 4 + 77 × 0x124.
+
+**That file is the game's own answer to what a record holds**, written by the
+game on the machine it ran on, and this page reads it as a measurement. It is
+not shipped data: an install the game has not been run on has none.
+
+**A record is 0x124 bytes.** The fill builds a real object from the scheme
+(`ArealMap.dll:CreateObjectFromScheme`, `0x10010ce3`), reads it, and deletes it
+again (`World3D.dll:DeleteGameObject`, `0x10010dd8`):
+
+| at | what | asked of the object |
+|---|---|---|
+| `+0x000` | the scheme's path, `UNITS\UNITS\AI\<file>` | — |
+| `+0x104` | the *may build* byte | not the fill's: [below](#the-byte-at-0x104-is-the-clans-research--read) |
+| `+0x108` | the Type word | `IGameObject` slot 14 (`0x10010d67`) |
+| `+0x10c` | the size class, 1 tiny to 4 large | variable `0x201` (`0x10010d7c`) |
+| `+0x110` | the hit points at full | `IControl` property 54 (`0x10010d18`) |
+| `+0x114` | the gun total | variable `0x204`'s `+4` (`0x10010d93`) |
+| `+0x118` | the live top speed | property 145 (`0x10010d38`) |
+| `+0x11c`, `+0x120` | never written | |
+
+The fill answers whether it worked and its one caller drops the answer
+(`0x100106ff`), so a scheme that will not build leaves a record of whatever
+the allocation held; in the install's file the bytes nothing writes read
+`0xcdcdcdcd`, the debug heap's fill, and a record like that matches no Type.
+Nothing in the fill is the clan's: every clan's store holds the same figures.
+
+*Measured*, the install's 77 records: 59 warriors (`0x1008000`), 4 builders, 4
+transports, 3 HQs and 7 buildings, in the order of their names with the letters
+in upper case — `23sfly1e` ahead of `23_cpt1`, `mwing1` ahead of `m_dblhow`.
+Every `+0x104` in the file is 0: the file is written before the first refresh.
+The Type is the `.dat`'s own class word on all 77, and the size class the
+chassis's letter on all 70 robots. The two floats a strength multiplies are
+re-derived from the shipped parts in
+[What a strength is](#what-a-strength-is--read-and-measured), **70 of 70**.
+
+The 59 warriors by the strength formula, the game's own floats:
+
+| | designs | strength |
+|---|---|---|
+| the winged-missile carriers | `lwing1`, `lwelssm1`, `lwing2`, `mwelssm1`, `mwing1` | 306,867 to 35,828 |
+| large | `AI_LW_31`, `AI_LS_21`, `AI_LT_10`, `32_l2` = `AI_L2`, `AI_LS_10`, `AI_LT_21`, `32_l1` = `AI_L1` | 14,878 to 2,573 |
+| medium | `m_stopper`, `23_m2`, `m_dblhow`, `41mtrk1`, `23_m1`, `41mwlk1` | 458.7 to 250.5 |
+| small, armed | 27, `23_swhl1` at 147.5 down to `41sfly1` at 13.1 | |
+| tiny | 3 spiders at 11.3, 4 helicopters at 7.6 | |
+| small, unarmed | `speed_c1`…`speed_c4`, `speed_cpt` | 0.065 |
+
+A missile of 60,000 or 100,000 points a round outweighs everything else in the
+store, so a ranking over all 59 is five missile carriers and then the large
+chassis by size. No clan ranks all 59.
+
+### The byte at `+0x104` is the clan's research — *read*
+
+The fill never writes it. `0x10010f90` does, and it runs with the store loaded
+and a tree at `+0x20`:
+
+1. It sets `+0x25` and walks the records. **A record whose byte is already set
+   is passed over** (`0x10010fe9`–`0x10010ff1`): once a design is allowed it
+   stays allowed.
+2. For any other it clears `+0x25`, reads the scheme file into a tree of nodes
+   (`0x100102c0`: the `0xf0f1`, the Type, then each 0x6c-byte component and its
+   child count, `0x10010350`) and asks two things of it.
+3. **Is every part open?** `0x100115f0` takes each node's part id (the
+   component's record name, `+0x20`), finds its item with `IResearch` slot 2 —
+   which walks `TRFB` comparing names and answers −1 for a part the tree does
+   not list ([16-research.md](16-research.md#the-interface-over-the-record)) —
+   and reads its state with slot 3. Every part must be **available** and **in
+   the tree**, and so must every child's. A design that fails leaves the byte
+   0 and is done with.
+4. **Is every part researched?** `0x10011530` walks the same nodes and wants
+   **researched** and **in the tree** of each. Its answer is what the byte
+   ends up as (`0x10011083`).
+5. A design that is open but not all researched is priced
+   (`ArealMap.dll:CalcFullResearchCost`), and the cheapest of them is
+   remembered at the store's `+0xc` (`0x100110a0`–`0x100110c3`): what the clan
+   researches next.
+
+So the byte says *every part of this design is researched in this clan's tree*
+— state 7 of [16-research.md](16-research.md#trf1-is-state-not-a-label)'s five.
+It is not "the scheme built", and nothing about a design's size or role enters
+it.
+
+**The tree is the clan's own**, with the flags its `.trf` ships and whatever
+the clan has researched since. `iron3d.dll` hands each clan's `IResearch` to
+that clan's SuperAI as the mission's objects are made (`0x100605fc`, SuperAI
+slot 21, `ai.dll:0x10001fa0`), which stores it in the store's `+0x20`
+(`0x10010e00`); slot 10 hands the same pointer back (`0x10001f90`), and it is
+what the clan's research centres research from
+([16-research.md](16-research.md#the-task)).
+
+**When it runs** — three callers, and the pick is not one of them:
+
+- as the tree is handed over, if the store is loaded by then (`0x10010e12`);
+- as function 43 loads the store (`0x1000d575`);
+- each time **function 41** runs (`0x1000d524`): it refreshes the bytes and
+  then gives the building its argument names order 16 with
+  `TARGET_BY_NAME` and the file of the design at `+0xc` (`0x10011100`),
+  answering 1 when the order was taken, 0 when not and `ERROR` for no such
+  building. So `PBM_MAKE_RESEARCH` is *research the cheapest design the clan
+  cannot build yet*, and a clan that researches comes to build more.
+
+*Measured*: 2 of the 58 scripts call 41, `c4m2e2` and `scream`, each from
+`PBM_MAKE_RESEARCH_Start`. In the other seven that build by name the bytes are
+what the mission's tree ships, for the whole mission.
+
+**Function 65** asks the store whether the clan may build a design of a medium
+chassis or larger whose gun total is 105,000 or more (`0x100111d0`, the float
+at `0x10034688`) — a winged missile's carrier — and latches the first yes at
+`+0x14`; its one caller is `scream`'s `dLargeResearched = fn65()`.
+
+### What each clan may build — *measured*
+
+For each clan whose script builds by name, the 59 warrior designs walked
+against its own tree as the refresh walks them, and ranked by the game's own
+floats. *F*, *S*, *W* and *T* are the chassis letter of a unit's name
+([35-hud.md](35-hud.md)): flying, walking, wheeled, tracked.
+
+| mission | clan, script | tree | may build | `SELECT_BEST_COMBAT`, best first, as far as the easy level's spread reaches |
+|---|---|---|---:|---|
+| C01 M03 | `Enemy`, `c1m3e` | `data` | 7 | `12spd1` (tiny *S*) |
+| C01 M04 | `Enm`, `c1m4e` | `c1m4e` | 27 | `wswlk22` (small *S*) |
+| C02 M01 | `enemy`, `c2m1e` | `c2m1e` | 28 | `wswlk21` (small *S*), `wsfly11`, `wsfly12` (small *F*) |
+| C02 M03 | `enemy`, `c2m3e` | `c2m3e` | 11 | `23_m2`, `23_m1` (medium *W*), `23_swhl1` (small *W*), `23_swlk1` (small *S*), `23_sfl1`, `23sfly1e`, `23_cpt1` (small *F*) |
+| C03 M01 | `Enm`, `c3m1e` | `c3m1e` | 27 | `23_m2`, `23_m1` (medium *W*), `23_swhl1` (small *W*), `wswlk22` (small *S*) |
+| C03 M02 | `Enm1`, `c3m2e` | `c3m2e` | 44 | `AI_LT_10`, `32_l2`, `AI_L2`, `AI_LT_21` (large *T*), `32_l1`, `AI_L1` (large *W*), `m_stopper` (medium *T*) |
+| C03 M02 | `Enm2`, `c3m2e2` | `c3m2e2` | 44 | `AI_LT_10`, `32_l2`, `AI_L2` (large *T*) |
+| C04 M02 | `Enm2`, `c4m2e2` | `c4m2e2` | 43 | `AI_LS_21` (large *S*), `AI_LT_10` (large *T*), `AI_LS_10` (large *S*), `32_l1`, `AI_L1` (large *W*), `m_stopper` (medium *T*), `23_m2` (medium *W*), `m_dblhow` (medium *T*) |
+| Single.01, Single.02 | `Enemy`; `enemy`, `enemy1`; `scream` | `scream` | 7 | `12spd1` (tiny *S*) |
+
+- **The byte is the campaign's difficulty curve.** `data.trf` and `scream.trf`
+  allow the seven tiny designs and nothing else; `c2m3e.trf` allows 11, of
+  which seven are the files named for it, `23_*`; and by C03 M02 the tree
+  allows 44, the large chassis of `32_l1` and `32_l2` among them. The file
+  names carry the campaign and mission a design was drawn for, and the trees
+  agree with them.
+- **The control**: without the byte every row's first entry would be `lwing1`,
+  two 100,000-point winged missiles, on C01 M03 as on C04 M02.
+- **`SELECT_SMALLEST`** would take `23_swhl1`, a Small Wheel worth 147.5, on
+  the five trees from `c2m3e` on, the small walkers `wswlk22` and `wswlk21` on
+  `c1m4e` and `c2m1e`, and the tiny spider `12spd1` on `data` and `scream`.
+  Only `c3m2e2` asks.
+- **`SELECT_FASTEST`**'s first is an unarmed small flyer on seven of the 11
+  clans — `speed_c2`, `speed_c3` or `speed_c4`, 24.9 to 27.6 m/s — and the tiny
+  helicopter `12hel1`, 13.9, on the four whose tree allows only tiny designs.
+
+### What the recordings name — *seen*
+
+"Let's Play - Parkan: Iron Strategy, Part 6" (-yNnsqudMzw) and "Part 6.5"
+(9SBZOCWv_vE) play C03 M02 on the easy level, and the target panel names what
+the two enemy clans build. A name is the size letter, the chassis letter, the
+role letter and the clan's running count ([35-hud.md](35-hud.md)). The mission
+places `Enm1`'s units to *MTW-2* and `Enm2`'s to *MWW-4*, so `Enm1`'s first
+build is its *-3* and `Enm2`'s its *-5*; whose a later name is, is *derived*
+from its count and its kind.
+
+- **`Enm2` builds one design, a small wheeled warbot**: *SWW-5*, *-6*, *-8* to
+  *-11*, *-13*, *-15*, *-19*, *-21* to *-26* and on to *-52*, some two dozen
+  names and not one of another kind. Its script's `Problems0` raises
+  `SELECT_SMALLEST`, and its tree's strongest small chassis is `23_swhl1`, a
+  Small Wheel. The store's weakest design is a small *flyer*.
+- **`Enm1` builds tracked and wheeled warbots of a medium or a large
+  chassis**: *MTW-3*, *-4*, *-5* and *-10*, *LTW-6*, *LWW-8* and *-9*. Its
+  `SELECT_BEST_COMBAT` draws among seven on the easy level, and its seven are
+  four large *T*, two large *W* and one medium *T*.
+- **No walker and no flyer is named in either recording.** A ranking of the
+  whole store by the figures this page carried before would have had `Enm1`
+  build small walkers.
+- **Not explained**: *MWW-21*, *-22* and *-23*, and *LTW-34* and *-35*, whose
+  clan the count does not settle. `23_m2`, a Medium Wheel, is the **eighth** of
+  `Enm1`'s ranking, one past the spread; `Enm2`'s `SELECT_BEST_COMBAT` raises,
+  spread 2, reach only the three large *T*. And *MTW-3*, *-4* and *-5* in a
+  row are one design of seven drawn three times running. What else decides
+  which of a clan's orders becomes a unit — a build that is ordered and never
+  finished is not named — is not read here.
+
+The names were read off the recordings in this round's playthrough analysis;
+*MTW-3* (Part 6.5, 9:10) and *SWW-5* (19:58) were looked at again here, at the
+video's own resolution.
 
 ## `fDifficulty` is the game level, 0, 0.5 or 1 — *read*
 
@@ -864,23 +1080,73 @@ Both go through one helper, `Control.dll:0x100138b0`, which takes a flag:
 the object (`0x1000fa42`), and `+0x58c` is a copy of it taken while everything
 is whole (`0x1000fa7c`); both are rescaled together when a scale changes
 (`0x10009f5d`), which is how [26-damage.md](26-damage.md) reads a node's life.
-The helper also divides by `[+0x5b4]`'s `+4` when that pointer is set — it is
-cleared in the constructor (`0x10007172`), never assigned anywhere in
-`Control.dll`, and only the destructor frees it, so **the divide never
-happens** and the branch that answers `FLT_MAX` for a zero divisor is dead.
+**The helper divides the life by what the armour keeps** (*read*, and
+*measured*). `[+0x5b4]` is the control system's **armour**: creating a class-27
+component allocates a 16-byte record — its owner, 1.0, 0 and 0 — and stores it
+there (`0x1002d7b1`–`0x1002d7e3`), then fills it from the part; the damage
+routine reads its `+4` and `+8` as the linear and square factors
+(`0x10010218`, [26-damage.md](26-damage.md#armour--read-and-measured)), the
+mass sum its `+0xc` as the rating (`0x1000fbac`) and the unit box's defence its
+`+4` (`0x100139b0`). The helper divides the summed life by that same `+4`
+(`0x100138e6`), the share of a small hit the armour lets through, and answers
+`FLT_MAX` for an armour that keeps nothing (`0x1001391c`). So
+
+```
+property 54 = Σ nodes' life at full ÷ armour's linear factor
+              + Σ deflector values 0–5 × shield value 0
+```
+
+and an object with no armour fitted is not divided. An earlier reading here
+said the pointer was "never assigned anywhere in `Control.dll`" and the divide
+never happened; the store at `0x1002d7e3` was there to be found, and the
+game's own figures say the divide happens: over the **70** robots among the
+store's 77 records ([What the store holds](#what-the-store-holds--read-and-measured))
+the formula above, on the parts as shipped, gives the float the game wrote to 1
+part in 10 million, **70 of 70**. `23_swlk1` is 5,414 points of nodes under an
+armour that keeps 0.6236 and a 1,700-point shield behind a deflector of six
+0.8s: 8,681.6 + 8,160 = **16,841.6**. The 70 are worth 1.6 to 6.1 times their
+nodes' own life.
 
 **The other float is the unit's guns**, `IGameObject` variable `0x204`'s `+4`
-(*read*). The variable getter is `MBehaviour`'s own switch
+(*read*, and *measured*). The variable getter is `MBehaviour`'s own switch
 (`Behavior.dll:0x1000a490`, the one [23-economy.md](23-economy.md#how-ore-reaches-a-consumer--read-after-two-corrections)
 reads the ore ids off); id `0x204` (`0x1000a7b1`) hands back `&[MBehaviour +
 0x674]` and, before it does, **recomputes the second word of that pair**: it
-refreshes the unit's weapon table from its machine (`0x1001c1a0`, asking every
-gun for its rounds left, `0x204` id `0x700`, and its rate figure, id 6) and
-then sums `a ÷ b × rounds` over it into `+0x678` (`0x1001ccb0`, skipping a gun
-whose *b* is not above 0). Which two authored figures *a* and *b* are — the
-gun record's `+0x0c` and `+0x28`, which that refresh does not fill — is **not
-read**. So a strength is fresh on every ask, and an unarmed machine still
-counts: the 0.8 is what it is worth without a gun.
+refreshes the unit's weapon table from its machine (`0x1001c1a0`) and then sums
+over it into `+0x678` (`0x1001ccb0`):
+
+```
+guns = Σ over the guns whose magazine is not 0:
+       the round's damage ÷ the magazine × the rounds left
+```
+
+The three figures are a gun row's `+0x0c`, `+0x28` and `+0x3c`:
+
+- `+0x0c` is the gun's **value 6** (variable interface slot 6, id 6), its
+  `+0x174`, the damage of the round its link made
+  ([14-controls.md](14-controls.md#ids-5-and-6-are-damage-a-second--read-and-measured))
+  — the round's nodes' hit points plus their explosions' damage. It is taken
+  **once**, when the row is filled (`0x1001b50c`–`0x1001b51b`). The refresh
+  reads value 6 again into `+0x40` and zeroes that copy for a gun whose node is
+  dead (`0x1001c33a`–`0x1001c376`), and the sum does not read `+0x40`.
+- `+0x28` is the **magazine**, query `0x800`, converted as an **unsigned**
+  word (`0x1001b53c`–`0x1001b571`).
+- `+0x3c` is the **rounds left**, query `0x700`, converted the same way on
+  every refresh (`0x1001c306`–`0x1001c328`).
+
+So a gun counts one round's damage while its magazine is full, less as it is
+shot off, and nothing once it is empty; and an unlimited gun, whose −1 reads
+4,294,967,295 on both sides of the division, always counts one round whole. A
+builder's tool is on the table and has no value 6: `sml_bldr`, a 150-point gun
+and a tool, totals 150. This is **a damage, not a rate** — the interval plays
+no part — and the reading this page carried, "a rate figure", was a guess at
+id 6. *Measured*: Σ of each gun's round's damage, the clip's round where a clip
+is fitted, is the store's `+0x114` on **77 of 77** records, and the game's
+figure for `41mtrk1`, two 500-point guns on clips of 60, is 999.99994: the
+division comes first, in single precision.
+
+A strength is fresh on every ask, and an unarmed machine still counts: the 0.8
+is what it is worth without a gun.
 
 **The cached form and the live one do not measure the same thing** (*read*).
 The clan areal map's contact record is 40 bytes and
@@ -897,28 +1163,46 @@ weighs in every engagement score: its *a*, *b* and *c* are the life left, the
 life at full and the guns' rate, so `2 − (a + 1) ÷ (b + 1)` is 1 on a whole
 target and rises towards 2 as it is shot apart.
 
-**The design store scores a design the same way** (*read*). Its per-design fill
-(`ai.dll:0x10010c30`) builds a real object from the scheme
+**The design store scores a design the same way** (*read*, and *measured*). Its
+per-design fill (`ai.dll:0x10010c30`) builds a real object from the scheme
 (`ArealMap.dll:CreateObjectFromScheme`) and reads five figures off it into the
 0x124-byte record: `+0x108` the Type word, `+0x10c` property `0x201` (the size
 class), **`+0x110` property 54**, **`+0x114` variable `0x204`'s `+4`**, `+0x118`
-property 145 (the live top speed). Those are the first two of the six floats
-`SELECT_*` chooses between ([Function 69](#function-69-sets-how-sloppy-the-ais-design-pick-is--read-and-measured)),
-so `SELECT_BEST_COMBAT` and `SELECT_FASTEST` rank by hit points and by speed.
+property 145 (the live top speed). Those are three of the six floats
+`SELECT_*` chooses between ([What each `SELECT_*` scores](#what-each-select_-scores--read)).
 The fill also computes the strength itself and drops it — the three calls
 around it (`0x10010daa`, `0x10010db4`, `0x10010dcd`) are stubs that `ret`, a
-trace that was compiled out.
+trace that was compiled out. And because the game writes those records to
+`preload.lda`, the store is where both floats above can be checked against the
+game's own arithmetic: property 54 on 70 of 70 robots, the gun total on 77 of
+77 records, and property 145 on 70 of 70, which is the constructor's own
+speed for the unit box ([38-designs.md](38-designs.md)).
 
-### What a `TAKE_BY_HITS` amount is worth — *measured*
+*Not established*: whether the game level's ratio
+([26-damage.md](26-damage.md#the-difficulty-ratio--read-and-measured)) reaches
+the object the fill builds. The install's file is at ratio 1, and what level it
+was written on is not known. The ratio would scale every warrior's hit points
+alike and change no ranking.
 
-The scale is only useful with a number beside it. Summing every component's
-`.ndp` durabilities over the **458** shipped assemblies gives 0 to 1,084,514
-hit points, median 8,774; five carry no damage table at all (`b_ruin`,
-`e_ruin`, `m_ruin`, `s_ruin`, `mas_l_n1`). All **19** hero assemblies sum
-**7,362** and the largest bunker 66,010, so unarmed and whole the hero is worth
-**0.0589** and that bunker **0.528**. So armour alone barely moves the number:
-a `TAKE_BY_HITS` amount of 25 is 424 hero hulls' worth of it, which no group
-the AI can raise will ever reach. **A two-digit amount is a demand for guns.**
+### What a `TAKE_BY_HITS` amount is worth — *measured*, and *derived*
+
+The scale is only useful with a number beside it. The store's 59 warriors run
+from 0.065 for an unarmed small flyer, through 7.6 to 11.3 for the tiny
+designs, 13 to 147 for an armed small one and 250 to 459 for a medium, to
+2,573 to 14,878 for a large — and five orders of magnitude on for the winged
+missiles ([What the store holds](#what-the-store-holds--read-and-measured)).
+The same two formulas over all **374** robot assemblies under `UNITS` (*derived*:
+the formulas are checked on the store's 70) give the **19** heroes 182.6 to
+229.1 — `hero11` is 21,782 hit points, 7,354 of nodes under an armour that
+keeps 0.6236 and 9,990 of shield, and 870 of guns, so **189.7** — and the 311
+warriors a median of 213.
+
+So a `TAKE_BY_HITS` amount of 25 is one armed small warbot, 150 the strongest
+small one, and 500 two mediums; **the hero alone, whole, is worth 190**.
+An earlier reading here priced the hero at 0.0589, on its nodes' life with
+neither the armour nor the shield nor a gun counted, and concluded that a
+two-digit amount was "a demand for guns" no group could meet on armour. It is
+an ordinary patrol.
 
 Where the amount comes from, over all **74** `TAKE_BY_HITS` calls — every one
 of them passing `dTemp3` (*measured*):
@@ -1427,13 +1711,22 @@ capturer — which is why the table stops one call deep.
   are — `IControl` property `0x36` and interface `0x204`'s `+4` — and so what a
   strength is worth in the numbers the scripts compare it against~~ is now read
   and measured: **guns over hit points**, where 54 is the life an object could
-  have and 38 the life it has, the guns are the behaviour's own recomputed
-  total, and a whole hero is worth 0.0589 ([What a strength
-  is](#what-a-strength-is--read-and-measured)). What is still not read is which
+  have and 38 the life it has, and the guns are the behaviour's own recomputed
+  total ([What a strength
+  is](#what-a-strength-is--read-and-measured)). ~~What is still not read is which
   two authored gun figures the total divides (`Behavior.dll:0x1001ccb0`'s
-  `+0x0c` and `+0x28`). The problem's action record (`+0x34`) and the object at
-  `+0x40c` behind functions 40, 41, 43, 53 and 65 are not read either. The table
-  says what each handler does with them. ~~The areal-map list function 32 tests~~ is now read:
+  `+0x0c` and `+0x28`).~~ **Read**, and *measured*: `+0x0c` is the damage of the
+  round the gun's link made, taken once as the row is filled, and `+0x28` the
+  magazine, so a gun counts its round's damage ÷ its magazine × its rounds
+  left — a damage, not a rate — and the hero is worth 190, not 0.0589, because
+  property 54 divides the nodes' life by what the armour keeps and adds the
+  shield. Both are checked against the floats the game itself wrote, 70 of 70
+  and 77 of 77. ~~The object at `+0x40c` behind functions 41, 43 and 65~~ is
+  the design store, **read** in [What the store holds](#what-the-store-holds--read-and-measured):
+  its records, the cache it writes and never reads, and the byte that keeps a
+  clan to the designs its tree has researched. The problem's action record
+  (`+0x34`) and the store's place list, behind functions 40 and 53, are not
+  read. The table says what each handler does with them. ~~The areal-map list function 32 tests~~ is now read:
   a route's list of the units last reported inside it
   ([34-progression.md](34-progression.md)).
 - ~~**The two numbers a problem is raised with** — `fn2`'s third and fourth
@@ -1464,11 +1757,15 @@ capturer — which is why the table stops one call deep.
   at the design record's `+0x110` upward that `SELECT_*` chooses between.~~ All
   six arms are now read ([What each `SELECT_*`
   scores](#what-each-select_-scores--read)), and the first reading of two of
-  them here was wrong: `SELECT_BEST_COMBAT` is the strength formula, guns over
-  armour, not hit points, and `SELECT_SMALLEST` takes the weakest by that same
-  figure rather than the least chassis. What is still unread is the one float
-  `SELECT_BEST_RANGE` reads, `+0x11c`, which the store's own fill never writes,
-  and which no shipped raise asks for.
+  them here was wrong: `SELECT_BEST_COMBAT` is the strength formula, not hit
+  points, and `SELECT_SMALLEST` — read a second time wrong, as the weakest by
+  that figure — takes **the strongest design of a small chassis**
+  (`0x10010b73`). And the candidates were never the whole store: the byte at
+  `+0x104` keeps a clan to the designs whose every part its own tree has
+  researched, 7 to 44 of the 59 warriors over the nine scripts that build by
+  name ([What each clan may build](#what-each-clan-may-build--measured)). What
+  is still unread is the one float `SELECT_BEST_RANGE` reads, `+0x11c`, which
+  the store's own fill never writes, and which no shipped raise asks for.
 - ~~**What writes `fDifficulty`.**~~ Read: the SuperAI's constructor, from a
   six-float table indexed by the game level ([`fDifficulty` is the game
   level](#fdifficulty-is-the-game-level-0-05-or-1--read)).

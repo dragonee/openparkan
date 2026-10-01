@@ -131,6 +131,20 @@ impl Shield {
         self.deflects(s) * self.max * self.fills[s]
     }
 
+    /// What the shield adds to the life an object has left, device query 14
+    /// (`Control.dll:0x1002b845`): the six sectors' mean fill × the deflector's six live
+    /// coefficients summed (ids `0x300`–`0x305`) × the sector maximum.
+    pub fn held(&self) -> f32 {
+        let mean = self.fills.iter().sum::<f32>() / SECTORS as f32;
+        (0..SECTORS).map(|s| self.deflects(s)).sum::<f32>() * self.max * mean
+    }
+
+    /// What it adds to the life the object could have, device query 15 (`0x1002b8f5`): the
+    /// deflector's six authored coefficients summed × the sector maximum.
+    pub fn held_full(&self) -> f32 {
+        self.coefficients.iter().sum::<f32>() * self.max
+    }
+
     /// A hit of `damage` on sector `s` (`0x1002ca80`): it takes what the sector can stop out
     /// of the sector, the sector losing that divided by what the deflector makes of it, and
     /// returns the damage stopped.

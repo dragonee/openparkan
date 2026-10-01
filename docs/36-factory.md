@@ -483,20 +483,26 @@ clicked at 157.4 s).
 4. **If the order is refused**, it clears the file and the batch word. Nothing is
    said.
 
-**The factory's task** is `M_Task_Construct`.
+**The factory's task** is `M_Task_Construct`, whose table is at
+`Behavior.dll:0x10059b24`. Two of its slots take the order, and this page read
+them as one routine before.
 
-Its start (`Behavior.dll:0x100299a0`):
+`SetTarget` (slot 3, `0x100299a0`):
 1. **It finds the creation vertex.** It asks `IHallWay` for the first vertex
    with bit `0x800`, else `0x80`; without one, *"Bad HallWay in Plant"*.
 2. **It checks the vertex's joint**, the second word of the vertex. If that node
    is destroyed, *"Plant creation node destroyed"*.
 3. **It takes the target**, which must be by name (*"Invalid Construct
-   parameter"* otherwise).
-4. **It reserves a mind and sets its budgets**
-   ([23-economy.md](23-economy.md#construction--read)):
-   - a paid bot costs its design's ore and power, with 5 s of time;
-   - a free bot (`FreeBotNum` > 0) costs no ore and 1 power, with time from the
-     factory-by-chassis table.
+   parameter"* otherwise), keeps the file name and logs *"New machine […]
+   constructing ordered"*.
+
+The start (slot 6, `0x10029ba0`) **reserves a mind and sets its budgets**
+([23-economy.md](23-economy.md#construction--read)):
+- a paid bot costs its design's ore and power, with 5 s of time;
+- a free bot (`FreeBotNum` > 0) costs no ore and 1 power, with time from the
+  factory-by-chassis table.
+
+What it refuses before that is [below](#what-the-start-refuses--read).
 
 **Each takt** the task's progress is min(time, ore, power) as fractions. The panel
 shows it × 100 as the bar's `"%d%%"`, rounded to the nearest (`fistp`).
@@ -556,6 +562,59 @@ when there are none (*derived*).
   - `fr_l_plant`: vertex 0, (−0.30, −4.51, 4.91).
 - **On Tut_2** the Large Factory is placed at (392.42, 788.73, 151.75), turned
   −0.0246. The bot appears at about (393.75, 854.91, 154.05).
+
+### What the start refuses — *read*
+
+Four things, tested in this order, and each ends the start with 0:
+
+1. **No free mind** (`0x10029bfa`–`0x10029c30`): *"No Free mind... cannot start
+   constructing"*.
+2. **A scheme that will not open** (`0x10029c9b`–`0x10029d74`): the file is
+   missing, does not begin `0xf0f1`, or its nodes do not read. *"Failed to open
+   scheme"*.
+3. **The size** (`0x10029d0f`–`0x10029ef5`, *"Robot SizedType not match..."*).
+   The design's size is its root part's third letter — the fourth for a
+   building — through a jump table: `t` 1, `l` and `h` 2, `m` 3, `b` 4, and 0
+   for any other. It is refused when it is **larger than the factory's** own
+   (`+0x960`, `0x10029e5b`), and a second switch over the same letter then
+   refuses **a letter it does not know** (`0x10029eef`, the byte table at
+   `0x1002a480`), which the first test had let through as 0.
+4. **The technology, for a paid bot alone** (`0x1002a0f4`–`0x1002a1c7`,
+   *"Failed to create … due to technology"*). The factory's clan's tree
+   (`MBehaviour+0x50`) is asked for every node of the scheme — `IResearch`
+   slots 2 and 3, the root here and each child in `0x10029810` — and every part
+   must be **researched** and **in the tree**. A clan with no tree is refused
+   outright. The same pass sums the parts' build costs into the two budgets, a
+   part's whether or not it is researched.
+
+**A free bot is never asked its technology.** The test for `FreeBotNum`
+(`0x10029efc`–`0x10029f0d`) comes after the size and before the tree, and its
+branch sets the budgets, reserves the mind and returns (`0x10029f13`–
+`0x1002a0ea`). So a factory with free bots builds a design its clan has not
+researched, and stops being able to when they run out.
+
+**Neither ore nor power refuses a build.** Nothing in the start reads what the
+clan holds: they are budgets the takt waits on, and a clan with no ore has a
+build that stands at 0%.
+
+**What a refusal does** is [23-economy.md](23-economy.md#the-bot-limit-is-the-clans-mind-count--read-and-measured)'s:
+the task stack drops the order and starts the next, and nothing waits. For a
+clan's AI the order came from `PBM_ROBOT_NEEDED_Start`, which marks the problem
+solved when the factory did not take it, so the clan orders again only when
+something next wants a robot — and then **draws again**
+([15-behaviour.md](15-behaviour.md#function-69-sets-how-sloppy-the-ais-design-pick-is--read-and-measured)).
+A refusal is therefore not the end of a clan's builds unless every design its
+draw can reach is refused: the pick applies no size limit of its own, so a clan
+whose only factory is smaller than everything in its spread would never build.
+*Measured*: no clan that builds by name is in that position. Of the 11, 9 are
+placed with a factory — Single.02's two `scream` clans with none — and on each
+of the 9 **every** warrior design its `SELECT_BEST_COMBAT` spread reaches is no
+larger than that factory, at every level: 35 of 35 on easy, 25 of 25 on medium
+and 16 of 16 on hard. So the size is never what refuses a shipped clan's own
+pick. Nor is the technology: the store asked the same question of the same tree
+before the design became a candidate. And four of the nine factories are placed
+with `FreeBotNum` 50 to 101, the other five with 1, so C03 M02's `Enm2`, on
+100, never pays for a warbot at all.
 
 ## Mission 02 — *measured*, *derived* and *seen*
 
@@ -632,6 +691,11 @@ when there are none (*derived*).
 4. **Production:**
    - The factory runs order 12 with the design, by name. Mind, ore, power and
      time are docs/23's; a free bot is 1 power and the size-table time.
+   - Refuse the start, and drop the order, for no free mind, a design that will
+     not open, a chassis larger than the factory or of no size letter it knows,
+     and — unless the factory has a free bot left — any part its clan's tree
+     has not researched ([What the start refuses](#what-the-start-refuses--read)).
+     Never for ore or power.
    - The progress is min of the three fractions.
    - On completion, create the design's unit for the factory's clan at the
      creation vertex (bit `0x800`, else `0x80`): the vertex's point through its
@@ -702,3 +766,14 @@ when there are none (*derived*).
   keys only in mode 3 ([What is drawn](#what-is-drawn--read-and-seen)). What
   the other pages show is command mode's, in
   [41-commander.md](41-commander.md#the-pages--read).
+- ~~What `M_Task_Construct`'s start refuses besides a missing mind and a chassis
+  too big, and whether a clan whose pick is refused ever builds~~ — **read**, and
+  *measured*: four things in order — no free mind, a scheme that will not open,
+  a size larger than the factory's or of no known letter, and for a **paid** bot
+  alone a part the clan's tree has not researched; never ore or power, and never
+  the technology of a free bot. A refused order is dropped and the clan draws
+  again at its next want, and over the 9 clans placed with a factory every
+  design their spread reaches fits it, 35 of 35 on the easy level
+  ([What the start refuses](#what-the-start-refuses--read)). An earlier line of
+  this page gave both of the task's entry points one address; `0x100299a0` is
+  its `SetTarget` and `0x10029ba0` its start.

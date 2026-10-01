@@ -1458,50 +1458,237 @@ fn c02_m03s_enemy_planner_orders_its_factory_to_build_a_warbot() {
 /// asked for and the factory builds one, until the clan's minds run out and it stands idle
 /// (docs/23, "The bot limit is the clan's mind count").
 ///
-/// `SELECT_BEST_COMBAT` scores a design by the **strength formula**, guns over armour
-/// (`ai.dll:0x1001099d`), which puts the small, heavily armed `23_swlk1` class above the
-/// 93,008-hit-point `AI_LS_10` — so the enemy turns out *SSW-X Warriors* of chassis size 2,
-/// not the biggest hull in the store. Each costs its design's ore, which its one Small Mine
-/// has to dig: only the first is free.
+/// The store holds every design in `UNITS\UNITS\AI\`, and the clan may build the ones whose
+/// every part its tree has researched (`ai.dll:0x10010f90`): for `c2m3e.trf` that is **11 of
+/// the 59 warriors**, and seven of them are the files named for this mission, `23_*`.
+/// `SELECT_BEST_COMBAT` ranks those by the strength formula (`0x1001099d`), and on the medium
+/// level the draw falls among the first five (`6 − 4·fDifficulty` is 4): two Medium Wheels, a
+/// Small Wheel, a Small Walker and a Small Flyer. The store's own best, the winged-missile
+/// carriers, are out of this clan's reach. Each costs its design's ore, which its one Small
+/// Mine has to dig: only the first is free.
 #[test]
 #[ignore = "needs the game install"]
-fn c02_m03s_enemy_factory_turns_out_small_warbots_until_the_clans_minds_run_out() {
+fn c02_m03s_enemy_factory_turns_out_the_designs_its_tree_has_researched_until_its_minds_run_out() {
+    use parkan_sim::planner::SELECT_BEST_COMBAT;
     use parkan_world::play::CLASS_ROBOT;
 
-    let mut play = campaign_play(gamedir::C02_MISSION_03);
+    const WARRIOR: u32 = 0x0100_8000;
+    let mut play = campaign_play_at(gamedir::C02_MISSION_03, Some(1));
     let tick = 1000.0 / 30.0;
     let enemy = 1_i64;
     let placed = play.units.len();
     let plant = play.units.iter().position(|u| u.logical_id == -2147483608).expect("its Large Factory");
     assert!(play.factories.iter().any(|f| f.target == plant), "which the play knows as a factory");
 
-    let mut made: Vec<(f32, u32, u8)> = Vec::new();
-    for step in 0..(100 * 30) {
+    let mut made: Vec<(f32, u32, u8, String)> = Vec::new();
+    for step in 0..(150 * 30) {
         play.tick(tick, [0.0; 2]);
         while placed + made.len() < play.units.len() {
             let t = placed + made.len();
             let u = &play.units[t];
             assert_eq!(u.clan, Some(enemy), "made for the enemy clan");
             let size = play.robots.iter().find(|(rt, _)| *rt == t).map_or(0, |(_, r)| r.size_class);
-            made.push((step as f32 / 30.0, u.type_word, size));
+            let file = play.commander.paths[t].rsplit('\\').next().unwrap().to_ascii_lowercase();
+            made.push((step as f32 / 30.0, u.type_word, size, file));
         }
     }
     assert_eq!(made.len(), 3, "three warbots, one a mind: {made:?}");
-    assert!(made.iter().all(|&(_, t, _)| t & CLASS_ROBOT != 0), "every one a robot: {made:?}");
-    assert!(made.iter().all(|&(_, _, size)| size == 2), "and every one a small chassis: {made:?}");
-    // The free bot first: a large factory building a small chassis takes 20 s (docs/23,
-    // "Construction"). The two behind it are paid, and wait on the mine's ore.
-    assert!((15.0..30.0).contains(&made[0].0), "the free one at {} s", made[0].0);
+    assert!(made.iter().all(|m| m.1 & CLASS_ROBOT != 0), "every one a robot: {made:?}");
+    // The free bot first, in the time a large factory takes over its chassis: 20 s for a small
+    // one and 40 for a medium (docs/23, "Construction"). The two behind it are paid, and wait
+    // on the mine's ore.
+    let free = if made[0].2 == 3 { 35.0..50.0 } else { 15.0..30.0 };
+    assert!(free.contains(&made[0].0), "the free one at {} s: {made:?}", made[0].0);
     assert!(made[1].0 > made[0].0 + 15.0, "and the paid ones dig for theirs: {made:?}");
     assert_eq!(play.free_minds(enemy), 0, "the clan's minds are all held now");
     let factory = play.factories.iter().find(|f| f.target == plant).unwrap();
     assert!(factory.idle(), "so the factory stands idle rather than queueing another");
-    // The design it built is one of the AI's own store, and it was paid for.
+
     let store = play.stores.get(&enemy).expect("the enemy's design store is loaded");
     assert!(store.designs.len() > 50, "the whole of UNITS\\UNITS\\AI: {}", store.designs.len());
-    let best = store.pick(0x0100_8000, parkan_sim::planner::SELECT_BEST_COMBAT, 0).expect("a design");
-    assert!(best.chassis_size <= 2, "the best combat design is a small one: {best:?}");
+    let ranked: Vec<String> =
+        store.ranked(WARRIOR, SELECT_BEST_COMBAT).iter().map(|d| design_file(d)).collect();
+    assert_eq!(ranked.len(), 11, "what c2m3e.trf has researched every part of: {ranked:?}");
+    assert_eq!(ranked.iter().filter(|n| n.starts_with("23")).count(), 7, "{ranked:?}");
+    let five = ["23_m2.dat", "23_m1.dat", "23_swhl1.dat", "23_swlk1.dat", "23_sfl1.dat"];
+    assert_eq!(ranked[..5], five);
+    assert!(made.iter().all(|m| five.contains(&m.3.as_str())), "each one of the five: {made:?}");
+    let best = store.pick(WARRIOR, SELECT_BEST_COMBAT, 0).expect("a design");
+    assert_eq!(best.chassis_size, 3, "the best combat design it may build is a Medium Wheel: {best:?}");
     assert!(best.ore > 100.0, "and it is not free: {} ore", best.ore);
+}
+
+/// One record of `preload.lda`, the design store as the game itself filled it: the file name,
+/// the Type word, the size class, and the three floats at `+0x110`, `+0x114` and `+0x118`.
+struct Preloaded {
+    name: String,
+    type_word: u32,
+    size_class: u32,
+    hit_points: f32,
+    guns: f32,
+    speed: f32,
+}
+
+/// `preload.lda` in the install's own directory, when the game has been run there: a count
+/// and that many 0x124-byte records (`ai.dll:0x1001071b`–`0x10010765`, written every time a
+/// clan loads its store). None on an install the game has not been played on.
+fn preload_lda(game: &std::path::Path) -> Option<Vec<Preloaded>> {
+    const RECORD: usize = 0x124;
+    let data = std::fs::read(gamedir::resolve(game, "preload.lda")?).ok()?;
+    let word = |at: usize| u32::from_le_bytes(data[at..at + 4].try_into().unwrap());
+    let count = word(0) as usize;
+    assert_eq!(data.len(), 4 + count * RECORD, "a count and that many records");
+    let out = (0..count)
+        .map(|i| {
+            let at = 4 + i * RECORD;
+            let path = &data[at..at + 0x104];
+            let path = String::from_utf8_lossy(&path[..path.iter().position(|&b| b == 0).unwrap()]);
+            Preloaded {
+                name: path.rsplit('\\').next().unwrap().to_ascii_lowercase(),
+                type_word: word(at + 0x108),
+                size_class: word(at + 0x10c),
+                hit_points: f32::from_bits(word(at + 0x110)),
+                guns: f32::from_bits(word(at + 0x114)),
+                speed: f32::from_bits(word(at + 0x118)),
+            }
+        })
+        .collect();
+    Some(out)
+}
+
+fn design_file(d: &parkan_world::factory::Design) -> String {
+    d.project.path.rsplit('\\').next().unwrap().to_ascii_lowercase()
+}
+
+/// The two floats a strength multiplies, against the game's own. Each time a clan loads its
+/// design store the game builds every scheme in `UNITS\UNITS\AI\` as a real object, reads it,
+/// and writes the records out as `preload.lda` — looking for the file under the directory and
+/// writing it beside the executable, so it is written every time and never read
+/// (`ai.dll:0x100104e0`). On an install the game has been run on, the engine's store must hold
+/// the same records in the same order: the Type and the size class of all of them, and for
+/// every robot the life at full (property 54: the nodes' life over what the armour keeps, plus
+/// the full shield) and the gun total (one round's damage a gun).
+#[test]
+#[ignore = "needs the game install"]
+fn the_design_stores_figures_are_the_ones_the_game_wrote_into_preload_lda() {
+    use parkan_world::factory::Store;
+
+    let game = gamedir::find(None).expect("a Parkan install: set PARKAN_DIR");
+    let mut play = campaign_play_at(gamedir::C03_MISSION_02, Some(0));
+    let catalogue = play.research.catalogue(1).expect("Enm1's tree, c3m2e.trf");
+    let store = Store::load(&game, &mut play.assembly, catalogue, 4).unwrap();
+    let warriors = store.designs.iter().filter(|d| d.project.type_word == 0x0100_8000).count();
+    assert_eq!(warriors, 59, "the 59 warrior designs of UNITS\\UNITS\\AI");
+
+    let mut ranked: Vec<&parkan_world::factory::Design> =
+        store.designs.iter().filter(|d| d.project.type_word == 0x0100_8000).collect();
+    ranked.sort_by(|a, b| b.strength().total_cmp(&a.strength()));
+    for (i, d) in ranked.iter().enumerate() {
+        eprintln!(
+            "{i:2} {:14} size {} hit points {:10.2} guns {:9.1} speed {:6.2} strength {:10.3} {}",
+            design_file(d),
+            d.size_class,
+            d.hit_points,
+            d.guns,
+            d.speed,
+            d.strength(),
+            if d.researched { "researched" } else { "" }
+        );
+    }
+
+    let Some(theirs) = preload_lda(&game) else {
+        eprintln!("no preload.lda in this install: the game has not been run on it");
+        return;
+    };
+    assert_eq!(theirs.len(), 77);
+    // The order the game listed the directory in is the names' with their letters upper case.
+    let robots: Vec<&Preloaded> = theirs.iter().filter(|r| r.type_word & 0x8000_0000 == 0).collect();
+    assert_eq!(robots.len(), 70, "70 robots and 7 buildings");
+    let order: Vec<String> = store.designs.iter().map(design_file).collect();
+    let listed: Vec<String> = theirs.iter().map(|r| r.name.clone()).filter(|n| order.contains(n)).collect();
+    assert_eq!(order, listed, "the store's order is the game's");
+    let (mut worst_life, mut worst_speed) = (0.0_f32, 0.0_f32);
+    for r in &robots {
+        let d =
+            store.designs.iter().find(|d| design_file(d) == r.name).unwrap_or_else(|| panic!("{}", r.name));
+        assert_eq!(d.project.type_word, r.type_word, "{}", r.name);
+        assert_eq!(u32::from(d.size_class), r.size_class, "{}", r.name);
+        assert_eq!(d.guns, r.guns, "{}: one round's damage from each gun", r.name);
+        worst_life = worst_life.max((d.hit_points - r.hit_points).abs() / r.hit_points);
+        worst_speed = worst_speed.max((d.speed - r.speed).abs() / r.speed);
+    }
+    assert!(worst_life < 1e-6, "property 54 on all 70: the worst is {worst_life:e} off");
+    // Property 145, the live top speed, is the constructor's own figure for the unit box.
+    assert!(worst_speed < 1e-5, "property 145 on all 70: the worst is {worst_speed:e} off");
+    eprintln!("the worst departures over the 70: life {worst_life:e}, speed {worst_speed:e}");
+}
+
+/// C03 Mission 02, *The Convoy*, on the easy level, as "Let's Play - Parkan: Iron Strategy,
+/// Part 6" and "Part 6.5" play it. The recordings' target panel names two dozen of the enemy's
+/// builds and every one is wheeled or tracked: *SWW* after *SWW* from one clan, and *MTW*,
+/// *LTW* and *LWW* from the other. Neither is what a ranking of the whole store gives.
+///
+/// `Enm2`'s script asks `SELECT_SMALLEST`, which is the strongest design of a small chassis
+/// the clan has researched — `23_swhl1`, a Small Wheel — and not the weakest in the store, an
+/// unarmed small flyer. `Enm1`'s asks `SELECT_BEST_COMBAT` over a spread of 6, and its seven
+/// are the six large tracked and wheeled designs its tree has researched and `m_stopper`, a
+/// Medium Track; the store's own top seven, unresearched, would be the winged-missile
+/// carriers.
+#[test]
+#[ignore = "needs the game install"]
+fn c03_m02s_enemies_build_wheeled_and_tracked_warbots_on_the_easy_level() {
+    use parkan_sim::planner::{SELECT_BEST_COMBAT, SELECT_SMALLEST};
+
+    const WARRIOR: u32 = 0x0100_8000;
+    let mut play = campaign_play_at(gamedir::C03_MISSION_02, Some(0));
+    let placed = play.units.len();
+    let tick = 1000.0 / 30.0;
+    // (clan, design, size class, chassis type) of each unit made.
+    let mut made: Vec<(i64, String, u8, u8)> = Vec::new();
+    for _ in 0..(100 * 30) {
+        play.tick(tick, [0.0; 2]);
+        while placed + made.len() < play.units.len() {
+            let t = placed + made.len();
+            let u = &play.units[t];
+            let file = play.commander.paths[t].rsplit('\\').next().unwrap().to_ascii_lowercase();
+            made.push((u.clan.unwrap(), file, u.designation.size_class, u.designation.chassis_type));
+        }
+    }
+    eprintln!("made: {made:?}");
+
+    // What each clan may build: 44 of the 59 warrior designs, its tree's researched parts.
+    for clan in [1_i64, 2] {
+        let store = play.stores.get(&clan).unwrap_or_else(|| panic!("clan {clan}'s store"));
+        let may = store.designs.iter().filter(|d| d.project.type_word == WARRIOR && d.researched).count();
+        assert_eq!(may, 44, "clan {clan}");
+    }
+
+    // Enm2: one design every time, a small wheeled warbot.
+    let enm2 = &play.stores[&2];
+    for draw in 0..3 {
+        let pick = enm2.pick(WARRIOR, SELECT_SMALLEST, draw).expect("a design");
+        assert!(pick.path.to_ascii_lowercase().ends_with("23_swhl1.dat"), "{}", pick.path);
+    }
+    let first = made.iter().find(|m| m.0 == 2).expect("Enm2 builds within 100 s");
+    assert_eq!((first.1.as_str(), first.2, first.3), ("23_swhl1.dat", 2, 3), "small, wheeled");
+    assert!(made.iter().filter(|m| m.0 == 2).all(|m| m.1 == "23_swhl1.dat"), "{made:?}");
+
+    // Enm1: the draw falls among seven, four large tracked, two large wheeled, one medium tracked.
+    let enm1 = &play.stores[&1];
+    let seven: Vec<String> =
+        enm1.ranked(WARRIOR, SELECT_BEST_COMBAT).iter().take(7).map(|d| design_file(d)).collect();
+    assert_eq!(
+        seven,
+        ["ai_lt_10.dat", "32_l2.dat", "ai_l2.dat", "ai_lt_21.dat", "32_l1.dat", "ai_l1.dat", "m_stopper.dat"]
+    );
+    let builds: Vec<&(i64, String, u8, u8)> = made.iter().filter(|m| m.0 == 1).collect();
+    assert!(!builds.is_empty(), "Enm1 builds within 100 s");
+    for b in builds {
+        assert!(seven.contains(&b.1), "one of its seven: {b:?}");
+        assert!(matches!(b.3, 3 | 4), "wheeled or tracked, never a walker or a flyer: {b:?}");
+    }
+    let stopper = enm1.designs.iter().find(|d| design_file(d) == "m_stopper.dat").unwrap();
+    assert_eq!(stopper.size_class, 3, "a medium chassis, the recordings' MTW");
 }
 
 /// And the capture: the player takes the enemy's Generator, the enemy's SuperAI runs

@@ -46,9 +46,12 @@ pub fn free_seconds(factory: u8, chassis: u8) -> f32 {
 }
 
 /// Whether a factory of `factory`'s size builds a chassis of `chassis`'s ("Robot SizedType
-/// not match"): a factory refuses a chassis bigger than itself.
+/// not match", `Behavior.dll:0x1002a3d2`): a factory refuses a chassis bigger than itself
+/// (`0x10029e5b`), and one whose size letter it does not know, which the first test lets
+/// through as 0 and a second switch over the same letter turns away (`0x10029eef`, the byte
+/// table at `0x1002a480`: `b`, `h`, `l`, `m` and `t` go on).
 pub fn builds(factory: u8, chassis: u8) -> bool {
-    chassis <= factory
+    chassis != 0 && chassis <= factory
 }
 
 /// One build's budgets and what has been collected toward them.
@@ -179,5 +182,6 @@ mod tests {
         );
         assert_eq!(b"tlhmbe".map(size_of_letter), [1, 2, 2, 3, 4, 5]);
         assert!(builds(4, 4) && !builds(2, 3));
+        assert!(!builds(4, 0), "a chassis of no known size is refused whatever the factory");
     }
 }

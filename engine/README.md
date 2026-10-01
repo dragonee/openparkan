@@ -1090,21 +1090,16 @@ out of the ground.
 - **The AI's bots are paid for, and it picks by guns rather than by armour.** Two things
   made the enemy's force unkillable, and both were the engine's. The design store priced every
   **large** design at **0 ore and 0 power**, because the price summed only the parts a clan
-  had researched and the AI's store — unlike the player's factory panel — is gated by no
-  research at all: neither the store's fill (`ai.dll:0x10010c30`) nor `M_Task_Construct::Start`
-  (`Behavior.dll:0x100299a0`) makes a technology query. A part's two build figures are its own,
-  so they are summed whatever the clan has researched, and a *AI_LS_21* now costs 639 ore and
-  344 power instead of nothing. And `SELECT_BEST_COMBAT` was read wrong: the six arms of the
-  jump table at `0x10010bbc` are read one at a time now (docs/15, "What each `SELECT_*`
-  scores"), and mode 5 calls **the strength formula** on the design's hit points and guns,
-  while it is mode 2, `SELECT_BEST_ARMOR`, that ranks by hit points. Over the 59 warrior
-  designs in `UNITS\UNITS\AI\` that inverts the answer: by hit points the top five are all
-  large, headed by the 93,008-point *AI_LS_10*; by strength the top three are the size-2
-  `23_swlk1`, `wswlk12` and `wswlk13` at 228.6 against its 207.2. On C02 M03 the enemy turned
-  out three large warriors in twenty seconds for nothing; it now turns out three **small**
-  *SSW-X Warriors* at 20, 48 and 78 s, each paid for out of its one Small Mine. `SELECT_SMALLEST`
-  is the weakest by that same strength, not the least chassis, and the candidate list matches
-  the order's Type **exactly** rather than by mask.
+  had researched. A part's two build figures are its own, so they are summed whatever the clan
+  has researched (`Behavior.dll:0x1002a136`), and a *AI_LS_21* now costs 639 ore and 344 power
+  instead of nothing. And `SELECT_BEST_COMBAT` was read wrong: the six arms of the jump table
+  at `0x10010bbc` are read one at a time now (docs/15, "What each `SELECT_*` scores"), and
+  mode 5 calls **the strength formula** on the design's hit points and guns, while it is mode
+  2, `SELECT_BEST_ARMOR`, that ranks by hit points. The candidate list matches the order's
+  Type **exactly** rather than by mask. What this note went on to say — that the store is
+  gated by no research at all, that the formula makes a clan build small, heavily armed
+  walkers, and that `SELECT_SMALLEST` is the weakest design — was wrong three times over, and
+  the next note but two is what replaced it.
 - **The difficulty setting reaches the AI** (docs/15, "`fDifficulty` is the game level").
   `varset.var` declares `fDifficulty` 0.5 and says the engine writes it; the engine never did,
   so every clan planned at medium whatever the player had chosen. `ai.dll:0x10005d00` is the
@@ -1122,6 +1117,40 @@ out of the ground.
   that would have used it, so the test reads a size class against `0xffffffff` and always
   passes. The pick applies no size limit and neither does the engine; a design too big for the
   factory is refused when the build starts, as the game refuses it.
+- **An AI clan builds what its own tree has researched, ranked by the game's own figures**
+  (docs/15, "What the store holds" and "What each clan may build"). On C03 M02's easy level
+  the engine's `Enm2` turned out small *flyers* and its `Enm1` small and large *walkers*; two
+  recordings name some thirty of those clans' builds and every one is wheeled or tracked.
+  Three things were wrong, and all three are read now.
+  - **The candidates.** The byte at a store record's `+0x104` is set when every part of the
+    design is researched in the clan's own tree (`ai.dll:0x10010f90`), and the pick passes
+    over the rest. `Store::refresh` marks them as the store loads, and it leaves a marked
+    design marked. That is 44 of the 59 warriors for C03 M02's enemies and 11 for C02 M03's.
+  - **The two floats.** The engine's hit points were the nodes' `.ndp` sums and its guns a
+    rate, rounds over the interval. Property 54 is the nodes' life **over the share of a hit
+    the armour keeps, plus the full shield** (`Control.dll:0x100138b0`), and the gun total is
+    **one round's damage from each gun** — its damage ÷ its magazine × its rounds left
+    (`Behavior.dll:0x1001ccb0`). The game writes its own store out as `preload.lda` every
+    time one loads, and on an install it has been run on the engine's 70 robot records agree
+    with it: the Type, the size class and the gun total exactly, the hit points and the top
+    speed to 1 part in a million, in the same order. `23_swlk1` is worth 50.7, not 228.6.
+  - **`SELECT_SMALLEST`.** Not the last of the ranking: the best-ranked design of a small or
+    tiny chassis (`ai.dll:0x10010b73`).
+
+  So `Enm2` builds `23_swhl1`, a Small Wheel, every time, and `Enm1` draws among four large
+  tracked designs, two large wheeled and the Medium Track `m_stopper`. On C02 M03 the enemy's
+  three are of `23_m2`, `23_m1`, `23_swhl1`, `23_swlk1` and `23_sfl1`, the first free at 40 s
+  when it is a medium chassis.
+- **A live strength is the same two figures** (docs/15, "What a strength is"). What the clan
+  map caches for an object is now the life its nodes have left over what its armour keeps, plus
+  its shield as it stands — and at full, plus the shield full — times its guns' rounds' damage
+  as far as its magazines are full, where it was the bare life times a rate. A building is
+  priced too: the refresh skipped every id with the top bit, which is every building, and they
+  counted 1 apiece.
+- **A factory asks a paid bot its technology** (docs/36, "What the start refuses").
+  `M_Task_Construct`'s start refuses a bot that is not free when a part of it is not researched
+  in the factory's clan's tree, and a chassis of no size letter it knows; it refuses nothing
+  for ore or power. The engine refused only the mind and the size.
 - **What is still in the way on C02 M03**: the timed `PBM_BUILDING_CAPTURE` fires at 340 s —
   `420 − 160 × fDifficulty` seconds off the clan's clock — and function 35 picks the player's
   Large Factory, the least defended of the highest rank it can see. The capturer takes the
@@ -1425,7 +1454,7 @@ a row here. A row leaves this table when research closes it.
 | M6 | The order the resource manager looks a sound's name up in | the first descriptor that binds the name wins, the mission's own before `ui/game_resources.cfg`; every training message resolves to the member its briefing or tutorial descriptor names | [20](../docs/20-resources.md#what-this-does-not-say) |
 | M6 | The three signatures a radar weighs against its sensitivities | every live object within the radar's range is detected | [25](../docs/25-sensors.md#a-scan-is-a-sphere-a-falloff-and-three-tests--read) |
 | M6 | Whether a guided round's velocity turns with it | it is kept in the round's frame, as a machine's is, and turns with it | [29](../docs/29-weapons.md#guided-rounds-differ-in-how-hard-they-steer--read-and-measured) |
-| M6 | What the script functions other than 15, 19, 30, 31, 32, 34, 52, 59, 60 and 71 do in play | a script's other calls do nothing and answer 0; Missions 01 to 03's scripts call none. One of the unanswered is read rather than unknown — 69 sets the AI design pick's spread — and none of its 7 call sites names a destination, so answering 0 is what the corpus sees either way. 57 is answered: it runs a line of `mission.cfg`'s `script` block through the console's `create`, `bcreate` and `death` ([15](../docs/15-behaviour.md#what-the-consoles-create-bcreate-and-death-do--read-and-measured)) | [15](../docs/15-behaviour.md#what-the-functions-do) |
+| M6 | What the script functions other than 15, 19, 30, 31, 32, 34, 52, 59, 60 and 71 do in play | a script's other calls do nothing and answer 0; Missions 01 to 03's scripts call none. One of the unanswered is read rather than unknown — 69 sets the AI design pick's spread — and none of its 7 call sites names a destination, so answering 0 is what the corpus sees either way. 41 and 65 are read as well — the design store's research refresh and its order to a research centre, and its test for a winged missile's carrier — and not answered: no clan researches here, so a store marks what its clan may build once, as it loads. 57 is answered: it runs a line of `mission.cfg`'s `script` block through the console's `create`, `bcreate` and `death` ([15](../docs/15-behaviour.md#what-the-consoles-create-bcreate-and-death-do--read-and-measured)) | [15](../docs/15-behaviour.md#what-the-functions-do) |
 | M6 | String 6223's key | a repeated message says string 6170 alone | [34](../docs/34-progression.md#not-established) |
 | M6 | Whether scenery is among a radar's contacts | a target needs a unit record: trees and rocks are never listed | [25](../docs/25-sensors.md#the-players-target--read-and-measured) |
 | M6 | The unit record's `+0x98`: where the right button's ray starts | 0 | [25](../docs/25-sensors.md#the-players-target--read-and-measured) |
@@ -1523,7 +1552,6 @@ a row here. A row leaves this table when research closes it.
 | M18 | What the engine below a SuperAI does with a problem's **action record** (`+0x34`), which function 27 files: `varset.var` names the five *"what to do with expression"*, *"When building capture"*, *"When all units in group killed"* and *"When all units in group nothing to do"*, and nothing else ends a problem a handler left `ST_SOLVING` — `PBM_ROBOT_NEEDED_Start` files `ACTION_NOTHING_DOING` on the factory it ordered and its `_Continue` has no nodes | an action that comes true retires its problem, tested at the head of each clan takt: a target no id answers any more for `ACTION_DESTROY`, a unit running no order for `ACTION_NOTHING_DOING`, the clan owning the building for `ACTION_CAPTURE_BUILDING`, and every unit of the group for the two group actions. Without it a clan builds one warbot and never another | [15](../docs/15-behaviour.md#what-the-functions-do) |
 | M18 | What `fn8(ST_SOLVED)` leaves behind: the drain's retire zeroes the record and frees the slot, and the state setter is read only as far as releasing the problem's units | a solved problem is retired as the drain retires one, and an unsolved one keeps its slot for the next `_Start` pass. All nine `ORDER_BUILDING_CONSTRUCT` sites mark their problem solved when the factory refused the build and leave the next want to raise it afresh, which the raise's duplicate test would block for as long as the record stood | [23](../docs/23-economy.md#the-bot-limit-is-the-clans-mind-count--read-and-measured) |
 | M18 | What the repeated `_Start` pass excludes, so that it walks down the weights instead of offering the same problem for ever: a handler that returns without setting a state — `PBM_ROBOT_NEEDED_Start` does, when the clan has no factory — would have it picked again every round | a problem already run this takt is not offered again, which is what "one takt drains the list from the heaviest down" describes; the pass gives up after 64 rounds | [15](../docs/15-behaviour.md#the-planner-when-a-_start-runs-and-when-a-_continue--read-and-measured) |
-| M18 | Which two authored gun figures the strength's `sum(a ÷ b × rounds)` divides (`Behavior.dll:0x1001ccb0`'s `+0x0c` and `+0x28`), and so what scale a strength is on | the rounds a gun has left over its interval in seconds, the two figures the game's own refresh fills the row with, and a design in the AI's store priced the same way off its guns' magazines. The pair has to be a **rate**: unarmed, every object in the install prices between 0.06 and 0.53, and the scripts keep a strength in a `DWORD`, so every comparison one reaches — `fn38(clan) > 0`, which gates the whole capture plan, the `*Hits` variables' authored 10 to 500, the `TAKE_BY_HITS` amounts — would read 0 and no clan would plan at all. It also decides what `SELECT_BEST_COMBAT` builds, since that arm is the same formula | [15](../docs/15-behaviour.md#what-a-strength-is--read-and-measured) |
 | M18 | The one float `SELECT_BEST_RANGE` scores, the design record's `+0x11c`, which the store's own fill never writes; the other five arms are read | it scores every design 0, so the ranking keeps the store's order. No shipped raise passes `SELECT_BEST_RANGE`: the corpus's 108 are 65 `SELECT_BEST_COMBAT`, 42 `SELECT_FASTEST` and one `SELECT_SMALLEST` | [15](../docs/15-behaviour.md#what-each-select_-scores--read) |
 | M18 | What a strength written into a `DWORD` looks like: the result slot is four bytes and a `DWORD` destination takes them as they stand, so either the handler leaves a whole number or the script reads a float's bit pattern | the strength truncated, since every `fn44`, `fn38` and `fn35` call site assigns to a `DWORD` and then compares it against a small authored number; bit patterns would make `dTemp3 < dPlaceProtectHits` false wherever anything at all stands there | [15](../docs/15-behaviour.md#what-the-functions-do) |
 | M18 | The second half of function 11's limit test, a per-type counter the brain keeps at `+0x3e0`..`+0x3f8`; and what functions 37 and 67 measure over, neither taking a radius | the `dMax*` variable alone, so a type no `dMax*` bounds — `ROBOT_BATTLEUNIT`, which is every robot the scripts build — is never at its limit; 37 and 67 measure over the clan's base radius | [15](../docs/15-behaviour.md#what-the-functions-do) |
@@ -1545,7 +1573,6 @@ a row here. A row leaves this table when research closes it.
 | M14 | Which dock a refit picks (`0x10023b60`), and when its walk is over | the nearest dock the unit's size fits — any for size class 1 or 2, a ground-level one alone above that, the size rule `MakeInsideDest` routes a unit inside by — walked to along that building's hall way, and it is there once it stands in the place itself, the cylinder that charges it. The game's own refit asks `MakeInsideDest` for the ground-level bit on every dock, so it would never send even a small bot indoors | [27](../docs/27-ownership.md#what-sends-a-bot-to-a-dock--read) |
 | M14 | The landscape's own side of a building's cut: the insertion re-triangulates each cut face and keeps its triangles outside the outer contour; and why 4 placed buildings without the start flag stand up to 0.14 off their cut contour's mean, where the insertion sets them down (the other 12 off it carry the flag, which keeps them at their file height) | the landscape is cut to the outer contour by a mask, a texel at a time, not re-triangulated, and a buried apron 2 units past the contour, sunk 0.5, covers the mask's edge; every placed building stands at its mission height, and one the console's `bcreate` makes is set down on the mean | [03](../docs/03-terrain.md#for-an-engine) |
 | M14 | Which cells a building draws: beyond 1.3 × `PortalFarDist` ÷ the field of view a doorway's room is not drawn; the field of view the game plays at; the 57 `DEFAULT` batches with no portal bit, which the game draws black | no cell is culled: every node is drawn, and each portal quad draws by its read fade, so beyond far a doorway is the black wall standing in front of the room the game leaves out; the fade takes the eye's own field of view; the 57 are left out | [24](../docs/24-motion.md#a-building-is-drawn-cell-by-cell-through-its-portals--read) |
-| M15 | The gun total behind an object's strength — variable `0x204`'s `+4`, which the behaviour sums as `a ÷ b × rounds` over authored gun figures this engine does not model. The formula and the hit points are read: `(guns + 0.8) × hit points × 1e-5`, on the life left for the map's cached form and the life at full for the live one | the areal map prices nothing, so every object counts 1 and a candidate's score is how many enemy objects stand within the radius; it orders candidates but does not weigh them | [15](../docs/15-behaviour.md#what-a-strength-is--read-and-measured) |
 | M14 | What holds an animal at the height it hovers at, when the walker stands its walk points 30 to 80 m over a flyer's (`Behavior.dll:0x10040f52`–`0x10040f7c`): the player remembers the game's medusas staying where they hover until provoked, never flying (2026-09-22), where the read carries them up as they graze and 50 m up after a fight | an animal's points keep the walk's own height, at least 15 over the ground under them | [24](../docs/24-motion.md#a-flyers-walk-points--read-and-measured) |
 
 ### Read since the stand-in was written

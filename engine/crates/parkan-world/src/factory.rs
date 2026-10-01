@@ -169,18 +169,36 @@ impl Factory {
         self.selected.get_or_insert(0);
     }
 
-    /// Start production of the shown project (`0x100986e0`): nothing without a project or a
-    /// free mind, or for a chassis bigger than the factory.
-    pub fn start(&mut self, batch: bool, free_minds: usize) -> bool {
+    /// Start production of the shown project (`0x100986e0`): nothing without a project, and
+    /// then as [`Factory::start_project`] refuses.
+    pub fn start(&mut self, batch: bool, free_minds: usize, researched: bool) -> bool {
         let Some(project) = self.shown().cloned() else { return false };
-        self.start_project(project, batch, free_minds)
+        self.start_project(project, batch, free_minds, researched)
     }
 
     /// Start production of `project`, which is what a build order naming its own design does:
     /// the player's panel names the shown one, and a clan's AI names one its design store
     /// picked, without touching the factory's recent projects (docs/36, "Production").
-    pub fn start_project(&mut self, project: Project, batch: bool, free_minds: usize) -> bool {
+    ///
+    /// `M_Task_Construct`'s start (`Behavior.dll:0x10029ba0`) refuses four things, in this
+    /// order, and none of them is ore or power, which are budgets the build then waits on:
+    /// no free mind (`0x10029c30`); a scheme that will not open; a chassis bigger than the
+    /// factory, or of no size it knows (`0x1002a3d2`, "Robot SizedType not match"); and, for a
+    /// **paid** bot alone, a part its clan's tree has not researched (`0x1002a385`, "Failed to
+    /// create … due to technology"). A free bot is never asked its technology: the branch
+    /// that prices it (`0x10029f13`) returns before the tree is read. `researched` is whether
+    /// every part of `project` is researched in the owner's tree now.
+    pub fn start_project(
+        &mut self,
+        project: Project,
+        batch: bool,
+        free_minds: usize,
+        researched: bool,
+    ) -> bool {
         if !self.idle() || free_minds == 0 || !construct::builds(self.size, project.chassis_size) {
+            return false;
+        }
+        if self.free_bots <= 0 && !researched {
             return false;
         }
         // A factory's ore cost is divided by its KPD as a build starts (`0x1002a2a7`).
@@ -304,28 +322,64 @@ pub fn prebuild(play: &mut crate::play::Play, game: &Path, mission_dir: &Path) -
 /// (`ai.dll:0x1000d561`).
 pub const AI_DIR: &str = "units\\units\\ai\\";
 
-/// One design in the store, with the three floats of its 0x124-byte record that a
-/// `SELECT_*` ranks by (`ai.dll:0x10010c30`): property 54 at `+0x110`, the guns figure at
-/// `+0x114` and the live top speed at `+0x118`.
+/// The largest size class `SELECT_SMALLEST` takes: a small chassis, or a tiny one
+/// (`ai.dll:0x10010b73`).
+pub const SMALLEST_SIZE: u8 = 2;
+
+/// One design in the store, as its 0x124-byte record holds it (`ai.dll:0x10010c30`, which
+/// builds a real object from the scheme and reads it): the Type word at `+0x108`, the size
+/// class at `+0x10c` (property `0x201`), property 54 at `+0x110`, the guns figure at `+0x114`
+/// and the live top speed at `+0x118`; and the byte at `+0x104`, which says the clan may
+/// build it.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Design {
     pub project: Project,
+    /// Every part the scheme names, the chassis first.
+    pub parts: Vec<String>,
+    /// `+0x104`: every part is researched in the clan's tree ([`Store::refresh`]).
+    pub researched: bool,
+    pub size_class: u8,
     pub hit_points: f32,
     pub guns: f32,
     pub speed: f32,
 }
 
+impl Design {
+    /// What `SELECT_BEST_COMBAT` and `SELECT_SMALLEST` rank by (`ai.dll:0x1000fc70`).
+    pub fn strength(&self) -> f32 {
+        parkan_sim::progression::strength(self.guns, self.hit_points)
+    }
+}
+
 /// A clan's design store: every `.dat` in `UNITS\UNITS\AI\`, priced and rated against that
 /// clan's research tree. See `docs/15-behaviour.md`, "Function 69 sets how sloppy the AI's
-/// design pick is".
+/// design pick is" and "What the store holds".
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Store {
     pub designs: Vec<Design>,
 }
 
+/// Whether a clan whose tree is `catalogue` has every one of `parts`: each found in the tree
+/// by its id, in the tree, open and researched (`ai.dll:0x100115f0` and `0x10011530`, which
+/// walk the scheme's nodes and ask `IResearch` slots 2 and 3 of each). A part the tree does
+/// not list fails it. The factory's own test of a paid bot is the same walk
+/// (`Behavior.dll:0x1002a11c`, `0x10029810`), and neither asks `FULL_RESEARCH_TREE`, which is
+/// the constructor's part lists' switch.
+pub fn researched(catalogue: &crate::designs::Catalogue, parts: &[String]) -> bool {
+    parts.iter().all(|p| catalogue.item(p).is_some_and(|i| i.in_tree() && i.available() && i.researched()))
+}
+
 impl Store {
     /// Load the store for a clan whose tree is `catalogue`, the factory's size setting the
-    /// designer's grade.
+    /// designer's grade: function 43 (`ai.dll:0x1000d54a`), which fills the records and then
+    /// marks the ones the clan may build.
+    ///
+    /// The records stand in the order the game's own listing of the directory gave them on
+    /// this install -- `preload.lda` keeps it -- which is the names' order with their letters
+    /// in upper case, `23sfly1e` ahead of `23_cpt1`. Equal scores keep it.
+    ///
+    /// A record's Type is the file's own class word, which is what the object built from it
+    /// answers (`IGameObject` slot 14, `0x10010d67`), not the Type a designer would derive.
     pub fn load(
         game: &Path,
         assembly: &mut Assembly,
@@ -339,96 +393,120 @@ impl Store {
             .filter_map(|e| e.ok().map(|e| e.file_name().to_string_lossy().into_owned()))
             .filter(|n| n.to_ascii_lowercase().ends_with(".dat"))
             .collect();
-        names.sort();
+        names.sort_by_key(|n| n.to_ascii_uppercase());
         let mut designs = Vec::new();
         for name in names {
             let path = format!("{AI_DIR}{name}");
-            let Some(project) = design_project(&mut designer, assembly, &path, &strings) else {
-                continue;
-            };
-            let rating = gamedir::resolve(game, &path)
+            let Some(unit) = gamedir::resolve(game, &path)
                 .and_then(|file| std::fs::read(file).ok())
                 .and_then(|data| objects::parse_unit(&data, &path).ok())
-                .and_then(|unit| Node::from_unit(&unit))
-                .and_then(|design| designer.rate(assembly, &design));
+            else {
+                continue;
+            };
+            let Some(mut project) = design_project(&mut designer, assembly, &path, &strings) else {
+                continue;
+            };
+            project.type_word = unit.kind;
+            let rating = Node::from_unit(&unit).and_then(|design| designer.rate(assembly, &design));
             designs.push(Design {
-                hit_points: design_hit_points(assembly, &project.path),
+                parts: unit.components.iter().map(|c| c.reference.member.clone()).collect(),
+                researched: false,
+                size_class: project.chassis_size,
+                hit_points: rating.as_ref().map_or(0.0, |r| r.hit_points),
                 guns: rating.as_ref().map_or(0.0, |r| r.guns),
                 speed: rating.as_ref().map_or(0.0, |r| r.speed),
                 project,
             });
         }
-        Ok(Store { designs })
+        let mut store = Store { designs };
+        store.refresh(&designer.catalogue);
+        Ok(store)
     }
 
-    /// The design a build order picks (`ai.dll:0x100107c0`, *read*). Every design of the
-    /// wanted robot type is scored by `mode`, the scores sorted largest first, and the one at
-    /// `draw` taken rather than the best — `draw` being `(rand() + timeGetTime()) % (spread +
-    /// 1)`, whose spread function 69 sets from `fDifficulty`. A draw at or past the count
-    /// falls back to 0, and `SELECT_SMALLEST` skips the draw and takes the **last** of the
-    /// ranking, the weakest.
+    /// Mark the designs the clan may build (`ai.dll:0x10010f90`): each record whose byte at
+    /// `+0x104` is still clear has its scheme walked against the clan's tree, and the byte set
+    /// when every part is researched. **A set byte is never looked at again**, so a design
+    /// once allowed stays allowed. The game runs this when function 43 loads the store, when
+    /// the clan is handed its tree (SuperAI slot 21, `0x10001fa0`) and each time function 41
+    /// asks for a research (`0x1000d524`) -- not when a design is picked.
+    pub fn refresh(&mut self, catalogue: &crate::designs::Catalogue) {
+        for d in self.designs.iter_mut().filter(|d| !d.researched) {
+            d.researched = researched(catalogue, &d.parts);
+        }
+    }
+
+    /// The candidates of a pick, ranked: every design whose Type **equals** the order's — not
+    /// a mask (`0x10010833`) — that the clan may build (`+0x104`, `0x10010837`) and that does
+    /// not carry `CLASS_BUILDING` (`0x1001083d`), scored by `mode` and sorted largest first.
     ///
     /// The six arms of the jump table at `0x10010bbc` are read one at a time, in `mode − 1`
     /// order: `SELECT_BEST_WEAPON` copies the record's `+0x114`, its guns; `SELECT_BEST_ARMOR`
     /// `+0x110`, property 54's hit points; `SELECT_BEST_RANGE` `+0x11c`, which the store's own
     /// fill never writes; `SELECT_FASTEST` `+0x118`, property 145's top speed; and
     /// `SELECT_BEST_COMBAT` and `SELECT_SMALLEST` both call the **strength formula**
-    /// (`0x1000fc70`) on `+0x110` and `+0x114` — so "best combat" is guns over armour, not
-    /// armour, and "smallest" is the weakest by that same figure rather than the least chassis.
+    /// (`0x1000fc70`) on `+0x110` and `+0x114`.
     ///
-    /// The candidate list is every design whose `+0x108` Type **equals** the order's — not a
-    /// mask — that does not carry `CLASS_BUILDING`.
+    /// The sort is the game's own (`0x10010a37`): for each place in turn, the first of what
+    /// is left that scores strictly more than any before it, exchanged with what stood there.
+    /// It is not stable, and the exchange is what orders equal scores.
     ///
     /// STAND-IN: docs/15-behaviour.md#function-69-sets-how-sloppy-the-ais-design-pick-is--read-and-measured
     /// -- `SELECT_BEST_RANGE`'s float is one nothing fills, so it scores every design 0 and the
-    /// ranking keeps the store's order; no shipped raise passes it. The game also works out the
-    /// clan's largest factory (`0x10006820`, every `BUILDING_PLANT` on its list, property
-    /// `0x201`, the maximum) and then **throws the answer away** — `or eax, 0xffffffff`
-    /// clobbers it at `0x10010af5` before the size comparison that would have used it — so the
-    /// pick applies no size limit, and neither does this. A design too big for the factory is
-    /// refused when the build starts ("Robot SizedType not match"), as it is here.
-    pub fn pick(&self, type_word: u32, mode: u32, draw: usize) -> Option<&Project> {
-        let strength = |d: &Design| parkan_sim::progression::strength(d.guns, d.hit_points);
+    /// ranking keeps the store's order; no shipped raise passes it.
+    pub fn ranked(&self, type_word: u32, mode: u32) -> Vec<&Design> {
         let score = |d: &Design| match mode {
             planner::SELECT_BEST_WEAPON => d.guns,
             planner::SELECT_BEST_ARMOR => d.hit_points,
-            planner::SELECT_BEST_RANGE => 0.0,
             planner::SELECT_FASTEST => d.speed,
-            _ => strength(d),
+            planner::SELECT_BEST_COMBAT | planner::SELECT_SMALLEST => d.strength(),
+            _ => 0.0,
         };
         let mut ranked: Vec<&Design> = self
             .designs
             .iter()
             .filter(|d| {
                 d.project.type_word == type_word
+                    && d.researched
                     && d.project.type_word & parkan_sim::behaviour::BUILDING_BIT == 0
             })
             .collect();
-        ranked.sort_by(|a, b| score(b).total_cmp(&score(a)));
-        let at = if mode == planner::SELECT_SMALLEST {
-            ranked.len().checked_sub(1)?
-        } else if draw < ranked.len() {
-            draw
-        } else {
-            0
-        };
-        ranked.get(at).map(|d| &d.project)
+        for place in 0..ranked.len() {
+            let mut best = place;
+            for i in place..ranked.len() {
+                if score(ranked[i]) > score(ranked[best]) {
+                    best = i;
+                }
+            }
+            ranked.swap(place, best);
+        }
+        ranked
     }
-}
 
-/// A design's hit points at full, property 54: its parts' `.ndp` durabilities summed, which
-/// is what the control system accumulates as it builds the object (docs/15, "What a strength
-/// is").
-pub fn design_hit_points(assembly: &mut Assembly, path: &str) -> f32 {
-    let parts = assembly.parts(mission::KIND_UNIT, path);
-    let mut total = 0.0;
-    for part in parts {
-        let Some(loaded) = assembly.mesh(&part.reference) else { continue };
-        let mesh = loaded.mesh.clone();
-        let (life, _) = crate::battle::part_damage(assembly, &part, &mesh, 1.0, 1.0, false);
-        total += life.map_or(0.0, |l| l.full());
+    /// The design a build order picks (`ai.dll:0x100107c0`, *read*): of the ranking, not the
+    /// best but the one at `draw` — `(rand() + timeGetTime()) % (spread + 1)` in the game,
+    /// whose spread function 69 sets from `fDifficulty`. A draw at or past the count falls
+    /// back to 0.
+    ///
+    /// `SELECT_SMALLEST` skips the draw (`0x10010aab`): it takes **the best-ranked design
+    /// whose size class is small or tiny** (`0x10010b73`–`0x10010b96`, property `0x201` at
+    /// most 2), and only with none the last of the ranking. So "smallest" is the strongest
+    /// warbot of a small chassis, not the weakest design in the store.
+    ///
+    /// The game also works out the clan's largest factory (`0x10006820`, every
+    /// `BUILDING_PLANT` on its list, property `0x201`, the maximum) and then **throws the
+    /// answer away** — `or eax, 0xffffffff` clobbers it at `0x10010af5` before the size
+    /// comparison that would have used it — so the drawn pick applies no size limit, and
+    /// neither does this. A design too big for the factory is refused when the build starts
+    /// ("Robot SizedType not match"), as it is here.
+    pub fn pick(&self, type_word: u32, mode: u32, draw: usize) -> Option<&Project> {
+        let ranked = self.ranked(type_word, mode);
+        let chosen = if mode == planner::SELECT_SMALLEST {
+            ranked.iter().find(|d| d.size_class <= SMALLEST_SIZE).or(ranked.last())
+        } else {
+            ranked.get(draw).or(ranked.first())
+        };
+        chosen.map(|d| &d.project)
     }
-    total
 }
 
 /// A vertex's point in the world, through its joint node's pose (`ArealMap.dll:0x1000a760`).
@@ -497,13 +575,32 @@ mod tests {
         // refused `ORDER_BUILDING_CONSTRUCT` marks the problem solved.
         let mut f = factory();
         f.prebuild(project("p1"));
-        assert!(!f.start(false, 0), "no mind, no build");
+        assert!(!f.start(false, 0, true), "no mind, no build");
         assert!(f.build.is_none(), "and nothing is queued behind it");
         // The project is still shown, so a later order can start it once a mind frees.
-        assert!(f.start(false, 1));
+        assert!(f.start(false, 1, true));
         assert!(f.build.is_some());
         // A second order while one runs is refused too, and again queues nothing.
-        assert!(!f.start(false, 1));
+        assert!(!f.start(false, 1, true));
+    }
+
+    #[test]
+    fn a_paid_bot_is_refused_for_a_part_not_researched_and_a_free_one_is_not_asked() {
+        // "Failed to create … due to technology" (`Behavior.dll:0x1002a385`): the start walks
+        // the scheme against the clan's tree only once it knows the bot is not free.
+        let mut f = factory();
+        assert!(!f.start_project(project("paid"), false, 1, false), "a part is not researched");
+        assert!(f.build.is_none());
+        assert!(f.start_project(project("paid"), false, 1, true));
+        let mut f = factory();
+        f.free_bots = 1;
+        assert!(f.start_project(project("free"), false, 1, false), "`FreeBotNum` spares it the test");
+        assert!(f.build.as_ref().is_some_and(|b| b.construct.free));
+        // And a chassis of no size the factory knows is refused whatever else is true.
+        let mut f = factory();
+        let mut odd = project("odd");
+        odd.chassis_size = 0;
+        assert!(!f.start_project(odd, false, 1, true), "Robot SizedType not match");
     }
 
     #[test]
@@ -512,7 +609,7 @@ mod tests {
         for name in ["p1", "p2"] {
             f.prebuild(project(name));
         }
-        assert!(f.start_project(project("made"), false, 1));
+        assert!(f.start_project(project("made"), false, 1, true));
         // The panel opens on what is being made, the active project's button lit.
         f.show_production();
         assert_eq!((f.selected, f.shown().map(|p| p.name.as_str())), (None, Some("made")));
@@ -534,11 +631,88 @@ mod tests {
     fn a_capture_drops_the_build_and_the_panel_shows_project_0() {
         let mut f = factory();
         f.prebuild(project("p1"));
-        assert!(f.start_project(project("enemy"), true, 1));
+        assert!(f.start_project(project("enemy"), true, 1, true));
         f.show_production();
         assert!(f.abort(), "a build was running");
         assert_eq!((f.build.is_none(), f.batch), (true, false));
         assert_eq!(f.shown().map(|p| p.name.as_str()), Some("p1"));
         assert!(!f.abort(), "nothing left to drop");
+    }
+
+    const WARRIOR: u32 = 0x0100_8000;
+
+    fn design(name: &str, size: u8, hit_points: f32, guns: f32, researched: bool) -> Design {
+        let mut project = project(name);
+        project.type_word = WARRIOR;
+        project.chassis_size = size;
+        Design { project, parts: Vec::new(), researched, size_class: size, hit_points, guns, speed: 10.0 }
+    }
+
+    fn names(ranked: &[&Design]) -> Vec<String> {
+        ranked.iter().map(|d| d.project.name.clone()).collect()
+    }
+
+    /// The figures are the game's own for five of C03 M02's designs, out of the install's
+    /// `preload.lda`.
+    fn store() -> Store {
+        Store {
+            designs: vec![
+                design("23_swhl1", 2, 15191.53, 970.0, true),
+                design("ai_lt_10", 4, 124_610.52, 5380.0, true),
+                design("lwing1", 4, 152_366.39, 201_400.0, false),
+                design("m_stopper", 3, 38845.21, 1180.0, true),
+                design("speed_c1", 2, 8078.25, 0.0, true),
+                design("wswlk22", 2, 15881.57, 470.0, true),
+            ],
+        }
+    }
+
+    #[test]
+    fn a_pick_ranks_only_the_designs_the_clan_has_researched() {
+        let s = store();
+        // `lwing1`, two 100,000-point missiles, would head any ranking; the clan has not
+        // researched its parts, and the byte at `+0x104` keeps it out (`ai.dll:0x10010837`).
+        assert_eq!(
+            names(&s.ranked(WARRIOR, planner::SELECT_BEST_COMBAT)),
+            ["ai_lt_10", "m_stopper", "23_swhl1", "wswlk22", "speed_c1"]
+        );
+        assert_eq!(s.pick(WARRIOR, planner::SELECT_BEST_COMBAT, 0).unwrap().name, "ai_lt_10");
+        assert_eq!(s.pick(WARRIOR, planner::SELECT_BEST_COMBAT, 1).unwrap().name, "m_stopper");
+        // A draw at or past the count falls back to the best.
+        assert_eq!(s.pick(WARRIOR, planner::SELECT_BEST_COMBAT, 5).unwrap().name, "ai_lt_10");
+        // The Type is an equality, and a store with nothing researched answers nothing.
+        assert!(s.pick(0x0100_2000, planner::SELECT_BEST_COMBAT, 0).is_none());
+        let mut none = store();
+        none.designs.iter_mut().for_each(|d| d.researched = false);
+        assert!(none.pick(WARRIOR, planner::SELECT_BEST_COMBAT, 0).is_none());
+    }
+
+    #[test]
+    fn select_smallest_takes_the_strongest_design_of_a_small_chassis() {
+        let s = store();
+        // Not the last of the ranking, `speed_c1`: the first, best first, whose size class is
+        // at most 2 (`ai.dll:0x10010b73`). The draw plays no part.
+        for draw in [0, 3, 9] {
+            assert_eq!(s.pick(WARRIOR, planner::SELECT_SMALLEST, draw).unwrap().name, "23_swhl1");
+        }
+        // With no small chassis among the candidates it is the last of the ranking.
+        let large = Store { designs: s.designs.into_iter().filter(|d| d.size_class > 2).collect() };
+        assert_eq!(large.pick(WARRIOR, planner::SELECT_SMALLEST, 0).unwrap().name, "m_stopper");
+    }
+
+    #[test]
+    fn equal_scores_are_ordered_by_the_sorts_exchanges() {
+        // A selection sort that exchanges: `a` and `b` tie below `c`, and putting `c` first
+        // sends `a` behind `b`.
+        let s = Store {
+            designs: vec![
+                design("a", 2, 100.0, 1.0, true),
+                design("b", 2, 100.0, 1.0, true),
+                design("c", 2, 100.0, 9.0, true),
+            ],
+        };
+        assert_eq!(names(&s.ranked(WARRIOR, planner::SELECT_BEST_COMBAT)), ["c", "b", "a"]);
+        // An unknown mode scores nothing and keeps the store's order.
+        assert_eq!(names(&s.ranked(WARRIOR, planner::SELECT_BEST_RANGE)), ["a", "b", "c"]);
     }
 }

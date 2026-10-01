@@ -504,6 +504,61 @@ is posted by the game loop's check of the queued orders
   Large Battle Turret's 12 energy would take 12 ÷ 21 = 0.57 s and its 35 ore
   5 s, with the ore on hand, against the default 2 s of time.
 
+## What an AI clan's tree gates — *read*, and *measured*
+
+Every clan holds a tree, an enemy clan as much as the player: the `.trf` its
+record in `data.tma` names ([04-missions.md](04-missions.md#clan)), loaded as
+its own object with the state bytes that file ships. `iron3d.dll` hands each
+tree to its clan's SuperAI as the mission's objects are made — the tree is
+asked whose it is, `IResearch` slot 24, and that clan's SuperAI is given it
+through its slot 21 (`iron3d.dll:0x100605e7`–`0x100605fc`,
+`ai.dll:0x10001fa0`) — and the SuperAI's slot 10 hands the same pointer back
+(`0x10001f90`), which is the `MBehaviour+0x50` a clan's buildings research
+from ([The task](#the-task)). Nothing gives an AI clan a fuller tree than the
+file's: its state changes only as its own research completes.
+
+**Two things read its researched bit for an AI clan**, and both ask the same
+question — every part of a design *researched* and *in the tree*, each part
+found by its id through slot 2 and read through slot 3:
+
+- **the design store**, which marks the designs the clan's build orders may
+  pick, when it loads and each time the clan orders a research
+  ([15-behaviour.md](15-behaviour.md#the-byte-at-0x104-is-the-clans-research--read));
+- **the factory**, as it starts a bot that is not free
+  ([36-factory.md](36-factory.md#what-the-start-refuses--read)).
+
+A part the tree does not list at all fails both, slot 2 answering −1.
+
+**What an AI researches is a design, not a technology.** Function 41 gives a
+research centre order 16 with a design's file name (`ai.dll:0x10011100`), and
+the design is the cheapest of those whose every part is *available* and in the
+tree but not yet all researched, priced by
+`ArealMap.dll:CalcFullResearchCost` (`0x10016280`, not read past its first
+node). A design with a part that is out of the tree, or one that is waiting on
+a prerequisite, is never chosen.
+
+*Measured*, the 59 warrior designs of `UNITS\UNITS\AI\` against the nine trees
+of the clans whose scripts build by name:
+
+| tree | every part researched | a part out of the tree (0) | a part waiting (4) | every part open, not all researched |
+|---|---:|---:|---:|---:|
+| `data` | 7 | 0 | 47 | 5 |
+| `c1m4e` | 27 | 32 | 0 | 0 |
+| `c2m1e` | 28 | 31 | 0 | 0 |
+| `c2m3e` | 11 | 48 | 0 | 0 |
+| `c3m1e` | 27 | 32 | 0 | 0 |
+| `c3m2e`, `c3m2e2` | 44 | 15 | 0 | 0 |
+| `c4m2e2` | 43 | 12 | 0 | 4 |
+| `scream` | 7 | 0 | 47 | 5 |
+
+(A design is counted once, by its worst part: out of the tree before waiting
+before open.) All 59 name only parts each of the nine lists. **On the six trees
+written for one enemy clan, a design is either researched whole or has a part
+that is not in the tree**, so there is nothing for the clan to research, and
+none of those six clans' scripts calls function 41. The two scripts that do
+call it, `c4m2e2` and `scream`, are the two whose trees leave designs open: 4
+and 5. `c1m3e`'s clan reads `data` too and never asks.
+
 ## Mission 04's tree — *measured*, and *seen*
 
 *"In the Research Center, research the missing components of the large flying
@@ -638,3 +693,12 @@ warbot and construct it in the Factory."*
   the 395 parts of every one of the 29 trees the categories fall 27/74/67/
   104/58/34/6/24 with one part, `R_H_01`, uncategorised, and 293 of the 395
   derive `Type` 0.
+- ~~Which tree an AI clan holds, with what state, and whether a clan's research
+  changes what it may build~~ — **read**, and *measured*: its own `.trf` with
+  the flags the file ships, handed to its SuperAI as the mission loads
+  (`iron3d.dll:0x100605fc`); the design store marks a design buildable once
+  every part of it is researched there and marks again each time the clan
+  orders a research, and a factory asks the same of a paid bot. Over the nine
+  trees of the clans that build by name, 7 to 44 of the 59 warrior designs are
+  researched whole, and on six of the nine every other design has a part out of
+  the tree ([What an AI clan's tree gates](#what-an-ai-clans-tree-gates--read-and-measured)).
