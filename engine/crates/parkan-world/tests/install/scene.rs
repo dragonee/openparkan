@@ -756,3 +756,27 @@ fn a_start_flagged_building_keeps_its_mission_height_and_the_rest_stand_on_their
     );
     assert!(flagged_off.iter().all(|&d| (0.2..5.2).contains(&d)), "{flagged_off:?}");
 }
+
+/// A building's insignia is its owner's: Part 6.5 of the let's play shows C03 M02's Enemy 1
+/// Medium Mine wearing cell 6 of `PG27`, a filled triangle over a bar, and the player's Small
+/// Bunker cell 0, the arrow. `B_LBL_01`'s eight tracks name cells 0, 6, 5, 4, 3, 2, 1 and 7, so
+/// the mine draws on track 1, its clan's index (docs/07, "Who picks an object mesh's material
+/// track").
+#[test]
+#[ignore = "needs the game install"]
+fn c03_m02s_buildings_wear_their_owners_insignia() {
+    let game = gamedir::find(None).expect("a Parkan install: set PARKAN_DIR");
+    let mut store = TextureStore::open(&game).unwrap();
+    let cell =
+        |store: &mut TextureStore, track: usize| store.look_on_track("B_LBL_01", track).unwrap().still.cell;
+    let grid = |c: usize| [(c % 4) as f32 * 0.25, (c / 4) as f32 * 0.25, 0.25, 0.25];
+    assert_eq!(cell(&mut store, 0), grid(0), "the arrow");
+    assert_eq!(cell(&mut store, 1), grid(6), "the triangle over a bar");
+    assert_eq!(store.look_on_track("B_LBL_01", 0).unwrap(), store.look("B_LBL_01").unwrap());
+
+    let play = campaign_play(gamedir::C03_MISSION_02);
+    let unit = |id: u32| play.units.iter().position(|u| u.logical_id == id as i32).expect("a placed object");
+    assert_eq!(play.insignia(unit(0x8000_0006)), 1, "Enemy 1's Medium Mine");
+    assert_eq!(play.insignia(unit(0x8000_0001)), 0, "the player's Small Bunker");
+    assert_eq!(play.insignia(unit(15)), 0, "a unit keeps track 0");
+}

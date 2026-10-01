@@ -821,7 +821,8 @@ pub fn own_view(objects: &mut Objects, store: &mut TextureStore, play: &Play) ->
             for node in 0..part.mesh.nodes.len() {
                 let stages = part.life.as_ref().and_then(|l| l.nodes.get(node)).map_or(1, |l| l.stages);
                 for variant in 0..usize::from(stages) {
-                    let Some(model) = models::build_node(loaded, node, variant, &mut *store)? else {
+                    let skins = &mut models::OnTrack { skins: &mut *store, track: play.insignia(t) };
+                    let Some(model) = models::build_node(loaded, node, variant, skins)? else {
                         continue;
                     };
                     objects.models.push(model);
@@ -883,7 +884,8 @@ pub fn add_targets(
             for node in 0..part.mesh.nodes.len() {
                 let stages = part.life.as_ref().and_then(|l| l.nodes.get(node)).map_or(1, |l| l.stages);
                 for variant in 0..usize::from(stages) {
-                    let Some(model) = models::build_node(loaded, node, variant, &mut *store)? else {
+                    let skins = &mut models::OnTrack { skins: &mut *store, track: play.insignia(t) };
+                    let Some(model) = models::build_node(loaded, node, variant, skins)? else {
                         continue;
                     };
                     objects.models.push(model);

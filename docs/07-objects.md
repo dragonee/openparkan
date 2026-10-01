@@ -1287,6 +1287,12 @@ the track to the manager's slot 5 (`Terrain.dll:0x100454e6`) or slot 3
   constructor sets it to 0 (`0x100070d1`) and only slot 16 (`0x10008810`)
   writes it; no caller of slot 16 has been found, so as far as is read an
   object draws track 0 — cell 0 of an insignia sheet.
+  - **Seen otherwise** in "Let's Play - Parkan: Iron Strategy, Part 6.5"
+    (9SBZOCWv_vE, 37.4 s and 2:15). On C03 M02, Enemy 1's Medium Mine wears
+    `B_LBL_01`'s track 1, cell 6 of `PG27` (a filled triangle over a bar), and
+    the player's Small Bunker track 0, the arrow. So something writes the track
+    per clan, and the clan's index, the sign a single-player game gives clan
+    *i*, picks it. The engine draws a building so; what writes it is not read.
 - **The manager** is the mesh's own (`+0x24`, `QueryInterface` 0xd, taken at
   `0x10007022`) — unless IAnimation slot 27 (`AniMesh.dll:0x10005970`) has
   given it another. Slot 27 takes a face reference, asks the object that owns

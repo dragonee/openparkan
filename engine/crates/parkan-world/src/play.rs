@@ -1135,6 +1135,20 @@ impl Play {
         }
     }
 
+    /// The material track target `t`'s meshes draw on, which picks a cell of an insignia
+    /// sheet (`B_LBL_01`, docs/07, "Who picks an object mesh's material track").
+    ///
+    /// STAND-IN: docs/07-objects.md#who-picks-an-object-meshs-material-track--read -- what writes
+    /// the control system's `+0x554` (slot 16) is not found. Part 6.5 of the let's play shows C03
+    /// M02's Enemy 1 Medium Mine wearing track 1 and the player's Small Bunker track 0, so a
+    /// building draws on its owner clan's index, the sign a single-player game gives clan *i*.
+    /// A unit keeps track 0, its own not seen, and a capture changes nothing, which is not seen
+    /// either.
+    pub fn insignia(&self, t: usize) -> usize {
+        let clan = self.units.get(t).filter(|u| u.kind == KIND_BUILDING).and_then(|u| u.clan);
+        clan.and_then(|c| usize::try_from(c).ok()).unwrap_or(0)
+    }
+
     /// Whether target `t` is drawn node by node -- each node at its own pose and its own damage
     /// stage -- rather than as one model built whole at its placement.
     ///

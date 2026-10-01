@@ -218,9 +218,10 @@ replaces, route 0 completing objective 3, and the win once all three primaries a
     - The recording's raider reads *"MWW-4 Warrior"* over a red *"Dangerous!"* at 13:44 and 13:49.5–13:53.5, and the LWW-3 at 30:45
     - docs/35 reads it for any unit not the player's that carries a gun whose node has life left and whose round does at least 10,000. The engine left it unwritten, a stand-in, and wrongly counted among this mission's matches until 2026-10-01
     - Fixed 2026-10-01: a gun keeps its round's damage, and the panel says *"Dangerous!"* under a unit carrying one of 10,000 or more
-  - [ ] Every building wears the arrow emblem
+  - [x] Every building wears the arrow emblem
     - The recording's emblem follows the owner. Enemy 1's Medium Mine wears cell 6 of the insignia sheet `PG27`, a filled triangle over a bar (briefing time 11 s; 37.4 s in Part 6.5, 0:55 in Part 6). The player's Small Bunker wears cell 0, the arrow (2:15 in Part 6.5)
     - `B_LBL_01`'s eight tracks name cells 0, 6, 5, 4, 3, 2, 1, 7, so Enemy 1, clan 1, wears track 1 and the player, clan 0, track 0. The engine draws track 0 on every building (queued: who sets the track). Campaign 02's Outpost emblem may be the same thing
+    - Fixed 2026-10-01 as a stand-in: a building draws its insignia on its owner clan's track, so the mine wears cell 6; a unit keeps track 0, and a capture changes nothing, neither seen (queued: what writes the track)
   - [ ] The Medium Mine's plume and two purple lights are missing in the engine (briefing time 8.5–11 s, 61–62 s)
     - On the Medium Mine, a dense dark plume rises from its tower's top and the platform's underside is lit purple. The engine draws thin grey streaks there and no purple light, and puts a large green rayed glow over the drill at 11 s
     - Enemy 2's Large Factory's mast is lit purple, and the engine lights it with nothing

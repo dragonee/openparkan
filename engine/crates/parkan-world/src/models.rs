@@ -173,6 +173,10 @@ pub struct Group {
 pub trait Skins {
     fn look(&mut self, material: &str) -> Result<Look>;
     fn lightmap(&mut self, page: &str) -> Result<Option<usize>>;
+    /// A material's look on one of its tracks; track 0 by default.
+    fn look_on_track(&mut self, material: &str, _track: usize) -> Result<Look> {
+        self.look(material)
+    }
 }
 
 impl Skins for TextureStore {
@@ -182,6 +186,32 @@ impl Skins for TextureStore {
 
     fn lightmap(&mut self, page: &str) -> Result<Option<usize>> {
         TextureStore::lightmap(self, page)
+    }
+
+    fn look_on_track(&mut self, material: &str, track: usize) -> Result<Look> {
+        TextureStore::look_on_track(self, material, track)
+    }
+}
+
+/// Skins that draw every material on one track: the track an object's control system names,
+/// which picks a cell of an insignia sheet (docs/07, "Who picks an object mesh's material
+/// track").
+pub struct OnTrack<'a, S: Skins> {
+    pub skins: &'a mut S,
+    pub track: usize,
+}
+
+impl<S: Skins> Skins for OnTrack<'_, S> {
+    fn look(&mut self, material: &str) -> Result<Look> {
+        self.skins.look_on_track(material, self.track)
+    }
+
+    fn lightmap(&mut self, page: &str) -> Result<Option<usize>> {
+        self.skins.lightmap(page)
+    }
+
+    fn look_on_track(&mut self, material: &str, track: usize) -> Result<Look> {
+        self.skins.look_on_track(material, track)
     }
 }
 

@@ -49,7 +49,8 @@ remainder a closed line names stays here as a line of its own.
   Small Bunker wears track 0 (cell 0, the arrow). So something writes the control system's
   `+0x554` for each clan. Not read: what writes it, whether it takes the clan's index or its sign
   (the clan record's `+0x14`, which a single-player game makes the same), and whether a capture
-  changes it. The engine draws track 0 on every object ([07-objects](docs/07-objects.md)).
+  changes it. The engine draws a building on its owner's track and a unit on track 0, a stand-in
+  ([07-objects](docs/07-objects.md)).
 - [ ] Whether any caller besides the round's hit test and the collision pass hands a face query a
   triangle mask carrying 2 or 16 — the round builds its filter inline, so enumerating the filter
   constructor's call sites is not a complete enumeration. (~~What reads object face flags 2 and 16~~ —

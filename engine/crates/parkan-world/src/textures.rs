@@ -332,6 +332,30 @@ impl TextureStore {
         self.looks.insert(k, look.clone());
         Ok(look)
     }
+
+    /// How a material draws on an object whose control system names `track` (`ILifeSystem`
+    /// slot 15, docs/07, "Who picks an object mesh's material track"): track 0 is [`Self::look`],
+    /// and another track the material has shows its first key's entry, still. A material with
+    /// no such track draws as on track 0.
+    pub fn look_on_track(&mut self, material: &str, track: usize) -> Result<Look> {
+        let base = self.look(material)?;
+        if track == 0 {
+            return Ok(base);
+        }
+        let Some(m) = self.materials.get(material).cloned() else { return Ok(base) };
+        let Some(entry) = m
+            .tracks
+            .get(track)
+            .and_then(|t| t.keys.first())
+            .and_then(|k| m.entries.get(usize::from(k.entry)))
+        else {
+            return Ok(base);
+        };
+        let named = m.frames().first().map(|s| (*s).to_owned());
+        let fallback = self.texture(named.as_deref().unwrap_or(material))?;
+        let still = self.phase(entry, fallback)?;
+        Ok(Look { still, animation: None, ..base })
+    }
 }
 
 #[cfg(test)]
