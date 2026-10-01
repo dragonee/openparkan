@@ -480,6 +480,64 @@ remainder a closed line names stays here as a line of its own.
 - [ ] [M13] Whether the AI's aiming reaches the turret lock's lead, and what spin a unit let go keeps until the Wizard writes one.
 - [ ] [M13] What a node reaching its last damage stage takes out of the load (the engine: its own weight and armour).
 
+## C03 Mission 02, *The Convoy*
+
+[playthrough-feedback](playthrough-feedback/feedback.md), [14-controls](docs/14-controls.md),
+[29-weapons](docs/29-weapons.md), [31-packages](docs/31-packages.md), [26-damage](docs/26-damage.md),
+[11-effects](docs/11-effects.md), [32-builder](docs/32-builder.md)
+
+What was left on 2026-10-01 of the list made by setting the mission against "Let's Play - Parkan:
+Iron Strategy, Part 6" (-yNnsqudMzw) and its bonus "Part 6.5" (9SBZOCWv_vE). Lines of that list
+already queued in their own areas: Enemy 1's first builds and function 41 (*AI, scripts, packages
+and economy*); the raid's launch, 414 m in the engine against the recording's 365–390, with the
+fire line's remainders, and a unit of more than one part in a panel's view (*Turrets, weapons and
+camera*); a save's own bytes (*Mission 03*); C03 M01's lava, the lit colour's remainders with the
+Outpost's lavender face, and a captured building's emblem (*Sky and rendering*); the Large
+Factory's masts (*Effects and sound*).
+
+**Where the engine is weaker than the game**
+
+- [ ] **The quick save and load in the window.** F7 keeps the play in memory and F8 puts it back,
+  over the *MISSION FAILED* panel too. The play's side is pinned by three install tests and a
+  headless run; what the window puts back beside it — the placed objects, the own view, the
+  cockpit — has only been compiled, never run. To check by hand: save, let a factory make a unit,
+  load, and look for a stale model or a stale name on a panel
+  ([14-controls](docs/14-controls.md#quick-save-and-quick-load--read-and-seen)).
+- [ ] **A unit that stands still on its way to a refit.** *Seen once on the engine*, 2026-10-01:
+  Enemy 2's SWW-5, sent to refit at Enemy 1's dock across the map (the Large Factory at (1064,
+  670)), stops at (727, 950) and stands there for minutes with its task still walking. Not looked
+  into: whether its route fails, or it waits on a dock another unit holds
+  ([31-packages](docs/31-packages.md)).
+
+**Seen in the recordings and not yet set against the engine**
+
+- [ ] **The second raid's warning in Part 6.5.** Part 6 shows I02 at 22:32; Part 6.5 never does. A
+  dead unit is given no order, so the line stays silent if unit 14, the LWW-3, is lost before its
+  timer; but no frame of Part 6.5 names an LWW-3 (the target panel's name bar, read every 2 s), so
+  whether it was lost first is not found.
+- [ ] **The Light Tower's shield under fire.** A large translucent green dome stands over the
+  tower's top while it is attacked (48:30–49:20). `mtow02` carries a shield generator, 11,000 × 6,
+  and the engine plays its flash, a type-9 dome whose pole now points at the hit. The two were not
+  set side by side: two tries at standing the hero before Enemy 2's tower (`--face mtow02.dat,90
+  --hold SCAN_LMOUSE`, seen with `--look`) showed no flash, and whether its shots were landing was
+  not checked ([26-damage](docs/26-damage.md#what-a-shield-hit-draws--read-and-measured)).
+- [ ] **The sparkles about a gun and what it hits.** White four-point stars about the muzzle and
+  the unit being shot (48:05, 48:40): the gun flashes' and hits' own sprites, `DUST.0`'s star
+  cells, worn by `splash5`, `plas_shoot`, `taser_shoot` and five explosions' sprites — not the
+  weather, as the first pass had it. Not set against the engine's
+  ([11-effects](docs/11-effects.md)).
+- [ ] **The effect light on the ground.** The recording's orange pool about a warbot as it is hit
+  (11:14) was not rendered from the same place in the engine; the 100 to 200 m reach of a large
+  blast's light is by the read, not by a frame ([11-effects](docs/11-effects.md)).
+- [ ] **The builder's upgrade from close by.** The dome's texture and shape match (33:32, 33:50);
+  an upgrade itself — the old building under its dome from 26 to 31 s in, and the new one coming
+  up under the dome played backward at 50 s — was not run in the engine beside 33:30–33:50
+  ([32-builder](docs/32-builder.md#upgrading-a-building--read)).
+- [ ] **Campaign 02's Outpost facade.** Bright yellow-green in the recording ("Let's Play -
+  Parkan: Iron Strategy, Part 3", UfyUzq8k2kY, 1:22) and a dim olive with an orange block in the
+  engine; its emblem matches. Not looked at again since the frame's colours were put right on
+  2026-10-01.
+
 ## Not looked at at all
 
 - [ ] **The 61 stand-ins refiled on 2026-09-21.** From Engine M6 on, `engine/README.md` filed new stand-ins under *Read since the stand-in was written*, and this file's rule leaves those rows out as waiting only on the engine, so most never reached it: of a sample of 24 of their subjects, **19 have no line here**. They are back in the *Stand-ins* table (`78e745f`), and each wants either a line in the area it belongs to or a check that it is answered.
