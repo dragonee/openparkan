@@ -313,7 +313,13 @@ its position in that combined list.
 
 **A script's call.** On channel 0 of the mission callback (`0x10060ce0`):
 
-- **`OBJECTIVE_COMPLETE`** on an objective still open:
+- **The three objective kinds** work one word, the objective record's state at
+  `+0xc` (0 open, 1 complete, −1 failed, [17-saves.md](17-saves.md)), read by
+  `0x1006b440` and written by `0x1006b450`. The callback's switch
+  (`0x10060d6f`, table `0x10061038`) sends kind 3 to `0x10060e66`, 4 to
+  `0x10060f80` and 5 to `0x10060e44`. Neither helper bounds the index.
+- **`OBJECTIVE_COMPLETE`** on an objective still open, state 0
+  (`0x10060e74`); a failed one is not completed:
   - shows string 5040, *"Objective is completed"*;
   - voices `VOICE_OBJ_COMPLETE` (`vc_obj_cpl.wav` through
     `ui/game_resources.cfg`);
@@ -329,8 +335,16 @@ its position in that combined list.
 - **`MISSION_FAILED`** voices `VOICE_MISSION_FAIL` and records the other
   outcome: state word 1, won flag 0.
 - What follows either is [After the outcome](#after-the-outcome--read-and-measured).
-- **`OBJECTIVE_FAILED`** fetches string 5041, *"Objective has failed"* (not
-  followed further).
+- **`OBJECTIVE_FAILED`** on an objective not failed already (`0x10060f8c`)
+  shows string 5041, *"Objective has failed"*, with no voice, and sets its
+  state to −1 (`0x10060ffd`).
+- **`OBJECTIVE_PROGRESS`** on an objective whose state is not 0 sets it back to
+  0 (`0x10060e44`–`0x10060e5c`): no string, no voice, and no completion test.
+  It is how a script uncompletes an objective whose count has fallen back.
+  *Seen* on C03 M02 ("Let's Play - Parkan: Iron Strategy, Part 6",
+  -yNnsqudMzw): the generators objective completes at 53:57, nothing shows as
+  Enemy 2 takes its generator back, and *"Objective is completed"* shows again
+  when the player retakes it (59:17).
 
 Bonus objectives never hold the mission back. A mission with no objectives
 would pass the test, but only an `OBJECTIVE_COMPLETE` ever runs it.

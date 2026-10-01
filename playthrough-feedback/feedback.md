@@ -207,10 +207,11 @@ replaces, route 0 completing objective 3, and the win once all three primaries a
     - docs/27 reads mode 6 as clearing only the driven unit, with the hero left standing in the pod room. The engine sets `driving` for mode 6, so `hero_away()` holds and the hero's target leaves the world: the missile's blast, 17 m from it in the engine's run, leaves it whole
     - Whether a blast reaches a hero in the room under a building is C02 M04's queued question; this is its second sighting
     - Fixed 2026-10-01: only boarding a bot takes the hero out of the world; at a building's guns or driving a unit from a command view it stands in its room, struck as anything there is, and the raider's missile on the bunker's roof kills it
-  - [ ] Objective 1 does not reopen when a generator is lost
+  - [x] Objective 1 does not reopen when a generator is lost
     - In the recording *"Objective is completed"* shows at 53:57, as the third generator becomes the player's. Enemy 2 takes its generator back by 59:05, and when the player's Comm. Center retakes it, *"Objective is completed"* shows again (59:15–59:17). Part 6.5 does the same: 24:34–24:35, then 32:20–32:21
     - `c3m2p` calls `OBJECTIVE_PROGRESS 0` when `fn34(BUILDING_GENERATOR)` falls from 3, and completes the objective again when it comes back; docs/34 reads `OBJECTIVE_COMPLETE` as acting only on an open objective, so the call reopened it. Nothing shows in either message box as it does (54:30–59:15)
-    - The engine leaves `OBJECTIVE_PROGRESS` unanswered (`progression.rs`'s STAND-IN): the objective stays complete through the loss, says nothing when retaken, and the mission can be won with a generator in Enemy 2's hands (queued: what the call does)
+    - The engine leaves `OBJECTIVE_PROGRESS` unanswered (`progression.rs`'s STAND-IN): the objective stays complete through the loss, says nothing when retaken, and the mission can be won with a generator in Enemy 2's hands
+    - Fixed 2026-10-01 from the read: `OBJECTIVE_PROGRESS` puts a complete or failed objective back to open without a word (`iron3d.dll:0x10060e44`), `OBJECTIVE_COMPLETE` completes only an open one, and `OBJECTIVE_FAILED` now fails it (state −1) besides showing its string
   - [ ] As on Mission 01, F7's quick save does nothing: the recording saves at 8:38, 12:57, 13:18 and on, and after the failure the panel's L loads the save (13:55–14:00). The engine has neither (queued)
 - Visuals
   - [ ] Every building wears the arrow emblem

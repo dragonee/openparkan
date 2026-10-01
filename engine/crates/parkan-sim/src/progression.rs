@@ -232,12 +232,17 @@ impl ClanTakt {
     }
 }
 
-/// One objective: whether the completion test passes over it, and its state (1 complete).
+/// One objective: whether the completion test passes over it, and its state.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Objective {
     pub exempt: bool,
     pub state: u8,
 }
+
+/// An objective's states, the record's `+0xc` (docs/17): 0 open, 1 complete, −1 failed.
+pub const OPEN: u8 = 0;
+pub const COMPLETE: u8 = 1;
+pub const FAILED: u8 = u8::MAX;
 
 /// What a script's call to function 30 shows or plays.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -563,6 +568,12 @@ impl Progress {
         }
     }
 
+    /// The objective a script's value names, with its index, when it is on the list.
+    fn objective(&mut self, value: i64) -> Option<(usize, &mut Objective)> {
+        let index = usize::try_from(value).ok()?;
+        self.objectives.get_mut(index).map(|o| (index, o))
+    }
+
     /// Function 30 on channel 0 (`iron3d.dll:0x10060ce0`): `kind` and `value` as the
     /// script hands them.
     pub fn call(&mut self, kind: i64, value: i64) -> Vec<Notice> {
@@ -575,32 +586,41 @@ impl Progress {
                 }
             }
             SYSTEM_MESSAGE => self.system(value, &mut out),
+            // The three objective kinds work the objective's state word (`+0xc`, through
+            // `0x1006b440` and `0x1006b450`). Nothing bounds the index in the game; past the
+            // list the engine changes nothing.
             OBJECTIVE_COMPLETE => {
-                // An open objective completes (`0x10060e89`); the completion test follows
-                // every call, open or not (`0x10060f5e`, `0x1006b130`). Nothing bounds the
-                // index in the game; past the list the engine changes nothing.
-                if let Some((index, o)) =
-                    usize::try_from(value).ok().and_then(|i| self.objectives.get_mut(i).map(|o| (i, o)))
-                    && o.state != 1
+                // An open objective, state 0, completes (`0x10060e74`, `0x10060e89`): a failed
+                // one stays failed. The completion test follows every call, open or not
+                // (`0x10060f5e`, `0x1006b130`).
+                if let Some((index, o)) = self.objective(value)
+                    && o.state == OPEN
                 {
-                    o.state = 1;
+                    o.state = COMPLETE;
                     out.push(Notice::ObjectiveComplete { index });
                 }
-                if self.objectives.iter().all(|o| o.exempt || o.state == 1) {
+                if self.objectives.iter().all(|o| o.exempt || o.state == COMPLETE) {
                     self.system(MISSION_COMPLETE, &mut out);
                 }
             }
+            // One not failed already shows string 5041 and fails (`0x10060f8c`, `0x10060ffd`).
             OBJECTIVE_FAILED => {
-                // STAND-IN: docs/34-progression.md#objectives-and-the-end-of-a-mission--read-and-measured
-                // -- past fetching string 5041 the failure is not followed: it shows the
-                // string and changes no state.
-                if let Some(index) = usize::try_from(value).ok().filter(|&i| i < self.objectives.len()) {
+                if let Some((index, o)) = self.objective(value)
+                    && o.state != FAILED
+                {
+                    o.state = FAILED;
                     out.push(Notice::ObjectiveFailed { index });
                 }
             }
+            // One complete or failed goes back to open, without a word and without the
+            // completion test (`0x10060e44`–`0x10060e5c`): a script uncompletes an objective
+            // whose count has fallen back.
+            OBJECTIVE_PROGRESS => {
+                if let Some((_, o)) = self.objective(value) {
+                    o.state = OPEN;
+                }
+            }
             // `CLAN_HERO_KILLED` does nothing in this build (docs/21).
-            // STAND-IN: docs/21-briefing.md#messagescfg--the-in-mission-dialogue -- what
-            // `OBJECTIVE_PROGRESS` shows is not read; nothing.
             _ => {}
         }
         out
@@ -909,5 +929,33 @@ mod tests {
         assert_eq!(p.outcome, Some(false));
         assert_eq!(p.call(OBJECTIVE_COMPLETE, 9), vec![Notice::MissionComplete]);
         assert_eq!(p.outcome, Some(true));
+    }
+
+    /// `c3m2p` uncompletes its generators objective when the count falls from three and
+    /// completes it again when it comes back, and the let's play's Part 6 shows *"Objective is
+    /// completed"* a second time (59:17).
+    #[test]
+    fn progress_reopens_an_objective_without_a_word_and_a_failed_one_stays_failed() {
+        let mut p = Progress::new(&[], &[false, false], []);
+        assert_eq!(p.call(OBJECTIVE_COMPLETE, 0), vec![Notice::ObjectiveComplete { index: 0 }]);
+        assert_eq!(p.call(OBJECTIVE_PROGRESS, 0), vec![], "reopened, silently");
+        assert_eq!(p.objectives[0].state, OPEN);
+        assert_eq!(
+            p.call(OBJECTIVE_COMPLETE, 0),
+            vec![Notice::ObjectiveComplete { index: 0 }],
+            "and shown again"
+        );
+        // A failure shows once and holds against a completion; progress reopens it too.
+        assert_eq!(p.call(OBJECTIVE_FAILED, 1), vec![Notice::ObjectiveFailed { index: 1 }]);
+        assert_eq!(p.call(OBJECTIVE_FAILED, 1), vec![]);
+        assert_eq!(p.call(OBJECTIVE_COMPLETE, 1), vec![]);
+        assert_eq!(p.objectives[1].state, FAILED);
+        p.call(OBJECTIVE_PROGRESS, 1);
+        assert_eq!(
+            p.call(OBJECTIVE_COMPLETE, 1),
+            vec![Notice::ObjectiveComplete { index: 1 }, Notice::MissionComplete]
+        );
+        // Past the list nothing changes.
+        assert_eq!(p.call(OBJECTIVE_PROGRESS, 7), vec![]);
     }
 }

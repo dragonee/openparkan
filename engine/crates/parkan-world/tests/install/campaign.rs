@@ -458,6 +458,34 @@ fn c03_m02s_raider_takes_up_the_attack_on_the_bunker_and_closes_on_it() {
     assert!((28..=42).contains(&clock), "the enemy clan's clock reads {clock} after 30 s");
 }
 
+/// C03 Mission 02's first objective, every generator captured, follows the player's count both
+/// ways: `c3m2p` completes it on `fn34(BUILDING_GENERATOR) == 3` and calls `OBJECTIVE_PROGRESS`
+/// when the count falls, which puts it back to open without a word (`iron3d.dll:0x10060e44`). The
+/// let's play's Part 6 shows *"Objective is completed"* at 53:57 and, once Enemy 2 has taken its
+/// generator back and the player retaken it, again at 59:17.
+#[test]
+#[ignore = "needs the game install"]
+fn c03_m02s_generators_objective_reopens_when_one_is_lost_and_completes_again() {
+    use parkan_sim::progression::{COMPLETE, Notice, OPEN};
+
+    let (mut p, _) = campaign_progression(gamedir::C03_MISSION_02);
+    let (enemy_1, enemy_2) = (0x8000_0004_u32 as i32, 0x8000_000a_u32 as i32);
+    let completed = |n: &[Notice]| n.contains(&Notice::ObjectiveComplete { index: 0 });
+    assert!(!completed(&p.run("Mission")), "the player holds one generator of three");
+
+    p.progress.captured(enemy_1, 0);
+    p.progress.captured(enemy_2, 0);
+    assert!(completed(&p.run("Mission")), "all three are the player's");
+    assert_eq!(p.progress.objectives[0].state, COMPLETE);
+
+    p.progress.captured(enemy_2, 2);
+    assert!(!completed(&p.run("Mission")));
+    assert_eq!(p.progress.objectives[0].state, OPEN, "Enemy 2 has taken its generator back");
+
+    p.progress.captured(enemy_2, 0);
+    assert!(completed(&p.run("Mission")), "and the player's retaking it completes it again");
+}
+
 /// C03 Mission 02 as the let's play's Part 6 has it at 13:54: the player at the Small Bunker's
 /// guns is lost as the raider's winged SSM lands on the bunker, and the mission fails. Taking a
 /// building's guns (mode 6) leaves the hero standing in the pod room (docs/27, "What the modes

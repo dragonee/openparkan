@@ -1627,6 +1627,19 @@ tests, 1015 of 1015 checks, 509 engine tests and 201 install tests, `ruff` clean
   FAILED..."*. `CLAN_HERO_KILLED` does nothing in this build and Mission 01's script never fails,
   which is what had kept the line open. Confirmed by the coordinator 2026-09-18
   ([34-progression](docs/34-progression.md#after-the-outcome--read-and-measured)).
+- [x] ~~What `OBJECTIVE_PROGRESS` does~~ — raised and closed 2026-10-01, **read** and **seen**:
+  it puts an objective whose state is not 0 back to 0, open, with no string, no voice and no
+  completion test (`iron3d.dll:0x10060e44`–`0x10060e5c`). The callback's switch (table
+  `0x10061038`) sends kinds 3, 4 and 5 to cases that all work the objective record's `+0xc`
+  through `0x1006b440` and `0x1006b450`. Read alongside it: `OBJECTIVE_COMPLETE` completes only an
+  objective at state 0, so a failed one stays failed; and `OBJECTIVE_FAILED`, on one not failed
+  already, shows string 5041 with no voice and sets −1 (`0x10060f8c`, `0x10060ffd`), where the
+  engine had changed no state. *Seen* in "Let's Play - Parkan: Iron Strategy, Part 6"
+  (-yNnsqudMzw). C03 M02's generators objective completes at 53:57. Nothing shows as Enemy 2
+  retakes its generator, and *"Objective is completed"* shows again when the player takes it back
+  (59:17). Its bonus "Part 6.5" (9SBZOCWv_vE) does the same at 24:35 and 32:21. Implemented and
+  tested, and the engine README's stand-in row went with it
+  ([34-progression](docs/34-progression.md#objectives-and-the-end-of-a-mission--read-and-measured)).
 
 ## Files and formats
 

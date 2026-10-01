@@ -289,17 +289,6 @@ remainder a closed line names stays here as a line of its own.
 [34-progression](docs/34-progression.md#not-established)
 
 - [ ] What the behaviour does with the message 6 it sends itself.
-- [ ] **What `OBJECTIVE_PROGRESS` does.** Raised 2026-10-01 from checking C03 M02 against a
-  recording ("Let's Play - Parkan: Iron Strategy, Part 6", -yNnsqudMzw, 53:57–59:17). `c3m2p` calls
-  `OBJECTIVE_PROGRESS 0` when the player's generators fall from three, and `OBJECTIVE_COMPLETE 0`
-  when they come back. In the recording *"Objective is completed"* shows at 53:57. Enemy 2 retakes
-  its generator, and the message shows again as the player takes it back (59:17). Nothing shows in
-  between. Its bonus "Part 6.5" (9SBZOCWv_vE) does the same at 24:35 and 32:21. docs/21 reads
-  callback kinds 3 to 5 as setting an objective's state, and docs/34 reads `OBJECTIVE_COMPLETE` as
-  acting only on an open objective. So the call reopened the objective without a word (*seen*). Not read: the handler itself, and whether it voices anything or only
-  sets state 0. The engine answers nothing (`progression.rs`'s STAND-IN, docs/21's
-  [messages.cfg](docs/21-briefing.md#messagescfg--the-in-mission-dialogue)), so the objective
-  stays complete.
 
 ## Files and formats
 
