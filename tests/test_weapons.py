@@ -61,6 +61,20 @@ def test_the_ai_scores_a_distance_by_its_rounds_speed():
     assert weapons.ai_fire_wait(-1) == (0.5, 1.5)
 
 
+def test_the_ai_aims_at_the_heaviest_part_and_a_damaged_one_weighs_more():
+    # A Small Bunker's devices in its device manager's order: the deflector is the last.
+    bunker = [19, 9, 15, 12, 13, 13, 26, 25, 1, 4, 2, 2, 8, 21]
+    assert bunker[weapons.ai_part(bunker)] == 21
+    assert weapons.ai_part(bunker[:-1]) == 8, "then its turret"
+    # Among equals the last listed keeps the pick; nothing listed picks nothing.
+    assert weapons.ai_part([2, 2, 5]) == 1
+    assert weapons.ai_part([]) is None
+    assert weapons.ai_part_weight(21) == 30.0
+    assert weapons.ai_part_weight(1, 0.4) == pytest.approx(32.0), "a turret at 0.4 outweighs it"
+    assert weapons.ai_part_weight(2, 0.0) == 0.0, "a part with no life is passed over"
+    assert weapons.ai_part_weight(27) == 1.0
+
+
 def test_a_shot_is_the_barrel_stroke_and_then_the_interval():
     cannon = gun(interval_ms=0.0, stroke_ms=(250.0,))
     assert cannon.shot_ms == 250.0

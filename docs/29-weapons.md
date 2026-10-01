@@ -537,12 +537,22 @@ value 8 is positive (`0x10029d3a`):
    (`0x10029e37`). **Report 7 is two refusals**: this one, and the ready byte
    clear before the gate is even reached (`0x10029d27`,
    [A gun with no follower is ready from birth](#a-gun-with-no-follower-is-ready-from-birth--read-and-measured)).
-   With no part named, the point is **the centre of the target's node sphere**:
-   interface `0x20` slot 3 asked with 2 and the all-zero request
-   (`0x1002a95b`–`0x1002a97f`), the sphere
-   [24-motion.md](24-motion.md#finding-the-ground--read) reads; only an object
-   that does not answer `0x20` gives its matrix's position (`0x1002a9a5`). A
-   tower's is its middle, not its foot on the ground.
+   **The point is the centre of one node's own sphere** — *corrected*
+   2026-10-01. The gun's pair is an id and a node, and with a node other than
+   −1 or −2 the routine asks interface `0x20` slot 3 with the pair and the
+   request at `0x10048348` (`0x1002a936`–`0x1002a959`), whose fourth word is 1:
+   the sphere of that node's level-0 slot. The turret hands its guns a node of
+   0 or more whenever it has a target — node 0 for the player's, the picked part
+   for an AI unit's
+   ([The part the AI aims at](#the-part-the-ai-aims-at--read-and-measured)). The
+   other branch (`0x1002a95b`–`0x1002a97f`), with the default request
+   `{0xfff, 0, 1, 2}` at `0x10048238`, gets the object's node sphere
+   ([24-motion.md](24-motion.md#finding-the-ground--read)), and a gun with a
+   target does not reach it; this item once read that branch as the rule, taking
+   both requests for the zeros their bytes are in the file. Only an object that
+   does not answer `0x20` gives its matrix's position (`0x1002a9a5`). The
+   **unit's own** position in the comparison is its node sphere's centre, asked
+   with the default request (`0x10029dba`).
 3. **Off the barrel.** With value 10 positive, the barrel point's direction and
    the line from the unit to the target are normalised. A dot product no greater
    than value 10 gives state 8, no shot, and the lock back to value 9
@@ -944,10 +954,16 @@ the round, and those are the seeker's values 1, 0 and 2 (`0x1002b738`,
 A seeker's target is the gun's target, handed to the round as it leaves
 ([The round's start](#the-rounds-start)). A turret's gun has its turret's
 target, and a unit the player drives has the player's: the target list is
-that unit's (`iron3d.dll:0x10091a80`). **The seeker steers at the target's
-node sphere's centre**, asked as the gate asks it (`Control.dll:0x100248b6`).
-A winged SSM (`bm_m_04`: mode 0, 45 m/s) flies straight at that point, so a
-crest between it and a tower on a hill takes the missile.
+that unit's (`iron3d.dll:0x10091a80`). **The seeker steers at the centre of
+the own sphere of the node it was handed** (`Control.dll:0x100248b6`, the
+request at `0x10047a68` with a fourth word of 1) — *corrected* 2026-10-01 from
+"the target's node sphere's centre": node 0's for a round the player fires, and
+for an AI unit's the part its fight module aims at
+([The part the AI aims at](#the-part-the-ai-aims-at--read-and-measured)). A
+seeker whose node has no life left takes node 0 in its place, and stops
+steering when node 0 has none (`0x10024836`–`0x10024860`). A winged SSM
+(`bm_m_04`: mode 0, 45 m/s) flies straight at that point, so a crest between it
+and a tower on a hill takes the missile.
 
 ## How the AI fires — *read*
 
@@ -957,12 +973,21 @@ every turret and lets every gun fire when that gun's own score allows.
 
 **The target.** The module picks one target for the unit on a timer, by the
 selector's mode of [25-sensors.md](25-sensors.md): none, fixed, nearest,
-units only, or weighted by the areal figure (`0x100240ae`).
+units only, or weighted by the areal figure (`0x100240ae`). With the target it
+picks **a part of it**, the node it will aim at
+([below](#the-part-the-ai-aims-at--read-and-measured)).
+
+**One line for the whole unit.** Before any turret or gun is looked at, the
+module works out once whether the unit has a clear line to that part
+(`0x10024464`–`0x10024989`,
+[below](#the-line-every-gun-waits-on--read-and-measured)). Every gun waits on
+that one answer.
 
 **Each turret** in the module's table (`MBehaviour+0x64c`: 52 bytes a turret,
 88 a gun) is aimed at it (`0x10024b1b`–`0x10024c51`):
 
-- the unit's turret target is set (interface `0x204` slot 16);
+- the unit's turret target is set (interface `0x204` slot 16) to the pair of
+  the target's id and the part's node;
 - the turret's lead speed is set to **its fastest gun's** round speed
   (property `0x54`, [below](#the-lead-is-the-turrets-fastest-gun--read-and-measured));
 - the turret is put in `CIS_POINTTRACE` (`0x400`).
@@ -1001,6 +1026,15 @@ units only, or weighted by the areal figure (`0x100240ae`).
   target stands.** Any other rises from 0 to 1 over the first 5 m (0 m for an
   animal, `+0x44`), holds 1 out to (*v* + 1) ÷ 2, and falls to 0 at 2 (*v* + 1),
   then is multiplied by 1 − height ÷ *v*.
+  - **The height is the firing unit's above its target** (*read*). The module
+    takes the two origins — the matrix translations the records `0x10014bd0` and
+    `0x10014ee0` fill — and keeps their distance and **the unit's z less the
+    target's** (`0x10024337`–`0x10024381`), and hands the score both
+    (`0x10024dbe`–`0x10024dca`). So a unit firing **down** loses score and one
+    firing up gains it: a tower 35 m over its target keeps 0.9 of a 350 m/s
+    round's score, and a unit 35 m under one takes 1.1. openparkan had the sign
+    the other way and measured both from the target's box, and now takes them as
+    read.
   - ***v* is the round's top speed**, `.ctl` `+48`: property `0x54` is interface
     `0x202` slot 3 (`Control.dll:0x1002e580`, case at `0x1002e5c6`), which answers
     a class-2 or class-30 gun's `+0x94`, set to `+0xb8` by the gun's link
@@ -1016,13 +1050,20 @@ units only, or weighted by the areal figure (`0x100240ae`).
     within about 146 m).
 - **Aim.** It is multiplied by two more factors, one for the turret and one for
   the gun, each `1 − θ × d ÷ R` (`0x10024cea`, `0x10024db4`):
-  - *d* is the distance from the unit to the target (`0x10024377`).
+  - *d* is the distance from the unit to the target (`0x10024377`), origin to
+    origin.
   - *R* is the target's **outer radius**: its variable `0x206`, which
     `MBehaviour` answers from `+0x688` (`0x1000a79b`). That is the distance from
     the target's origin to the centre of the sphere its mesh interface gives, plus
     the sphere's radius (`0x1000648c`, `0x1000cbe3`). With no target *R* is 5
     (`0x1002411c`). A target reporting 0 is asked to recompute and read again
-    (`0x10024452`).
+    (`0x10024452`). The sphere is **the agent's**: both sites ask `IMesh2`, the
+    interface `0x18` the behaviour keeps at `+0x60` (`0x10005ccc`), for slot 9
+    with 2, the parts' header spheres joined, in the world
+    ([26-damage.md](26-damage.md#the-hit-test--read-and-measured)). *Measured* on
+    C03 M02: 57.3 for the Small Bunker, whose agent sphere of 52.75 stands 4.6 m
+    over its origin, and 6.0 for the Medium Wheel Chassis. openparkan took the
+    radius of the box over the nodes' spheres, 87.6 and 5.8, and now takes this.
   - *θ* comes from interface `0x202` slot 10 (`Control.dll:0x1002eaa0`, called
     at `0x10024c92` for the turret and `0x10024d54` for the gun). The slot
     writes the component's property `0xf00` and returns a word by class:
@@ -1097,8 +1138,9 @@ units only, or weighted by the areal figure (`0x100240ae`).
   the ground, which 80 m and 40 m out from the Mission 03 bunker stands 3.5° and
   2.1° above its sight, the bunker's own sight standing high. The engine holds to
   this, and its test puts the enemy's flyer there: the player's bunker traces it
-  and fires 4 and 5 flames in 6 s, and 4 with the flyer 40 m up and 20.5° over
-  its sight. **So the bunker fights flyers as well as walkers**; what keeps its
+  and fires 6 flames in 6 s at each, and 6 with the flyer 40 m up and 20.5° over
+  its sight (4, 5 and 4 before its turret traced the flyer's deflector and its
+  guns waited on the one line). **So the bunker fights flyers as well as walkers**; what keeps its
   fire off a target is its turret not having settled, not the target's height.
   An earlier line in the queue had the walker's 0.85 limit the bunker to targets
   near its own ground level. That holds only for a round without bit 8 or
@@ -1106,19 +1148,35 @@ units only, or weighted by the areal figure (`0x100240ae`).
   guns fires one.
 
   Past the bar, the gun fires **one shot** (`CIS_SINGLEFIGHT`, `0x200`,
-  `0x10024fa2`). Before that it must have both factors above 0, a clear line
-  (`0x10025c60`, `0x10024981`) and its timer run out. An animal instead needs
-  the dot product at `0x10024330` above 0.85 (`0x10024f3f`).
+  `0x10024fa2`). Before that it must have both factors above 0, its timer run
+  out (`0x10024f52`) and the unit's line clear (`0x10024f69`), in that order.
+  An animal that fails the factors or the bar instead needs the dot product at
+  `0x10024330` above 0.85 (`0x10024f3f`), and then the same timer and line.
 - **Its own timer.** The shot also waits for the gun's randomised timer: 30 ÷
   magazine s plus up to as much again when the magazine holds more than 2,
   otherwise 0.5 s plus up to 1.5. Both are divided by the difficulty profile's
   value (`0x1001b5ec`, `0x1001b650`).
+  - **Asking the timer sets it again** (*read*). The timer is the behaviour's
+    common one (`0x1004c550`): it answers no while its deadline is ahead, and
+    once the deadline is passed, or is still 0 as it is built, it writes the next
+    — now, plus its base, plus a random share of its spread — and answers yes.
+    The fight module asks it only for a gun whose score has passed the bar, and
+    looks at the line **after** the answer. So a gun whose line is blocked spends
+    its wait all the same and asks again a wait later: **it does not fire the
+    moment the line clears, but when its next wait runs out**, up to 2 s on for
+    a magazine of 2 or less and up to 60 ÷ magazine s for a larger one. A gun
+    whose score does not pass leaves its timer alone, so one that has waited out
+    a turn of its turret fires at once. openparkan set the timer only when the
+    gun fired, and now sets it where it is asked.
 - **During the go, attack and search tasks** every gun fires on its timer,
-  line permitting, whatever its aim (`0x10024e58`). All three factors are
+  whatever its aim (`0x10024e58`). All three factors are
   forced to 0.5 and the bar to 0. The task numbers 2, 3 and 5 are what these
   tasks' slot 0 returns: go `0x10035710`, attack `0x10035950`, search
   `0x100359e0`. This holds only while the record `0x10014bd0` fills has an id
-  at `+0x30`, which was not traced.
+  at `+0x30`, which was not traced, **and only while the unit's line is clear**
+  (`0x10024de5`–`0x10024df9`): with the line blocked the factors and the bar are
+  worked out as outside the task, so nothing fires either way and the only
+  difference is whether the timer is asked.
 
 So a unit fires every gun whose score clears the bar, each on its own timer.
 
@@ -1141,6 +1199,249 @@ target, and keep their range gate.**
 scores fully out to 5,000 m, a 350 m/s cannon to 175 m, and a 70 m/s missile
 only to 35 m and not at all beyond 142 m. `weapons.ai_distance_score` and
 `weapons.ai_fire_wait` compute them.
+
+### The part the AI aims at — *read*, and *measured*
+
+When the module has a target it picks **one node of it** (`0x10025830`, called
+at `0x100241f7` with the target's `ILifeSystem`, interface `0x16`, and its
+`IDeviceManager`, `0x204`), and that node goes with the target's id wherever
+the id goes.
+
+- **Running gear first.** It walks the life system's nodes from the last
+  (`0x10025844`–`0x100258b5`). A node counts when slot 3 answers id 2 for it,
+  which is when its `.ndp` row's flags carry any of **`0x70`**
+  (`Control.dll:0x1000dc76`–`0x1000dc88`), and when id 1, its life over its
+  maximum, is above 0. It weighs **(2 − life) × 7.5** (`0x1002588a`, the 7.5 at
+  `0x10059978`). `0x20` and `0x40` are a machine's left and right running gear
+  ([07-objects.md](07-objects.md#ndp-is-a-damage-table-one-record-per-node)).
+- **Then the devices**, from the last (`0x100258bb`–`0x100259b4`). A device
+  counts when its property `0x400`, its node's life over its maximum
+  (`Control.dll:0x1002bc3c`), is above 0, and weighs **(2 − life) × its class's
+  figure**, through a byte map over classes 1 to 21 (`0x100259e8`) into a jump
+  table (`0x100259c8`):
+
+  | class | figure |
+  |---|---:|
+  | 21, a deflector | 30 |
+  | 1, a turret | 20 |
+  | 2, a gun | 15 |
+  | 5, an engine; 8, a radar | 14 |
+  | 19, a power store | 10 |
+  | 9, a fight shield | 7 |
+  | 15, a repair system | 3 |
+  | any other, and any class over 21 | 1 |
+
+  The pick is that device's property `0x200`, **the node it sits on**
+  (`0x1002599b`, [13-control.md](13-control.md#the-component-record)).
+- **Only a greater weight takes the pick** (`0x1002589a`, `0x10025984`), and
+  both walks run from the last entry to the first, so among equals **the last
+  listed keeps it**. With nothing alive the routine answers 0, and where the
+  target does not answer the three interfaces the module asks of it the node is
+  −1 (`0x1002414c`), which the turret's own setter makes 0 (below).
+
+So **an AI unit shoots at a part, and a damaged part outweighs a whole one of
+its class by up to twice** (*derived*): a whole deflector at 30 is aimed at
+before a whole turret at 20, a turret at 0.4 of its life (32) before the
+deflector, and a gun below 0.67 (20) before a whole turret. Running gear, at
+7.5 to 15, is aimed at only on a machine with no live device heavier than that
+— every assembled unit carries an engine at 14.
+
+**Where the node goes** (*read*). The pair of the target's id and the node is
+what the module writes to the turret, on every aiming pass (`0x10024b1b`) and
+again before each shot (`0x10024f8f`), through `IDeviceManager` slot 16.
+
+- **The turret** keeps it at `+0x94` and `+0x98`, a node of −1 made 0
+  (`Control.dll:0x100280d0`–`0x100280de`), and relinks its guns only when the
+  pair changes (`0x100280e7`–`0x100280f9`) — a new node as much as a new target,
+  so when the part aimed at is destroyed and the pick moves on, **every guided
+  gun's lock starts again** (`0x10028126`, `0x1002a160`; *derived*). It traces
+  **that node's own sphere's centre** (`0x10028c40`): interface `0x20` slot 3
+  asked with the pair and the request at `0x10048110`, whose fourth word is 1
+  (`0x100291b5`). And it traces nothing once that node's life is 0
+  (`0x100286ca`–`0x1002871e`).
+- **Each gun** takes the pair in the relink (`0x10028183`–`0x10028195`), and its
+  gate measures to the same point (`0x1002a8c0`, the request at `0x10048348`,
+  fourth word 1 at `0x1002ae35`).
+- **Each round** is handed the gun's pair as it leaves (`0x1002a514`), which
+  the round's device manager writes straight into its seeker
+  (`0x1002cb16`–`0x1002cb2b`), and the seeker steers at the same point
+  (`0x100247c0`, the request at `0x10047a68`, fourth word 1 at `0x10025185`).
+  A seeker whose node's life is 0 takes node 0 in its place, and with node 0's
+  gone it steers at nothing (`0x10024836`–`0x10024860`).
+
+**What that sphere is.** Interface `0x20` slot 3 looks at its request's fourth
+word first (`AniMesh.dll:0x1000f3c5`): where it is 1 the answer is **one node's
+own sphere** — the sphere of the node's level-0 slot in its current variant
+(`0x100124d0`), the slot record's `+0x20` centre and `+0x2c` radius, through the
+node's matrix, or the node's origin with a radius of 0 where the node has no
+such slot (`0x1000f40e`). The three requests above are each written by a
+static initialiser in `Control.dll`'s table (`0x1003ea2c`, `0x1003ea84`,
+`0x1003e924`) as a mask, 0, 0 and 1. Only a request equal to the module's
+default with no node gets the object's node sphere
+([24-motion.md](24-motion.md#finding-the-ground--read)).
+
+**The player's target names node 0** — a correction. `iron3d.dll` hands the
+turret the target's id with a part of **0** (`0x10091b0e`), not with none, and
+the turret's setter makes even −1 a 0. The branch of the gate and of the
+turret's trace that asks the default request, and so gets the node sphere, is
+taken only for a pair whose node is −1 or −2 (`0x1002a936`–`0x1002a943`,
+`0x10028cb6`–`0x10028cc3`), and −2 is what an unguided gun on a `0x200` turret
+is given with no target at all (`0x10028177`). So with a target a gate always
+measures to **one node's own sphere**, node 0's for the player — the chassis's
+root, or a building's first node — and a seeker has no other branch at all.
+Earlier text here had the gate and the seeker take the node sphere's centre,
+from reading the three requests as zeros: they lie in the module's
+uninitialised data and are written as it loads. **openparkan follows this**:
+an AI unit's turret traces the part, its gate measures to it and its round
+steers at it, and the player's gate and rounds take node 0's own sphere. On
+C02 M02's tower `23tower` that is the chassis `r_b_06`'s root, a sphere of
+3.21 about the tower's origin and 3.89 m under its node sphere's centre
+(*measured*), and the HQ's winged missiles still lock on it from 380 m and
+bring it down.
+
+*Measured* over the 458 assemblies, each whole, by the class of the device
+that takes the pick (`weapons.ai_part`, `openparkan verify`): **a deflector on
+435** — 372 of the 382 units and 63 of the 76 buildings. The rest are the
+eight animals, whose one class-1 component on their root takes it (`bird`,
+`crab`, `m_crab`, `l_arah`, `s_arah`, `tent`, `tushka`, `worm`); the two
+practice targets, by their engine; eleven buildings by their power store (the
+four bridges, the four ruins, `gen_l_n1`, `gener01` and `mtp_s_n1`); and
+`mas_l_n1` and `tel_l_n1`, which carry no device and are aimed at by node 0. On
+a warbot the deflector's node is its turret's own deflector housing — `TMdef`
+on the Medium Battle Turret, a sphere of radius 0.91 — and on a bunker a part
+of its own on the roof.
+
+*Measured* on C03 M02's Small Bunker, `sbunk02`: its devices in order are a
+power store, a fight shield, a repair system, a door, two class-13 and a class
+26 and 25 of the building, then the turret (20), its camera, two guns (15), the
+radar (14) and **the deflector `u_bun_def_l_01`, class 21, on its node 1**. So
+a raider aims at the deflector on the roof, whose sphere of radius 1.55 stands
+**14.5 m over the bunker's origin**, and after it at the turret beside it.
+
+### The line every gun waits on — *read*, and *measured*
+
+`0x10025c60`, which this page named as the clear line, is not a line query: it
+is a test of two moving spheres, and it is the last of three steps. The whole
+of it runs once a pass, for the unit, before the turrets and guns are walked
+(`0x10024464`–`0x10024989`), and leaves one flag every gun reads
+(`0x10024f69`). With no target the flag is 0 (`0x100249b5`).
+
+**1. The two ends** (`0x1002447a`–`0x1002468b`).
+
+- **From the firing unit's first turret**, not from a muzzle. `0x1001cd00`
+  takes turret record 0 of the module's table, and `0x10016100` asks the unit's
+  `IItemManager` slot 12 for that component's nodes — the one node its record's
+  `+4` names (`Control.dll:0x1002ed90`) — and interface `0x20` slot 3 for that
+  node's own sphere, with the request `{0xfff, 0, 0, 1}` at `0x10066be8`
+  (written by the initialisers `0x10016210` and `0x10016220`). A unit with no
+  turret keeps its own origin and a radius of 0.
+- **To the part aimed at.** `0x10016050` asks the target the same slot for the
+  node the picker chose, −1 taken as 0.
+- **Started and stopped short.** The first radius is multiplied by **0.7**
+  (`0x10024512`, `0x10059968`). When that and the second radius together are
+  **less** than the distance between the centres (`0x1002454c`–`0x1002455b`), the
+  start moves that far toward the target and the end moves **the whole of the
+  target sphere's radius** back toward the start (`0x10024561`–`0x1002468b`).
+  Otherwise the line runs centre to centre. So the line stops on the surface of
+  the part's sphere and never enters the mesh it is aimed at.
+
+**2. The world's line** (`0x1002468d`–`0x10024788`).
+
+- **The query is `IWorld` slot 12** (`Terrain.dll:0x10025540`, vtable
+  `0x1009a630`), not the sight ray's slot 7. It walks the same tree from the
+  same root, by the same class table and the same interface `0x18` slot 6, and
+  takes **a list of object ids to leave out**: an object whose own id (slot 9)
+  is in the list is skipped, its children still walked
+  (`0x10025690`–`0x100256cf`). The module hands it two, **its own unit's and the
+  target's** (`0x100246c3`–`0x10024710`). So striking the target does not have
+  to count as clear: the target is not asked.
+- **The record is `[0x40a, 0, 0, 0, 0, 8, 0, 0]`** (`0x10024466`–`0x100244bc`,
+  the four-word builder `0x10026110`). Classes **1, 3 and 10** — the landscape,
+  buildings and `STAT` scenery — and **no unit**: class 4 is not in the mask,
+  nor a round's 9. The one excluded flag, 8, is a mesh's portal batches and the
+  landscape's flags-word `0x20`, on 0 of 275882 faces
+  ([26-damage.md](26-damage.md#the-query-record-and-what-a-round-excludes--read-and-measured)).
+  **No face class is excluded**, so unlike a round's query it stops on a
+  lake's sheet and on the leaves a round flies through.
+- **Anything met blocks the line, with one exception** (`0x1002478e`–`0x100247f5`).
+  The module asks `CWorld::GetWorldFace` (slot 6) with `0x10` for the face
+  struck and reads the flags word of its record, the first word of the struck
+  object's interface `0x18` slot 5 answer. Where that carries **`0x20`** and
+  the line — the shortened one — is **under 20 m** (`0x1005960c`), the line is
+  clear, and the third step is skipped. For a mesh the word is the triangle's
+  own first word (`AniMesh.dll:0x10013773`), so `0x20` is one of the two flags
+  a round passes through, set on trees and the mines
+  ([26-damage.md](26-damage.md#the-hit-test--read-and-measured)). For the
+  landscape it is compacted from the face's mask (`Terrain.dll:0x100202e4`–
+  `0x10020371`), `0x20` being that mask's `0x80`; that the mask is the file's
+  face dword there is *inferred* from the same bits elsewhere, and if so no
+  shipped face carries it: 0 of 275882 have `0x80` in the flags word, against
+  6102 with `0x2000` (*measured*).
+
+**3. The unit's own side** (`0x100247fa`–`0x1002497b`), only where the world's
+line met nothing.
+
+- The module takes the world queue's list of **class 4, every unit**
+  (`World3D.dll!GetQueue`, slot 13, `0x10007a00`: a count and up to 3000
+  pointers a class) and passes over its own unit and any whose behaviour's
+  slot 17, **its owner**, is not its own unit's
+  ([15-behaviour.md](15-behaviour.md)). A building is in no such list, and a
+  unit of an allied clan is not of the same owner.
+- For each of the rest it asks the agent's sphere in the world (interface
+  `0x18` slot 9 with 2) and runs `0x10025c60`: the line as a sphere of radius
+  **0.5** moving from its start to its end, against that sphere standing still.
+  The line is blocked when the two overlap at the start, or first touch within
+  the line's length — the same swept-sphere test as the collision pass's
+  (`Control.dll:0x1001e9f0`), with 0.001 for the least squared length it will
+  sweep.
+
+**What does not enter it** (*read*). No gun and no round is asked anything: the
+flag is set before the gun loop, and the loop reads it for a guided round, a
+lobbed one and a beam alike. A round frame's flags (`.ctl` `+116`) change the
+distance score and nothing else here. The target's class is not asked either;
+the heavy-round rule is the only place the module looks at it. And an enemy
+unit standing in the way, other than the target, does not block the line at
+all.
+
+*Measured* on C03 M02, along the raider's way to the player's Small Bunker in
+openparkan's own run of the raid, sampled each half second, the landscape
+alone, from the raider's launcher's muzzle to two points of the bunker and
+along the line as read:
+
+| the raider stands | the bunker's origin, z 11.9 | its node sphere's centre, z 21.4 | the read: turret sphere to the deflector's, z 26.4 |
+|---:|---|---|---|
+| 700 m | ground 125 m ahead | ground 127 m ahead | ground 125 m ahead |
+| 600 m | 83 m ahead | 87 m ahead | 85 m ahead |
+| 498 m | 24 m ahead | 25 m ahead | 22 m ahead |
+| 429 m | 23 m ahead | 27 m ahead | 23 m ahead |
+| **423 m** | 48 m ahead | 62 m ahead | **clear** |
+| 399 m | 33 m ahead | 43 m ahead | clear |
+| **390 m** | 29 m ahead | **clear** | clear |
+| 349 m | 161 m ahead | clear | clear |
+| 298 m | 106 m ahead | clear | clear |
+| 204 m | 66 m ahead | clear | clear |
+| 113 m | 62 m ahead | clear | clear |
+| **106 m** | **clear** | clear | clear |
+
+The middle of the box over the bunker's nodes' spheres, which openparkan asked
+before, lies at the origin's height and clears with it, at 106 m. The bunker's
+origin is under the lip of the plateau it is sunk into, and a line to it
+grazes the ground all the way in; the deflector stands on the roof, and the
+line to it clears as the raider tops a rise 423 m off and stays clear from
+there. **That accounts for the recording's launch from afar**: "Let's Play -
+Parkan: Iron Strategy, Part 6" (-yNnsqudMzw) has the raider 345 m off at 13:49.5
+with its missile in the air and 292 m off as it strikes at 13:54.2, which at the
+missile's 45 m/s, the raider closing at a steady 11.3 m/s, puts the launch 365
+to 390 m off (*derived*, with and without the raider's own speed added to the
+missile's). openparkan's raider, following all of the
+above, launches the first of its two 414 m off, within one wait of the line
+clearing, and lands one on the deflector with the raider 314 m off. The line
+at its first clearing passes the rise by about 0.2 m and the two launchers
+hang 1.7 m either side of the turret it is asked from, so one missile of the
+first pair meets the rise 67 m ahead; whether the game's raider loses one the
+same way the recording does not show. What is left between 414 and the
+recording's 365 to 390 is the way the raider takes over the rise and the
+moment its wait runs out.
 
 ### The lead is the turret's fastest gun — *read*, and *measured*
 
@@ -1342,12 +1643,44 @@ assembled nowhere, so "in the tree" and "assembled" are detected apart.
   flyer and anything slower, the fixed towers among them, take 0.45. The premise
   was wrong: the bunker's flame scores 1 at any height, its round's bit 8
   returning before the height term (`0x1001ba00`), so with its turret settled it
-  passes 0.85 on a flyer 15 m up as on a walker, and the engine's bunker fires 4
+  passes 0.85 on a flyer 15 m up as on a walker, and the engine's bunker fires 6
   flames in 6 s on a flyer hovering 80 m out
   ([How the AI fires](#how-the-ai-fires--read)).
 - The order record whose `+0x30` id lets the go, attack and search tasks fire
-  without aim (`0x10014bd0`); whether a self-given attack carries one; and
-  the height term in the distance score.
+  without aim (`0x10014bd0`); whether a self-given attack carries one; ~~and
+  the height term in the distance score~~ — **read**: the firing unit's origin's
+  height above its target's, so firing down loses score
+  ([How the AI fires](#how-the-ai-fires--read)).
+- ~~What the AI's clear line is (`0x10025c60`, `0x10024981`): its two ends, the
+  query, whether striking the target counts as clear, and whether a guided or a
+  lobbed round asks it at all.~~ **Read**, and **measured** on C03 M02. One line
+  a pass for the whole unit, from the own sphere of the node its first turret
+  sits on, 0.7 of the radius out, to the own sphere of the **part of the target
+  it aims at**, the whole radius short; through `IWorld` slot 12 with its own
+  and the target's ids left out, over the landscape, buildings and scenery and
+  no unit (`[0x40a, 0, 0, 0, 0, 8, 0, 0]`); and then, as a sphere of 0.5, past
+  every unit of its own owner. `0x10025c60` is that last sweep, not the line. No
+  round's flags are asked. The part is the heaviest live device by class, a
+  deflector on 435 of the 458 assemblies, and on the Small Bunker it stands on
+  the roof: the line to it clears 423 m off where a line to the bunker's origin
+  clears at 106
+  ([The part the AI aims at](#the-part-the-ai-aims-at--read-and-measured),
+  [The line every gun waits on](#the-line-every-gun-waits-on--read-and-measured)).
+  Still open:
+  - whether a building's mesh agent, which hangs on `CBuilding`, answers the
+    same id as the building, so that leaving the target's id out leaves its
+    faces out; the walk skips the object whose slot 9 matches and still walks
+    its children (`Terrain.dll:0x100256cf`, `0x10025abe`). openparkan leaves the
+    whole target out;
+  - that the landscape's slot-4 record's `+0x3c`, which its slot 5 compacts
+    into the word the 20 m exception reads, is the file's face dword
+    (*inferred*);
+  - the 25 to 50 m between openparkan's first launch on C03 M02, 414 m off, and
+    the recording's, 365 to 390 m (*derived*).
+- The turret's property `0xf00` (`Control.dll:0x10028bb0`), the share of its aim
+  the turret factor's *θ* takes at stage 1, and the gun's report codes 2 to 8:
+  openparkan stands a settled turret and a run-out lock in for them
+  ([How the AI fires](#how-the-ai-fires--read)).
 - ~~A seeker's value 2: read by nothing found.~~ Answered: it is the gun's lock
   ([A guided gun waits for a lock](#a-guided-gun-waits-for-a-lock--read-and-measured)).
 - ~~What an AI turret's state word is while it fights.~~ `0x400`, set on every

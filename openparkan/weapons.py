@@ -359,7 +359,9 @@ def ai_distance_score(distance: float, rise: float, speed: float) -> float:
     Behavior.dll's gun record keeps three distances from the round's speed:
     none nearer than 5 m, full out to ``(speed + 1) / 2``, none past
     ``2 (speed + 1)`` (``0x1001b4b0``); the score is then scaled by
-    ``1 - rise / speed`` (``0x1001b9f0``).
+    ``1 - rise / speed`` (``0x1001b9f0``).  ``rise`` is how far the firing
+    unit's origin stands above its target's (``0x10024337``): a unit firing
+    down loses score.
     """
     full = (speed + 1.0) * 0.5
     none = 2.0 * (speed + 1.0)
@@ -386,3 +388,45 @@ def ai_fire_wait(magazine: float, difficulty: float = 1.0) -> tuple[float, float
         each = 30.0 / magazine / difficulty
         return each, each
     return 0.5 / difficulty, 1.5 / difficulty
+
+
+#: What a device of each class weighs when the AI picks the part of a target
+#: to aim at (``Behavior.dll:0x10025830``, the jump table at ``0x100259c8``
+#: through the byte map at ``0x100259e8``): a deflector, a turret, a gun, an
+#: engine, a radar, a power store, a fight shield, a repair system.  Any other
+#: class weighs ``AI_PART_OTHER``.
+AI_PART_WEIGHT = {21: 30.0, 1: 20.0, 2: 15.0, 5: 14.0, 8: 14.0, 19: 10.0, 9: 7.0, 15: 3.0}
+AI_PART_OTHER = 1.0
+#: What a running-gear node weighs in the same pick (``0x10059978``).
+AI_GEAR_WEIGHT = 7.5
+#: An AI unit's line of fire starts this share of its turret's sphere's radius
+#: out from the centre (``0x10059968``), is a sphere this thick past the
+#: unit's own side (``0x10024954``), and passes a face flagged ``0x20`` while
+#: it is shorter than ``AI_LINE_NEAR`` (``0x1005960c``).
+AI_LINE_FROM = 0.7
+AI_LINE_RADIUS = 0.5
+AI_LINE_NEAR = 20.0
+
+
+def ai_part_weight(type_id: int, life: float = 1.0) -> float:
+    """What a device of class ``type_id`` weighs in the AI's pick of a part.
+
+    ``life`` is its node's life over its maximum: the weight is the class's
+    figure times ``2 - life``, and a part with no life left weighs nothing.
+    """
+    if life <= 0.0:
+        return 0.0
+    return (2.0 - life) * AI_PART_WEIGHT.get(type_id, AI_PART_OTHER)
+
+
+def ai_part(classes: list[int]) -> int | None:
+    """Which of a whole target's devices the AI aims at: an index into ``classes``.
+
+    The devices are walked from the last, and only a greater weight takes the
+    pick, so among equals the last listed keeps it.  None for no devices.
+    """
+    best: int | None = None
+    for i in reversed(range(len(classes))):
+        if best is None or ai_part_weight(classes[i]) > ai_part_weight(classes[best]):
+            best = i
+    return best

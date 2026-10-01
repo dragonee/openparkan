@@ -14278,6 +14278,104 @@ def check_ai_fight(check, game: Path) -> None:
           f"Search and capture skips bridges (0x10030859), so it roams and a Refit fails")
 
 
+def _assembly_devices(armoury, unit: objects.UnitDefinition) -> list[control.Component]:
+    """An assembly's devices in its device manager's order, a building's among them.
+
+    The root's components come first -- a ``FORT`` root's are those of the record
+    its first slot names -- then each external part's, and an internal part
+    stands in the slot it was fitted to (docs/28-chassis.md)."""
+    parents = unit.parents()
+    devices: list[control.Component] = []
+    first: dict[int, int] = {}
+    for i, c in enumerate(unit.components):
+        record = armoury.library.get(c.ref.member.lower())
+        hops = 0
+        while i == 0 and record is not None and record.tag == "FORT" and hops < 3:
+            named = next((s for s in record.slots if s and not s.suffix), None)
+            record = armoury.library.get(named.member) if named else None
+            hops += 1
+        parsed = armoury.controller(record.name.lower()) if record else None
+        if record is None or parsed is None:
+            continue
+        if i == 0 or record.tag == objects.EXTERNAL_TAG:
+            first[i] = len(devices)
+            devices.extend(parsed.components)
+        elif record.tag == objects.INTERNAL_TAG and parsed.components and parents[i] in first:
+            slot = first[parents[i]] + c.attach_node
+            if 0 <= slot < len(devices):
+                devices[slot] = parsed.components[0]
+    return devices
+
+
+def check_ai_aim(check, game: Path) -> None:
+    """The part of a target the AI aims at, and the line its guns wait on (docs/29)."""
+    behavior = _image_at((game / "Behavior.dll").read_bytes())
+    ctl = _image_at((game / "Control.dll").read_bytes())
+    iron = _image_at((game / "iron3d.dll").read_bytes())
+
+    def f32(at, va: int) -> float:
+        return struct.unpack("<f", at(va, 4))[0]
+
+    # The picker's byte map over classes 1..21 into its jump table; each case but the
+    # last loads the life term and multiplies by one constant (fld; fmul dword [imm32]).
+    cases = struct.unpack("<8I", behavior(0x100259C8, 32))
+    byte_map = list(behavior(0x100259E8, 21))
+    weights = {}
+    for cls, case in enumerate(byte_map, start=1):
+        head = behavior(cases[case], 10)
+        if head[:6] == bytes.fromhex("d9442418d80d"):
+            weights[cls] = f32(behavior, struct.unpack_from("<I", head, 6)[0])
+    requests = (ctl(0x100291B5, 10) == bytes.fromhex("c7051c81041001000000")
+                and ctl(0x1002AE35, 10) == bytes.fromhex("c7055483041001000000")
+                and ctl(0x10025185, 10) == bytes.fromhex("c705747a041001000000"))
+    check("Behavior.dll: the AI aims at a part, weighed by its device's class",
+          {c: round(w, 3) for c, w in weights.items()} == weapons.AI_PART_WEIGHT
+          and f32(behavior, 0x10059978) == weapons.AI_GEAR_WEIGHT
+          and requests and iron(0x10091B0E, 2) == bytes.fromhex("6a00"),
+          f"the pick's byte map {byte_map} names {len(set(byte_map)) - 1} weighted cases over "
+          f"classes 1 to 21: {dict(sorted(weights.items()))}, 1 for the rest, and 7.5 for a "
+          f"running-gear node.  The turret, the gun's gate and the seeker each ask interface "
+          f"0x20 slot 3 with a request whose fourth word is 1 (Control.dll:0x100291b5, "
+          f"0x1002ae35, 0x10025185), one node's own sphere, and the player's target is handed "
+          f"with part 0 (iron3d.dll:0x10091b0e)")
+
+    line = (behavior(0x10024470, 5) == bytes.fromhex("680a040000")
+            and behavior(0x100244AA, 11) == bytes.fromhex("c78424740100000800 0000".replace(" ", ""))
+            and behavior(0x10024954, 11) == bytes.fromhex("c78424f80000000000003f"))
+    check("Behavior.dll: the line a unit's guns wait on asks classes 0x40a and no unit",
+          line and round(f32(behavior, 0x10059968), 3) == weapons.AI_LINE_FROM
+          and f32(behavior, 0x1005960C) == weapons.AI_LINE_NEAR,
+          "the query record's class mask is 0x40a (0x10024470) -- the landscape, buildings and "
+          "scenery -- with excluded flags 8 (0x100244aa) and no excluded class; the line starts "
+          "0.7 of the turret's sphere's radius out (0x10059968), is swept 0.5 thick past the "
+          "unit's own side (0x10024954) and passes a face flagged 0x20 under 20 m (0x1005960c)")
+
+    armoury = weapons.Armoury(game)
+    dats = sorted(p for p in (game / "UNITS").rglob("*") if p.suffix.lower() == ".dat")
+    picks: dict[bool, Counter] = {False: Counter(), True: Counter()}
+    odd: dict[int | None, list[str]] = defaultdict(list)
+    for path in dats:
+        unit = objects.load_unit(path)
+        classes = [d.type_id for d in _assembly_devices(armoury, unit)]
+        pick = weapons.ai_part(classes)
+        cls = classes[pick] if pick is not None else None
+        picks[unit.is_building][cls] += 1
+        if cls != control.DEFLECTOR_TYPE:
+            odd[cls].append(path.stem.lower())
+    bunker = [d.type_id for d in _assembly_devices(
+        armoury, objects.load_unit(next(p for p in dats if p.stem.lower() == "sbunk02")))]
+    check("UNITS: whole, 435 of the 458 assemblies are aimed at by their deflector",
+          len(dats) == 458
+          and dict(picks[False]) == {21: 372, 1: 8, 5: 2}
+          and dict(picks[True]) == {21: 63, 19: 11, None: 2}
+          and bunker == [19, 9, 15, 12, 13, 13, 26, 25, 1, 4, 2, 2, 8, 21],
+          f"of the {sum(picks[False].values())} units {dict(picks[False])} by the class of the "
+          f"device picked, of the {sum(picks[True].values())} buildings {dict(picks[True])}; "
+          f"the ones not aimed at by a deflector: {dict(sorted(odd.items(), key=str))}.  The "
+          f"Small Bunker sbunk02's devices in order are {bunker}: its deflector, the last, "
+          f"takes the pick at 30 over its turret's 20")
+
+
 #: The patrol block's constants, by offset: name and compiled default
 #: (``Behavior.dll:0x10016250``, bound by name at ``0x10016480``).
 PATROL_CONSTANTS = {
@@ -27056,7 +27154,8 @@ def run(game: Path) -> int:
         check_chassis, check_weapons,
         check_firing,
         check_moving_parts,
-        check_targeting, check_target_marks, check_ai_fight, check_patrol, check_turrets,
+        check_targeting, check_target_marks, check_ai_fight, check_ai_aim, check_patrol,
+        check_turrets,
         check_packages,
         check_target_panel,
         check_wingman,

@@ -229,6 +229,30 @@ hero turret the four channels animate `CP_m1o1`, `Turn_m1o1` (49–53),
   the turret holds its heading meanwhile. Keypad 5 switches this off and on
   ([The hull follows the turret](#the-hull-follows-the-turret--read-and-measured)).
 
+**What a turret traces** (*read*). A turret's target is a pair, an object's id
+and **a node of it**, kept at `+0x94` and `+0x98`. The setter
+(`Control.dll:0x100280d0`) makes a node of −1 into 0, and does nothing — no
+relink, so no gun's lock starts again — when the pair it is handed is the one
+it holds (`0x100280e7`–`0x100280f9`).
+
+- **The point it traces is that node's own sphere's centre** (`0x10028c40`,
+  called from the trace at `0x10028679`): interface `0x20` slot 3 asked with the
+  pair and the request at `0x10048110`, whose fourth word a static initialiser
+  sets to 1 (`0x100291b5`), which is the sphere of the node's level-0 slot
+  through the node's matrix (`AniMesh.dll:0x1000f3c5`). The other request, at
+  `0x10048000`, the module's default that gets the object's node sphere, is
+  asked only for a pair with no id or with a node of −1 or −2
+  (`0x10028cb4`–`0x10028cc3`), which the setter never leaves it with.
+- **It gives up a dead part** (`0x100286ca`–`0x1002871e`): with an id and a
+  node other than −2, it asks the target's `ILifeSystem` for that node's life
+  over its maximum, and traces nothing while that is 0 or less. Before that it
+  gives up a target whose owner word reads `0xfffe` (`0x100286b0`–`0x100286c4`),
+  and one that is its own unit (`0x1002865f`–`0x1002866c`).
+- **Who names the node.** The player's target is handed with node 0
+  (`iron3d.dll:0x10091b0e`), and an AI unit's with the part its fight module
+  picked, a deflector on 435 of the 458 shipped assemblies
+  ([29-weapons.md](29-weapons.md#the-part-the-ai-aims-at--read-and-measured)).
+
 **Which way a count turns** (*read* chain, *derived* sign):
 
 - **Counts.** DirectInput's relative mouse state is copied as it comes
@@ -779,6 +803,19 @@ object's, as `0x7c48` into `0x170`
 **Read for the landscape only.** The same `+8` is dereferenced whatever the line
 meets, so a mesh object's `0x18` interface must fill the same field with its own
 face's normal; that side of it was not traced.
+
+**The word at `+4` is the face's flags** — *read*. `GetWorldFace` copies it from
+the first word of the struck object's slot-5 record (`0x10024fad`–`0x10024fb2`).
+The landscape compacts it from the slot-4 record's `+0x3c` mask
+(`0x100202e4`–`0x10020371`): `0x100` → 1, `0x8000` → 2, `0x10000` → 4, `0x40000` →
+8, `0x80000` → `0x10`, `0x80` → `0x20`. A mesh answers the struck triangle's own
+first word (`AniMesh.dll:0x10013773`), the flags a query's class masks test. A
+reader of it is the AI's line of fire, which asks the answer with `0x10` and
+lets a short line pass a face whose word carries `0x20`
+([29-weapons.md](29-weapons.md#the-line-every-gun-waits-on--read-and-measured));
+its other readers were not looked for. That line goes through **`IWorld` slot
+12** (`Terrain.dll:0x10025540`), which is slot 7's walk with a list of object
+ids left out of it.
 
 **What turns it off** (`0x10038ad0`, *read*):
 
