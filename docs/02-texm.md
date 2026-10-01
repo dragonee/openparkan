@@ -140,6 +140,27 @@ textures** — so it is padding. Palette index 0 is unused in the image data of
 all fifteen, which rules out the other common convention too. Of those
 fifteen, four are trees and ten are `WATER0`..`WATER9`, an animation.
 
+### A texel is used as it is stored — *read*
+
+Nothing between the file and the frame decodes a texel: the device samples the
+surface's bytes, multiplies them by a vertex colour that was itself formed
+from the files' bytes, and writes and blends the result into a frame that is
+never encoded. A renderer that reads the textures as sRGB and blends in
+linear gets every sum wrong — a fog blend, an alpha blend, the specular a
+light adds — though its products come out nearly right
+([10-sky.md](10-sky.md#the-frame-holds-what-the-files-hold--read-and-measured)).
+The engine uploads the bytes as they are.
+
+**The clouds are the worked case of a graded alpha.** The three cloud sheets
+the missions name, `S_03.0`, `S_05.0` and `S_06.0`, are 256-pixel `4444`, so
+their alpha has sixteen levels and no more (*measured*: 16 distinct values on
+`S_03` and `S_05`, 5 on `S_06`; `S_05` is 0 on 66% of its texels, `S_06` on
+none, with a mean of 207 of 255). It is used as an alpha, blended
+`SRCALPHA`/`INVSRCALPHA`, not as a key; the steps it leaves show only where
+the layer's colour differs from the sky behind it, which the layer's own fog
+sees to everywhere but overhead
+([10-sky.md](10-sky.md#the-clouds-are-lit-and-fogged-on-a-range-of-their-own--read-and-measured)).
+
 ### Most of that alpha is not transparency
 
 Carrying alpha and *being* transparent are different things, and conflating

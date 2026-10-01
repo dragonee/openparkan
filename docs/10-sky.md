@@ -622,10 +622,12 @@ interpolation reads that field.
 property 15's R, G and B ÷ 255 at `+0x308`..`+0x310` and zeroes
 `+0x318`..`+0x320` (`0x1007a4de`–`0x1007a5b3`), then queues the cloud layer
 with `+0x304` as its material block (`0x1007ab51`). The draw item keeps that
-block at `+0x70`, and the item setup builds the Direct3D material from it
-(`0x10030819`): its `+4` is the diffuse colour and its `+0x14` the material's
-**ambient** colour, to which the scene colour is added to make the emissive.
-So the clouds are slot 18 in diffuse, and the scene colour alone in emissive. *Measured*: on 24 of the 27 files whose light varies, slot
+block at `+0x70`: its `+4` is the diffuse colour and its `+0x14` the material's
+**ambient** colour. So the clouds' material is slot 18 in diffuse and nothing
+in ambient, and the layer is lit: what a vertex of it shows is in
+[The clouds are lit](#the-clouds-are-lit-and-fogged-on-a-range-of-their-own--read-and-measured).
+The slot's alpha is not read; the block's ambient alpha stays the entry's.
+*Measured*: on 24 of the 27 files whose light varies, slot
 18 is at its brightest where the light is — `#f0f5ff` at Mission 01's
 brightest keyframe, `#ac2800` as its sun rises. Control: slot 16, 6.
 
@@ -763,11 +765,14 @@ The vertices:
 **How it is queued.** The sky's layers go through the shader's slot 16
 (`0x10028500`, `CShade`'s vtable `0x1009b17c`, installed at `0x10041f94`) into
 group 1, with the static render record at `0x100a7138` — its own class's
-vtable and flags 0, both written at `0x1007c07d` — so they take the scene's
-fog, not their own. The record only reaches the item at
-all when the item's own flag word carries `0x10` (`0x100285a2`), which of the
-sky's draws only the clouds do, and the clouds hand over a record of their own
-with flags `0x40` and fog 5000 to 11380.7 (`0x1007a5c3`–`0x1007a607`). Bits 0
+vtable and flags 0, both written at `0x1007c07d`. The record only reaches the
+item at all when the item's own flag word carries `0x10`, the lit flag
+(`0x100285a2`), which of the sky's draws only the clouds do, and the clouds
+hand over a record of their own with flags `0x40` and fog 5000 to 11380.7
+(`0x1007a5c3`–`0x1007a607`). The other draws are unlit, so the shade never
+sees them, and they carry their fog factor themselves: a constant specular of
+`0xff000000` (`0x100792bc`), alpha 255, which is **no fog at all**
+([Fog](#fog)). Bits 0
 and 1 of another argument become the draw item's `ZENABLE` and `ZWRITEENABLE`
 bytes (`+0x12c`, `+0x12d`, each set when its bit is clear, `0x10028664`), which
 the item renderer sets as render states 7 and 14 (`0x100302fb`, `0x10030318`):
@@ -888,7 +893,8 @@ count at `+0x198` (`0x100286ab`–`0x100286c9`).
 - the rim takes the fog colour every takt.
 
 **The clouds** use the same cap with its origin 5000 below the camera
-(`0x1007a08e`), and carry their own fog, from 5000 to 11380.7 (`0x1007a5d4`).
+(`0x1007a08e`), and carry their own fog, from 5000 to 11380.7 (`0x1007a5d4`):
+[below](#the-clouds-are-lit-and-fogged-on-a-range-of-their-own--read-and-measured).
 
 ### The sky's first draw is a screen-wide quad — *read*
 
@@ -935,8 +941,10 @@ modules none hands a constant in `edx`.
 ### The three layers and their texture coordinates — *read*
 
 The cap builder (`0x100787f0`) lays out, per vertex, one position array
-(`+0x34`, 12 bytes) and one colour array (`+0x38`, 4) — and then **three**
-eight-byte arrays, `+0x40`, `+0x44` and `+0x48`. They are texture coordinates,
+(`+0x34`, 12 bytes), one colour array (`+0x38`, 4) and one **normal** array
+(`+0x3c`, 4: the unit vector out from the sphere's centre as three signed
+bytes at 127, `0x10078c39`–`0x10078edd` — (0, 0, 1) at the apex) — and then
+**three** eight-byte arrays, `+0x40`, `+0x44` and `+0x48`. They are texture coordinates,
 and all three are the same thing: the vertex **projected straight down on to
 the horizontal plane, in radii**, times one constant each
 (`0x10078f2f`, `0x10078fa9`, `0x10079023`):
@@ -958,12 +966,22 @@ nebula never leaves one tile of its sheet and the clouds cross three.
 name. The builder fills four of them, each a run of `{pointer, stride}` pairs
 (`0x100792fc` onwards):
 
-| block | position | colour | texture coordinates |
-|---|---|---|---|
-| `+0xd4` | `+0x34` | `+0x38`, per vertex | none |
-| `+0x74` | `+0x34` | a constant white | `+0x40`, *K* 15 |
-| `+0x134` | `+0x34` | `+0x3c`, per vertex | `+0x44`, *K* 3 |
-| `+0x194` | `+0x34` | a constant white | `+0x48`, *K* 1 |
+| block | position | normal | colour | specular | texture coordinates |
+|---|---|---|---|---|---|
+| `+0xd4` | `+0x34` | none | `+0x38`, per vertex | `0xff000000` | none |
+| `+0x74` | `+0x34` | none | a constant white | `0xff000000` | `+0x40`, *K* 15 |
+| `+0x134` | `+0x34` | `+0x3c`, per vertex | none | none | `+0x44`, *K* 3 |
+| `+0x194` | `+0x34` | none | a constant white | `0xff000000` | `+0x48`, *K* 1 |
+
+A block's pairs are, in order, the position, the normal (`+8`), the diffuse
+colour (`+0x10`), the specular colour (`+0x18`) and the two texture stages'
+coordinates (`+0x20`, `+0x28`), which is how the shade reads them
+(`0x1004e743`–`0x1004e781`). An earlier reading here had `+0x3c` as the
+clouds' colours: it sits in the **normal** place of its block
+(`0x100794ac`–`0x100794bb`, pointer at `+0x13c`, stride 4), and the block has
+no colour stream at all — the shade makes one for it. The constant white is
+the sky's `+0x6c` (`0x100792f5`) and the constant specular its `+0x5c`
+(`0x100792bc`), each handed over with a stride of 0.
 
 and the sky's four draws, in the order it queues them:
 
@@ -983,6 +1001,60 @@ a flat quad over the viewport.
 
 So **the nebula is drawn first and the coloured dome over it**, which is what
 makes the dome's alpha matter.
+
+### The clouds are lit, and fogged on a range of their own — *read*, and *measured*
+
+The cloud layer is the one sky draw filed **lit** — item flags `0x14`
+(`0x1007aaf1`) — so it goes through the shade like a mesh
+([The lit colour is the game's own](#the-lit-colour-is-the-games-own--read-and-measured)):
+
+- its **material** is `sky.wea`'s slot 2 with the diffuse overwritten by the
+  keyframe's cloud colour and the ambient zeroed (`0x1007a4de`–`0x1007a5b3`).
+  The ambient alpha is the entry's own, and *measured* it is 1.0 on all three
+  cloud materials the 29 missions name (`ENV_CLOUDS` on 12, `ENV_CLOUDS_2` on
+  10, `ENV_CLOUDS_4` on 6; the 29th names `TOK51`, a 16-pixel texture whose
+  alpha is 0 throughout, which is no clouds at all);
+- its **normals** are the cap's own, out of the sphere and so upward. A vertex
+  takes whichever of the sun object's two lights comes down at it — the main
+  one while the body is above the horizon, the second while it is below — on
+  the cloud colour, and the scene colour is the floor under that;
+- its **lights** are whatever list the shade last gathered: the item is
+  filed with the list the shade hands out (`0x1002863d`, slot 24), and the
+  sky's draws are filed after the world's (`CCamera::Render` asks the world
+  first, `0x1008477e`, and the queue's second drawable with pass flags
+  `0x1000` after it, `0x100847e8`). That list is the last drawn object's or
+  cell's, with the sun's two lights in it; *which* object's it is, and so
+  which point lights ride along, is **not read**;
+- its **fog** is its own record's: from 5000 — the dome's height less the
+  drop, `0x10077c43` — to a third of the sphere's radius, 11380.7
+  (`0x10077c73`), toward the frame's fog colour, the horizon ahead. The
+  distances are from the eye, which stands 5000 over the cap's origin:
+
+| vertex | distance | fog keeps |
+|---|---:|---:|
+| apex | 5000 | 1 |
+| ring 1, 40.6° up | 7035 | 0.77 |
+| ring 2, 17.5° up | 11063 | 0.07 |
+| ring 3, 4.7° up, and out | 15553 + | 0 |
+
+  So the layer is itself overhead and **the horizon's own colour from the
+  cap's third ring out to the rim**, and between the rings the device carries
+  the two vertex colours across the face.
+
+Its texture is blended on its own alpha, mode 4. *Measured*: `S_03.0`,
+`S_05.0` and `S_06.0` are 256-pixel `ARGB4444`, so the alpha has 16 levels —
+`S_05` is 0 on 66% of its texels and 35 of 255 in the mean, `S_06` is never 0
+and 207 in the mean, a nearly solid sheet. A fogged vertex keeps its alpha,
+so below the second ring a solid sheet **paints the fog colour over the
+dome's gradient**, and the lower sky is one smooth colour.
+
+*Seen*, with the frames converted by the video's own matrix. C02 M04's
+briefing at 43.5 s ("Part 4", Qqs8_i9IeUU, 16:12.5) looks level, and its sky
+is one green, (105, 169, 22), where the fog colour ahead is (107, 172, 25);
+C03 M02's at 29 s ("Part 6", -yNnsqudMzw, 1:11.7) is one red, (158, 8, 21).
+Drawn unlit and unfogged, as the engine had it, the first showed yellow
+streaks with stepped edges across that green and the second a grey-brown
+band; lit and fogged the engine's sky reads (107, 171, 24) and (161, 9, 22).
 
 ### The dome's alpha shows the nebula through — *read*, and *measured*
 
@@ -1046,35 +1118,199 @@ So the sky blends on alpha everywhere but the flare, which is added. `ENV_STARS`
 is the one material in the game with **bit 0** of the flags byte set, and what
 that bit does is still not read — it does not change the mode.
 
+### The frame holds what the files hold — *read*, and *measured*
+
+The game is Direct3D 7's fixed function, and nothing in it decodes or encodes
+a colour: a texel, a vertex colour, the fog colour and the frame are all the
+bytes as stored, and every multiply, add and blend is done on them. So the
+arithmetic of a fogged, textured vertex is, with *T* the texel, *D* and *S*
+the vertex's diffuse and specular, *F* the fog colour and *k* what the fog
+keeps:
+
+```
+frame = k × min(T × D + S, 1) + (1 − k) × F          all of them stored values
+```
+
+The engine used to draw the scene into an sRGB frame from sRGB textures —
+decoding *T*, *D* and *F* to linear, blending there, and letting the frame
+encode the result — and held that this gave "the game's display-space
+blends". It does not. A product nearly survives the curve, since
+*x*^2.2 × *y*^2.2 = (*xy*)^2.2, and a sum does not:
+
+| *T*, *D* | *F*, *k* | the game writes | decoded, blended, encoded |
+|---|---|---:|---:|
+| 0.3, 0.5 | —, 1 | 0.150 | 0.132 |
+| 0.3, 0.5 | 0.675, 0.5 | 0.4125 | 0.500 |
+
+— a dark ground texel half lost in C02 M04's green fog came out **22 levels of
+255 paler**, and unfogged 5 darker. Alpha blends go the same way: a see-through
+surface over a dark one is lighter blended in linear.
+
+The scene is now drawn as the HUD and the effects already were: into the
+frame read without sRGB decoding, from textures read as stored, with the
+files' colours as they are.
+
+### The lit colour is the game's own — *read*, and *measured*
+
+**No device material is ever built, and no device light.** A draw item that
+asks to be lit carries `0x10` in its flags: every mesh batch
+([11-effects.md](11-effects.md#what-a-light-does-to-a-surface--read-and-measured)),
+the landscape's cells (`0x414`, `0x10044627`,
+[03-terrain.md](03-terrain.md#how-the-landscape-is-lit-and-fogged--read-and-measured))
+and the clouds (`0x14`). `CStridedPrimitive::RenderVB` (`0x1002fab0`) tests
+the flag (`0x1002fe3d`) and then the setting `UseDXLighting`, entry 29 of the
+page (`0x1002fe50`). **It is 0** — compiled so (`0x1005fcce`), and nothing
+writes it ([The render settings](#the-render-settings)) — so the render calls
+slot 8 of the shader component, `CShade::ShadeIndexedStrided` (`0x1004df70`,
+named by its panic strings), clears the flag (`0x1002ffbc`), and the device
+draws the item with its lighting off, from a buffer of position, diffuse,
+specular and texture coordinates (`0x1002f995`). `Ngi32.dll`'s reset leaves
+`SPECULARENABLE` at 1 (`0x10006c38`, the state's cache at `+0x190` taking the
+1 in `ebx`), so what the device does with a vertex is: texture stages by the
+diffuse, **plus the specular**, fogged by the specular's alpha.
+
+**What the shade writes on a vertex.** It merges the item's own record into
+the scene's (`0x1004df7b`), copies the material's diffuse, ambient, specular
+and power out of the item's block (`0x1004e026`–`0x1004e0a7`), puts the eye
+into the item's frame, and for each vertex keeps the unit vector to the eye
+and its length (`0x1004e7b1`–`0x1004e8ea`). Then:
+
+1. **The lights**, while the state's lighting flag is on and the material has
+   a diffuse that is not black or a specular with a power (`0x1004e99f`–
+   `0x1004ea30`): each light of the item's list, a point light through
+   `g_FastProc`'s `+0xc4` and a directional one through `+0xc8`. The
+   directional routine (`Ngi32.dll:0x10016070`) takes the cosine of the
+   vertex's normal — three signed bytes at 127 — against the way back along
+   the light's travel, passes over a vertex it is not above 0 on, and adds
+   **light colour × material diffuse × cosine** to the vertex's diffuse sum.
+   Where the item wants highlights it mirrors the light's travel in the
+   normal, takes that against the vector to the eye, and adds **light colour ×
+   material specular × that cosine squared `power − 1` times** to the
+   specular sum (`0x1001616f`–`0x100161e9`): exponents 4, 8, 16 and 32 for
+   the shipped powers 3, 4, 5 and 6. With the lighting off, or nothing to
+   light, the diffuse sum is the material's diffuse itself (`0x1004ee3a`).
+2. **The ambient and the floor**: `g_FastProc`'s `+0x50` with the sum, the
+   material's ambient and the state block's colour (`0x1004f225`–`0x1004f23d`).
+   All four builds of it — x87 `Ngi32.dll:0x100248a0`, 3DNow! `0x1001bdd0`,
+   SSE `0x1001d980`, P6 `0x1001ffc0` — **add the ambient to the sum and then
+   take the larger of that and the scene colour**: `fadd` then a compare and
+   a store of the third argument where the sum is below it; `addps` then
+   `maxps`. So
+
+   ```
+   lit = max(material ambient + Σ light colour × material diffuse × cos θ,  scene colour)
+   ```
+
+3. **The knee**: a channel is as it is up to 1, *c* ÷ 6 + 5 ÷ 6 up to 7, and
+   2 beyond (`0x1004f26d`–`0x1004f3cd`; the constants at `0x100a2354`,
+   `0x100a2360` and `0x1009b35c`).
+4. **The overbright goes to the specular**: what a channel then has over 1 is
+   added to the specular sum and the diffuse held at 1
+   (`0x1004f3e5`–`0x1004f4a5`); and the specular sum is scaled in its turn,
+   0.8 of it up to 1, 0.1 of it plus 0.7 up to 3, and 1 beyond
+   (`0x1004f4c3`–`0x1004f648`).
+5. **The alphas**: the diffuse's is the material's ambient alpha times the
+   item's own factor (`0x1004f3d0`) — 1, a distance fade, the vertex's alpha
+   stream or their product, by the record's mode (`0x1004f0b8`, the table at
+   `0x1004f6ef`); the specular's is the fog factor ([Fog](#fog)).
+
+The two colours are packed to bytes (`+0x54`) into streams the shade gives
+the item (`0x1004e246`–`0x1004e3a1`), so the colour is a **vertex's** and the
+device carries it across the face.
+
+A lit vertex is therefore never darker than the scene colour and never
+brighter for it; a light past 1 whitens what it falls on, by up to 0.8 of a
+channel; and a batch whose lightmap has made its diffuse its self-light
+([07-objects.md](07-objects.md#how-a-lightmapped-batch-is-drawn--read-and-measured))
+shows the larger of that colour and the scene's.
+
+*Measured*, the engine before and after following this — with the fog and the
+[ground's materials](03-terrain.md#the-uv-unit-is-1024--read-and-measured)
+beside it — against the recordings' frames converted by the video's own
+matrix, mean colours over the same areas:
+
+| frame | area | recording | before | after |
+|---|---|---|---|---|
+| C02 M04 briefing 43.5 s | near hill | (76, 115, 26) | (90, 129, 30) | (78, 118, 28) |
+| | the hill behind it | (35, 57, 11) | (91, 136, 27) | (37, 61, 13) |
+| | far hill | (77, 123, 20) | (99, 160, 24) | (79, 126, 21) |
+| | sky | (105, 169, 22) | (116, 176, 22) | (107, 171, 24) |
+| C02 M01 briefing 57.5 s | sky | (95, 150, 20) | (105, 164, 24) | (96, 151, 22) |
+| C03 M02 briefing 54 s | cracked ground | (59, 7, 10) | (89, 8, 15) | (57, 11, 14) |
+| | sky | (127, 12, 23) | (158, 12, 27) | (133, 14, 26) |
+| C03 M02 briefing 29 s | sky | (158, 8, 21) | (102, 20, 20) | (161, 9, 22) |
+| C03 M02 cockpit, 79 s in | sky | (169, 38, 41) | (129, 62, 53) | (157, 39, 53) |
+
+**Not followed here**: the engine shades a point light's diffuse and not its
+highlight; it gathers one list of point lights a frame
+([11-effects.md](11-effects.md#what-a-light-does-to-a-surface--read-and-measured));
+and it does not round a vertex's two colours to bytes.
+
 ### Fog
 
 **Fog is on for the whole scene.** `CShade`'s constructor sets `FOGENABLE`
 (`0x10042070`); only the 2D overlays switch it off and back on.
 
-**It is linear, range-based and starts at the eye.**
+**It is the shade's own, and linear in the squared distance.** The device is
+never given a fog mode, a start or an end: those calls sit in the routine that
+builds a device material (`0x10030620`, `0x10030f20`), which has one caller
+(`0x1002ff27`) behind `UseDXLighting`, and that setting is 0
+([below](#the-lit-colour-is-the-games-own--read-and-measured)). With no vertex
+or table mode set, the device takes each vertex's fog factor from **the alpha
+of its specular colour**, and the shade writes it there
+(`0x1004f187`–`0x1004f213`, into the vector packed at `0x1004f64b`):
 
-- The sky writes the scene's render record in two places:
-  - fog vertex mode 3, `D3DFOG_LINEAR`, when it is built (`0x10078689`);
-  - start 700 × property 13 and end 700 × property 14, every update
-    (`0x1007bbc5`).
-- Each drawn item then applies either its own record's mode, start and end,
-  or the scene's (`0x10030620`). Applying a mode also sets `RANGEFOGENABLE`
-  (`0x10030f20`).
-- With slot 5 always 0, **fog starts at 0 and ends at 700 × slot 6**, which
+```
+keep = 1                                          d² < start²
+       0                                          d² > end²
+       1 − (d² − start²) ÷ (end² − start²)        between
+```
+
+with *d* the vertex's distance from the eye, which the shade has already
+measured for every vertex (`0x1004e7f8`–`0x1004e8ea`), and the two squares and
+the reciprocal of their difference kept by `0x1004bfb0`. The start and the end
+are the item's own record's where it carries mask `0x40`, the clouds' alone,
+and the scene's otherwise:
+
+- the sky writes the scene's record in two places: the word at its `+0x24`,
+  3, when it is built (`0x10078689`) — the shade asks only that it is not 0
+  (`0x1004f187`) — and start 700 × property 13 and end 700 × property 14,
+  every update (`0x1007bbc5`);
+- with slot 5 always 0, **fog starts at 0 and ends at 700 × slot 6**, which
   is 70 to 700 units (*measured*). On Mission 01 it ends at 420, 490, 525,
   560 or 700.
 
-**It is Direct3D's vertex fog, as far as `Terrain.dll` goes.**
+So the fog keeps 1 − (*d* ÷ end)²: at half the range three quarters of a
+surface, where a fog linear in the distance keeps half; at three quarters of
+it 0.44 against 0.25. An earlier reading here had the device's own linear
+vertex fog, `D3DFOG_LINEAR` with `RANGEFOGENABLE`: that is what `0x10030f20`
+would ask for, on the path the shipped setting never takes. An item that is
+not lit skips the shade and carries its factor in its own specular stream:
+the effects' sprites one the shader component makes them, by the same
+squares ([11-effects.md](11-effects.md#how-an-effect-sprite-is-coloured--read-and-measured)),
+the dome's gradient and the nebula a constant 255, no fog.
 
 - The only fog states `Terrain.dll`, `World3D.dll` and `Ngi32.dll` set are
   `FOGENABLE`, `FOGCOLOR`, `FOGSTART`, `FOGEND`, `RANGEFOGENABLE` and
-  `FOGVERTEXMODE`; none pushes `FOGTABLEMODE` ahead of a call.
-- The item renderer submits untransformed vertices — FVF `0x1c2`, `0x2c2`,
-  `0x112`, `0x212` and `0x252`, all `D3DFVF_XYZ` (`0x1002f1e0`–`0x1002f800`)
-  — for which Direct3D computes the vertex fog itself. The one pre-transformed
-  path, FVF `0x1c4` behind the item flag 8 (`0x1002f2c0`), is outside it.
+  `FOGVERTEXMODE`; none pushes `FOGTABLEMODE` ahead of a call. Of
+  `FOGVERTEXMODE`'s nine sites in `Terrain.dll` one is `0x10030f41`, on the
+  path not taken, and the other eight are the four pass renders saving the
+  state as they begin and putting it back as they end (`0x1003dab0` and
+  `0x1003dc93`, `0x1003de30` and `0x1003e013`, `0x1003e290` and `0x1003ef31`,
+  `0x1003f1c9` and `0x1003f3fb`).
 - **`ForceSWFog` is never read, in `Terrain.dll` or anywhere else.** See
-  [below](#nobody-reads-forceswfog--read-and-measured).
+  [below](#nobody-reads-forceswfog--read-and-measured). It has nothing to
+  switch: the software fog is the only one.
+
+*Measured* against C02 M04's briefing at 43.5 s ("Part 4", Qqs8_i9IeUU,
+16:12.5), where the camera stands about 290 units from the generator it
+looks at and the fog ends at 498.5 in a colour of (107, 172, 25). A fog
+linear in the distance would keep 0.42 there, and leave no surface a green
+under 0.58 × 169 = 98; the generator's body in the recording is (64, 77, 16),
+(57, 68, 15) and (65, 90, 16) over three patches. The squared fog keeps 0.66,
+a floor of 57. The engine's linear fog gave (94, 142, 21) on the same
+patches, and with the squares it gives (70, 84, 18), (61, 70, 17) and
+(64, 83, 18).
 
 **Its colour follows the camera's heading** (`0x10079730`):
 
@@ -1128,22 +1364,32 @@ and `0x1009a9d0`):
 
 Otherwise glows would pick up fog colour rather than fade out.
 
-### The scene colour is added to every material
+<a id="the-scene-colour-is-added-to-every-material"></a>
+
+### The scene colour is a floor under every lit vertex — *read*, and *measured*
 
 The same record carries a colour: property 16, file slot 20
-(`0x1007bbc5`). Every drawn material gets **emissive = that colour + the
-material's ambient colour**, and an ambient term of 0 (`0x100308b8`). It is the
-scene's ambient light in all but name — 40/255 grey at Mission 01's brightest
-keyframe, a brighter violet at night. An earlier draft said the material's own
-emissive; the block offsets `+0x14..+0x1c` are the entry's ambient, and the
-entry's emissive is never read. Nothing sets `D3DRS_AMBIENT`, so the zero
-ambient term is moot: a material's ambient colour is its self-light. See
+(`0x1007bbc5`). **It is not added to anything.** The shade adds the material's
+ambient colour to what the lights gave the vertex and then takes, channel by
+channel, **the larger of that sum and the scene colour**
+([The lit colour is the game's own](#the-lit-colour-is-the-games-own--read-and-measured)).
+So it is the darkest a lit surface can be — 40/255 grey at Mission 01's
+brightest keyframe, a brighter violet at night — and a surface the lights
+reach past it shows nothing of it. This page used to say "emissive = that
+colour + the material's ambient colour", which is what the device material
+would be given (`0x100308b8`) on the path `UseDXLighting` 0 never takes; and
+an engine that adds it draws every lit surface paler by the scene colour,
+which is what the recordings showed of this one. The block offsets
+`+0x14..+0x1c` are the entry's ambient, and the entry's emissive is never
+read: a material's ambient colour is its self-light. See
 [07-objects.md](07-objects.md#how-a-material-reaches-the-device--read-and-measured).
 
 **There is one scene colour, the shader component's, and a model view takes it
-too** — *read*. The colour `0x100308b8` adds is `+0x2c`–`+0x34` of the item
-renderer, one global object at `0x100a5d30` (`0x1002ff22`): `+0x18` of it is a copy
-of a state block, `+0x14` the block's colour. Each prim buffer's render copies that
+too** — *read*. The colour is the state block's, at its `+0x14`: the shade
+reads it out of the block it merges for each item (`0x1004df7b`–`0x1004df8b`,
+the colour at the interface's `+0x78`), and the item renderer, one global
+object at `0x100a5d30` (`0x1002ff22`), keeps a copy of the same block at its
+`+0x18`. Each prim buffer's render copies that
 block in, asking the state object it holds at `+0x9c` for it (that object's slot 7;
 `0x1003d990`–`0x1003da6c`, and the three renders like it at `0x1003dd59`,
 `0x1003e230`, `0x1003f169`), and
@@ -1582,6 +1828,28 @@ which is what the game does.
 
 ## Not resolved
 
+- ~~Whether the dome and its layers take the scene's fog~~ — the gradient and
+  the nebula carry a specular of `0xff000000`, a fog factor of 1, and take
+  none; the clouds are a lit item with a fog of their own, 5000 to 11380.7
+  ([The clouds are lit](#the-clouds-are-lit-and-fogged-on-a-range-of-their-own--read-and-measured)).
+- ~~How the files' colours meet the textures~~ — as stored values, every
+  multiply, add and blend
+  ([The frame holds what the files hold](#the-frame-holds-what-the-files-hold--read-and-measured)).
+- **Whose light list the clouds are lit with.** The item takes the list the
+  shade last gathered, which is the last drawn object's or landscape cell's;
+  the sun's two lights are in every list, and which point lights ride along
+  is not read.
+- **Whether a light's direction is put into an item's frame as a unit
+  vector.** The directional routine does not normalise it
+  (`Ngi32.dll:0x10016070`), and the shade turns it through the item's matrix
+  when the item's frame is not the world's (`0x1004ed3f`–`0x1004ed7b`); what
+  a scaled frame does to its length is not read.
+- **One face of C03 M02's Outpost.** At briefing time 54 s ("Part 6",
+  -yNnsqudMzw, 1:36.7) the slope it turns to the camera is a plain red in the
+  recording, (136, 14, 24), and lavender in the engine, (188, 42, 71): lit by
+  the second light here and, by its colour, by the first or by neither there.
+  The ground and the sky of the same frame agree, so it is the light's
+  direction on that face, or which light reaches it, and it is not read.
 - ~~Where the sun's lights point~~ — the light manager's slot 9
   (`0x10080550`) writes the record's `+0x24`, and `CSun` calls it twice every
   takt with the body's travel and its negation; the only other writer of the

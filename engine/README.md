@@ -55,8 +55,11 @@ Milestones **M0** to **M18** are in, each with the stand-ins listed below.
 - the golden cross-check;
 - a window over Mission 01.
 
-The ground is drawn with its two material layers blended and the file's own
-mip levels. Every placed object is drawn from its assembly:
+The ground is drawn as the game's cell draw has it (docs/03): each face's
+material, its texture one turn in 170 to 256 world units, under the
+microtexture `Land2.wea` names for it, one turn in 20 and doubled; a face's
+second material over the first on the vertices' alpha; and the file's own mip
+levels. Every placed object is drawn from its assembly:
 
 - each part is mounted on its host's socket;
 - each node sits at its rest pose;
@@ -131,13 +134,16 @@ starts at the file's closing time and plays its sections in turn:
   their alpha**, which is what lets the nebula through: clear overhead at
   night, solid by day, solid at the rim throughout;
 - the **clouds**, slot 2, go last of the layers, on the same cap dropped 5000
-  below the camera and tiled three times, tinted by slot 18 — so they pass in
-  front of a body;
+  below the camera and tiled three times — so they pass in front of a body.
+  They are lit, their material wearing slot 18 as its diffuse colour, and
+  fogged on a range of their own, 5000 to 11380.7, so the layer shows overhead
+  and is the horizon's colour from the cap's third ring out;
 - the **stars**, slot 1, are not drawn, because the game does not draw them
   either: it loads the material, lays out their texture coordinates, and never
   names either again;
-- linear range fog runs from the eye to 700 × slot 6, in the horizon colour
-  of the heading, additive materials fogging to black;
+- the fog runs from the eye to 700 × slot 6, linear in the **squared**
+  distance as the game's shade writes it, in the horizon colour of the
+  heading, additive materials fogging to black;
 - the sun and the moon are up from their start keyframe to their stop, and
   while one is up the sun object's two lights shine: slot 19, lifted by the
   flare gates, and slot 21;
@@ -146,10 +152,13 @@ starts at the file's closing time and plays its sections in turn:
   places, sizes and colours with only their alpha scaled by the gates — the
   first on the 15° cone about the camera the frame is drawn with, the second on
   how high the body stands;
-- the lit colour, the scene colour and the material's ambient colour (its
-  self-light) and diffuse under both lights, is formed in the files' display
-  space, held to 1, and decoded; the texture's alpha is scaled by the ambient
-  alpha;
+- a vertex's lit colour is the game's own shade's (docs/10, "The lit colour
+  is the game's own"): the lights on the material's diffuse plus its ambient
+  (its self-light), **held up to the scene colour** rather than added to it,
+  kneed past 1 with the excess whitening through the specular, and a light's
+  highlight on a material that has a specular power. Every colour is the
+  files' own value and the frame holds stored values, as the game's device
+  blends them; the texture's alpha is scaled by the ambient alpha;
 - the **weather** runs from its start keyframe to its stop. Snow and rain are a
   thousand points at full intensity, kept in the camera's box from 2 to 50 ahead
   and wrapped round it as it moves, drawn as quads over the finished scene with
@@ -166,8 +175,8 @@ starts at the file's closing time and plays its sections in turn:
   looks at the first bolt, `--ticks 8` is inside its flash). The flash is the
   effect's own light, (7, 7, 10) over a range of 4000, one of the frame's point
   lights: it lights the ground and the objects by the square of what is left of
-  its range, to their textures' own colours and no paler, a lit colour being
-  held at 1 here.
+  its range, and past their textures' own colours toward white, through the
+  lit colour's knee.
 
 Sound plays each effect's sound emitters from `sounds.lib`, WAV and MS ADPCM
 through kira, as their effect time passes their trigger. A HUD showed a
@@ -1484,21 +1493,20 @@ a row here. A row leaves this table when research closes it.
 
 | milestone | what is unknown | stand-in | see |
 |---|---|---|---|
-| M1 | Whether the dome and its layers take the scene's fog, and what the game clears the frame to below the dome's rim | draw the dome at the camera, depth-tested without writing depth under a projection with no far plane, unfogged but for its rim; clear the frame to the fog colour | [10](../docs/10-sky.md#the-dome) |
 | M1 | What the sky's screen-wide quad paints: it is drawn first of all in every scene camera's frame (mode 0; only mode 1 skips it, `0x1007a325`), and that it carries the scene colour is derived, not checked against a frame | never drawn; the frame is cleared to the fog colour instead | [10](../docs/10-sky.md#the-skys-first-draw-is-a-screen-wide-quad--read) |
-| M1 | The files' colours in a renderer that decodes textures to linear | sky, fog and dome colours and texture tints decoded from sRGB to linear; the lit colour (scene colour, material ambient and diffuse, both lights) formed from the files' values, held to 1, then decoded, so blends match the game's display-space ones | [10](../docs/10-sky.md#the-dome-the-fog-and-the-scene-colour--read-and-measured) |
+| M1 | Whose light list the cloud layer is lit with: the item takes the list the shade last gathered, the last drawn object's or cell's, point lights and all | the sun's two lights alone | [10](../docs/10-sky.md#the-clouds-are-lit-and-fogged-on-a-range-of-their-own--read-and-measured) |
+| M1 | A point light's highlight on a material's specular (`Ngi32.dll:0x100166b5`), and the bytes a vertex's two colours are rounded to | the sun's two lights' highlights alone; the colours are not rounded | [10](../docs/10-sky.md#the-lit-colour-is-the-games-own--read-and-measured) |
 | M4 | Whether a target the hero's AI set before the player took over survives | none: nothing sets it while the player drives, so the plasma bolt and the missile fly straight | [29](../docs/29-weapons.md#not-established) |
 | M4 | How a **building's** gun capacitor refills; a unit's runs the read power tick | a gun on a building, or on a unit with no battery, is served at a level of 1 | [23](../docs/23-economy.md#bots-spend-power-through-the-same-code-priced-by-part--read-and-measured) |
 | M4 | Poses of other units for the hit test | their rest poses: other units' animation is not played | [24](../docs/24-motion.md#playing-a-state--read-and-measured) |
 | M4 | When each of a burst's particles spawns | every particle of a type-7 or type-10 burst is as old as the emitter's progress through the window over +28, so they fly as one | [11](../docs/11-effects.md#a-channel-is-a-low-high-jitter-exponent-run--read-and-measured) |
-| M4 | How an effect sprite fogs: the game puts a factor linear in the *squared* distance in its specular alpha (`Terrain.dll:0x1004bf20`) | the renderer's own fog, linear in the distance itself, as every other pipeline takes it; none on an effect whose header carries `0x2000`, as read | [11](../docs/11-effects.md#how-an-effect-sprite-is-coloured--read-and-measured) |
+| M4 | How an effect sprite fogs: the game puts a factor linear in the *squared* distance in its specular alpha (`Terrain.dll:0x1004bf20`) | a fog linear in the distance itself, where the world's pipelines take the squared one; none on an effect whose header carries `0x2000`, as read | [11](../docs/11-effects.md#how-an-effect-sprite-is-coloured--read-and-measured) |
 | M5 | The weather's random draws: where a particle spawns and when and where a bolt strikes come off `Terrain.dll`'s one C-runtime `rand` state, seeded 1 and shared with every other caller in the module, and the snow's flutter off a generator seeded from the clock | the weather keeps states of its own of the same two generators | [10](../docs/10-sky.md#the-weather--read-and-seen) |
 | M5 | Which faces the lightning's ground query takes (the landscape's slot 8, kind 2, the default filter) | the landscape's top face under the strike, and the map box's floor where there is none | [10](../docs/10-sky.md#lightning--read-measured-and-seen) |
 | M5 | The flags the rain's background sound is made with, `0x102` | a loop, heard alike from everywhere, its volume the read one | [10](../docs/10-sky.md#rain--read) |
 | M4 | The owner values of time modes 9–14, now that each is read: the spin over the top spin, and one minus the owner's life fraction (property `0x31`) | nothing sets either, so a mode-9-to-12 effect holds *t* at 0 and a mode-14 one reads its owner as undamaged; of the 923 only the 8 burning trees and wrecks are mode 14, and none is 9–13. A tree's load group makes its fire switched off (header flag `0x40`) for block entry 6, a machine's critical damage, to switch on, and entries 6 and 7 are not run (docs/13, "Critical damage"): nothing burns, and a shot tree never catches fire | [11](../docs/11-effects.md#how-an-effect-runs--read) |
 | M4 | How a sprite whose material says opaque blends | alpha-blended, so its fade shows | [07](../docs/07-objects.md#how-a-material-draws-is-in-the-archive-directory) |
 | M4 | Which lights an item is lit with: the game gathers a list for each object and each landscape cell, every light whose reach meets it, and its lighter walks all of it | one list a frame, the 64 lights whose reach comes nearest the eye, those that light everything first; each lights whatever stands inside its range. A unit's parts are agents with a light manager each and a round is one: an owner-only light on a unit's gun lights the whole unit, and one on a round nothing | [11](../docs/11-effects.md#what-a-light-does-to-a-surface--read-and-measured) |
-| M4 | A lit colour past 1: the lighter knees each channel (c ÷ 6 + 5 ÷ 6, 2 from 7 on), moves what is over 1 into the specular colour, which the device adds after the texture, and lights per vertex | held at 1, so a strong light stops at the texture's own colour where the game whitens it; the sun's two lights are taken per fragment and the point lights per vertex | [11](../docs/11-effects.md#what-a-light-does-to-a-surface--read-and-measured) |
 | M4 | Which streams a light's jitter draws from: the game takes the alpha, blue, green and range from the light emitters' module-wide state and the red from the bursts' | all five from a state the instance keeps for its lights, in the game's order, redrawn every 100 ms | [11](../docs/11-effects.md#a-lights-jitter-is-five-draws-an-update--read-and-measured) |
 | M4 | When a stream emits its first particle | on its first update inside its window | [11](../docs/11-effects.md#bolts-streams-and-fades--read-and-measured) |
 | M4 | What slows an ambient stream: the read clock, emission and ageing give C03 M01's volcano smoke about twice the speed and flicker rate Part 5 of the let's play shows | the streams of every load group's effects (buildings, trees, stones) and of a lode's plume run at half pace; the construction sphere's and every gun's and round's run as read | [11](../docs/11-effects.md#bolts-streams-and-fades--read-and-measured) |
@@ -1547,6 +1555,7 @@ a row here. A row leaves this table when research closes it.
 | M10 | Whether a cull mode changes for the mirrored reflection frame | the faces that face the mirrored eye draw, as a mirror shows them | [03](../docs/03-terrain.md#not-established) |
 | M10 | What the reflection camera's pass flags `0x120` leave out | the effects' sprites; the dome, the ground less its water and beds, and every shown object draw | [03](../docs/03-terrain.md#not-established) |
 | M10 | How far the water's bump map displaces its lookup | a signed byte stands for −1 to 1 at 127, so the largest offset is 0.01 × 64 ÷ 127 of the box | [03](../docs/03-terrain.md#not-established) |
+| M10 | The microtexture on a liquid drawn without its reflection: passes of their own, within 260 units of the eye over the field of view, at an alpha of at most 0.3 (`Terrain.dll:0x1002b512`) | none: a water face takes no microtexture | [03](../docs/03-terrain.md#not-established) |
 | M10 | What a device's byte 0 of 1 adds from the machine's list at `+0xc4` | nothing: its channels hold their initial values (no Mission 01 unit has one) | [28](../docs/28-chassis.md#not-established) |
 | M11 | Which way a flyer takes to a pod under a floor, the floors pushing it as its collision flags are read to keep them (8, from states that all lack bit 4; a walker's never do). A floor a flyer rests on or is made on only touches it, the pair pushing out its node sphere held to 7.5, so that is no longer what this stands for | no robot keeps the floors: with them Mission 04's helicopter, sent to take the Large Factory, stops over the hall floor 14 m from the pod in the room under it, where without them it sinks through that floor onto the pod; and a walker's segment test passes the floors as its push-out does, where the segment's filter is read to keep them for every mover | [24](../docs/24-motion.md#not-established) |
 | M11 | When a door's holds are worked out: `CBuilding` does it as each child moves (event 1, `Terrain.dll:0x10059f40`) | the holds are worked out from every child each tick; the capsule each is measured against is read (`IJointMesh` slot 5, `AniMesh.dll:0x1000fd60`) | [24](../docs/24-motion.md#walking-into-a-building--read-and-measured) |

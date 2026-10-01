@@ -6,8 +6,8 @@ Each of the 33 directories under `DATA/MAPS/` holds one map:
 DATA/MAPS/SC_3/
   Land.msh    NRes, 9 members  — the terrain mesh
   Land.map    NRes, 1 member   — 'ArealMap', unresolved (see 06-open-questions)
-  Land1.wea   text             — texture-layer-1 name table
-  Land2.wea   text             — texture-layer-2 name table
+  Land1.wea   text             — the materials a face names
+  Land2.wea   text             — index for index, the materials their microtextures come from
 ```
 
 `Land.msh` is an NRes archive whose members all share the name `Land`; the
@@ -20,9 +20,9 @@ indexed by vertex or by face.
 |---|---|---|---|
 | 3 | 12 | vertex | position, `float32` x/y/z — **Z is up** |
 | 4 | 4 | vertex | normal, `int8` x/y/z ÷ 127, plus one padding byte |
-| 5 | 4 | vertex | layer-1 UV, `uint16` pair, 8.8 fixed point |
-| 18 | 4 | vertex | layer-2 UV, same encoding |
-| 14 | 4 | vertex | weight of layer 1, `float32` in 0..1 |
+| 5 | 4 | vertex | the material's UV, `uint16` pair, 1024 to one turn of the texture |
+| 18 | 4 | vertex | the microtexture's UV, same encoding |
+| 14 | 4 | vertex | alpha of a face's second material, `float32` in 0..1 |
 | 21 | 28 | face | the face record, below |
 | 11 | 4 | face | `(face index, flags)` |
 | 2 | 68 | cell | the spatial index: 8 bbox corners, then a box and a face run per cell |
@@ -34,7 +34,7 @@ indexed by vertex or by face.
 |---|---|
 | 0 | flags over a constant `0x600`; `0x004` a second layer, `0x008` water (**1544**, `0x0608`), `0x2000` a liquid bed |
 | 1 | surface bitfield; bit **`0x02`** marks water, bit `0x10` is clear on lava |
-| 2 | lo byte = layer-1 texture index, hi byte = layer-2 (`0xFF` = none) |
+| 2 | lo byte = the face's material, hi byte = a second material drawn over it (`0xFF` = none); both index `Land1.wea` |
 | 3 | always `0xFFFF` |
 | 4, 5, 6 | vertex indices |
 | 7, 8, 9 | adjacent face across each edge (`0xFFFF` = mesh boundary) |
@@ -57,8 +57,13 @@ A `.wea` file is a whitespace-delimited count followed by `index name` pairs:
 4 WATER
 ```
 
-Face field 2's low byte indexes `Land1.wea` and its high byte indexes
-`Land2.wea`. The same format is reused for mission skyboxes (`sky.wea` lists
+**Both bytes of face field 2 index `Land1.wea`.** `Land2.wea` is the same
+length on all 33 maps and names, index for index, the material each
+`Land1.wea` material takes its **microtexture** from
+([below](#the-microtexture-is-land2weas--read-and-measured)); an earlier
+reading here had the high byte index it, which
+[the faces themselves refute](#a-faces-second-material--read-and-measured).
+The same format is reused for mission skyboxes (`sky.wea` lists
 `ENV_NEBULA_0`, `ENV_STARS`, `ENV_SUN_3`, `ENV_MOON`, …).
 
 Most names resolve to entries in `Textures.lib` (`L04` → member `L04.0`).
@@ -80,11 +85,16 @@ face index and the other 247 are exactly `0xFFFF`; nothing else appears. The
 decisive check is mutuality: **for all 33 maps, whenever face A names B as a
 neighbour, B names A back.** A field that satisfies that is not a coincidence.
 
-**Stream 5 is the layer-1 UV, in 8.8 fixed point, tiling every 50 world
-units.** Correlation of the u component against world X is `+1.000` and of v
-against world Y is `−1.000`, to three decimal places. The ratio `u16 / X` tops
-out at exactly 5.12 = 256/50. Reconstructing `u = x/50` and `v = (maxY − y)/50`
-leaves a worst-case residual of **0.004 texel units** over the whole map.
+**Stream 5 is the material's UV, laid flat over the world.** Correlation of
+the u component against world X is `+1.000` and of v against world Y is
+`−1.000`, to three decimal places, and on SC_3 the ratio `u16 / X` tops out at
+exactly 5.12. That was first read as 8.8 fixed point, 256/50, a texture
+tiling every 50 world units; the data cannot tell 256 from any other unit,
+and the binary's is **1024**
+([The UV unit is 1024](#the-uv-unit-is-1024--read-and-measured)): 5.12 is
+1024/200, and SC_3's ground texture turns once in **200** world units.
+Reconstructing `u = x/200` and `v = (maxY − y)/200` leaves a worst-case
+residual of 0.001 of a turn over the whole map.
 
 **Stream 4 is a normal, not a colour.** Reading the three bytes as *signed* and
 dividing by 127 yields a unit vector at every vertex of every map — worst
@@ -140,31 +150,79 @@ Maps are square, 798 to 2490 world units on a side, with 3000–10600 vertices
 and 3100–9500 triangles. It is a coarse adaptive mesh — roughly one triangle
 per 35 × 35 units on SC_3 — not a regular heightfield grid.
 
-## The second texture layer
+<a id="the-second-texture-layer"></a>
 
-A face names two textures — the low and high bytes of face word 2 — and a
-vertex carries UVs for both, in streams 5 and 18. Between 8% and 30% of a
-map's faces carry a second layer; 32450 of 275882 across all 33 maps.
+## The UV unit is 1024 — *read*, and *measured*
 
-Stream 14 is **the weight of layer 1**, and the proof is a clean split: it is
-exactly 1.0 on all 258046 vertices that no layer-2 face touches, and below 1.0
-on 19663 of the 41404 that one does. Nothing else in the mesh separates so
-cleanly on that boundary.
+`Terrain.dll` keeps one constant for every `uint16` texture coordinate it
+expands, 1 ÷ 1024 (`0x10035070` stores it at `0x100a5c6c` from the 1024.0 at
+`0x1009a950`), and each of the eight strided expansions scales the cell's
+width and height by it before it multiplies a coordinate
+(`0x10038876`–`0x1003889d` and its seven likes). The landscape's own face
+query makes its float coordinates the same way (`0x1001ae50`, the constant at
+`0x100a5a04` from `0x100227cf`). An object mesh's are over 1024 too
+([07-objects.md](07-objects.md#how-a-material-reaches-the-device--read-and-measured)).
 
-So the ground is `mix(layer2, layer1, blend)`. Without it every texture
-boundary on the terrain is a hard polygon edge; the game's are gradients.
+*Measured* on the 33 maps, the gradient of each stream across a face in
+`uint16` a world unit:
 
-The engine's own name for stream 18 is the **microtexture mapping** — *read*:
-`CLandscape`'s constructor asks the archive for type `0x12` and, failing,
-panics *"Unable to find microtexture mapping chunk"*. What that name implies
-for the draw is not read here.
+- **stream 18 is 51.2 on every map** (51.19 to 51.20). At 1024 to the turn
+  that is 0.05 a world unit, one turn in **20 units** — and 0.05 is the
+  compiled value of the setting `MicroTexScale`, which nothing reads at run
+  time ([10-sky.md](10-sky.md#the-render-settings)): the scale is baked into
+  the stream. The values wrap at 65536, which is 64 whole turns, so the wrap
+  does not show;
+- **stream 5 varies by map**, one turn in 70 to 513 units: 4.0 on `KM_6bis`
+  (256 units), 5.12 on `SC_3` and `KM_4` (200), 6.04 on maps 31 and 32 (170).
 
-Draw it in **one pass**. Grouping faces by the pair `(layer 1, layer 2)`
-rather than by layer 1 alone costs almost nothing — 5 to 8 groups per map
-against 3 to 5 — and then one material can sample both. Drawing layer 2 as a
-second, coplanar mesh instead makes the ground flicker: the two passes compile
-to different shader programs, their interpolated depths come out a hair apart,
-and the walkable areas z-fight as the camera moves.
+So a ground material's own texture is a **large** one — a 256-pixel image
+across a couple of hundred units, about a texel a unit — and the fine grain
+comes from the microtexture over it. The engine and the notes here read both
+at 256 until this was read, which tiled the ground's texture sixteen times
+too often and made of it a fine, even pattern; the recordings show broad
+shapes ([below](#how-the-landscape-is-lit-and-fogged--read-and-measured)).
+
+## A face's second material — *read*, and *measured*
+
+A face names two materials — the low and high bytes of face word 2 — and
+between 8% and 30% of a map's faces carry the second; 32450 of 275882 across
+all 33 maps.
+
+**The second is drawn over the first, on stream 14's alpha.** `CShade`'s cell
+draw builds one item for the face's first material and, where the second byte
+is not `0xFF` (`0x100445d1`–`0x100445e4`), hands it to `0x1002c000`
+(`0x10043aef`), which makes a copy of the item — the same vertices, normals
+and both coordinate streams (`0x1002c02d`–`0x1002c044`) — with:
+
+- the material at the **second byte's index in the same manager**, track 0
+  (`0x1002c094`–`0x1002c0ba`; the manager is the one the landscape's own draw
+  hands the shade, loaded from `Land1.wea`, `0x1001b937`);
+- blend mode `CShade+0xbf0`, which is translate index 1, mode 4:
+  `SRCALPHA`/`INVSRCALPHA` (`0x1002c0d7`, [below](#the-ground-draws-opaque--read-and-measured));
+- alpha mode 2 (`0x1002c0f2`), in which the shade makes a vertex's alpha the
+  material's ambient alpha times the item's alpha stream
+  ([10-sky.md](10-sky.md#the-lit-colour-is-the-games-own--read-and-measured)),
+  and the alpha stream is **stream 14** (the record's pair at `+0x58`,
+  `0x100449e5`–`0x100449fa`);
+- and a place in the queue's layer 2 (`0x1002c170`), after layer 0 where the
+  first item goes, whose own alpha stream is then taken away (`0x1002c182`).
+
+So the ground is `mix(first, second, stream 14)`: the first material opaque,
+the second over it. This page used to say the reverse — stream 14 "the weight
+of layer 1" and the second name looked up in `Land2.wea` — from the one thing
+the data shows without the binary, that the stream is exactly 1.0 on all
+258046 vertices no two-material face touches.
+
+*Measured*, and it settles both points without the binary: take every edge a
+two-material face shares with a one-material face, at the fine level of all
+33 maps — **15011** of them. On **7554** both ends carry 1.0 and the
+neighbour's material is the face's **second** byte; on **7436** both carry
+0.0 and the neighbour's material is its **first**; 21 are neither. So 1.0 is
+the second material whole, where the face meets ground that wears it, and the
+second byte names the same table the first does: all **17641** second bytes
+of the fine level lie inside `Land1.wea`. (A vertex on such an edge is stored
+twice, once for each side, which is how "1.0 on every vertex no two-material
+face touches" and "0.0 at a patch's edge" are both true.)
 
 ## Terrain layers name materials, not textures
 
@@ -520,10 +578,13 @@ which of the band's faces wear the bit, is **not established**.
 and each corner takes a layer-1 UV from **its own world x and y times 0.066**
 (`0x1009a214`, packed at 1024 to the UV unit at `0x1000d4be`), a blend of 1
 (`0x1000d1fd`) and a **zero vertex normal** (`0x1000d106` into the packer at
-`0x10015fd0`). The engine's own UV unit is 1024 (`0x100227c0`, `1.0/1024`),
-while the stream reads at 256 to the unit
-([above](#how-each-of-these-was-established)),
-so the foundation tiles **every 3.8 world units**, against the landscape's 50.
+`0x10015fd0`). The UV unit is 1024 (`0x100227c0`, `1.0/1024`,
+[above](#the-uv-unit-is-1024--read-and-measured)),
+so the foundation tiles **every 15.15 world units**, against the landscape's
+170 to 256. A basement face's flags are `0x300`, without the `0x400` the
+microtexture is drawn under, and its vertex normal is zero, so no light
+reaches it: it shows its texture at the scene colour
+([How the landscape is lit](#how-the-landscape-is-lit-and-fogged--read-and-measured)).
 
 **The two builders are callbacks over a walk** (*read*). The insertion passes
 each, with an object, to `0x10007f00` (362 bytes, 8 callers: six in the
@@ -789,7 +850,8 @@ before this one said, and the one after it denied.
 the device supports render phase 9 — `CShade::ConfigureTextureAndAlphaBlendModes`
 keeps that answer at `+0xbd8` (`0x10041274`) — and the batch's face is not
 water (its face word 1 bit `0x02`), the helper asks the material manager's
-slot 3 for **track 1** of the batch's material (`0x1002b4b6`) and makes it the
+slot 3 for **track 1** of a material (`0x1002b4b6`; which one is
+[below](#the-microtexture-is-land2weas--read-and-measured)) and makes it the
 surface's second stage: track 1's texture as the second texture, its whole
 image as the second cell, and phase **9** — `tex0 · tex1 · 2 · diffuse`,
 `MODULATE2X`, whose identity is mid-grey
@@ -803,18 +865,57 @@ The helper runs only while the setting `MicroTexturingOn` is on (`CShade
 to change it), the face carries flag `0x400` (all 173827 level-0 faces do, in the
 constant `0x600`), and a per-frame camera flag at `+0xbcc` is clear.
 
-What that reaches (*measured*, level 0 of all 33 maps): **164230 of the 172012
-faces that are not water** name a layer-1 material with a second track — all
-but `L08` and `L32` — and 17263 of their 17641 layer-2 materials do. None of
+<a id="the-microtexture-is-land2weas--read-and-measured"></a>
+
+**The material it asks is not the face's own: it is `Land2.wea`'s at the same
+index** — *read*, and *measured*. The landscape loads `Land1.wea` into its
+material manager and then `Land2.wea` into the same manager as a second wear
+(`0x100171e1`, then the manager's slot 6 at `0x10017215`, `World3D.dll`'s
+wear loader `0x10003b10`, which answers the new wear's index), and keeps that
+index for its face records (`0x10018ce9`–`0x10018cef`). A material handle
+carries a wear in its high word, and the cell draw builds the microtexture's
+handle as **the face's material index plus that wear's index shifted 16**
+(`0x100445bd`–`0x100445ce`, and `0x100445fe` for the second material), which
+is what the helper asks track 1 of (`0x1002b4a3`–`0x1002b4b6`). The second
+stage's coordinates are the item's second pair, **stream 18** (`0x10044931`–
+`0x10044946`; the landscape puts chunk 5 in the first pair and chunk `0x12`
+in the second, `0x100175b4`, `0x10017641`). So a face draws
+
+```
+its Land1.wea material's texture, on stream 5      (a turn in 170 to 256 units)
+  × track 1 of Land2.wea's material, on stream 18  (a turn in 20 units)  × 2
+  × the vertex's lit colour
+```
+
+and its second material, where it has one, the same way with its own pair.
+On `KM_6bis`, *The Last Bastion*: `Land1.wea` is `B_S0, L33, L00, L32` and
+`Land2.wea` `DEFAULT, L05, L01, L32`, so the mossy rock `L33.0` is drawn under
+the gravel `L05M.0`, and the grass `L00.0` under `L01M.0`.
+
+What that reaches (*measured*, level 0 of all 33 maps): **169688 of the 172012
+faces that are not water** have, at their material's index in `Land2.wea`, a
+material with a second track — all but `L32`, whose own entry `Land2.wea`
+names beside it — and 17263 of their 17641 second materials do. None of
 the 1815 water faces does, and the draw never asks them. A material with one
 track answers with track 0: both of the manager's fetches take a track and
-clamp one outside the material's count to 0 (`World3D.dll:0x1000322f`).
+clamp one outside the material's count to 0 (`World3D.dll:0x1000322f`), so
+`L32` is doubled over itself. The pairs most worn are `L02` under `L03`
+(30256 faces), `L33` under `L05` (25843), `L35` and `L22` under `L13`
+(14961, 13070) and `L00` under `L01` (10169): eight materials — `L01`,
+`L03`, `L05`, `L07`, `L09`, `L13`, `L17` and `L31` — are the detail of
+eighteen others, and four are named beside themselves, `L28`, `L32` and the
+two liquid beds.
 
-So on the default settings the ground is the base times its twin times two:
-where the twin is mid-grey it changes nothing, which is *derived* from the
-phase and explains why the twin is flattened towards grey. That this is what
-the engine calls microtexturing is a *guess* from the setting's name and the
-stream-18 chunk's.
+So on the default settings the ground is the material times a microtexture
+times two: where the microtexture is mid-grey it changes nothing, which is
+*derived* from the phase and explains why the `M` images are flattened
+towards grey. The engine's own names say the rest — the setting
+`MicroTexturingOn`, `MicroTexScale`'s 0.05 in stream 18, and the panic when
+chunk `0x12` is missing, *"Unable to find microtexture mapping chunk"*.
+
+**An earlier reading here had the twin of the face's own material**, on the
+same coordinates, which is the base against a flattened copy of itself and
+changes little. It is another material's, sixteen times as fine.
 
 **Two things this entry used to say were wrong.** Slot 3 is not track-less:
 it takes `(handle, track, &out)` and uses the global clock, where slot 5 takes
@@ -823,6 +924,58 @@ a time as well. And there *is* a five-argument call through slot 5
 `CShade::StartMeshRender` (`0x100437c0`) rather than stored where the earlier
 search looked. An object mesh passes its track there too — see
 [07-objects.md](07-objects.md#who-picks-an-object-meshs-material-track--read).
+
+## How the landscape is lit and fogged — *read*, and *measured*
+
+**A landscape cell is a lit item like a mesh batch.** The cell draw files its
+item with flags `0x414` (`0x10044627`), and `0x10` is what
+`CStridedPrimitive::RenderVB` hands to the game's own shade
+([10-sky.md](10-sky.md#the-lit-colour-is-the-games-own--read-and-measured)).
+The item carries the face's material entry whole — diffuse, ambient,
+specular and power, copied at `0x1004465e`–`0x10044756` — the cell's light
+list (`0x1004482a`), stream 3 as positions and stream 4 as normals
+(`0x100448e1`–`0x10044910`), and no colour stream, so the shade makes its
+colours. Each vertex is then
+
+```
+lit      = max(ambient + Σ light colour × diffuse × cos θ,  scene colour)     kneed past 1
+frame    = texture × microtexture × 2 × min(lit, 1)  +  0.8 × what lit has over 1
+           fogged by 1 − (d² − start²) ÷ (end² − start²) toward the horizon ahead
+```
+
+on the values the textures and the frame store. Three things follow, each of
+which the engine had otherwise:
+
+- **the scene colour is a floor, not an addend.** A slope the lights do not
+  reach is the scene colour and no brighter, and a lit one is the light alone:
+  the engine added the scene colour to every vertex, which paled the whole
+  ground by it;
+- **the fog is linear in the squared distance**, so the middle distance keeps
+  far more of itself than a fog linear in the distance leaves it;
+- of the 24 materials any face wears, 22 carry a white diffuse over a black
+  ambient — the other two are the liquids, `WATER` and `ENV_NLAVA` — and none
+  a specular colour (*measured*), so the ground's lit colour is the lights'
+  own, and a light past 1 whitens it.
+
+A basement corner's normal is zero, so it takes no directional light and
+stands at the scene colour; liquid surfaces are in
+[Water reflects](#water-reflects--read-and-measured).
+
+*Measured* on *The Last Bastion*'s briefing at 43.5 s ("Let's Play - Parkan:
+Iron Strategy, Part 4", Qqs8_i9IeUU, 16:12.5), mean colours over the same
+areas, the recording converted by the video's own matrix:
+
+| area | recording | engine before | engine after |
+|---|---|---|---|
+| near hill, lit face | (76, 115, 26) | (90, 129, 30) | (78, 118, 28) |
+| the hill behind it, unlit | (35, 57, 11) | (91, 136, 27) | (37, 61, 13) |
+| far hill, half fogged | (77, 123, 20) | (99, 160, 24) | (79, 126, 21) |
+
+and across the whole picture in an 8 × 10 grid the two now agree to within
+about ten levels in every cell of the ground: the same dark valleys and the same patches
+of moss, because the rock's texture lies across the hill once and not
+sixteen times. Before, the engine's ground was a fine pale pattern washed
+toward the fog.
 
 ## The map is stored twice, at two levels of detail
 
@@ -1120,11 +1273,28 @@ yet reproduced (below).
 ### Not established
 
 - **The lake's brightness.** Phase 10 multiplies the reflection by the lit
-  colour, which the device clamps to 1, so the water can be no brighter than
-  what it reflects; the recording's open water is brighter in green than its
-  sky. Either the reflection texture holds something brighter than the
-  horizon, the lit colour reaches the stage unclamped, or that machine did
-  not draw phase 10 (its record needs capability `0x1`).
+  colour, so the water can be no brighter than what it reflects but for what
+  the shade moves into the specular: a lit channel past 1 adds up to 0.8 of
+  itself after the texture
+  ([10-sky.md](10-sky.md#the-lit-colour-is-the-games-own--read-and-measured)),
+  which is one way a lake under a lifted sun comes out brighter than its sky
+  (*derived*, and not checked against the recording's (162, 248, 253)). Or
+  that machine did not draw phase 10 (its record needs capability `0x1`).
+- **How the recordings' machine draws a liquid.** C03 M01's lava at briefing
+  time 38 s ("Let's Play - Parkan: Iron Strategy, Part 5", PfAg6zSe-yM, 1:25)
+  shows **both** the lava's own texture, bright — (187, 4, 3) to (225, 8, 5),
+  `LAV00.0`'s cells plain in it — **and** the mirrored image of the plant
+  standing over it. That is neither way as read: `REFLECTION` leaves the
+  liquid's faces out, and `REFLECTION_SHIFTED` draws the reflection times the
+  lit colour with no texture of the liquid's, which is what the engine draws,
+  a flat dim red. The lava's faces carry water's flags exactly (`0x608`,
+  surface 2, on all 2624), so nothing in the file tells them apart; what that
+  machine's device ran in place of phase 10 is not read.
+- **The microtexture on a liquid drawn without its reflection.** A water face
+  skips the one-pass second stage (`0x1002b49d`) and takes the microtexture
+  in passes of their own, within 260 units of the eye over the field of view
+  and at an alpha of at most 0.3 (`0x1002b512` on, the 0.3 at `0x1004f065`);
+  those passes were not followed, and the engine draws none.
 - **What the pass flags `0x120` leave out of the reflection** — the world
   draw passes them on to what it draws (`0x1001c8a8`), and their tests were
   not followed.

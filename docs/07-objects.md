@@ -1525,6 +1525,20 @@ rgb   = texture.rgb × clamp(scene + ambient + Σ lights × diffuse + specular)
 alpha = texture.a × ambient alpha
 ```
 
+**That is the device material, and the shipped game never builds it.** The
+routine has one caller, behind the setting `UseDXLighting`, which is compiled
+0 and written by nothing; with it 0 the shade lights each vertex itself and
+hands the device two vertex colours instead. What a batch then shows is
+
+```
+lit   = max(ambient + Σ lights × diffuse, scene colour)        kneed past 1
+rgb   = texture.rgb × min(lit, 1) + specular, the lights' highlights and what lit has over 1
+```
+
+— the scene colour a **floor** under the lit colour and not a term of it, and
+the whole of it on stored values, fogged by the specular's alpha
+([10-sky.md](10-sky.md#the-lit-colour-is-the-games-own--read-and-measured)).
+
 and the blend mode only says what is done with it: flags 0 and 2 write it
 (`ONE/ZERO`), 4 and 5 blend it over (`SRCALPHA/INVSRCALPHA`, alpha-tested),
 8 adds it (`SRCALPHA/ONE`, alpha-tested). A black diffuse carrying an ambient

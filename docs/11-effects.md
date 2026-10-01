@@ -1158,8 +1158,11 @@ That is the lighting `D3DLIGHT2` describes, which the record's layout already sa
 range and its reciprocal are put into the item's own units first (`0x1004ead5`,
 `0x1004ec5f`) and the position into its frame (`0x1004eb49`–`0x1004ec03`).
 
-When the list is done each vertex's colour is **scene colour + material ambient + its
-sum** (`0x1004f225`–`0x1004f23d`), each channel through the knee the sprites' colour has:
+When the list is done each vertex's colour is **its sum plus the material's ambient, held
+up to the scene colour** (`0x1004f225`–`0x1004f23d`: `g_FastProc`'s `+0x50` adds the two and
+then takes the larger of that and the scene colour, channel by channel, in all four of its
+builds — [10-sky.md](10-sky.md#the-lit-colour-is-the-games-own--read-and-measured); this
+page used to add the scene colour in), each channel through the knee the sprites' colour has:
 as it is up to 1, c ÷ 6 + 5 ÷ 6 above, and 2 from 7 on (`0x1004f25a`–`0x1004f3cd`). What
 a channel then has over 1 is **moved into the specular colour**, and the diffuse held at
 1 (`0x1004f3e5`–`0x1004f4a5`); the specular is scaled in its turn, 0.8 of it up to 1,
@@ -1172,8 +1175,9 @@ whitens a surface rather than stopping at its texture**.
 So a lit vertex, before the knee, is
 
 ```
-rgb = scene colour + material ambient
-    + material diffuse × Σ light colour × cos θ × (a₀ + a₁ x + a₂ x²)      x = (range − d) ÷ range
+rgb = max(scene colour,
+          material ambient
+          + material diffuse × Σ light colour × cos θ × (a₀ + a₁ x + a₂ x²))      x = (range − d) ÷ range
 ```
 
 with the sun's two directional lights in the same sum at a falloff of 1: their routine
