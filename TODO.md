@@ -844,7 +844,8 @@ What this entry used to say, and why it was wrong, is worth keeping:
   mesh wear the material of a face it is given, keeping that face owner's
   manager at `+0x204` and the handle at `+0x208`, and passes them to
   `StartMeshRender` with track 0. An object mesh otherwise passes the track its
-  `ILifeSystem` slot 15 answers — 0 as far as is read.
+  `ILifeSystem` slot 15 answers — its clan's sign, which the building's and the
+  unit's records write every game frame (read 2026-10-01); slot 27 is camouflage's.
   → [docs/07-objects.md](docs/07-objects.md#who-picks-an-object-meshs-material-track--read)
 
 Left open: who calls IAnimation slot 27, and who, if anyone, sets an object's

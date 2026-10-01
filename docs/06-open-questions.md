@@ -165,10 +165,13 @@ outer ring is a clearance drawn around the building. See
   inline, not through the filter constructor, so enumerating that constructor's
   callers does not enumerate the filters. See
   [07-objects.md](07-objects.md#stream-7-is-the-per-face-record).
-- What sets an object's material track (`ILifeSystem` slot 16,
+- ~~What sets an object's material track (`ILifeSystem` slot 16,
   `Control.dll:0x10008810`; nothing found) and who calls IAnimation slot 27,
   which makes a mesh wear the material of a face it names
-  (`AniMesh.dll:0x10005970`). See
+  (`AniMesh.dll:0x10005970`)~~ — answered 2026-10-01: the building's and the
+  unit's records write their clan's sign every game frame (`iron3d.dll:0x10033072`,
+  `0x10075727`), and slot 27 is camouflage, called by the ground contact
+  (`Control.dll:0x1001a95d`). See
   [07-objects.md](07-objects.md#who-picks-an-object-meshs-material-track--read).
 - ~~What IAnimation node mask bit `0x10` does — the ground contact sets it on a
   contact point's carrying node (`Control.dll:0x1001a3aa`)~~ — **read**: the

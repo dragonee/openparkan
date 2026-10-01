@@ -884,7 +884,8 @@ third y. So the effect's depth — the axis its position channel travels, a stre
 sprite's length and a dome's pole — **stands up**, the sphere's radius long. The
 ray's plasma falls along it from one radius over the centre toward the centre,
 `NE_PFire`'s (2, 0.4, 0.4) streaks stand upright, and the dome's shells sit on the
-centre, 1.5 then 1 radius across. A stream is not sized by its frame
+centre, of 1.5 then 1 times the sphere's radius — the sizes are radii, not widths
+([11-effects.md](11-effects.md)). A stream is not sized by its frame
 ([11-effects.md](11-effects.md#a-control-point-frames-axes-are-depth-width-and-height--measured)),
 so the ray's clouds keep their own metres.
 

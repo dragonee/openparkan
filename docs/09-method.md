@@ -139,6 +139,18 @@ find.
   both sweeps come back empty, look at what the getter returns before concluding
   that nothing answers the value.
 
+- **Following a pointer that comes from `QueryInterface`.** A setter with "no caller"
+  had three: each takes the interface from a `QueryInterface` on a record's object and
+  calls the slot at once, so no stored global leads to it. `analysis/slotcalls.py`
+  searches from the request instead — every `call [reg + slot]` on a pointer that may
+  be the interface asked for — and its control is a slot whose callers are known
+  ([07-objects.md](07-objects.md#who-picks-an-object-meshs-material-track--read)).
+- **Reading a static's bytes out of the file.** A static whose bytes are zero in the
+  file is not thereby zero: a static initialiser may write it before anything reads
+  it. Three request records read as "all zero" are `{0xfff, 0, 1, 2}` once their
+  initialisers have run, and the landscape's UV unit, 0 in the file, is 1 ÷ 1024
+  (`Terrain.dll:0x10035070`). Look for the store before trusting the bytes
+  ([24-motion.md](24-motion.md#finding-the-ground--read)).
 
 ## Reading other people's work
 

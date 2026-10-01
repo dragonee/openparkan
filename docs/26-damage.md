@@ -1243,7 +1243,7 @@ time, as instances `0x20000001`–`3` on the object's node 0.
   ([35-hud.md](35-hud.md#shields-six-sectors--read)).
 - **What `r_shield_<c>` draws** (0.5 s, flags 0): two type-9 emitters,
   `NE_shield_<c>` (fade 1) and the white `NE_shield_w` (fade 0.5), placed in the
-  effect's frame (`+4` = 2) moving from 0.9 to 1.0 along *n* and sized
+  effect's frame (sprite mode 2, the block's `+4`: square to its direction) moving from 0.9 to 1.0 along *n* and sized
   (0.07, 0.4, 0.4) → (0.077, 0.44, 0.44): a **hemisphere** (`+200` = 0: 8 around by 3
   rings; 1: 16 × 6; 2: 24 × 9, `Terrain.dll:0x100273b0`) flat along the hit and 0.4
   of the bubble across, on its surface; a type-3 `ENV_wave_<C>` quad facing the
@@ -1496,10 +1496,14 @@ shield, battery and ammunition (`Behavior.dll:0x10018100`, `0x10019372`,
 
 ## Not established
 
-- Which of the effect frame's axes a type-9 dome's pole ends on: as read
-  (`Effect.dll:0x1000d110`, a default direction (0, 0, 1)) its second, so the
-  flash's dome would stand across the hit rather than bulge toward it; not checked
-  against a recording. Where a round's `+0x104` bit `0x2000000`, which skips
+- ~~Which of the effect frame's axes a type-9 dome's pole ends on~~ — **answered**
+  2026-10-01: its pole is the block's own direction channel, which the shield's
+  blocks set to (1, 0, 0), so it ends on the frame's first axis and the flash's dome
+  bulges toward the hit, as drawn
+  ([11-effects.md](11-effects.md)). Not checked against a recording: C03 M02's Light
+  Tower shows a translucent green dome under fire ("Let's Play - Parkan: Iron
+  Strategy, Part 6", 48:40), and the engine's was not set beside it.
+- Where a round's `+0x104` bit `0x2000000`, which skips
   bubbles, is set; the height below which a building's own collision context drops
   a contact (`0x1001d846`); whether the deflector parts' own `deflector` and
   `tur_deflector*` load effects loop.
