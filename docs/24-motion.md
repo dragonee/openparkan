@@ -1037,25 +1037,47 @@ and that group picks the step by surface
      out; [26-damage.md](26-damage.md)). A radius under 20 is held to at most
      7.5 (`0x1001a48e`); one of 20 or more is kept.
    - **The centre** goes into `+0x98` from the other ask: interface `0x20`
-     slot 3 (`0x1001a518`, `AniMesh.dll:0x1000f3b0`), with 2 and a request
-     record that is all zero (`0x10046328`). Its answer's centre is copied to
+     slot 3 (`0x1001a518`, `AniMesh.dll:0x1000f3b0`), with 2 and the default
+     request record (`0x10046328`). Its answer's centre is copied to
      `+0x98` (`0x1001a591`–`0x1001a5c3`), and its radius is r₂, held to 7.5
-     only when it is under 20 **and** the object's flags carry `0x1000000`
-     (`0x1001a51b`–`0x1001a58a`, message `0x10` then slot 14; which objects
-     carry that flag is not read); r₂ bounds the first search pass below.
+     only when it is under 20 **and** the unit is a robot
+     (`0x1001a51b`–`0x1001a58a`); r₂ bounds the first search pass below.
+   - **The hold asks the unit's Type** (*read* 2026-10-01). The word tested for
+     `0x1000000` is what the control's interface `0x10`, the `MBehaviour`,
+     answers from its slot 14 (`0x1001a540`–`0x1001a55a`;
+     `Behavior.dll:0x10008c50`, `+0xafc`): the Type, whose `0x1000000` is
+     `CLASS_ROBOT`
+     ([30-turrets.md](30-turrets.md#the-turret-decides-what-the-unit-is--measured-and-read)).
+     Every robot carries it, whatever its turret — battle, transport, builder,
+     HQ and hero alike — and an animal (`0x20000000`) and a building do not. The
+     pair's push-out asks the same word of its mover
+     ([Collision between objects](#collision-between-objects--read)).
    - **r₂ is the node sphere's radius, and it is not r** (*measured*). r comes
      from the parts' header spheres and r₂ from the nodes' boxes, and over the
-     **148** unit models the campaign places they differ on all 148 — r₂ ÷ r
-     runs from 0.42 to 2.34. r₂ is the **larger** on 26 of them, 25 of which are
-     the big machines whose parts' sphere is over 7.5 and held there (the L-2f
-     at 11.84 against 7.5, the Transformer at 14.68, `M_targ` at 17.57), plus
-     `42_mons`, whose parts' sphere clears 20 and is kept: 34.19 against 27.90.
-     On the other 122 r₂ is the smaller. So reading r₂ as r changes the up pass
-     on every unit in the game.
-   - **What slot 3 answers.** A request equal to the default one (all zero,
-     `0x10026ad0`) with no node gets the object's **node sphere**, `+0x124`
-     and `+0x130`, through the object's matrix (`0x1000f5c8`); any other gets
-     the agent's sphere (`0x1000f62e`).
+     **148** unit models the missions place the two radii differ on all 148:
+     the node sphere's is the smaller on 145. As the contact holds them they
+     still differ on **123**: r₂ is the smaller on 122, r₂ ÷ r running down to
+     0.42, and the larger on `42_mons` alone, 34.19 against 27.90, both kept
+     for clearing 20. On the other **25**, the big robots whose two spheres are
+     both over 7.5 and under 20 — the L-2f at 11.84 and 12.26, the Transformer
+     at 14.68 and 16.27, `M_targ` at 17.57 and 15.45 — both are held to 7.5. So
+     reading r₂ as r changes the up pass on every small and medium unit in the
+     game.
+   - **What slot 3 answers.** A request equal to the default one with no node
+     gets the object's **node sphere**, `+0x124` and `+0x130`, through the
+     object's matrix (`0x1000f5c8`); any other gets the agent's sphere
+     (`0x1000f62e`); and one whose fourth word is 1 a single node's slot sphere
+     (`0x1000f3c5`). **The default is `{0xfff, 0, 1, 2}`, not zeros**
+     (*corrected* 2026-10-01). The record at `AniMesh.dll:0x10026ad0` lies in
+     the module's uninitialised data, so its bytes in the file are zero, and a
+     static initialiser writes it as the module loads (`0x10011fe0`): the OR of
+     the twelve bit constants at `0x10020990`, then 0, 1 and 2. `Control.dll`
+     carries the same header's record twice, once for the ground contact
+     (`0x10046328`, written at `0x1001bcf0`) and once for the collision object
+     (`0x10046e40`, at `0x10020550`), each from its own copy of the twelve
+     constants (`0x1003bfa0`, `0x1003c320`). The three are equal, which is why
+     both asks get the node sphere; the earlier reading reached the same answer
+     from the file's zeros.
    - **The node sphere** (`0x10009e0a`–`0x1000a147`) joins, as the parts'
      spheres are joined, a sphere for every node of the merged model whose
      flags pass two masks set once to 0 and 1 (`0x1000c7f0`): every exterior
@@ -1388,7 +1410,7 @@ when the normal's z is above 0.173648 and **the face's z less the contact's z
 is below the word at the frame's `+0xc8`** (`0x1001ae08`–`0x1001ae1e`); only
 then the down query (10). That word is r₂: `0x1001acac` reads the node
 sphere's radius out of interface `0x20` slot 3's answer at the frame's `+0xa4`
-— the same answer, held to 7.5 under 20 for the flag `0x1000000`, that the body
+— the same answer, held to 7.5 under 20 on a robot, that the body
 sphere's search bounds its up pass by (`0x1001a51b`–`0x1001a58a`) — and
 `0x1001acb8` writes it into `+0xc8`. The two registers the function saves at
 `0x1001a5a5` and restores at `0x1001b3bc` stand between the frame and every
@@ -1433,6 +1455,15 @@ with it at r₂ — the Large Factory 5 s faster for a wheeled bot and 15 s fast
 for a walker, and the Small Bunker lost for a walker, which stalls 34 m short
 of its pod with no lift over 0.5 and no segment stop anywhere near it, so by
 something other than this.
+
+**It was the sphere the pair pushed out** (*measured* 2026-10-01, on
+openparkan's engine, each walker sent from 60 m north of C02 M03's Small Bunker
+`l_bunk1` with its guns off). Pushed out as their agent spheres, 3.45, the
+placed designs `21swlk1` and `22swlk1` never take the bunker — the first ends
+37.8 m from the pod and the second 94.6 — and the SSW-X walker takes it in
+24 s. Pushed out as their node spheres, 2.22
+([Collision between objects](#collision-between-objects--read)), all three
+take it: `21swlk1` in 61 s, `22swlk1` in 14 and the SSW-X in 15.
 
 ### A contact point sits on one node and dies with another — *measured*
 
@@ -1685,12 +1716,42 @@ established.
   manager by handing it `this + 0x20` (`0x1001f611`). So every offset below,
   and the flags and mass the pass reads, are that much past the object's own:
   entry `+0x10` is object `+0x30`, the flags; `+0x14` is `+0x34`, the mass;
-  `+0x18` is `+0x38`, the sphere; `+0x38` and `+0x3c` are `+0x58` and `+0x5c`,
+  `+0x18` is `+0x38`, the first sphere; `+0x38` and `+0x3c` are `+0x58` and `+0x5c`,
   the face source (interface `0x18`) and the push-out (`0x25`); `+0x40` is
   `+0x60`, the manager itself (interface `0x203`). All seven are written by the
   attach, message 4 with a zero argument (`0x1001f598`–`0x1001f607`).
+- **A unit and a building keep two spheres** (*read* 2026-10-01). Each is seven
+  floats: a start, an end and a radius. The first lies in the object, at `+0x38`
+  (entry `+0x18`). The second is a record of its own, 0x1c bytes, that the
+  constructor allocates for kinds 4 and 3 alone and keeps at `+0x54`, entry
+  `+0x34` (`0x1001f2ee`–`0x1001f332`); every other kind leaves that pointer 0.
+  - **Message 1 fills both** (`0x1001fec0`, case 0 of the switch at
+    `0x1001f548`, whose byte table at `0x1001f64c` is indexed by the message
+    less one: 1, 4, 21 and `0x1c` are its four cases). Start and end are both set
+    to the centre, so each frame's segment begins where the object stands as the
+    frame's message 1 reaches it. Message `0x1c` (`0x10020010`) then writes the
+    two ends again, after the move.
+  - **The first is the agent's sphere**: interface `0x18` slot 9 asked with 2
+    (`0x1001fef5`), the parts' header spheres joined
+    ([26-damage.md](26-damage.md#the-hit-test--read-and-measured)). **Slot 9's
+    argument is a space, not a choice of sphere** (`AniMesh.dll:0x10014587`):
+    with 2 the sphere at `+0x110` goes through the matrix at `+0x160` into the
+    world, and with anything else it is handed out as it lies. The slot answers
+    no other sphere.
+  - **A unit's second is its node sphere**: interface `0x20` slot 3
+    (`AniMesh.dll:0x1000f3b0`) asked with 2, no node and the request at
+    `Control.dll:0x10046e40` (`0x1001ff3a`–`0x1001ff9e`). That request is
+    `{0xfff, 0, 1, 2}`, which is `AniMesh.dll`'s own default, so the slot
+    answers the sphere over the exterior nodes' boxes
+    ([Finding the ground](#finding-the-ground--read)) — the sphere whose centre
+    the ground contact holds the body about.
+  - **A building's second** is its device manager's: interface `0x204` slot 12
+    with 2 (`0x1001ffb3`–`0x1001fffa`, `0x1002c500`). What that slot answers is
+    not read here; it is the sphere a round is swept against
+    (`0x1001d6cd`).
 - **What the pass skips.** It passes over an entry whose flags carry 1
-  (`0x1001c1e3`), and one whose radius is still below 0 (`0x1001c15a`).
+  (`0x1001c1e3`), and one whose first sphere's radius is still below 0
+  (`0x1001c15a`).
   **Nothing sets that flag** (*read*, with a control). The flag is object
   `+0x30` bit 0; the constructor clears it (`0x1001f2c0`), the object's own
   slot 4 sets it (`0x1001fe10`) and slot 3 clears it (`0x1001fe00`), and slot 3
@@ -1704,24 +1765,38 @@ established.
   shipped game.
 - **Which pairs go on.** It takes every pair j < i once. A pair goes on only
   when one side has a contact record (`0x1001c1e9`) and the swept spheres touch
-  within the frame (`0x1001e9f0`). A unit against a tree, a stone, a building or
-  another unit qualifies; two pieces of scenery never do.
+  within the frame (`0x1001e9f0`). The spheres swept are the **first** ones,
+  the agents' (`0x1001c203`, `0x1001c206`). A unit against a tree, a stone, a
+  building or another unit qualifies; two pieces of scenery never do.
+- **Nothing takes a unit out of the pair with the building it stands in**
+  (*read* 2026-10-01). From the top of the pass (`0x1001c040`) the gates are
+  the manager's own context entry's skip flag (`0x1001c04d`), each entry's skip
+  flag and radius, the contact record and the swept test. A building's own pass
+  hands every member and visitor with a contact record to the pair against the
+  building with no swept test at all (`0x1001c1ae`–`0x1001c1b2`). Inside the
+  dispatcher the one exclusion is a round against the object that fired it
+  (`0x1001d6a9`–`0x1001d6c1`). No child relation, property or door is asked
+  before the push-out, which asks the door only face by face.
 - **Handlers.** A pair with a handler of its own (`+0x40` slot 7) goes to it;
   `+0x40` is the **manager the object joined**, which the attach fills from
   interface `0x203` (`0x1001f600`) and without which it would not have
   registered at all, so the pass always has one to hand the pair to
   (`0x1001c222`). What that manager's slot 7 then does is not read.
   A pair with no round goes to `0x1001daf0`, with **the larger sphere as the
-  obstacle A and the smaller as the mover B** (`0x1001d647`). A must answer
-  interface `0x25`, or the pair ends (`0x1001db07`).
+  obstacle A and the smaller as the mover B** (`0x1001d647`), measured by the
+  first spheres' radii. A must answer interface `0x25`, or the pair ends
+  (`0x1001db07`).
 - **The landscape** is the manager's context entry, kind 1. A unit meets it
   only through the map box ([below](#the-map-edge--read)); the ground search
   holds it up.
 
-**B's move.** B's segment runs from its sphere's start to its end, with its
-end moved by B's accumulated push this pass less A's (`0x1001dcb2`). Every
-contact record's push is zeroed as the pass starts (`0x1001c077`). A push P
-starts at 0:
+**B's move.** The pair copies B's seven floats from its **second** sphere
+where it has one, and from the first only where it has none
+(`0x1001dc9d`–`0x1001dcb0`): a unit moves, is stopped and is pushed out as its
+node sphere, not as the agent's. B's segment runs from that sphere's start to
+its end, with its end moved by B's accumulated push this pass less A's
+(`0x1001dcb2`). Every contact record's push is zeroed as the pass starts
+(`0x1001c077`). A push P starts at 0:
 
 1. **Faces stop B.** B's segment runs through A's level-0 faces (interface
    `0x18` slot 6). Triangles flagged 4 are passed, and so are batches flagged 8
@@ -1743,9 +1818,16 @@ starts at 0:
    the machine's own slot 54, `0x1000cee0`. So the hero, class 2, is never
    stopped this way, and a class-3 or class-4 machine is.
 3. **A's shape pushes B out** (`AniMesh.dll:0x1000d410`, *read*). B's sphere
-   at its end goes to A's interface `0x25` slot 3, its radius held to 7.5 when
-   B's flags carry `0x1000000` (`0x1001df8f`). The push it returns is added to P
-   (`0x1001e007`):
+   at its end goes to A's interface `0x25` slot 3, **its radius held to 7.5
+   when B is a robot** (`0x1001df7a`–`0x1001dfb2`, the float at `0x1003c044`).
+   The word the hold tests for `0x1000000` is B's **Type**: B's interface
+   `0x10`, its `MBehaviour`, asked at `0x1001dde2`, and that interface's slot 14
+   (`Behavior.dll:0x10008c50`), which answers `+0xafc`
+   ([30-turrets.md](30-turrets.md#the-turret-decides-what-the-unit-is--measured-and-read)).
+   `0x1000000` is `CLASS_ROBOT`, on every robot's Type; an animal's is
+   `0x20000000` and a building's carries `0x80000000`, so theirs go whole.
+   Unlike the ground contact's hold this one has no 20 from which the radius is
+   kept. The push it returns is added to P (`0x1001e007`):
    - **Gather.** The pose walk runs. Every node whose level-0 slot sphere
      overlaps B's sphere is visited (`0x1000dfe0`). Each triangle that
      `0x1000e900` accepts, given the triangle, its plane and the sphere, gives a
@@ -1891,22 +1973,82 @@ object is then in the building's own manager, whose pass the world's runs: the
 building's faces push it too
 ([Walking into a building](#walking-into-a-building--read-and-measured)).
 
-*Measured*, the spheres on Mission 01 (the parts' header spheres joined as
-`0x10009510` joins them, times the placement's scale):
+*Measured*, the spheres on Mission 01. The first is the parts' header spheres
+joined as `0x10009510` joins them, times the placement's scale; the second, a
+unit's alone, is its node sphere as the pair hands it on:
 
-| object | collision radius | level-0 triangles | flagged |
-|---|---:|---:|---|
-| the hero, `tut1_p` | 2.18 | 688 | none |
-| `l_targ` / `M_targ` dummies | 5.22 / 15.45 | 104 / 174 | none |
-| `tut1_e1`, `helic`, `tut1_mf1` | 2.72, 2.45, 5.98 | 756, 812, 1054 | none |
-| `s_tree_29` | 3.43 | 178 | none |
-| `s_tree_04`, scaled | 43.5–65.2 | 404 | 192 flagged 4, its leaves |
-| `s_stone_05`–`_10`, scaled | 41.2–78.9 | 52–86 | none |
-| `m_bridge` | 61.9 | 230 | 16 flagged 2, 18 flagged 4 |
+| object | the pass's sphere | the pair's | level-0 triangles | flagged |
+|---|---:|---:|---:|---|
+| the hero, `tut1_p` | 2.18 | 1.59 | 688 | none |
+| `l_targ` / `M_targ` dummies | 5.22 / 15.45 | 3.24 / 7.5, of 17.57 | 104 / 174 | none |
+| `tut1_e1`, `helic`, `tut1_mf1` | 2.72, 2.45, 5.98 | 1.89, 1.86, 4.94 | 756, 812, 1054 | none |
+| `s_tree_29` | 3.43 | | 178 | none |
+| `s_tree_04`, scaled | 43.5–65.2 | | 404 | 192 flagged 4, its leaves |
+| `s_stone_05`–`_10`, scaled | 41.2–78.9 | | 52–86 | none |
+| `m_bridge` | 61.9 | | 230 | 16 flagged 2, 18 flagged 4 |
 
 The hero is the smaller sphere against every one of them, so it is always the
 mover. Its sphere is pushed out of their triangles, and its segment is
 stopped by their faces. A leaf never stops it.
+
+**The pair's sphere is what fits a door** (*measured* 2026-10-01, over the
+missions' units, the AI's designs and `fortif.rlb`'s doors).
+
+- **The units.** The missions place 296 units of **148** models, **143** of
+  them robots by their Type and 5 animals. The node sphere is the smaller of
+  the two on 145. It is over 7.5 on **27** robots, all 27 held to 7.5 in the
+  pair; the ground contact keeps two of those whole, `51_alien` at 41.47 and
+  `42_mons` at 34.19, the only robots at 20 or more. The animals' go unheld:
+  2.21 (`tushka`) to 29.57 (`l_arah`).
+- **The AI's designs.** `UNITS\UNITS\AI\` holds 77 assemblies, **70** robots and
+  7 buildings. The **15** on a large chassis have agent spheres of 10.79 to
+  14.20 (`AI_LS_31`, the largest) and node spheres of 8.10 to 10.11, every one
+  held to 7.5.
+- **The doors.** A door is its class-12 component's node, and its opening the
+  box of that node's level-0 triangles at rest — the ones flagged `0x10` where
+  the node carries any ([07-objects.md](07-objects.md#the-flags-word)). There
+  are **56** on 20 controllers:
+
+  | door | wide | high |
+  |---|---:|---:|
+  | Large Factory `fr_b_plant`, front `i05` | 22.1 | 15.4 |
+  | Medium Factory `fr_m_plant`, front `i05` | 19.2 | 12.9 |
+  | Small Factory `fr_l_plant`, front `i05` | 15.4 | 7.6 |
+  | the three factories' side doors `i19`, `i21` | 11.5 | 5.9 |
+  | Small Bunker `fr_l_bunker`, `i03` | 9.8 | 5.8 |
+  | Medium and Large Bunker, front `i02` / sides `i05`, `i07` | 9.1 / 8.1–8.2 | 5.7 / 5.8 |
+  | the mines' `i02`, `i06`; the warehouses' `i10` | 9.1; 9.5 | 5.8 |
+  | the institutes' `i08` / `i02`, `i05` / `i12`, `i14` | 11.5 / 11.0 / 7.6 | 6.2 |
+  | Small Generator, four leaves in two pairs | 6.2–6.8 each | 5.7 |
+  | Light and Medium Tower `fr_b_tower`, two leaves / `fr_m_tower` | 5.8 each / 7.7 | 6.8 / 6.3 |
+  | the ruin `fr_b_ruin`, four leaves in two pairs | 9.1–9.6 each | 7.7 |
+
+- **Against the factory that builds them.** A factory builds no chassis larger
+  than itself, and what it builds walks out by its front door. The small and
+  medium robots pass theirs by either sphere: of the 106 placed models on a
+  tiny, small or medium chassis only two have an agent sphere wider than the
+  Small Factory's 15.4 or the Medium's 19.2 — the target `M_targ` at 15.45 and
+  the monster `41_mons` at 14.75, neither of them built. The large ones do not.
+  Of the **37**
+  placed models on a large chassis the agent sphere is wider than the Large
+  Factory's 22.1 m door on **20**, the node sphere unheld on 10, and the pair's
+  on **none**. Of the AI's 15 large designs it is the agent sphere on **10**,
+  and on the other five its diameter is 21.6 to 22.06; the pair's 15 m leaves
+  3.5 m on either side.
+- **The LSW-3 Warrior** the AI builds on C03 M02, `AI_LS_10.dat` on `R_B_01`:
+  an agent sphere of 13.72 about (0, 0.94, 2.39) and a node sphere of 9.59
+  about (0.01, 0.13, 0.29), its origin 2.95 over its feet. The agent sphere
+  would top out 19.1 over the floor under a 15.4 m lintel; the pair's, at 7.5,
+  tops out at 10.75. *Measured on openparkan's engine*: pushed out by its agent
+  sphere the walker stood at the hall's door for the whole mission, pressed 2 m
+  into the floor, its Leave given again every 10 to 20 s; by the pair's it is
+  out on the landscape 3.5 s after it is made and at its Leave's goal, 74 m
+  off, in 12.
+- **Under a bunker's lintel.** A small walker on `R_L_01` (`21swlk1`) stands
+  with its origin 1.63 up: its agent sphere, 3.45, tops out at 5.55 and its
+  node sphere, 2.22, at 3.76, under doors 5.7 to 5.9 high. A medium walker's
+  node sphere (`22mwlk1`, 4.26) tops out at 6.61 and a large one's at 10.75, so
+  neither passes a bunker's, a mine's, a warehouse's or a factory's side door.
 
 ### Walking into a building — *read*, and *measured*
 
@@ -1964,18 +2106,21 @@ against it). C02 M03's Small Warehouse (`sto_l_n1`) is 6.3–7.5 m high inside:
 its floor face stands at 36.62 and its ceiling's faces, on the interior node
 `i09`, at 42.88–44.08. The medium walker `22mwlk1` the mission places on that
 floor, logical id 28, has an agent sphere of 5.87 about a centre 0.41 above its
-origin, which stands 3.04 over its feet, so the ceiling's faces press the
-sphere 2.85 m down; the sphere the pass hands the push-out is that agent sphere,
-interface `0x18` slot 9 asked with 2 (`Control.dll:0x1001fef5`, copied into
-`+0x38`–`+0x50` at `0x1001ff36`). Taken whole after the ground contact, as read
-above, the push leaves the walker with its hull at the floor and its legs
-through it in every frame the push lands in. The recording shows it upright on
-its legs in the briefing and in play, and in **every** frame at 60 fps as the
-hero walks up to it, with no frame sunk ("Let's Play - Parkan: Iron Strategy,
-Part 4", 1:43, 15:13–15:15). What keeps it there is not read: where the frame
-is drawn among the move, the pass, the contact and the push would do it, and so
-would something that keeps the pair from pushing at all
-([Not established](#not-established)).
+origin, which stands 3.04 over its feet: under that ceiling the agent sphere
+would be pressed 2.85 m down, and the walker left with its hull at the floor
+and its legs through it in every frame the push lands in. **That is not the
+sphere the pair pushes out** (*corrected* 2026-10-01): it is the node sphere,
+4.26 about a centre 0.67 *below* the origin
+([Collision between objects](#collision-between-objects--read)), which tops
+out 6.63 over the floor, and the ceiling's lowest faces press it **0.28 m**
+(*measured* on openparkan's engine: the body's lowest is 2.76 over the floor
+across ten seconds, against 0.16 with the agent sphere). The recording shows it
+upright on its legs in the briefing and in play, and in **every** frame at
+60 fps as the hero walks up to it, with no frame sunk ("Let's Play - Parkan:
+Iron Strategy, Part 4", 1:43, 15:13–15:15); a quarter of a metre on a walker
+6 m tall is under what those frames resolve. Whether the game draws even that
+is not read: where the frame is drawn among the move, the pass, the contact
+and the push decides it ([Not established](#not-established)).
 
 **Doors** (*read*). `CBuilding` files each class-12 item as a door, with the
 nodes its channels play (`Terrain.dll:0x100583a2`–`0x100584e8`), and each
@@ -2056,6 +2201,19 @@ flag and value, and a hold.
     engine that runs the ground contact only at state steps lets those pushes
     add up between steps: the hero sank 1.2 m there, and on one build fell
     through the floor.
+  - **A sinking leaf is gone before the door is open** (*derived*, and
+    *measured* on openparkan's engine, 2026-10-01). The Large Factory's front
+    leaf `i05` sinks its 15.4 m in 2.5 s, and the building counts the door open
+    at 2.25. Both of its triangles' centroids are under the floor well before
+    that and the floor hides them, and the centre's segment is stopped only by
+    a face it crosses. So Mission 02's L-2f, whose pair sphere's centre flies
+    8 m over the floor, goes over the leaf once its top is under that centre —
+    3.7 m up, 0.27 s before the door reports open. A large walker, its centre
+    3.2 m up, reaches the leaf while half of it still stands and is held
+    there. Its feet's up pass reaches 7.5 and takes the leaf's top for ground:
+    it is lifted 5.6 m onto the leaf and rides it down for a second
+    (*measured* on the engine, C03 M02; whether the game's contacts read a
+    door's faces is not checked).
 - **Two more openers:** a hit struck on a door's node opens it
   (`Control.dll:0x1000ec7e`, [below](#a-shot-opens-a-door--read-and-seen)),
   and a hall-way link opens the doors listed on it
@@ -2347,6 +2505,32 @@ and so lack 8; **107 carry it in none**: the nine flying chassis (`r_t_02`, `r_l
 `r_m_02`, `r_b_02`, `_07`, `_08`), the animals `a_a_l2` and `a_a_l3`, the 30
 buildings and 66 rounds, and so carry 8. `0x20000` is on no state; `0x4000000`
 on 31, all rounds, which pass batches flagged `0x200` (none is).
+
+**A level floor only touches the flyer over it** (*derived* from the two reads,
+and *measured* 2026-10-01). A flyer's flags carry 8, so the floors push it, and
+whole. But the sphere the pair pushes out is the node sphere, held to 7.5 on a
+robot ([Collision between objects](#collision-between-objects--read)), and the
+ground contact holds a flyer's centre — the same node sphere's centre — the
+agent sphere's radius, held to 7.5 under 20, over the face under it
+([Holding the body](#holding-the-body-on-the-ground--read-and-measured)). On
+**all 148** unit models the missions place the first radius is no larger than
+the second, so the floor a flyer rests on or is made on lies at or under the
+foot of its pair sphere. Mission 02's L-2f, made 5 m over the Large Factory's
+hall floor, is lifted by its own contact to 9.67 over it and takes no push from
+it; pushed out as its 12.26 m agent sphere it left the hall through the roof,
+38 m up, in its first frame (*measured* on openparkan's engine, the floors
+kept in both runs).
+
+**What the floors do stop is a flyer's way down** (*measured* on openparkan's
+engine, and not read). With the floors kept, Mission 04's helicopter, sent to
+take the Large Factory, comes in over the hall floor at 52.5 and stays there,
+14 m from the pod in the room 12.4 below. With no floor pushing it, it sinks
+through the hall floor onto the pod, which is how the engine's flyers have
+taken every building so far. The game's helicopter takes that factory, so its
+way to the pod goes round the floor; the hall way has links only a flyer
+crosses ([below](#the-way-to-the-pod--measured-and-seen)), and which a flyer
+takes, at what height, is not followed here
+([Not established](#not-established)).
 
 **The doorways are portal quads** (*measured*, *read*, and *seen*). `fr_b_plant`
 carries 87 triangles of the material `DEFAULT`, all with triangle flags 0. 80
@@ -2760,12 +2944,11 @@ neither limit comes into play.
    a flyer's do. The floors and ramps are then climbed by the lift alone. The
    stairs' 64° side pieces carry no 2 and still push, and the hero still walks
    the stairs (*measured* on openparkan's engine). STAND-IN in openparkan: no
-   robot keeps the floors; with them, Mission 02's flyer, made at the Large
-   Factory's creation vertex 5 m over the hall floor, is pushed 33 m up in its
-   first frame, through the hall's roof. What keeps a flyer's sphere off a
-   floor it is made on is not read; its walk points' heights
-   ([A flyer's walk points](#a-flyers-walk-points--read-and-measured)) are, and
-   they do not.
+   robot keeps the floors. A floor no longer throws a flyer made on it — the
+   pair's sphere only touches it
+   ([above](#the-ground-inside-a-building--read-in-part-and-measured)) — but
+   with the floors kept a flyer sent to a pod under a floor stops over that
+   floor, and the way the game's flyer takes down is not read.
 5. Take the push as the machine does: with state bit 4, whole when the parent
    is a building and z ≤ 0; otherwise flattened, lengthened to |P| and at
    most ×4.
@@ -2979,11 +3162,13 @@ points back along the face's horizontal normal. The walker is left s × (1 − h
 inside the face. A vertical face (h = 1) stops it dead. The buoy's cone
 (h ≈ 0.87) lets it creep 13% of every step, and any glancing contact adds a
 sideways part that slides it round. The centre meets a face, and step 1 stops
-it, only after about 2.18 ÷ 0.06 ≈ 36 such steps.
+it, only after about 1.59 ÷ 0.06 ≈ 27 such steps, 1.59 being the hero's node
+sphere, which is what the pair pushes out.
 
 **On openparkan's engine**, which follows the steps above (*measured*): the hero
 walked head-on into buoy 26 moves in 0.06 for each 0.46 step. A sideways push
-of about 0.05 a step grows until it slides past.
+of about 0.05 a step grows until it slides past. Walked at each of the five,
+it comes within 2.7 to 2.9 of the buoy's axis, the cone reaching 1.94.
 
 **Not established.** No read step stops a class-2 walker at a small sloped
 object. Whether the original game lets the hero through a buoy has not been
@@ -3650,13 +3835,22 @@ patrol runs past it.
 
 ## Not established
 
-- What keeps a walker standing on a building's floor upright under a low
+- ~~What keeps a walker standing on a building's floor upright under a low
   ceiling ([above](#collision-between-objects--read), "A low ceiling and a
   walker on the floor under it"): where the frame is drawn among the move, the
   collision pass, the ground contact and the push, or what keeps the pair from
   pushing. Which message runs the collision object's sphere refresh
   (`Control.dll:0x1001fec0`, case 0 of the switch at `0x1001f548`) is not read
-  either. A stand-in draws the body where the contact last held it.
+  either.~~ — **read** 2026-10-01, in the part that mattered: nothing keeps the
+  pair from pushing, and what it pushes out is not the agent's sphere but the
+  unit's **node sphere**, held to 7.5 on a robot, which the collision object
+  keeps in a second record and message 1 refreshes
+  ([Collision between objects](#collision-between-objects--read)). The
+  warehouse's ceiling presses that sphere 0.28 m, not 2.85
+  ([Walking into a building](#walking-into-a-building--read-and-measured)).
+  Still open: where the frame is drawn among the move, the collision pass, the
+  ground contact and the push. A stand-in draws the body where the contact last
+  held it.
 - How the velocity integrator's pull toward *command × top speed*, with the
   command left at 0, combines with a velocity the Wizard writes every frame.
   A stand-in takes the written velocity as the machine's own. ~~Whether the
@@ -3705,11 +3899,18 @@ patrol runs past it.
   the ground under each point, as the behaviour's ground routine answers it, and
   15 — 115 over a building, a tree or a stone — and for an animal 45 to 95
   ([A flyer's walk points](#a-flyers-walk-points--read-and-measured)).
-- **What keeps a flyer's sphere off a building's floor it is made on.** Its
+- ~~**What keeps a flyer's sphere off a building's floor it is made on.** Its
   collision flags carry 8, so the floors push it, whole; Mission 02's L-2f, made
   5 m over the Large Factory's hall floor, would be pushed 33 m up in its first
   frame (*measured* on openparkan's engine), and the engine lets no robot keep
-  the floors ([The ground inside a building](#the-ground-inside-a-building--read-in-part-and-measured)).
+  the floors~~ — **read**, and **measured** 2026-10-01: nothing keeps it off;
+  the floor only touches it. The pair pushes out the node sphere held to 7.5,
+  not the 12.26 m agent sphere, and the contact rests that sphere's centre the
+  held agent radius over the floor, which is no less on all 148 placed models
+  ([The ground inside a building](#the-ground-inside-a-building--read-in-part-and-measured)).
+  Still open, and what the engine's stand-in now stands for: **which way a
+  flyer takes to a pod under a floor**. With the floors kept the engine's
+  helicopter stops over the Large Factory's hall floor, 14 m from the pod.
 - **What brings a medusa's written velocity inside its moving states' boxes.**
   As read, a grazing medusa is asked for 13 m/s and a climb of tens of metres,
   and holds its hover
@@ -3771,8 +3972,11 @@ patrol runs past it.
   (`0x1000cb90`), which a flyer's is; it runs on message `0x1c`, once a frame,
   and state bit `0x4` is what decides whether the machine falls
   ([Holding the body](#holding-the-body-on-the-ground--read-and-measured)).
-  Still open beside it: which objects carry the flag `0x1000000` that holds r₂
-  to 7.5. ~~What the **contact points'** own up pass tests against~~ — **read**
+  ~~Still open beside it: which objects carry the flag `0x1000000` that holds r₂
+  to 7.5.~~ — **read** 2026-10-01: the word is the unit's Type, which its
+  behaviour's slot 14 answers, and the bit is `CLASS_ROBOT`, so every robot
+  and no animal ([Finding the ground](#finding-the-ground--read)).
+  ~~What the **contact points'** own up pass tests against~~ — **read**
   2026-09-30: r₂, the body sphere's own bound, which the pass copies into the
   fourth word of the record it builds from control `+0x2ec`, `+0x2fc` and
   `+0x30c` and compares with alone

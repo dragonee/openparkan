@@ -24175,6 +24175,185 @@ def check_body_sphere(check, game: Path) -> None:
           "the records' +0x94, is the same slot's radius (0x1007e5f7)")
 
 
+#: `Type` bit every robot carries, `CLASS_ROBOT` (docs/30, "The turret decides what the unit is").
+CLASS_ROBOT = 0x1000000
+#: The most a robot's sphere measures in the pair's push-out (Control.dll:0x1003c044).
+PAIR_RADIUS_HOLD = 7.5
+#: The front door of the factory that builds each chassis size class: its leaf's width and height
+#: (`fr_l_plant`, `fr_m_plant`, `fr_b_plant` node `i05`).
+FACTORY_FRONT_DOORS = {"fr_l_plant": (15.4, 7.6), "fr_m_plant": (19.2, 12.9),
+                       "fr_b_plant": (22.1, 15.4)}
+#: The LSW-3 Warrior the AI builds on C03 M02: (agent radius, its centre, node radius, its centre).
+LSW_3 = ("UNITS\\UNITS\\AI\\AI_LS_10.dat", 13.72, (0.0, 0.94, 2.39), 9.59, (0.01, 0.13, 0.29))
+
+
+def _door_leaves(game: Path) -> dict[tuple[str, int], tuple[float, float]]:
+    """Every `fortif.rlb` door, by controller and class-12 component: its leaf's width across and
+    its height, over the node's level-0 triangles at rest (those flagged 0x10 where it has any)."""
+    fortif = NResArchive.open(game / "fortif.rlb")
+    entries = {e.name.lower(): e for e in fortif}
+    names = frozenset(p.name.lower() for p in all_archives(game))
+    out = {}
+    for name, entry in sorted(entries.items()):
+        stem = name[:-4]
+        if not name.endswith(".msh") or stem + ".ctl" not in entries:
+            continue
+        model = objmesh.parse(fortif.read(entry), stem)
+        doors = [p for p in control.parse(fortif.read(entries[stem + ".ctl"]), names).components
+                 if p.type_id == control.DOOR_TYPE]
+        if not doors:
+            continue
+        pos = model.posed_positions()
+        for d, door in enumerate(doors):
+            on = [t for t in range(len(model.triangles)) if model.node_of_triangle(t) == door.node]
+            leaf = [t for t in on if model.face_flags[t] & objmesh.FACE_DOOR_LEAF] or on
+            points = [pos[v] for t in leaf for v in model.triangles[t]]
+            ext = [max(p[k] for p in points) - min(p[k] for p in points) for k in range(3)]
+            out[stem, d] = (max(ext[0], ext[1]), ext[2])
+    return out
+
+
+def check_pair_sphere(check, game: Path) -> None:
+    """A unit's collision object keeps two spheres: the pass tests the agent's, and the pair moves
+    and pushes out the node sphere, held to 7.5 on a robot (docs/24, "Collision between
+    objects")."""
+    asm = assembly.Assembly(game)
+
+    def spheres(path: str):
+        parts = asm.parts(mission.KIND_UNIT, path)
+        root = objects.load_unit(asm.unit_file(path)).components[0].ref.member.lower()
+        centre, radius = _parts_sphere(asm, parts)
+        node_centre, node_radius = _node_sphere(asm, parts)
+        return root, centre, radius, node_centre, node_radius
+
+    placed: dict[str, tuple[str, int]] = {}
+    count = 0
+    for folder in gamedir.missions(game):
+        for o in mission.load(folder / "data.tma").objects:
+            if o.kind == mission.KIND_UNIT:
+                count += 1
+                placed.setdefault(o.path.lower(), (o.path, o.type_id or 0))
+    models = [(*spheres(path), bool(word & CLASS_ROBOT)) for path, word in placed.values()]
+    robots = [m for m in models if m[5]]
+    over = [m for m in robots if m[4] > PAIR_RADIUS_HOLD]
+    kept = [m for m in over if m[4] >= CONTACT_RADIUS_HOLD[0]]
+
+    def pair(node_radius: float, robot: bool) -> float:
+        return min(node_radius, PAIR_RADIUS_HOLD) if robot else node_radius
+
+    def contact(radius: float) -> float:
+        return radius if radius >= CONTACT_RADIUS_HOLD[0] else min(radius, CONTACT_RADIUS_HOLD[1])
+
+    # A flyer rests on the agent sphere's radius, held, about the node sphere's centre; the floor
+    # under it pushes the pair's sphere, which has the same centre.
+    clear = sum(1 for m in models if pair(m[4], m[5]) <= contact(m[2]) + 1e-6)
+    width = FACTORY_FRONT_DOORS["fr_b_plant"][0]
+
+    def wider(rows) -> tuple[int, int, int]:
+        """How many of `rows` are wider than the door by the agent's sphere, the node sphere
+        unheld and the pair's."""
+        return (sum(1 for m in rows if 2 * m[2] > width), sum(1 for m in rows if 2 * m[4] > width),
+                sum(1 for m in rows if 2 * pair(m[4], True) > width))
+
+    large = [m for m in robots if m[0][2:3] == "b"]
+    large_wide = wider(large)
+
+    designs = [spheres("UNITS\\UNITS\\AI\\" + p.name)
+               for p in sorted((game / "UNITS" / "UNITS" / "AI").glob("*.dat"))]
+    ai_robots = [m for m in designs if m[0].startswith("r_")]
+    ai_large = [m for m in ai_robots if m[0][2:3] == "b"]
+    ai_wide = wider(ai_large)
+    ai_agent = (round(min(m[2] for m in ai_large), 2), round(max(m[2] for m in ai_large), 2))
+    ai_node = (round(min(m[4] for m in ai_large), 2), round(max(m[4] for m in ai_large), 2))
+    _, lsw_centre, lsw_radius, lsw_node_centre, lsw_node_radius = spheres(LSW_3[0])
+    lsw = (abs(lsw_radius - LSW_3[1]) < 0.01 and math.dist(lsw_centre, LSW_3[2]) < 0.02
+           and abs(lsw_node_radius - LSW_3[3]) < 0.01
+           and math.dist(lsw_node_centre, LSW_3[4]) < 0.02)
+
+    doors = _door_leaves(game)
+    fronts = {stem: tuple(round(v, 1) for v in doors[stem, 0]) for stem in FACTORY_FRONT_DOORS}
+    bunker = tuple(round(v, 1) for v in doors["fr_l_bunker", 0])
+    check("UNITS, fortif.rlb: the agent's sphere is wider than the Large Factory's door on most "
+          "large robots, and the pair's sphere on none",
+          count == 296 and len(models) == 148 and len(robots) == 143 and len(over) == 27
+          and len(kept) == 2 and clear == 148 and len(large) == 37 and large_wide == (20, 10, 0)
+          and len(designs) == 77 and len(ai_robots) == 70 and len(ai_large) == 15
+          and ai_wide == (10, 0, 0) and ai_agent == (10.79, 14.2) and ai_node == (8.1, 10.11)
+          and lsw and len(doors) == 56 and len({stem for stem, _ in doors}) == 20
+          and fronts == FACTORY_FRONT_DOORS and bunker == (9.8, 5.8),
+          f"the missions place {count} units of {len(models)} models, {len(robots)} of them robots "
+          f"(Type & 0x1000000); the node sphere is over 7.5 on {len(over)} robots, {len(kept)} of "
+          f"them at 20 or more; the pair's sphere is no larger than the contact's on {clear}; of "
+          f"the {len(large)} models on a large chassis (agent, unheld node, pair) spheres wider "
+          f"than the Large Factory's {width} m door: {large_wide}; UNITS/UNITS/AI holds "
+          f"{len(designs)} assemblies, {len(ai_robots)} robots, {len(ai_large)} large with agent "
+          f"spheres {ai_agent} and node spheres {ai_node}, wider than the door {ai_wide}; "
+          f"AI_LS_10 is {lsw_radius:.2f} about {tuple(round(c, 2) for c in lsw_centre)} and "
+          f"{lsw_node_radius:.2f} about {tuple(round(c, 2) for c in lsw_node_centre)}; "
+          f"{len(doors)} doors on {len({stem for stem, _ in doors})} buildings, the factories' "
+          f"front doors (width, height) {fronts}, the Small Bunker's {bunker}")
+
+    paths = [game / name for name in ("Control.dll", "AniMesh.dll", "Behavior.dll")]
+    if not all(p.exists() for p in paths):
+        return
+    ctl, ani, beh = (_image_at(p.read_bytes()) for p in paths)
+
+    def dwords(at, va: int, n: int) -> tuple[int, ...]:
+        return struct.unpack(f"<{n}I", at(va, 4 * n))
+
+    bits = tuple(1 << k for k in range(12))
+    sites = [
+        # the constructor: kinds 4 and 3 get a second 0x1c-byte sphere record at +0x54
+        (ctl, 0x1001F308, b"\x6a\x1c"), (ctl, 0x1001F332, b"\x89\x46\x54"),
+        # message 1 (case 0): +0x38 from interface 0x18 slot 9 with 2; a unit's +0x54 from
+        # interface 0x20 slot 3 with 2 and the request at 0x10046e40; a building's from
+        # interface 0x204 slot 12
+        (ctl, 0x1001F551, b"\xe8\x6a\x09\x00\x00"), (ctl, 0x1001FEF2, b"\x6a\x02\x50\xff\x51\x24"),
+        (ctl, 0x1001FF1F, b"\x8d\x7b\x38"), (ctl, 0x1001FF57, b"\x68\x40\x6e\x04\x10"),
+        (ctl, 0x1001FF63, b"\xff\x50\x0c"), (ctl, 0x1001FF72, b"\x8b\x7b\x54"),
+        (ctl, 0x1001FFBF, b"\xff\x50\x30"),
+        # the request is {mask, 0, 1, 2}, written by a static initialiser, as AniMesh's default is
+        (ctl, 0x10020555, b"\xc7\x05\x44\x6e\x04\x10\x00\x00\x00\x00"),
+        (ctl, 0x10020564, b"\xc7\x05\x48\x6e\x04\x10\x01\x00\x00\x00"),
+        (ctl, 0x1002056E, b"\xc7\x05\x4c\x6e\x04\x10\x02\x00\x00\x00"),
+        (ani, 0x10011FE5, b"\xc7\x05\xd4\x6a\x02\x10\x00\x00\x00\x00"),
+        (ani, 0x10011FF4, b"\xc7\x05\xd8\x6a\x02\x10\x01\x00\x00\x00"),
+        (ani, 0x10011FFE, b"\xc7\x05\xdc\x6a\x02\x10\x02\x00\x00\x00"),
+        # the pass tests the first spheres, entry +0x18
+        (ctl, 0x1001C203, b"\x8d\x48\x18"), (ctl, 0x1001C206, b"\x83\xc2\x18"),
+        # the pair takes B's seven words from the record at entry +0x34 when it has one
+        (ctl, 0x1001DC9D, b"\x8b\x70\x34"), (ctl, 0x1001DCA4, b"\x8d\x70\x18"),
+        (ctl, 0x1001DCA7, b"\xb9\x07\x00\x00\x00"),
+        # and holds its radius to 7.5 when interface 0x10 slot 14 answers a word with 0x1000000
+        (ctl, 0x1001DF85, b"\xff\x51\x38"), (ctl, 0x1001DF88, b"\xa9\x00\x00\x00\x01"),
+        (ctl, 0x1001DF8F, b"\xd9\x05\x44\xc0\x03\x10"),
+        # the ground contact's hold on the node sphere's radius asks the same word
+        (ctl, 0x1001A557, b"\xff\x52\x38"), (ctl, 0x1001A55A, b"\xa9\x00\x00\x00\x01"),
+        # slot 14 answers MBehaviour +0xafc, the Type
+        (beh, 0x10008C50, b"\x8b\x44\x24\x04\x8b\x80\xfc\x0a\x00\x00\xc2\x04\x00"),
+        # interface 0x18 slot 9's argument is the space: 2 carries the sphere into the world
+        (ani, 0x10014587, b"\x83\xf8\x02"),
+    ]
+    switch = (dwords(ctl, 0x1001F638, 4) == (0x1001F54F, 0x1001F598, 0x1001F567, 0x1001F55B)
+              and ctl(0x1001F64C, 28) == bytes([0, 4, 4, 1] + [4] * 16 + [2] + [4] * 6 + [3]))
+    masks = (dwords(ctl, 0x1003C320, 12) == bits and dwords(ctl, 0x1003BFA0, 12) == bits
+             and dwords(ani, 0x10020990, 12) == bits)
+    held = struct.unpack("<f", ctl(0x1003C044, 4))[0] == PAIR_RADIUS_HOLD
+    slot14 = dwords(beh, 0x10059250 + 4 * 14, 1) == (0x10008C50,)
+    check("Control.dll, AniMesh.dll, Behavior.dll: the pair pushes out a unit's node sphere, "
+          "held to 7.5 on a robot",
+          all(at(va, len(code)) == code for at, va, code in sites) and switch and masks and held
+          and slot14,
+          "a collision object of kind 4 or 3 keeps a second sphere record at +0x54 (0x1001f332); "
+          "message 1 (0x1001fec0, case 0 of 0x1001f548) fills +0x38 from interface 0x18 slot 9 "
+          "and a unit's second from interface 0x20 slot 3 asked by {0xfff, 0, 1, 2} "
+          "(0x10046e40, set at 0x10020550), AniMesh's own default (0x10026ad0, set at "
+          "0x10011fe0), so the node sphere; the pass sweeps the first spheres (0x1001c203) and "
+          "the pair copies B's from the second (0x1001dc9d), holding its radius to 7.5 "
+          "(0x1003c044) when MBehaviour +0xafc, the Type, carries 0x1000000 (0x1001df88, "
+          "Behavior.dll:0x10008c50)")
+
+
 #: docs/30's outer camera places, in order: (angle, distance back in r).
 OUTER_PLACES = [(0.4, 2.5), (0.2, 4.5), (-0.2, 4.5), (-0.4, 2.5)]
 #: The mode handlers that turn the outer camera off, front -> new, and their address
@@ -26321,7 +26500,7 @@ def run(game: Path) -> int:
         check_packages,
         check_target_panel,
         check_wingman,
-        check_boarding, check_hull_follow, check_live_limits, check_body_sphere,
+        check_boarding, check_hull_follow, check_live_limits, check_body_sphere, check_pair_sphere,
         check_zoom_and_outer_camera,
         check_builder, check_placement, check_placed_exits,
         check_designs,
