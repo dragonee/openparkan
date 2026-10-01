@@ -74,6 +74,21 @@ impl Frame {
         self.origin + self.axes[0] * local.x + self.axes[1] * local.y + self.axes[2] * local.z
     }
 
+    /// How far `eye` stands from the frame's origin in the frame's own units: the eye as an
+    /// emitter's update is handed it, in the instance's space (docs/11, "A sprite is drawn
+    /// through its frame"). A frame of three points that make a basis is inverted; any other
+    /// is an orientation scaled alike on its three axes -- the handler's one-direction branch
+    /// scales a turned frame by that direction's length (`Control.dll:0x10002c7b`–`0x10002cfd`)
+    /// -- so the distance is divided by the first axis's length.
+    pub fn local_distance(&self, eye: Vec3) -> f32 {
+        let to = eye - self.origin;
+        if let Some([x, y, z]) = self.basis() {
+            return (glam::Mat3::from_cols(x, y, z).inverse() * to).length();
+        }
+        let unit = self.axes[0].length();
+        if unit > 0.0 { to.length() / unit } else { to.length() }
+    }
+
     /// The same frame with its axes a unit long: it turns what it places without sizing it.
     /// It is no basis to draw through either — a stream's particle is sized by its own
     /// channel and by nothing else ([`Instance::stream`]).
@@ -86,6 +101,10 @@ impl Frame {
         }
     }
 }
+
+/// A type-4 block's distance its sprite reaches its full size at, in the frame's units:
+/// 500 on every glow the buildings carry.
+pub const FLARE_REACH_AT: usize = 200;
 
 /// A sound block's +4: 2 or 3 make it a loop (`Effect.dll:0x10012d3e`).
 pub const SOUND_MODE_AT: usize = 4;
@@ -644,6 +663,11 @@ impl Instance {
     /// nothing (`0x10008016`); while it is in view an emitter with bit 8 draws over the
     /// scene (`0x10009930`), and nothing else does.
     pub fn sprites(&self, now_ms: f64, in_view: bool, out: &mut Vec<Sprite>) {
+        self.sprites_from(now_ms, None, in_view, out);
+    }
+
+    /// [`Self::sprites`] seen from `eye`, which a type-4 sprite sizes itself by.
+    pub fn sprites_from(&self, now_ms: f64, eye: Option<Vec3>, in_view: bool, out: &mut Vec<Sprite>) {
         if !self.on || (self.effect.header.flags & FX_HIDE_OCCLUDED != 0 && !in_view) {
             return;
         }
@@ -660,7 +684,8 @@ impl Instance {
             let first = out.len();
             let age_ms = seconds * 1000.0;
             match e.kind {
-                3 | 4 | 9 => self.sprite(e, p, age_ms, seconds, out),
+                3 | 9 => self.sprite(e, p, age_ms, seconds, out),
+                4 => self.sprite(e, self.flare(e, p, eye), age_ms, seconds, out),
                 5 => self.bolt(e, p, age_ms, seconds, out),
                 7 | 10 => self.burst(e, i as u32, p, age_ms, out),
                 8 => self.stream(i, e, seconds * self.stream_pace, out),
@@ -737,6 +762,20 @@ impl Instance {
     /// +64..+72 for the position, +124..+132 for the size (`0x100106f6`, `0x10010784`;
     /// docs/11, "A channel is a (low, high, jitter, exponent) run"). Its **phase**, from
     /// +8, +12 and +16, is where its material's animation stands ([`phase_fraction`]).
+    /// A type-4 sprite's progress (`Effect.dll:0x100109b0`): the window's, times the eye's
+    /// distance in the frame's own units over the block's `+200` (the constructor keeps its
+    /// inverse, `0x100108d9`), and held at 1. Everything the sprite draws then runs on it --
+    /// its place, size and fade, and its phase where `+8` is not negative -- so up close it
+    /// stays near its low end and grows with the distance: the light glows keep their size on
+    /// the screen. With no eye the window's progress stands.
+    fn flare(&self, e: &Emitter, p: f32, eye: Option<Vec3>) -> f32 {
+        let reach = e.f(FLARE_REACH_AT);
+        match eye {
+            Some(eye) if reach > 0.0 => (p * self.frame.local_distance(eye) / reach).min(1.0),
+            _ => p,
+        }
+    }
+
     fn sprite(&self, e: &Emitter, p: f32, age_ms: f32, seconds: f32, out: &mut Vec<Sprite>) {
         let local = lerp3_axis(e.triple(40), e.triple(52), shaped(p, e.triple(64)));
         let size = lerp3_axis(e.triple(100), e.triple(112), shaped(p, e.triple(124)));
@@ -1043,6 +1082,35 @@ mod tests {
         assert_eq!(out[0].frame, None);
         assert_eq!(out[0].along, Vec3::ZERO);
         assert!((out[0].centre - point.0).length() < 1e-6);
+    }
+
+    /// A building's light glows (`glow_y` and its kin) grow 0.2 → 9 over their window, and a
+    /// type-4 sprite runs that on the window's progress times the eye's distance in the frame's
+    /// units over its `+200`, 500 (`Effect.dll:0x100109b0`): from 50 units it is 1.08 across,
+    /// from 1000 its full 9. C03 M02's generator ball, read as a type 3, drew 60 m wide.
+    #[test]
+    fn a_type_4_glow_grows_with_the_eyes_distance_in_its_frame() {
+        let glow = block(4, 204, &[(32, 0.0), (36, 1.0), (20, 1.0), (24, 1.0), (28, 1.0), (200, 500.0)], "G");
+        let glow = [(100, 0.2), (104, 0.2), (108, 0.2), (112, 9.0), (116, 9.0), (120, 9.0)]
+            .into_iter()
+            .fold(glow, |e, (at, v): (usize, f32)| with_word(e, at, v.to_bits()));
+        // One control point named three times, its direction 2 long: distances in its frame halve.
+        let point = (Vec3::new(0.0, 0.0, 30.0), Vec3::new(0.0, 0.0, 2.0));
+        let mut whole = effect(TIME_MANUAL, 0.0, 0, vec![glow]);
+        Rc::get_mut(&mut whole).unwrap().header.scale = [1.0; 3];
+        let mut fx = Instance::new(whole, Frame::from_points([point; 3]), 1.0, 0.0, None, 1);
+        fx.value = 1.0;
+        let width = |eye: Vec3| {
+            let mut out = Vec::new();
+            fx.sprites_from(0.0, Some(eye), true, &mut out);
+            out[0].width
+        };
+        let near = width(Vec3::new(100.0, 0.0, 30.0));
+        assert!((near - 1.08 * 2.0).abs() < 1e-3, "50 frame units off: {near}");
+        assert!((width(Vec3::new(2000.0, 0.0, 30.0)) - 9.0 * 2.0).abs() < 1e-3, "past 500 it is whole");
+        let mut out = Vec::new();
+        fx.sprites(0.0, true, &mut out);
+        assert!((out[0].width - 18.0).abs() < 1e-3, "with no eye the window's progress stands");
     }
 
     #[test]

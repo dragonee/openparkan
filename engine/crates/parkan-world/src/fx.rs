@@ -331,12 +331,12 @@ impl Fx {
     /// the landscape's and the atmosphere's draws pass it outright, an object's draw passes
     /// it while the object is inside the camera's planes -- so a 0x800 effect draws with
     /// the rest ([11](../../../docs/11-effects.md#who-passes-the-draws-pass-argument--read)).
-    pub fn sprites(&self, now_ms: f64, in_view: impl Fn(Vec3) -> bool) -> Vec<(usize, Sprite)> {
+    pub fn sprites(&self, now_ms: f64, eye: Vec3, in_view: impl Fn(Vec3) -> bool) -> Vec<(usize, Sprite)> {
         let mut out = Vec::new();
         let mut buffer = Vec::new();
         for (_, instance) in &self.instances {
             buffer.clear();
-            instance.sprites(now_ms, instance.test_point().is_none_or(&in_view), &mut buffer);
+            instance.sprites_from(now_ms, Some(eye), instance.test_point().is_none_or(&in_view), &mut buffer);
             out.extend(buffer.drain(..).filter_map(|s| Some((self.sprite_look(&s.material, s.phase)?, s))));
         }
         out

@@ -4675,7 +4675,8 @@ impl Play {
     /// query, which excludes no face class, so a lake surface hides what is behind it
     /// (docs/11, "How often the point is tested, and what the ray meets").
     pub fn sprites(&self, eye: Vec3) -> Vec<(usize, Sprite)> {
-        self.fx.sprites(self.hero.time_ms, |point| self.battle.combat.clear_line(&self.ground, eye, point))
+        self.fx
+            .sprites(self.hero.time_ms, eye, |point| self.battle.combat.clear_line(&self.ground, eye, point))
     }
 }
 

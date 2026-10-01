@@ -459,7 +459,7 @@ channel numbers instead, the seven name a channel on that node twice.
 | 1 | 0xf0, vtable `0x1001e78c` | +8..+12 | creates a light in the owner's light manager, interface `0xe` (`0x1000f4b0`), switches it on inside the window and off outside, and hands it a position, direction, colour, range and attenuation every update (`0x1000f6e0`) | a **light** — [below](#type-1-is-a-light--read-and-measured) |
 | 2 | 0xa0, `0x1001f048` | trigger +8, window +8..+12 | +4 of 0: plays as *t* crosses +8 going up; +4 of 2 or 3: plays while *t* is inside the window (`0x10012eb0`) | the **sound**; near/far at +64/+68 — [below](#type-2-is-a-sound--read-and-measured) |
 | 3 | 0xfc, `0x1001e770` | +32..+36 | a phase *a* + (*b* − *a*)·*x*^*g* from +8/+12/+16, *x* the progress through the window or seconds when +8 < 0 (`0x100105f0`); its position +40 → +52 shaped by the powers at +64 and its size +100 → +112 by those at +124; a 0..1 value +20..+24 to the power +28 and the phase's fractional part go to the draw (`0x100106c0`) | a **sprite** that moves (+40/+52) and grows (+100/+112) over its window — muzzle flashes, glows, bullets |
-| 4 | 0x104, `0x1001e754` | +32..+36 | type 3's phase (`0x100108f0`) | a sprite variant |
+| 4 | 0x104, `0x1001e754` | +32..+36 | type 3's phase (`0x100108f0`); its update scales the window's progress by the eye's distance in the frame over +200 (`0x100109b0`) | a **glow** that keeps its size on the screen — [below](#type-4-is-a-glow-sized-by-the-eyes-distance--read-and-seen) |
 | 5 | 0x54, `0x1001e360` | +12..+16 | a phase from +40, seconds when negative (`0x10002a20`); a start point, and sprites along the line from it to where the effect is now, each lerp(+24, +28) wide by the progress (`0x10002be0`) | a **bolt**: laser and shock tails, `hero_laser_bullet` — [below](#bolts-streams-and-fades--read-and-measured) |
 | 6 | 0x1c, `0x1001e738` | — | — | never shipped |
 | 7 | 0x48, `0x1001e228` | +20..+24 | +0x24 × +0x28 particles, each running +44 → +56 in place and +92 → +104 in size over its life, both jittered at the high end and shaped by the powers at +80 and +128 (`0x10001720`, `0x10001300`); its age = (phase − its spawn) / +0x1c, one-shot flag, drag, and a fade value from +8/+12/+16 | a **particle burst** — smoke, fire, splashes |
@@ -657,6 +657,34 @@ stepping the matrix that many times and by none of the three prime quotients
 closing it — and the zero state is a fixed point that only ever draws 0. Over a
 million draws the mean is 0.4995 of 65536 and the sixteen equal buckets hold
 61 728 to 63 034 against 62 500, so it is uniform enough for what it is asked to do.
+
+### Type 4 is a glow sized by the eye's distance — *read*, and *seen*
+
+A type-4 block is type 3 with its own update (vtable `0x1001e754`, slot 3 `0x100109b0`), and
+its constructor (`0x100108c0`) keeps one more value: **1 ÷ the block's +200** at `+0x100`
+(`0x100108d9`). The update takes the context's eye — which is in the instance's own space
+([below](#a-sprite-is-drawn-through-its-frame--read)) — and its length, the eye's distance
+from the frame's origin in the frame's units, and multiplies the window's progress by it and
+by `+0x100`, holding the product at 1 (`0x100109d5`–`0x10010a14`). It writes that back over the
+progress (`+0x1c`), so **everything the sprite draws runs on it**: its place, its size, its
+fade, and its phase where +8 is not negative (`0x10010a17`–`0x10010a53`); then it tails into
+type 3's draw.
+
+So a glow is near its low size up close and grows with the distance, whole only from +200
+frame units on. *Measured*: the buildings' light glows — `glow_y`, `glow_g` and `glow_r` in
+`f_gener_ball`, `f_smalllight_*`, `f_signlight_g` and `f_blinklight_r` — all carry +200 = 500
+and a size of 0.2 → 9 over a window of 0.75–1. Their effects are made by the load group and
+never started, so they run their header's mode 1 to *t* = 1 and stay there at the window's
+end: read as type 3 they would stand at size 9 for good.
+
+**A frame of one point named three times is scaled by that point's direction.** The handler's
+branch for three equal directions (`Control.dll:0x10002c42`) takes the direction's length,
+builds an orientation from the unit direction (`0x10003600`) and scales it alike on all three
+axes by that length (`0x10002c7b`–`0x10002cfd`). C03 M02's generator ball hangs on
+`Sign_Type1`, whose direction is 8.98 long, so its glow's size 9 × the effect's 0.75 scale
+would be 60.6 m wide. *Seen* in "Let's Play - Parkan: Iron Strategy, Part 6" (-yNnsqudMzw,
+64:50) and Part 6.5 (9SBZOCWv_vE, briefing time 8.5 s): a small yellow ball between the
+generator's horns; from 80 m the read gives 2.4 m.
 
 ### A phase is where its material's animation stands — *read*, and *measured*
 
