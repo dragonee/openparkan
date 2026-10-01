@@ -18503,6 +18503,128 @@ def check_saves(check, game: Path) -> None:
           f"{agree} of those name a .sav that is there")
 
 
+#: ``iron3d.dll``'s command handler (``0x10071cd0``) sends commands 738 to 754
+#: through this table; its last two rows are the quick save's and the quick load's.
+QUICK_TABLE = 0x100726F8
+QUICK_SAVE_CASE, QUICK_LOAD_CASE = 0x1007267F, 0x100726A6
+QUICK_SAVE, QUICK_LOAD = 0x100A5030, 0x100A51E0
+SAVE_WRITER, GAME_EXIT = 0x100A1590, 0x10061A30
+#: The strings the quick save names its slot by and reports with, and the header a
+#: message of kind 2 is shown under.
+STRING_QUICK_SAVE, STRING_GAME_SAVED, STRING_FROM_SYSTEM = 6245, 6246, 1541
+
+
+def check_quick_save(check, game: Path) -> None:
+    """The quick save and the quick load: commands 753 and 754, the seventh slot."""
+    iron = (game / "iron3d.dll").read_bytes()
+    at = _image_at(iron)
+
+    def call(va: int) -> int:
+        """Where the ``call rel32`` at ``va`` goes."""
+        code = at(va, 5)
+        return va + 5 + struct.unpack_from("<i", code, 1)[0] if code[0] == 0xE8 else 0
+
+    def callers(target: int) -> list[int]:
+        """Every ``call rel32`` in the image's first section that goes to ``target``."""
+        sections, _ = resources._sections(iron)
+        rva, size, raw = sections[0]
+        base = struct.unpack_from("<I", iron, struct.unpack_from("<I", iron, 0x3C)[0] + 52)[0]
+        found = []
+        start = iron.find(b"\xe8", raw)
+        while 0 <= start < raw + size - 4:
+            va = base + rva + (start - raw)
+            if va + 5 + struct.unpack_from("<i", iron, start + 1)[0] == target:
+                found.append(va)
+            start = iron.find(b"\xe8", start + 1)
+        return found
+
+    table = struct.unpack("<17I", at(QUICK_TABLE, 68))
+    keys = {name: {b.key for man in ("addition.man", "ui_other.man", "ui_other_d.man")
+                   for b in controls.bindings(game / man) if b.command == name}
+            for name in ("CMD_QUICK_SAVE", "CMD_QUICK_LOAD")}
+    save_calls, load_calls = callers(QUICK_SAVE), callers(QUICK_LOAD)
+    writer_calls = callers(SAVE_WRITER)
+    check("iron3d.dll: F7 and F8 are commands 753 and 754, the quick save and the quick load",
+          controls.CMD.get("CMD_QUICK_SAVE") == 753 and controls.CMD.get("CMD_QUICK_LOAD") == 754
+          and keys == {"CMD_QUICK_SAVE": {"SCAN_F7"}, "CMD_QUICK_LOAD": {"SCAN_F8"}}
+          and at(0x100722C6, 9) == bytes.fromhex("8d831efdffff83f810")
+          and table[753 - 738] == QUICK_SAVE_CASE and table[754 - 738] == QUICK_LOAD_CASE
+          and save_calls == [0x1007269F] and load_calls == [0x100726C0]
+          and writer_calls == [0x10065767, 0x10065C88, 0x100A50E4],
+          f"the command handler's table at {QUICK_TABLE:#x} runs from 738; its rows 753 and "
+          f"754 are {table[15]:#x} and {table[16]:#x}, the only callers of {QUICK_SAVE:#x} "
+          f"and {QUICK_LOAD:#x}; {sorted(keys['CMD_QUICK_SAVE'])} and "
+          f"{sorted(keys['CMD_QUICK_LOAD'])} in addition.man and both ui_other files.  "
+          f"Control: the same sweep finds the writer {SAVE_WRITER:#x}'s "
+          f"{len(writer_calls)} callers, the save page's button, its Enter and the quick save")
+
+    strings = resources.strings(iron)
+    saves = (at(0x1007267F, 4) == bytes.fromhex("8b442418")          # the game
+             and at(0x10072683, 6) == bytes.fromhex("8a88e6000000")  # +0xe6, training
+             and at(0x1007268D, 6) == bytes.fromhex("8a88e4000000")  # +0xe4, network
+             and at(0x10072697, 4) == bytes.fromhex("83780804"))     # the state word is 4
+    loads = (at(0x100726AA, 6) == bytes.fromhex("8a88e6000000")
+             and at(0x100726B4, 6) == bytes.fromhex("8a88e4000000")
+             and at(0x100726BE, 2) == bytes.fromhex("8bcf"))         # and no state test
+    check("iron3d.dll: the quick save writes slot index 6 as 'Quick Save' and says 'Game saved...'",
+          saves and at(0x100A5056, 2) == b"\x6a\x06"
+          and at(0x100A50AA, 5) == b"\xba" + struct.pack("<I", STRING_QUICK_SAVE)
+          and at(0x100A50C5, 2) == b"\x6a\x06" and at(0x100A50D3, 3) == b"\x53\x6a\x06"
+          and call(0x100A50E4) == SAVE_WRITER
+          and at(0x100A512C, 8) == bytes.fromhex("c744243c02000000")
+          and at(0x100A5134, 5) == b"\xba" + struct.pack("<I", STRING_GAME_SAVED)
+          and strings.get(STRING_QUICK_SAVE) == "Quick Save"
+          and strings.get(STRING_GAME_SAVED) == "Game saved..."
+          and strings.get(STRING_FROM_SYSTEM) == "from: System"
+          and save.QUICK_SLOT == 6,
+          f"{QUICK_SAVE:#x} takes the slot record at index {save.QUICK_SLOT}, names it string "
+          f"{STRING_QUICK_SAVE} {strings.get(STRING_QUICK_SAVE)!r}, clears its empty flag, "
+          f"hands its filename to the writer {SAVE_WRITER:#x} and posts string "
+          f"{STRING_GAME_SAVED} {strings.get(STRING_GAME_SAVED)!r} as a message of kind 2, "
+          f"{strings.get(STRING_FROM_SYSTEM)!r}; case 753 runs it only outside the training "
+          f"campaign and a network game and while the state word is 4")
+
+    exe_at = _image_at((game / "iron_3d.exe").read_bytes())
+    # The code each caller of the exit pushes: the nearest ``push imm8`` before the call.
+    exits = {}
+    for va in callers(GAME_EXIT):
+        before = at(va - 9, 9)
+        exits[va] = before[before.rfind(b"\x6a") + 1]
+    check("iron3d.dll, iron_3d.exe: the quick load exits with code 4, and the game runs slot 6",
+          loads and at(0x100A5201, 2) == b"\x6a\x06" and at(0x100A52CB, 2) == b"\x6a\x04"
+          and call(0x100A52D4) == GAME_EXIT
+          and sorted(exits.items()) == [(0x10065ACD, 3), (0x10065AF0, 1), (0x10070E11, 1),
+                                        (0x10070E2C, 1), (0x10071232, 2), (0x10071240, 3),
+                                        (0x100A52D4, 4)]
+          and exe_at(0x4012AB, 3) == bytes.fromhex("83f804")
+          and exe_at(0x4012C3, 10) == bytes.fromhex("c7059866400006000000")
+          and exe_at(0x4012B6, 6) == bytes.fromhex("881da4664000"),
+          f"{QUICK_LOAD:#x} builds the path of slot {save.QUICK_SLOT}'s file under /save/ and, "
+          f"when it is a file, exits with code 4; case 754 tests the training campaign and "
+          f"the network game and not the state word, so it runs on the outcome panel too.  "
+          f"The executable answers code 4 by writing {save.QUICK_SLOT} to the block's +0x148 "
+          f"and clearing +0x154, and runs the game again without the shell.  Of the exit's "
+          f"{len(exits)} callers one hands it 4; L on the failed panel (0x10071240) and the "
+          f"menu's Load game (0x10065acd) hand it 3, the shell's load-game screen")
+
+    index = save.slots(game)
+    names = [(x.slot, x.filename.lower()) for x in index]
+    quick = index[save.QUICK_SLOT] if len(index) > save.QUICK_SLOT else None
+    on_disk = quick is not None and (game / save.DIRECTORY / quick.filename).is_file()
+    check("saves: the index holds the save page's six slots and a seventh, the quick save's",
+          len(index) == save.MENU_SLOTS + 1
+          and names == [(f"slot{i}", f"slot{i}.sav") for i in range(1, len(index) + 1)]
+          and quick is not None and quick.empty == (not on_disk)
+          and at(0x100657D9, 3) == bytes.fromhex("83ff06")
+          and at(0x10066BBE, 5) == bytes.fromhex("bbca000000")
+          and at(0x10066C8F, 9) == bytes.fromhex("83c31581fb48010000"),
+          f"{len(index)} slots, slot1 to slot{len(index)}, each naming slot<n>.sav; the save "
+          f"page makes {save.MENU_SLOTS} slot widgets, 21 apart from y 202 while below 328, "
+          f"and its click tests {save.MENU_SLOTS}; the seventh, "
+          f"{quick.slot if quick else '-'}, is named {(quick.name if quick else '-')!r} and is "
+          f"{'empty, with no file' if quick and quick.empty else 'filled'} in this install")
+
+
 #: A round: ``b<family>_<size>_<index>``.  ``b`` is the BULL tag's own letter
 #: and the second letter is the weapon family (``docs/18-vocabulary.md``).
 ROUND_MEMBER = re.compile(r"^b([abflmprt])_[a-z]_\w+$")
@@ -26208,6 +26330,7 @@ def run(game: Path) -> int:
         check_pick_marker_names,
         check_turret_channels,
         check_behaviour, check_research, check_descriptions, check_saves,
+        check_quick_save,
         check_vocabulary, check_resources, check_briefing, check_briefing_screen,
         check_progression, check_mission_02, check_mission_03, check_mission_04,
         check_main_teleport, check_convoy_raids, check_outcome,

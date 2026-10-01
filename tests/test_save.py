@@ -139,6 +139,22 @@ def test_the_slot_index_reads(tmp_path):
     assert got[1].empty
 
 
+def test_the_quick_save_has_the_slot_after_the_save_pages_six(tmp_path):
+    d = tmp_path / save.DIRECTORY
+    d.mkdir()
+    text = "OBJECT saveslots\n\tquantity\t\t=\t7\nEND\n" + "".join(
+        f'OBJECT slot{i}\n\tname\t\t=\t"{"Quick Save" if i == 7 else "empty"}"\n'
+        f'\tfilename\t\t=\t"slot{i}.sav"\n\tempty\t\t=\t{"FALSE" if i == 7 else "TRUE"}\nEND\n'
+        for i in range(1, 8))
+    (d / save.SLOTS).write_text(text.replace("\n", "\r\n"), "latin-1")
+    got = save.slots(tmp_path)
+    assert len(got) == save.MENU_SLOTS + 1
+    quick = got[save.QUICK_SLOT]
+    assert (quick.slot, quick.name, quick.filename, quick.empty) == (
+        "slot7", "Quick Save", "slot7.sav", False)
+    assert all(s.empty for s in got[:save.MENU_SLOTS])
+
+
 def test_the_wide_record_is_found_too():
     body = in_world(record("objects.rlb", "fr_l_gener", width=save.MEMBER_AT[1]))
     s = save.parse(build_save(body=body))

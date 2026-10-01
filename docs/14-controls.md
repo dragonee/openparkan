@@ -184,7 +184,7 @@ The game commands are a flat run instead — `CMD_JAMES_HQ_MOVE_LEFT` is 723 and
 `CMD_QUICK_LOAD` 754, with only **743** and **745** unused. They are the
 commander's camera, target selection, the wingman menu, the pager, the chat
 terminal, entering and leaving a warbot, the map's alpha, the game menu, help,
-and quick save and load.
+and quick save and load ([below](#quick-save-and-quick-load--read-and-seen)).
 
 **The split is a fact about the files, not a reading of the names.** Ten of
 the twelve `.man` files draw on one binary only — `hero.man` and both
@@ -206,6 +206,123 @@ Two loose ends, both small and both checked:
   whole of the difference.
 
 Of the 73, **65** are actually bound by the 275 `.man` lines.
+
+### Quick save and quick load — *read*, and *seen*
+
+`addition.man`, `ui_other.man` and `ui_other_d.man` each bind `CMD_QUICK_SAVE`
+to `SCAN_F7` and `CMD_QUICK_LOAD` to `SCAN_F8`, and `Command.dsc` calls them
+*Quick save* and *Quick load*. They are 753 and 754, the last two rows of the
+game's command table (`iron3d.dll:0x100726f8`, which runs from 738).
+
+**What has to hold before either runs.** A key reaches the table through the
+bindings' lookup (`0x10071c10`), which does nothing during a briefing (the
+level's view state 5) or in the auto-demo (the game's `+0xe5`). Each case then
+tests the game itself:
+
+| | F7, 753 (`0x1007267f`) | F8, 754 (`0x100726a6`) |
+|---|---|---|
+| the training campaign, `+0xe6` | refused | refused |
+| a network game, `+0xe4` | refused | refused |
+| the state word (`+8`) | must be 4, the mission being played | not tested |
+
+- These are the two bytes that grey the game menu's *Save game* and *Load game*
+  ([39-boarding.md](39-boarding.md#the-game-menu--read)), so a mission of
+  `CAMPAIGN.00` can be saved by no route, and F8 does nothing in one. It is the
+  launch mode that says so, not anything in a mission's files: `save`, in any
+  case, is in 0 of the 362 files under `MISSIONS/`, where the same search for
+  `wav` finds 38, all 29 `mission.cfg` among them (*measured*).
+- Neither case asks for the pause, the help screen or the game menu, as F3's
+  does (`0x10072359`). On the menu's save page its listener takes every
+  key-down before the bindings are asked (`0x10065be0`), so neither key gets as
+  far as the table there.
+- **F8 works once the mission is over**, on the outcome panel, lost or won;
+  F7 does not.
+
+**The quick save** (`0x100a5030`, called from nowhere else) uses the save
+index's slot 6, the seventh, which the save page does not list
+([17-saves.md](17-saves.md#saveslotscfg-and-the-seven-slots--read-and-measured)):
+
+1. it sets the slot's `name` to string 6245, *"Quick Save"* (`0x100a50aa`,
+   `0x100a50ce`), and its `empty` to FALSE (`0x100a50d8`), each of which writes
+   `save/saveslots.cfg` again;
+2. it hands the slot's `filename`, `slot7.sav` in the installed index, to the
+   save's writer (`0x100a50e4` → `0x100a1590`);
+3. it posts string 6246, *"Game saved..."*, as a message of kind 2
+   (`0x100a512c`–`0x100a5188`, through `0x1007ed50`), which the message box
+   heads *"from: System"* ([35-hud.md](35-hud.md#the-message-box--read-and-measured)).
+
+Nothing is asked and nothing is confirmed, the slot is overwritten each time,
+and play goes on. The save page's own saves post no message.
+
+**It does not stop the clocks; it holds the frame for as long as it writes.**
+
+- **No pause.** The pause is one routine, `0x1005f620`, which sets the game's
+  `+0xe8` and calls `World3D.dll`'s `PauseGameTime` and `ResumeGameTime`
+  ([39-boarding.md](39-boarding.md#the-game-menu--read)). The quick save does
+  not call it, and neither it nor the writer calls either export: of
+  `World3D.dll`'s the writer calls `GetQueue` twice and `DeleteGameObject` once
+  (every direct call in `0x100a1590`–`0x100a1c2f`; control: the same sweep over
+  `0x1005f620` finds both). `World3D.dll`'s own side of the save
+  (`0x10009a90`) copies the game time into the world's header and does not
+  write the clock's offset (`0x10795148`), whose three writers are
+  `ResumeGameTime`, the clock's constructor (`0x1000525e`) and `0x10009e40`,
+  which takes a time out of a buffer it is handed: the load's side
+  (*inferred*).
+- **It blocks.** The case runs inside the window routine's key-down
+  (`0x100a0e30` → `0x10071c10` → `0x10071cd0`) and returns when the writer has
+  and the message is posted. Nothing else runs meanwhile, and no time is taken
+  out afterwards.
+- **A clan's takt does not notice.** Its timer is the wall clock: SuperAI slot 3
+  asks `timeGetTime` (`ai.dll:0x100017ae`), runs once that has passed the
+  deadline at the SuperAI's `+0x860`, and sets the next from the moment it runs,
+  `timeGetTime` + 7000 + `rand` % 1000 (`0x100017df`–`0x100017f9`)
+  ([34-progression.md](34-progression.md#when-the-mission-handler-runs--read)).
+  A frame held past a deadline makes that one takt late by what was left of the
+  hold, and no more.
+
+*Measured* on the bonus part (`9SBZOCWv_vE`), comparing each of the video's 60
+frames a second with the one before over 1:34–13:20, 42360 frames: 11 runs of five or more pictures
+alike, of which 7 are two quick loads' *Exiting...* panels and loading screens
+(7:22.85 and 7:50.07, each 0.87–0.88 s on the loading screen), and the other 4
+are 83, 167, 83 and 350 ms at 4:44.9, 6:16.9, 7:34.3 and 8:12.7. The box *"Game
+saved..."* goes up between two frames at 1:46.6 and at 6:56.7 with no run over 2
+frames within five seconds of either. So a quick save holds the picture for
+less than a tenth of a second.
+
+**The quick load** (`0x100a51e0`, called from nowhere else) builds the path of
+that same slot's file — the current directory, `/save/`, the slot's `filename`
+— and asks `GetFileAttributesA` whether it is a file (`0x100c8330`).
+
+- **If it is not, nothing happens**: no message, no sound. It does not read the
+  slot's `empty` flag.
+- **If it is, the game exits with code 4** (`0x100a52cb`), the only place that
+  code comes from. The state word goes to 3, so the panel reads *"Exiting..."*
+  over the darkened screen until the loop ends
+  ([34-progression.md](34-progression.md#after-the-outcome--read-and-measured)).
+  The executable answers 4 by writing slot 6 into the parameter block and
+  running the game again, with no shell between (`iron_3d.exe:0x4012b0`), and
+  the game loads the mission the file names and then the file.
+
+So F8 loads **the quick save only**, never the newest save of another slot.
+
+*Seen*, in the recording of *The Convoy* (`-yNnsqudMzw`, and its bonus part
+`9SBZOCWv_vE`), at the video's 60 frames a second:
+
+| where | what |
+|---|---|
+| Part 6, 12:56.5–13:20.0 | *"from: System / Game saved..."* in the message box over a bunker's command view, and play going on under it |
+| Part 6, 13:55.8 | on the *MISSION FAILED* panel: 10 frames of *"Exiting..."*, then the loading screen from its empty bar, then play at 13:57.1 |
+| Part 6, 26:14.5 | in play, on foot inside a building: 9 frames of *"Exiting..."*, the loading screen, play at 26:16.0 |
+| Part 6.5, 6:56.7 | the box again, over a command view; the picture does not stop |
+| Part 6.5, 7:22.85 and 7:50.07 | in play, in a command view, twice: *"Exiting..."*, the loading screen, play at 7:24.2 and 7:51.3, each time on foot in the bunker the save of 6:56.7 was made from |
+| Part 6.5, 13:39.0 | in play, in a command view: 9 frames of *"Exiting..."*, the loading screen, play at 13:40.3 |
+
+None of the five loads shows a menu or the shell, and each runs from the panel
+into the loading screen's first frame with no cut between. That is exit code
+4's path and no other's: *Load game* and the panel's L leave with code 3, which
+deletes the game and opens the shell's load-game screen. So all five are F8,
+the first of them pressed on the failed panel (*inferred*: the key itself is
+not on the screen).
 
 ## The join with the controller — *read*
 

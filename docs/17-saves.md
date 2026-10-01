@@ -1,7 +1,9 @@
 # Save games — `.sav`
 
-`SAVE/` holds up to seven slots, six of them filled in this installation, from
-20 KB to 106 KB, beside a `saveslots.cfg` that indexes them.
+`SAVE/` holds seven slots: the six of the game menu's save page, all filled in
+this installation, from 20 KB to 106 KB, and a seventh that is the quick
+save's, empty here. A `saveslots.cfg` beside them indexes them
+([below](#saveslotscfg-and-the-seven-slots--read-and-measured)).
 
 **A save is a fixed sequence of sections, and all six parse to the last
 byte.** Most of the bytes inside the sections are the classes' own memory —
@@ -294,7 +296,7 @@ that stepped four bytes at a time and found 10 matching triples. Stepping
 variable-length chunks before them end. **An alignment assumption is an
 assumption**, and a negative resting on one is worth no more than it.
 
-## `saveslots.cfg`
+## `saveslots.cfg` and the seven slots — *read* and *measured*
 
 Plain text in the engine's `OBJECT` / `END` form, tab-separated:
 
@@ -311,8 +313,112 @@ END
 ```
 
 The first object declares the slot count and is not itself a slot — it has no
-`filename`, which is how the reader tells them apart. Seven slots, six not
-empty, and each of those six names a `.sav` that is on disk.
+`filename`, which is how the reader tells them apart. *Measured*: seven slots,
+`slot1` to `slot7`, each naming `slot<n>.sav`; six not empty, each of those six
+naming a `.sav` that is on disk; the seventh named `empty`, marked empty, with
+no `slot7.sav`.
+
+**One object keeps the index** (`iron3d.dll:0x1008c300`, vtable `0x100e6678`,
+0x14 bytes): the parsed file at `+0x10` and a list of slot records at `+4`.
+
+- **Reading** (`0x1008c710`): `saveslots`' `quantity`, then one record for each
+  index below it, bound to the object `slot%d` of the index plus one. A record
+  answers its `name` (`0x1008c060`), its `filename` (`0x1008c140`) and its
+  `empty` (`0x1008c220`) out of the parsed file each time it is asked.
+- **Writing.** Setting a slot's name (`0x1008c930`) or its empty flag
+  (`0x1008cb00`) writes the whole file at once: `DeleteFileA` on
+  `save/saveslots.cfg`, then the file's own writer (`0x100c5e60`). The
+  constructor and the destructor (`0x1008c4c0`) do the same, so the file is
+  written again every time the index is opened, and the banner's date is the
+  last time it was. *Measured*: the banner reads `14/6/2026 21:38` and the
+  file's own time is 14 June, 21:38.
+- **Who makes one.** The game, each time it runs a mission (`0x1005c8be`, kept
+  at its `+0x34`), and the shell's slot list, a temporary one each time it is
+  filled (`0x1001e182`).
+- **The path is relative**, `save/saveslots.cfg`, where a save's is the current
+  directory, `/save/` and the slot's `filename` (`0x100c8390` asks
+  `GetCurrentDirectoryA`).
+
+**Slots 0 to 5 are the save page's, and slot 6 is the quick save's.** The save
+page makes six slot widgets and its click tests six
+([39-boarding.md](39-boarding.md#the-game-menu--read)); the quick save and the
+quick load push the index 6 ([14-controls.md](14-controls.md#quick-save-and-quick-load--read-and-seen)).
+So the seventh slot is on no save page, and only F7 writes it.
+
+**The writer has three callers and no others** (`0x100a1590`, every `call` to it
+in the module):
+
+| caller | which slot | what it does to the index |
+|---|---|---|
+| the save page's *Save* (`0x10065767`) | the selected one, 0 to 5 | the typed name, then `empty` FALSE |
+| Enter on the save page (`0x10065c88`) | the same | the same |
+| the quick save (`0x100a50e4`) | 6 | `name` *"Quick Save"* (string 6245), then `empty` FALSE |
+
+Each hands the writer the slot's `filename`, and the writer opens the current
+directory + `/save/` + that name for `"wb"` (`0x100a15b9`–`0x100a1626`). All
+three write the same file, so a quick save's header and sections are a save's.
+**No `slot7.sav` is installed to measure it against**: this installation's
+quick slot was never written.
+
+**A save's name is what was typed after the name already there.** The slot
+widget opens on the slot's `name`, a letter or a digit is appended while it is
+under 16 characters, and Backspace takes one off the end
+([39-boarding.md](39-boarding.md#the-game-menu--read)). *Measured*: the six
+filled slots are named `emptyfde`, `emptyfdffff`, `emptygrfdfg`,
+`emptydfsdfsdf`, `emptydsadsd` and `emptyfdd` — the seventh's untouched `empty`
+with 3 to 8 letters typed after it, 8 to 13 characters, none over 16.
+
+### Loading — *read*, and *seen*
+
+**A load is a mission started with a slot index.** The parameter block the
+executable hands the game ([34-progression.md](34-progression.md#after-the-outcome--read-and-measured))
+carries the slot at `+0x148` (−1 for none) and a fresh-start byte at `+0x154`.
+With the byte clear:
+
+1. `Run` takes the slot's `filename`, opens the file under `/save/` and reads
+   its `SLOT`, its version, its difficulty and its mission path, which it copies
+   into the block (`0x1005ddfd`–`0x1005df3b`);
+2. the mission loads from that path as any does;
+3. the level then calls the loader (`0x100a1e24` → `0x100a2bd0`), which opens the
+   same file again and reads the sections above.
+
+Two things set the block so:
+
+| who | slot | how |
+|---|---|---|
+| the shell's load-game screen, a row chosen (`0x100130f5`–`0x10013143`) | the row's index, 0 to 6 | only if `slot%d.sav` of the index plus one is a file whose first four bytes are `SLOT` (`0x10013260`); then mode 1, `+0x148` the row, `+0x154` clear, no mission path, and the shell starts the game |
+| the executable, on the game's exit code 4 (`iron_3d.exe:0x4012b0`) | 6 | the same block with 6, and the game runs again with no shell between |
+
+- **The load-game screen lists all seven.** Its list (`0x1001e100`) makes a row
+  for every slot of the index, named by the slot's `name`, and disables the row
+  of a slot whose `empty` is TRUE (`0x1001e26b`, `0x100c9e10`). So the quick
+  save is its seventh row, *"Quick Save"* once F7 has named it.
+- **The screen checks the file by its number, the game opens it by its
+  `filename`.** The two agree in the installed index, where slot *n* names
+  `slot<n>.sav`.
+- **Exit code 4 has one source**, the quick load
+  ([14-controls.md](14-controls.md#quick-save-and-quick-load--read-and-seen)).
+
+**A load takes the clans' clocks back with the world.** A clan's AI state
+carries the seconds clock its takt steps, the SuperAI's `+0x854`
+(`ai.dll:0x10002399` writes it, `0x10002510` reads it back), and the reader
+re-bases the word beside it on the wall clock, `+0x858` = `timeGetTime` − clock
+× 1000 (`0x10002516`–`0x1000253b`). So what a script times off that clock
+([34-progression.md](34-progression.md#when-the-mission-handler-runs--read))
+is as far along after a load as it was at the save, whatever was played since.
+
+*Seen*, in the bonus part of *The Convoy* (`9SBZOCWv_vE`): a quick save at 6:56.7
+and two quick loads of it, their *Exiting...* panels at 7:22.85 and 7:50.07 and
+play back at 7:24.2 and 7:51.3. The two throw away 26.2 s and 25.9 s of play,
+so every clan's clock is 52 s behind the video from there on (*derived*).
+
+*Seen*: a save made in a bunker's command view comes back on foot. In the
+recording of *The Convoy* (`-yNnsqudMzw`) the box *"from: System / Game
+saved..."* stands over the command view from 12:56.5 to 13:20.0, longer than
+one box's 20 seconds, so the player saved there at least twice; the load at
+13:57.1 opens on the hero standing inside the bunker, and the player is back in
+the command view by 14:01. So the interface's mode stack is not in the file
+(*inferred*).
 
 ## Not established
 
@@ -328,6 +434,16 @@ empty, and each of those six names a `.sav` that is on disk.
 - **The AI state's layout** beyond its size: which 2000 bytes are fixed and
   what the 28- and 4-byte entries are. `ai.dll:0x100020f0` is the writer and
   its slot 20, `0x10002400`, the reader.
+- **A quick save's own bytes.** The quick save goes through the one writer
+  ([above](#saveslotscfg-and-the-seven-slots--read-and-measured)), so its file is
+  a save like the other six; this installation has no `slot7.sav` to walk.
+- **What a save keeps of the interface.** *Seen*, a save made in a command view
+  loads on foot ([Loading](#loading--read-and-seen)). Whether the message box,
+  its history or the mode stack is anywhere in the file is not read; the
+  unknown chunks above are where they would be.
+- **What a load does with a slot whose file is gone.** The shell's screen and
+  the quick load both test the file first; `Run`'s own open (`0x1005de8e`) is
+  not followed past a failed `fopen`.
 - Whether a mind list's ids are the units' logical ids: `slot1`'s player list
   holds 12, 27, 28 and 29, and the mission places a hero with logical id 12,
   but the world records carry serials, not logical ids, so nothing in the

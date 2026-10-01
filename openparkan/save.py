@@ -74,6 +74,15 @@ DIRECTORY = "SAVE"
 #: The slot index beside the saves, in the engine's ``OBJECT``/``END`` text.
 SLOTS = "saveslots.cfg"
 
+#: How many of the index's slots the game menu's save page lists: its six
+#: slot widgets, indices 0 to 5 (``iron3d.dll:0x10066bbe``-``0x10066ca8``).
+MENU_SLOTS = 6
+
+#: The slot index the quick save writes and the quick load reads: the seventh,
+#: ``slot7``, which the save page does not list (``iron3d.dll:0x100a5056``,
+#: ``0x100a5201``; ``iron_3d.exe:0x4012c3``).
+QUICK_SLOT = 6
+
 #: The first four bytes of every save.
 MAGIC = b"SLOT"
 

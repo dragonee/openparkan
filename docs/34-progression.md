@@ -226,7 +226,13 @@ state word `+0x710` is 5:
     `0x10064629`, `0x10067887`, `0x100a2a6a`) were not followed, and may not
     be on a SuperAI.
 - **Slot 3** (`0x10001780`) is the clan's takt.
-  - It runs every 7000 + rand % 1000 ms.
+  - It runs every 7000 + rand % 1000 ms, on the wall clock as slot 9 does: it
+    runs once `timeGetTime` has passed the deadline at the SuperAI's `+0x860`
+    (`0x100017ae`–`0x100017ca`) and sets the next to `timeGetTime` + 7000 +
+    `rand` % 1000 as it runs (`0x100017df`–`0x100017f9`). So a late takt moves
+    every later one, and a pause, which skips the frame, costs a clan what the
+    pause lasted beyond its deadline. A quick save does not pause
+    ([14-controls.md](14-controls.md#quick-save-and-quick-load--read-and-seen)).
   - Each run adds 7 to the seconds clock that function 59 reads
     ([15-behaviour.md](15-behaviour.md)), then runs `Problems<n>`.
 - **Slot 5** (`0x10001ae0`) runs `Init`, once.
@@ -1310,6 +1316,28 @@ while the state word is 1 or 2, and not in a network game:
 The Cyrillic four are windows-1251 `0xca`, `0xea`, `0xc4` and `0xe4`: the letters
 on the same two keys of a Russian layout (*derived*). A win has no R or L.
 
+**L loads nothing itself, and F8 does.** The panel takes three keys of its own,
+Esc, R and L, and one that is not on it:
+
+- **L** exits with code 3, as the game menu's *Load game* does: the game is
+  deleted, the shell comes up on its load-game screen, and the player picks one
+  of the seven slots there ([17-saves.md](17-saves.md#loading--read-and-seen)).
+  It is any save, not the last one.
+- **F8**, `CMD_QUICK_LOAD`, is not tested against the state word, so it works on
+  the panel as in play: it exits with code 4, and the quick save loads with no
+  shell between
+  ([14-controls.md](14-controls.md#quick-save-and-quick-load--read-and-seen)).
+  It is refused in the training campaign and in a network game; L's handler
+  tests only the second.
+- **F7**, the quick save, needs the state word 4 and does nothing on the panel.
+
+*Seen*: in the recording of *The Convoy* (`-yNnsqudMzw`) the failed panel stands
+from 13:54.5 with its three lines; at 13:55.8 it gives way to *"Exiting..."*
+over the whole darkened screen for 10 of the video's 60 frames a second, then to
+the loading screen from its empty bar, and play is back at 13:57.1 on the quick
+save. No shell screen comes between. That is code 4's path, so the key was
+F8 and not the L the panel offers (*inferred*: the key is not on the screen).
+
 **The exit** (`0x10061a30`) writes its code to the block's `+0x14c` and sets the
 state word to 3. The loop ends and `Run` returns 2 (`0x1005efae`).
 
@@ -1319,9 +1347,14 @@ deletes). The shell runs until the player starts a mission, and the game runs
 that mission. Then, by the exit code:
 
 - **2:** the game runs again at once with the same parameters, a restart;
-- **4:** a load from inside the game (`iron3d.dll:0x100a52d4`, once a file under
-  `/save/` is found). The block is reset to mode 1, with `+0x148` 6, `+0x154`
-  clear and no mission path, and the game runs again;
+- **4:** the quick load, `CMD_QUICK_LOAD` on F8, and nothing else
+  (`iron3d.dll:0x100a52d4`, once the quick slot's file under `/save/` is found;
+  [14-controls.md](14-controls.md#quick-save-and-quick-load--read-and-seen)).
+  The block is reset to mode 1, with `+0x148` 6, `+0x154` clear and no mission
+  path, and the same game object runs again (`0x4012b0`–`0x4012ee`). `+0x148`
+  is a save slot's index and 6 is the quick save's; a clear `+0x154` is what
+  makes `Run` take the mission from that slot's file and the level load it
+  ([17-saves.md](17-saves.md#loading--read-and-seen));
 - **any other code:** the game is deleted and the shell created afresh, and the
   shell is handed `Run`'s 2 (`0x4012f0`).
 
@@ -1343,7 +1376,9 @@ The block (`iron_3d.exe:0x406550`) starts as mode 0, `+0x148` −1, `+0x14c` 1,
     goes to the campaign branch (`0x10009c10`), and one holding `single` or
     `SINGLE` to the single-mission branch (`0x10009f40`);
   - **code 3 in mode 1, or with the block's `+0x154` clear:** the load-game
-    screen, 21 (`0x10012ce0`, `"load_game"`, `"save/"`);
+    screen, 21 (`0x10012ce0`, `"load_game"`, `"save/"`), whose chosen row
+    writes its index to the block's `+0x148`, clears `+0x154` and starts the
+    game ([17-saves.md](17-saves.md#loading--read-and-seen));
   - **any other code:** the main menu stays.
 
 ### The two branches, and what leads to the next mission — *read*
@@ -1498,7 +1533,8 @@ through `0x1007d4e0`. That it is a loss is *derived* from the voices it plays.
    complete, and return to the menus.
 3. **On a failure** (the hero lost, or a script's `MISSION_FAILED`), show the red
    title and the R and L lines. R restarts the mission with the same parameters;
-   L goes to the load-game screen.
+   L goes to the load-game screen; F8 loads the quick save, as it does in play
+   outside the training campaign.
 4. **Nothing runs the next mission.** Build the campaign list by walking
    `MISSIONS/CAMPAIGN/CAMPAIGN.%02d/` from 00 and each one's `Mission.%02d/`
    from 01, naming each by its `descr`'s first line, and open a row only when

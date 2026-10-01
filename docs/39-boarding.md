@@ -540,18 +540,56 @@ rectangle (`0x100670d0`):
   [34-progression.md](34-progression.md#the-parameter-blocks-modes--read)).
   *Resume game* and *Quit game* test nothing.
 - **Exit codes 1 and 3** hand the mission back to the shell: its menus, or its
-  load-game screen ([34-progression.md](34-progression.md#after-the-outcome--read-and-measured)).
+  load-game screen ([34-progression.md](34-progression.md#after-the-outcome--read-and-measured)),
+  which lists all seven slots, the quick save's last
+  ([17-saves.md](17-saves.md#loading--read-and-seen)). So *Load game* does not
+  load anything itself; F8 does, with no shell
+  ([14-controls.md](14-controls.md#quick-save-and-quick-load--read-and-seen)).
 
 So **in *The Field Base*, a training mission, the menu offers *Resume game* and
 *Quit game*, with *Save game* and *Load game* grey** (*derived*).
 
-**The save page** (`+0x38`, `0x100669a0`; not followed further): the box grows
-to (200, 150)–(440, 420) (`0x10065b00`); six slots, one selected by a click; a
-name typed into it, up to 16 characters, through the menu's listener
-(backspace `0x10065bee`, a printable character `0x10065cc7`, Enter to save
-`0x10065c54`); a button that saves into the selected slot (`0x1006574c`–
-`0x10065778`, through the level's `0x100a1590`, which builds a path under
-`/save/`) and one back to the main page.
+**The save page** (`+0x38`, made once with the menu by `0x100669a0`, vtable
+`0x100e6274`). Showing it grows the box to (200, 150)–(440, 420), and going
+back shrinks it to the main page's (`0x10065b00` with 1 and 0). It draws
+(`0x10066d50`) a title as the main page's, 5086 *SELECT SLOT* in white from
+(210, 160), then its widgets:
+
+| widget | string | rectangle | a click (`0x100656e0`) |
+|---|---|---|---|
+| six slots, *i* = 0 to 5 (`0x10066bbe`–`0x10066ca8`) | the slot's `name` from the save index | (210, 202 + 21 *i*)–(430, 223 + 21 *i*) | selects it; on the selected one, opens it for typing |
+| *Save* | 6212 | (210, 360)–(430, 385) | saves into the selected slot, if one is selected |
+| *Cancel* | 6213 | (210, 385)–(430, 410) | back to the main page |
+
+- **The six slots are the save index's first six**
+  ([17-saves.md](17-saves.md#saveslotscfg-and-the-seven-slots--read-and-measured)).
+  The seventh is the quick save's and is not on the page
+  ([14-controls.md](14-controls.md#quick-save-and-quick-load--read-and-seen)).
+- **A slot** (vtable `0x100e6244`, drawn by `0x10066090`) is a text box 215
+  wide holding its name, white under the cursor and `#80ff80` otherwise, as a
+  button's is. Open for typing it is an empty field with its text drawn 15 in
+  and 4 down in `GAME_FONT` and a caret after it that a timer blinks
+  (`0x10066166`–; not followed to the pixel).
+- **Selecting** only records the index (the page's `+0x28`, −1 at first). A
+  click on another slot first puts the selected one's text away as its name
+  (`0x10066ed0`, which writes the index).
+- **Typing** goes through the menu's listener. While a slot is open, a
+  character the CRT's `isalnum` passes (`0x100b4a86`, mask `0x107`: a letter or
+  a digit) is appended to the name already there if that is under 16 characters
+  (`0x10065cb0`–`0x10065cdc`), Backspace takes the last one off (`0x10065bee`,
+  `0x10065f70`), and Enter saves (`0x10065c54`). The name is not cleared first,
+  so a new save's name starts with the old one.
+- **Saving** (`0x10065742`–`0x10065781`, and the same from Enter): the slot's
+  text becomes its `name`; the level's writer `0x100a1590` is handed the slot's
+  `filename` and writes it under `/save/`
+  ([17-saves.md](17-saves.md)); the slot's `empty` is set FALSE and the index
+  written (`0x1008cb00`, `0x1008c610`); and the menu goes back to its main page,
+  still up and the game still paused. No message is posted.
+- **While the page is up the listener takes every key-down** (`0x10065be0`
+  answers 1 whenever the page word is 1), so no bound key reaches the game's
+  commands from it: F3 and Esc do not close the menu there, and only *Save*,
+  Enter and *Cancel* leave the page (*derived*: `0x10065b00`, which switches
+  the page, has four callers, those three and *Save game*).
 
 **Input under the menu.** The game's own listener is asked before the menu's
 (the chain appends, `0x10070940`, and the game's registers first, `0x1005cbfb`):
@@ -699,9 +737,17 @@ would read 9.
   the factory gives every new bot left it at 234.5 s
   ([Against the recording](#against-the-recording--seen)).
 - The wingman line's own layout (`0x1009d970`).
-- **The game menu's save page** ([The game menu](#the-game-menu--read)): its
+- ~~**The game menu's save page** ([The game menu](#the-game-menu--read)): its
   draw (`0x10066d50`), its six slots' records and what the level's
-  `0x100a1590` writes under `/save/`.
+  `0x100a1590` writes under `/save/`.~~ **Read**: the page is a title, six slot
+  widgets 21 apart from y 202, *Save* and *Cancel*; the slots are the first six
+  of the seven in `save/saveslots.cfg`, each a `name`, a `filename` and an
+  `empty` flag, and the writer is handed the selected slot's `filename`
+  ([The game menu](#the-game-menu--read),
+  [17-saves.md](17-saves.md#saveslotscfg-and-the-seven-slots--read-and-measured)).
+  The seventh slot is the quick save's
+  ([14-controls.md](14-controls.md#quick-save-and-quick-load--read-and-seen)).
+  A slot's typing field is not followed to the pixel.
 - ~~What game messages `0x3f1` and `0x3f2` do on other machines.~~ **Read**:
   the receiving queue's consumer (slot 8, `World3D.dll:0x10006460`) dispatches a
   game message's code above `0x3ee` by subtraction (`0x1000695d`); `0x3f1`
