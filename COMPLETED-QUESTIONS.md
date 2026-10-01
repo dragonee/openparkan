@@ -528,6 +528,76 @@ three sites short of its own 21 besides. One branch conflicted, in the engine's 
 table alone, resolved by keeping both sides' rows. The merged tree passed every check: 387
 tests, 1015 of 1015 checks, 509 engine tests and 201 install tests, `ruff` clean.
 
+A twelfth round, on **2026-10-01**, was not picked from the queue: it took **what setting C03
+M02 against its two recordings had left**, a list of some thirty lines, and its runs raised
+five more questions than it began with. Eleven branches: the blast and its firer, the quick
+save, the effect lights, the type-9 dome, the weather and the insignia from the list; and, out
+of the day's own runs on the easy level, the collision's sphere, the AI's design store, the
+camera's mode 2, the haze with the ground and the clouds, and the AI's clear line. **Seven
+queue lines closed** — who writes the material track, how the weather is drawn, the Small
+Bunker's walker, the sprite draw's eye, a blast and its firer, the quick save, the game menu's
+save page — **four narrowed** — the low ceiling, the Light Tower's death, a node hidden by
+action 1, the hero's panel in the pod room — and **eight were raised and closed the same day**:
+a light's jitter, an object under an effect's light, the dome's pole and a sprite's mode, a
+single-point frame's axes, the design pick's candidates, the clear line, mode 2's colour, and
+the haze. Sixteen new lines hold what the answers left.
+
+Five results are **negatives carrying their controls**: no batch word carries `0x800` and no
+call maps the archive writable, against 633 batches with 8 and 2953 with `0x100`; a blast asks
+no line and no occlusion, against the same enumeration finding the world's segment query once,
+at the gun's sight ray; nothing excludes a pair inside a building, the dispatcher's one
+exclusion being a round against its firer; a quick save does not pause, against the sweep
+finding both of `World3D`'s pause exports; and the clear line asks no round flag and no target
+class. **The engine changed on every branch but the quick save's read**, and that one it took
+as a stand-in: the play kept in memory. The largest change is the frame itself, which now
+holds stored values, floors a lit vertex at the scene colour and fogs on the squared distance,
+so every mission looks different from the day before.
+
+**This round corrects twenty premises.** [07-objects](docs/07-objects.md) had *no caller of
+slot 16*; there are three, found by searching from the `QueryInterface` request rather than
+from a stored pointer. [11-effects](docs/11-effects.md) had kinds 6 and 7 *lighting nothing*,
+the attenuation triple *dead data*, `UseDXLighting`'s default as 2, where 2 is its descriptor's
+type word and the default is 0, and a sprite's `+0xc` *never written*, where it is the mode.
+[15-behaviour](docs/15-behaviour.md) had `SELECT_SMALLEST` as the last of the ranking, the
+byte at `+0x104` as "set" with no word on what sets it, and "the divide never happens" in
+property 54. [24-motion](docs/24-motion.md) had the pair pushing out the agent sphere, and a
+default request read as zeros from bytes a static initialiser writes. [26-damage](docs/26-damage.md)
+had a hit on one's own side dropped in the hit queue; no clan is asked anywhere.
+[29-weapons](docs/29-weapons.md) had the gate and the seeker asking the object's node sphere.
+[10-sky](docs/10-sky.md) had the world's view as mode 1 and the cap's `+0x3c` stream as the
+clouds' colours. [03-terrain](docs/03-terrain.md) had the UV unit as 256 and the second
+material's mix the wrong way round. [36-factory](docs/36-factory.md) had `SetTarget` as the
+construct task's start. And the first pass's own feedback had the mine's violet as *not the
+effect lights*, the load after the loss as the panel's L, and the enemy at the bunker before
+the warning as a script's raid, where it is a chase.
+
+**The round corrected itself twice, and which way those ran is worth recording.** The weather
+branch read the Direct3D light builder and took an effect's light for a device light; the
+lights branch had read the setting that keeps that builder from ever running, and the weather
+branch withdrew the claim after checking the address itself. Then the lights branch's own
+sentence, a lit vertex as *scene colour plus ambient plus the lights' sum*, was corrected by the
+mode-2 branch, which read the routine it cites and found a maximum where the sentence has a sum
+— and it was a recording that settled it, a patch of the hero's figure whose green is the
+node's own 127 where a sum would give 167. One branch's fix also **broke a matched behaviour**:
+with the pair's sphere right, other units moved a few metres and the raider's first missile
+left from 106 m, not the recording's 345 to 292; the earlier 363 m had been one lucky moment
+on a wrong line, and the clear line was read because of it.
+
+**Which way this round's checks ran**: every coordinator spot-check confirmed — the firer's
+compare at `Control.dll:0x1000ed4e`, the quick load's `push 4`, the 7.5 at `0x1001df99`, the
+size-2 compare in the smallest pick at `ai.dll:0x10010b82`, the line's 0.7 at
+`Behavior.dll:0x10059968`, `addps` then `maxps` at `Ngi32.dll:0x1001d980`, and the UV unit's
+initialiser dividing by 1024 at `Terrain.dll:0x10035079`, whose static reads 0 in the file.
+The coordinator's own work was the runs: `--level`, `--log` and `--tap`, the target panel's
+names read off both recordings, which is what showed the enemy building only wheeled and
+tracked warbots, and the count of quick loads, which accounts for the 50 s by which one
+recording's raid trails the other's. Two branches conflicted, one in `verify.py`'s registry
+and one in a test written against a signature another branch changed; three agents stalled on
+a stream timeout and were resumed where they stood; and a worktree made late in a session
+starts at the session's first commit, which three briefs got wrong. The merged tree passed
+every check: 390 tests, 1050 of 1050 checks, 588 engine tests and 237 install tests, 207 of
+them `parkan-world`'s, the golden dumps 511 of 511, `ruff` after one wrapped line.
+
 ## Sky and rendering
 
 [10-sky](docs/10-sky.md#not-resolved), [02-texm](docs/02-texm.md),
@@ -742,6 +812,43 @@ tests, 1015 of 1015 checks, 509 engine tests and 201 install tests, `ruff` clean
   - The engine drew no weather and now draws all three as read
     ([10-sky](docs/10-sky.md#the-weather)). The engine's flash stops at the texture's own colour
     where the recording's goes on to a pale lilac-white, the stand-in of the lit colour held at 1.
+- [x] ~~Why the engine's haze is heavier, its ground paler and its clouds hard-edged~~ — raised from
+  every briefing pair since Campaign 02 and closed 2026-10-01, **read** and **measured** against the
+  recordings. Four causes for the ground and one for the clouds.
+  - **The lit colour.** `UseDXLighting` is compiled 0 (`Terrain.dll:0x1005fcce`) and nothing writes
+    it, so no device material is ever built: every lit item, mesh batch and landscape cell alike,
+    goes through `CShade::ShadeIndexedStrided` (`0x1004df70`). It adds the material's ambient to the
+    lights' sum and takes **the larger of that and the scene colour** (`g_FastProc` `+0x50`,
+    `Ngi32.dll:0x100248a0`, `0x1001bdd0`, `0x1001d980`, `0x1001ffc0`). Past 1 a channel is kneed,
+    c ÷ 6 + 5 ÷ 6 to 7 and 2 beyond, the diffuse is held at 1 and the excess goes to the specular
+    (`0x1004f26d`–`0x1004f648`), which the device adds after the texture. The engine added the scene
+    colour to every lit vertex and held the sum at 1.
+  - **The fog** is each vertex's specular alpha, where the shade writes 1 − (d² − start²) ÷ (end² −
+    start²) (`0x1004f187`–`0x1004f213`): linear in the **squared** distance, the same for landscape
+    and objects. *Measured* on C02 M04 at briefing time 43.5 s: the generator is about 290 off and the
+    fog ends at 498.5; a linear fog keeps 0.42 of it and leaves no green under 98, the recording's is
+    (64, 77, 16), and the squared fog keeps 0.66.
+  - **The blend space.** The game's arithmetic is on stored values; the engine decoded to linear,
+    blended there and encoded, 22 levels paler on a half-fogged mid-grey.
+  - **The ground's materials.** The landscape's UV unit is 1024, not 256 (`0x10035070`); stream 18
+    maps a microtexture, track 1 of the same index of `Land2.wea`, drawn doubled; and a face's second
+    byte indexes `Land1.wea`, drawn over the first on stream 14's alpha. Of 15011 edges between a
+    two-material and a one-material face 7554 carry 1.0 and meet the second material and 7436 carry
+    0.0 and meet the first. The engine had the mix reversed and the name from `Land2.wea`.
+  - **The clouds** are the one lit sky item (flags `0x14`, `0x1007aaf1`) and carry a fog of their own
+    from 5000 to a third of the dome's radius (`0x10077c43`), which keeps 1 at the apex, 0.77 on ring
+    1, 0.07 on ring 2 and nothing from ring 3 out. The cap's `+0x3c` stream is its normals, not the
+    clouds' colours, as [10-sky](docs/10-sky.md) had it.
+  - *Measured*, recording against engine over the same areas: C02 M04's hill behind (35, 57, 11)
+    against (37, 61, 13), where it was (91, 136, 27); C02 M01's near ground (27, 50, 11) against (29,
+    53, 12), where it was (56, 93, 19); C03 M02's sky (158, 8, 21) against (161, 9, 22), where it was
+    (102, 20, 20).
+  - **The tool was biased**: `analysis/playthrough.py` wrote its JPEGs in the video's own BT.709
+    values, read back as BT.601, so every grabbed frame's greens were about a tenth too bright.
+  - Three stand-in rows leave the engine's table — the dome's fog, the linear decode and the lit
+    colour held at 1 ([10-sky](docs/10-sky.md), [03-terrain](docs/03-terrain.md),
+    [02-texm](docs/02-texm.md)). Queued: C03 M01's lava, which this did not explain, and the lit
+    colour's remainders.
 
 ## Effects and sound
 

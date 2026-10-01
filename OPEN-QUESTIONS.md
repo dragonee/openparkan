@@ -70,6 +70,22 @@ remainder a closed line names stays here as a line of its own.
   `ICamera2` slot 23 to give a camera a mode other than 0, the one gate on the weather's draw (38
   calls through `+0x5c` across the install, none with a constant); and whether the weather draws in a
   pod room that is its own world ([10-sky](docs/10-sky.md#the-weather)).
+- [ ] **What draws C03 M01's lava.** *Narrowed 2026-10-01* with the haze and the ground closed
+  ([COMPLETED-QUESTIONS](COMPLETED-QUESTIONS.md#sky-and-rendering)). The recording's lava is bright
+  red, (208, 7, 4), and shows its own texture and the mirrored plant together ("Let's Play - Parkan:
+  Iron Strategy, Part 5", PfAg6zSe-yM, 1:25, briefing time 38 s); the engine's is (137, 20, 22).
+  Neither reflection mode as read draws that: `REFLECTION` leaves liquid faces out, and
+  `REFLECTION_SHIFTED` draws the reflection times the lit colour with no liquid texture, which is
+  what the engine draws. Lava faces carry water's flags exactly, `0x608` and surface 2 on all 2624.
+  What that machine ran in place of phase 10 is not read; the lake's brightness is the same line
+  ([03-terrain](docs/03-terrain.md#not-established)).
+- [ ] The lit colour's remainders, left 2026-10-01: a point light's highlight, its mirrored travel
+  against the way to the eye raised to the material's power less 1 (`Ngi32.dll:0x1001616f`), which
+  the engine does not take; the clouds' light list, where the engine lights them with the sun's two
+  lights only; a sprite's fog, still linear in the engine where the world's now runs on the squared
+  distance; and one face of C03 M02's Outpost, plain red in the recording at briefing time 54 s,
+  (136, 14, 24), and lavender in the engine, (188, 42, 71), lit there by the second light
+  ([10-sky](docs/10-sky.md#not-resolved)).
 - [ ] What a type-1, 2 or 5 pass does with its items' order. The effect sprites' layer 6 is a type-3
   `CCamDistSortLayerVB`, read to draw far to near (`Terrain.dll:0x1003e090`, `0x1003e1d0`;
   [11-effects](docs/11-effects.md#effect-sprites-are-drawn-far-to-near--read-and-seen)); the see-through
