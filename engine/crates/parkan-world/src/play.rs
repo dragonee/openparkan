@@ -26,7 +26,7 @@ use parkan_formats::pose::Pose;
 use parkan_formats::{arealmap, gamedir, landmesh};
 use parkan_sim::behaviour::{
     Condition, SCORE_RAMP, SERVICE_GUNS, SERVICE_MAGAZINE, Search, Seen, Senses, Takt, Task, Usable, Walk,
-    distance_score, fire_bar, fire_wait_ms,
+    distance_score, fire_bar, fire_line, fire_wait_ms,
 };
 use parkan_sim::combat::{Event, Part, Round, RoundEnd, Target};
 use parkan_sim::damage::FLIGHT_MS;
@@ -479,7 +479,13 @@ pub struct Launch {
     pub direction: Vec3,
     pub velocity: Vec3,
     pub target: Option<usize>,
+    /// The node of the target the gun hands the round with it ([`Round::part`]).
+    pub part: Option<(usize, usize)>,
 }
+
+/// The part the player's target is handed to a turret with (`iron3d.dll:0x10091b0e`): node 0,
+/// the first part's root.
+pub const PLAYERS_PART: (usize, usize) = (0, 0);
 
 /// What a behaviour sees of an object: its target in the battle (the hero's number after the
 /// targets), what it is, and its clan.
@@ -537,7 +543,8 @@ pub fn light_nudge(eye: Vec3, corner: Vec3, w: f32) -> Vec3 {
 /// once its AI timer runs out and its score passes the bar its unit's Type `type_word` and
 /// live speed set, or freely during a search or an attack (docs/29, "How the AI fires"). With
 /// `floor`, a building's guns hold their fire on a target below the lowest its turret's sight
-/// can look.
+/// can look. `hero_lives` are the hero's nodes' lives, which its target does not hold between
+/// the battle's frames.
 #[allow(clippy::too_many_arguments)]
 fn aim_and_fire(
     robot: &mut Robot,
@@ -546,6 +553,7 @@ fn aim_and_fire(
     takt: &Takt,
     seen: &[Sighting],
     battle: &Battle,
+    hero_lives: Option<&[Option<Life>]>,
     ground: &Ground,
     animal: bool,
     floor: bool,
@@ -563,11 +571,34 @@ fn aim_and_fire(
     }
     let Some(victim) = target.and_then(|i| battle.combat.target(i)) else {
         robot.target_point = None;
+        robot.fire_part = None;
         robot.rig.traced = None;
         return;
     };
-    let (point, reach) = (victim.centre, victim.radius);
+    // The part of the target the fight module hands the turret with it (`0x100241f7`,
+    // `0x10024b1b`), node 0 where none is picked (`Control.dll:0x100280d9`). The turret traces
+    // that node's own sphere's centre (`0x10028c40`), the gun's gate measures to it
+    // (`0x1002a8c0`) and the round's seeker steers at it (`0x100247c0`).
+    let hero = hero_lives.filter(|_| target == Some(battle.combat.hero_index()));
+    let part = match hero {
+        Some(lives) => victim.aim_part_by(|(p, n)| node_share(lives.get(p).and_then(Option::as_ref), n).0),
+        None => victim.aim_part(),
+    }
+    .unwrap_or((0, 0));
+    // The turret relinks its guns when the pair it is handed is not the one it holds, a new
+    // node as much as a new target (`Control.dll:0x100280e7`–`0x10028126`), and a relink
+    // starts every gun's lock again (`0x1002a160`).
+    if robot.fire_part.is_some_and(|held| held != part) {
+        for g in &mut robot.guns {
+            g.relink(target);
+        }
+    }
+    let (point, part_radius) = victim.slot_sphere(part).unwrap_or((victim.position, 0.0));
+    // The target's outer radius, its variable `0x206` (`0x1000648c`, `0x1000cbe3`): from its
+    // origin to its agent sphere's centre, and that sphere's radius.
+    let reach = victim.agent_sphere.0.distance(victim.position) + victim.agent_sphere.1;
     robot.target_point = Some(point);
+    robot.fire_part = Some(part);
     robot.aim_at(point);
     // DEPARTURE: docs/29-weapons.md#how-the-ai-fires--read -- no floor on a building's fire is
     // read. A building's turret keeps tracing a target that stands lower than its pitch channel
@@ -582,25 +613,51 @@ fn aim_and_fire(
     let settled = [robot.rig.yaw, robot.rig.pitch].iter().enumerate().all(|(axis, c)| {
         c.is_none_or(|c| (robot.rig.values[c] - robot.rig.target(axis)).abs() < AIM_SETTLED)
     });
-    let distance = at.distance(point);
+    // The distance and the height the scores take are between the two origins (`0x10024263`–
+    // `0x10024381`): how far the unit stands from its target, and how far above it.
+    let distance = at.distance(victim.position);
+    let above = at.z - victim.position.z;
+    // The line every gun waits on, worked out once a pass for the whole unit (`0x10024464`–
+    // `0x10024989`), from the node its first turret sits on to the part it aims at. No round's
+    // flags are asked: a guided or a lobbed round waits on it as any other does. Free fire
+    // waits on it too (`0x10024df3`).
+    let from = battle
+        .combat
+        .target(t)
+        .zip(robot.turret_life())
+        .and_then(|(me, node)| me.slot_sphere(node))
+        .unwrap_or((at, 0.0));
+    let (line_from, line_to) = fire_line(from, (point, part_radius));
+    let owner = seen.iter().find(|(i, _, _)| *i == Some(t)).map(|(_, _, clan)| *clan);
+    let clear = |battle: &Battle| {
+        let solid = |id: usize| {
+            id != t
+                && Some(id) != target
+                && matches!(battle.placed_kinds.get(id), Some(&(KIND_BUILDING | KIND_VEGETATION | KIND_ROCK)))
+        };
+        let allies = seen
+            .iter()
+            .filter(|(_, s, clan)| !s.building && owner == Some(*clan))
+            .filter_map(|(i, _, _)| *i)
+            .filter(|&i| i != t);
+        battle.combat.fire_line_clear(ground, line_from, line_to, solid, allies)
+    };
+    let mut line: Option<bool> = None;
+    let mut line_clear = || *line.get_or_insert_with(|| clear(battle));
+    // Free fire is for a clear line (`0x10024de5`–`0x10024df9`): with the line blocked the
+    // factors and the bar are worked out as outside the task.
+    let free = takt.fire_freely && line_clear();
     // The bar by what the unit is and how fast it may go now (`0x10024e7a`–`0x10024ec5`): the
     // live forward top speed is the limited one, which damage lowers.
-    let bar = if takt.fire_freely {
-        0.0
-    } else {
-        fire_bar(robot.flyer, robot.walker.limits.top_speed[1], type_word)
-    };
+    let bar = if free { 0.0 } else { fire_bar(robot.flyer, robot.walker.limits.top_speed[1], type_word) };
     for g in 0..robot.guns.len() {
-        if now < robot.next_shot_ms[g] {
-            continue;
-        }
         let gun = &robot.guns[g];
         // Heavy rounds are held back: a gun whose round does more than 10,000 fires only at a
         // building, an id of class 3 (`Behavior.dll:0x10024d02`–`0x10024d3e`), in free fire too.
         if gun.round_damage > parkan_sim::guns::HEAVY_ROUND && !building {
             continue;
         }
-        let score = if takt.fire_freely {
+        let score = if free {
             0.5
         } else {
             // STAND-IN: docs/29-weapons.md#how-the-ai-fires--read -- the turret's aim stage
@@ -618,24 +675,25 @@ fn aim_and_fire(
                 continue;
             }
             let ramp = if animal { 0.0 } else { SCORE_RAMP };
-            distance_score(distance, point.z - at.z, gun.round_speed, gun.round_flags, ramp) * turret * own
+            distance_score(distance, above, gun.round_speed, gun.round_flags, ramp) * turret * own
         };
         // A score must pass the bar, not reach it (`0x10024f13`–`0x10024f1e`).
         if score <= bar {
             continue;
         }
-        let Some((muzzle, _)) = robot.gun_muzzle(g, gun.current) else { continue };
-        let clear = match battle.combat.first_hit(ground, Some(t), muzzle, point, 0.0) {
-            None => true,
-            Some((_, struck, _)) => struck == target,
-        };
-        if !clear {
+        // The gun's timer is asked only now, and asking it once it has run out sets it again
+        // (`0x10024f52`, `0x1004c550`) -- before the line is looked at (`0x10024f69`). So a
+        // gun whose line is blocked does not fire the moment it clears: it looks again when
+        // its next wait is up.
+        if now <= robot.next_shot_ms[g] && robot.next_shot_ms[g] != 0.0 {
             continue;
         }
         let magazine = gun.magazine;
+        robot.next_shot_ms[g] = now + fire_wait_ms(magazine, robot.behaviour.random());
+        if !line_clear() {
+            continue;
+        }
         robot.guns[g].state = SINGLE_FIGHT;
-        let wait = fire_wait_ms(magazine, robot.behaviour.random());
-        robot.next_shot_ms[g] = now + wait;
     }
 }
 
@@ -669,7 +727,12 @@ fn pose_target(robot: &Robot, target: &mut Target) {
 /// The hero as the battle strikes it: each of its parts, posed by [`pose_target`], its sphere
 /// over their level-0 spheres as a placed unit's is. Its lives stay the hero's and are lent to
 /// the target for the battle's frame ([`Play::lend_hero_lives`]).
-fn hero_target(hero: &Hero, shield: Option<parkan_sim::shield::Shield>) -> Target {
+fn hero_target(
+    hero: &Hero,
+    shield: Option<parkan_sim::shield::Shield>,
+    devices: Vec<(usize, i32, usize)>,
+    gear: Vec<(usize, usize)>,
+) -> Target {
     let parts: Vec<Part> = hero
         .parts
         .iter()
@@ -682,6 +745,7 @@ fn hero_target(hero: &Hero, shield: Option<parkan_sim::shield::Shield>) -> Targe
             host: usize::try_from(part.host).ok().zip(usize::try_from(part.node).ok()),
         })
         .collect();
+    let devices = crate::battle::devices_of(devices, Some, |p| parts.get(p).and_then(|x| x.host));
     let mut target = Target {
         parts,
         centre: Vec3::ZERO,
@@ -691,6 +755,8 @@ fn hero_target(hero: &Hero, shield: Option<parkan_sim::shield::Shield>) -> Targe
         aim: hero.walker.body.position,
         shield,
         agent_sphere: (hero.walker.body.position, 0.0),
+        devices,
+        gear,
     };
     pose_target(&hero.robot, &mut target);
     let (mut lo, mut hi) = (Vec3::splat(f32::MAX), Vec3::splat(f32::MIN));
@@ -756,13 +822,18 @@ fn launches(
                 None => traced,
             };
             let lobbed = if owner.is_some() { robot.lobbed_launch(g, muzzle) } else { None };
+            let target = robot.guns.get(g)?.target;
             Some(Launch {
                 kind,
                 owner,
                 muzzle,
                 direction: lobbed.unwrap_or_else(|| aim.map_or(barrel, |p| p - muzzle)),
                 velocity: robot.world_velocity(),
-                target: robot.guns.get(g)?.target,
+                target,
+                // The gun's pair is its turret's (`Control.dll:0x10028183`), which the fight
+                // module wrote with the part it aims at, and the player's target with part 0.
+                part: target
+                    .map(|_| robot.fire_part.filter(|_| target == robot.fire_target).unwrap_or(PLAYERS_PART)),
             })
         })
         .collect()
@@ -946,7 +1017,10 @@ impl Play {
         // The player's own hero is never given the level ratio (docs/26).
         let hero_shield =
             crate::shields::load(&mut assembly, KIND_UNIT, &mission.objects[hero.object].path, 1.0);
-        battle.combat.hero = Some(hero_target(&hero, hero_shield));
+        let hero_path = &mission.objects[hero.object].path;
+        let hero_devices = crate::shields::devices(&mut assembly, KIND_UNIT, hero_path);
+        let hero_gear = crate::battle::gear(&mut assembly, KIND_UNIT, hero_path);
+        battle.combat.hero = Some(hero_target(&hero, hero_shield, hero_devices, hero_gear));
         let mut robots = Vec::new();
         let mut emplacements = Vec::new();
         for t in 0..battle.objects.len() {
@@ -1648,13 +1722,14 @@ impl Play {
                 self.say_sound(VOICE_UNIT_DETECTED, true);
             }
         }
-        // The gate measures to the target's node sphere's centre (`Control.dll:0x1002a8c0`).
+        // The player's target is handed with part 0 (`iron3d.dll:0x10091b0e`), and the gate
+        // measures to that node's own sphere's centre (`Control.dll:0x1002a8c0`).
         let point = self
             .targets
             .current
             .filter(|&t| world.get(t).is_some())
             .and_then(|t| self.battle.combat.target(t))
-            .map(|x| x.aim);
+            .map(|x| x.slot_sphere(PLAYERS_PART).map_or(x.aim, |(centre, _)| centre));
         self.gunner_mut().target_point = point;
     }
 
@@ -4212,7 +4287,7 @@ impl Play {
                 let sensed = self.radar_ids(e, true, world);
                 let others = self.seen_by(t, seen, &sensed);
                 let type_word = self.units[t].type_word;
-                let Play { emplacements, battle, ground, building_fire_floor, graph, .. } = self;
+                let Play { emplacements, battle, ground, building_fire_floor, graph, hero, .. } = self;
                 let robot = &mut emplacements[e].1;
                 let usable = |x: f32, y: f32| graph.as_ref().is_none_or(|g| g.usable(x, y));
                 let senses = Senses {
@@ -4234,7 +4309,18 @@ impl Play {
                     pastures: parkan_sim::behaviour::Pastures::NONE,
                 };
                 let takt = robot.behaviour.takt(&senses);
-                aim_and_fire(robot, t, type_word, &takt, seen, battle, ground, false, *building_fire_floor);
+                aim_and_fire(
+                    robot,
+                    t,
+                    type_word,
+                    &takt,
+                    seen,
+                    battle,
+                    Some(&hero.lives),
+                    ground,
+                    false,
+                    *building_fire_floor,
+                );
             }
             let (t, robot) = &mut self.emplacements[e];
             let target = &self.battle.combat.targets[*t];
@@ -4496,7 +4582,18 @@ impl Play {
         let forward = robot.walker.body.forward();
         robot.walker.drive = Some(robot.wizard.takt(now, at, forward, dt_ms));
         if fights {
-            aim_and_fire(robot, t, type_word, &takt, seen, &self.battle, &self.ground, animal, false);
+            aim_and_fire(
+                robot,
+                t,
+                type_word,
+                &takt,
+                seen,
+                &self.battle,
+                Some(&self.hero.lives),
+                &self.ground,
+                animal,
+                false,
+            );
         }
     }
 
@@ -4587,6 +4684,7 @@ impl Play {
             {
                 // The round's load group creates its flight effects at spawn, and the gun hands its
                 // effect manager the muzzle on the shooter's node 0 (`Control.dll:0x1002a56d`).
+                self.battle.combat.rounds.last_mut().expect("just fired").part = l.part;
                 let round = *self.battle.combat.rounds.last().expect("just fired");
                 for e in self.battle.kinds[l.kind].effects.clone() {
                     let frame = self.round_frame(&round, e.points);

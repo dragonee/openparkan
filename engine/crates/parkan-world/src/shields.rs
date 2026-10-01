@@ -50,6 +50,19 @@ pub fn slots(
     slots
 }
 
+/// Every component of the object built from `path` as its device manager lists them, each as
+/// its part, its class and its node in that part: what the fight module weighs when it picks
+/// the part of a target to aim at (`Behavior.dll:0x10025830`, docs/29, "The part the AI aims
+/// at").
+pub fn devices(assembly: &mut Assembly, kind: u32, path: &str) -> Vec<(usize, i32, usize)> {
+    // A component's class is an id from 1 to 30 (docs/13, "The component record").
+    let classes: Vec<i32> = (1..=30).collect();
+    slots(assembly, kind, path, &classes)
+        .into_iter()
+        .filter_map(|(p, _, k)| Some((p, k.type_id, usize::try_from(k.node).ok()?)))
+        .collect()
+}
+
 /// The shield of the object built from `path`, where it has both a fight shield and a
 /// deflector; its sectors' maximum times the level ratio `ratio`. The generator's resource is
 /// the effect a hit plays.

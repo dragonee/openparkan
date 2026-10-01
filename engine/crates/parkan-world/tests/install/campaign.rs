@@ -565,6 +565,14 @@ fn c03_m02s_raider_takes_up_the_attack_on_the_bunker_and_closes_on_it() {
 /// "Making a move"), so the guided gun's gate opens at 500 m and its 7 s lock runs out short of
 /// 400; and a round of more than 10,000 is held for a building (docs/29, "How the AI fires"), so
 /// the hero the raider passes on its way draws none.
+///
+/// What lets it fire from there is the line the fight module asks for (docs/29, "The line every
+/// gun waits on"): from its turret's own sphere to the part of the bunker it aims at, which is
+/// the deflector on the roof, 14.5 m over the bunker's origin -- a deflector weighs 30 in the
+/// pick, the turret beside it 20 -- and stopped that part's radius short. The bunker's origin
+/// lies under the lip of the plateau it is sunk in, and a line to it grazes the ground all the
+/// way in to 106 m; the line to the deflector first clears as the raider tops a rise 423 m off.
+/// The missile is handed the same part and steers at it.
 #[test]
 #[ignore = "needs the game install"]
 fn c03_m02s_raider_lands_its_winged_ssm_on_the_bunker_from_afar_and_spends_none_on_the_hero() {
@@ -585,23 +593,34 @@ fn c03_m02s_raider_lands_its_winged_ssm_on_the_bunker_from_afar_and_spends_none_
     let ssm = play.battle.combat.kinds.iter().position(|k| k.name.eq_ignore_ascii_case("bm_m_04")).unwrap();
     let bunker_at = play.battle.combat.targets[bunker].position;
 
+    // The part the raider's fight module aims at: the bunker's deflector, the heaviest in the
+    // pick, whose own sphere stands on the roof.
+    let target = &play.battle.combat.targets[bunker];
+    let part = target.aim_part().expect("the bunker has parts to aim at");
+    assert!(target.devices.iter().any(|d| d.class == 21 && d.node == part), "its deflector: {part:?}");
+    let (aimed_at, _) = target.slot_sphere(part).unwrap();
+    assert!((aimed_at.z - bunker_at.z - 14.5).abs() < 0.5, "on the roof: {aimed_at} over {bunker_at}");
+
     let (mut fired, mut seen) = (Vec::new(), std::collections::BTreeSet::new());
-    let mut struck = None;
+    let (mut short, mut struck) = (0, None);
     for _ in 0..(90 * 60) {
         let events = play.tick(1000.0 / 60.0, [0.0; 2]);
         let from = play.battle.combat.targets[raider].position.distance(bunker_at);
         for r in play.battle.combat.rounds.iter().filter(|r| r.owner == Some(raider) && r.kind == ssm) {
             if seen.insert(r.id) {
-                fired.push((r.target, from));
+                fired.push((r.target, r.part, from));
             }
         }
         for e in events {
-            if let Event::Struck { round, target, .. } = e
+            if let Event::Struck { round, target, point, .. } = e
                 && round.owner == Some(raider)
                 && round.kind == ssm
                 && struck.is_none()
             {
-                struck = Some((target, from));
+                match target {
+                    Some(t) if t == bunker => struck = Some((point, from)),
+                    _ => short += 1,
+                }
             }
         }
         if struck.is_some() {
@@ -609,21 +628,27 @@ fn c03_m02s_raider_lands_its_winged_ssm_on_the_bunker_from_afar_and_spends_none_
         }
     }
     assert!(!fired.is_empty(), "the raider fired a winged SSM");
-    assert!(fired.iter().all(|&(t, _)| t == Some(bunker)), "every one at the bunker: {fired:?}");
-    let (_, from) = fired[0];
-    let (target, at) = struck.expect("and lands");
-    eprintln!("the first leaves {from:.0} m off the bunker and lands with the raider {at:.0} m off");
-    // How far off the first one leaves is not pinned to the recording's 345 to 292 m. The gun is
-    // ready by 400 m, as read above, and then waits on a clear line from its muzzle to the
-    // bunker's centre, which lies 3 to 4 m under the plateau the raider crosses: the line
-    // grazes the ground 90 to 160 m ahead of it nearly all the way in. It cleared for a moment
-    // at 373 m on the way the raider took while the pair pushed agent spheres out, and on the
-    // way it takes now -- the same road a few metres aside, the mission's animals and tracked
-    // bots moving otherwise about it -- it first clears at 106 m. That the missile leaves from
-    // afar at all hangs on that line, which is the open item here.
-    assert!(from > 80.0, "the first leaves {from:.0} m off the bunker");
-    assert_eq!(target, Some(bunker), "on the bunker");
-    assert!(at > 50.0, "with the raider still {at:.0} m off");
+    assert!(fired.iter().all(|&(t, _, _)| t == Some(bunker)), "every one at the bunker: {fired:?}");
+    assert!(fired.iter().all(|&(_, p, _)| p == Some(part)), "and handed its deflector: {fired:?}");
+    let (_, _, from) = fired[0];
+    let (point, at) = struck.expect("and one lands on the bunker");
+    eprintln!(
+        "the first leaves {from:.0} m off the bunker; one lands {:.1} m from the deflector's centre \
+         with the raider {at:.0} m off, {short} having fallen short",
+        point.distance(aimed_at)
+    );
+    // The recording's missile is in the air with the raider 345 to 292 m off and strikes at the
+    // second figure, which puts its launch 365 to 390 m off (*derived*, at 45 m/s with and
+    // without the raider's own 11 m/s). Here the line first clears 423 m off and each launcher
+    // fires when its 0.5 to 2 s wait next runs out. The two launchers hang a metre and a half
+    // either side of the turret the line is asked from, and the line has only just cleared the
+    // rise: one missile of the first pair may meet it. So the bars are on the first to leave
+    // and the first to land, and no more than one falls short.
+    assert!(from > 290.0, "the first leaves {from:.0} m off the bunker");
+    assert!(from < 430.0, "and not before the line clears: {from:.0} m");
+    assert!(point.distance(aimed_at) < 5.0, "it lands on the part aimed at: {point} against {aimed_at}");
+    assert!(at > 250.0, "with the raider still {at:.0} m off");
+    assert!(short <= 1, "{short} fell short");
 }
 
 /// C03 Mission 02's raider outlives its own winged SSM. A hit names the object that fired it and

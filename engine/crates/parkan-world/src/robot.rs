@@ -311,6 +311,10 @@ pub struct Robot {
     /// When each gun may next fire on the AI's timer, and the target its guns were given.
     pub next_shot_ms: Vec<f64>,
     pub fire_target: Option<usize>,
+    /// The node of that target the fight module handed the turret with it, which the guns hand
+    /// their rounds (`Behavior.dll:0x10024b1b`, `Control.dll:0x10028130`, `0x1002a514`); `None`
+    /// while the player's target is the guns'.
+    pub fire_part: Option<(usize, usize)>,
     /// The unit's one radar: its fitted radar part's, else its turret's (docs/25).
     pub radar: Radar,
     /// The radar slot's node, as a part and a node of it, which a fitted radar keeps (docs/28,
@@ -720,6 +724,7 @@ impl Robot {
             behaviour: Behaviour::new((object as u32).wrapping_mul(2_654_435_761)),
             next_shot_ms: Vec::new(),
             fire_target: None,
+            fire_part: None,
             gun_parts: Vec::new(),
             gun_nodes: Vec::new(),
             size_class,
@@ -892,6 +897,7 @@ impl Robot {
     /// `CIS_MANUALCONTROL`, so only its guided guns take it (`Control.dll:0x10028164`), and
     /// every gun's lock starts again.
     pub fn relink(&mut self, target: Option<usize>) {
+        self.fire_part = None;
         for g in &mut self.guns {
             g.relink(if g.gate.guided() { target } else { None });
         }

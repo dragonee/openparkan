@@ -904,8 +904,10 @@ fn c01_m03s_tower_whose_turret_is_shot_off_loses_its_gun_and_radar_and_fires_no_
 /// only guns that reach the enemy towers on the hill. The target list is the driven unit's,
 /// and its target goes to the driven unit's guns (`iron3d.dll:0x10091a80`): from 380 m, looking
 /// at a tower, the missiles lock on and fire, where they kept reporting out of range because
-/// the hero's own guns took the target. They steer at the tower's node sphere's centre, not
-/// its foot on the crest (`Control.dll:0x100248b6`), and bring it down.
+/// the hero's own guns took the target. They steer at the centre of the own sphere of the node
+/// the player's target is handed with, node 0 (`iron3d.dll:0x10091b0e`,
+/// `Control.dll:0x100248b6`) -- the tower's chassis's root, a sphere of 3.21 about its origin and
+/// 3.89 m under its node sphere's centre -- and bring it down.
 #[test]
 #[ignore = "needs the game install"]
 fn c02_m02s_hq_driven_by_the_hero_locks_its_winged_missiles_on_a_tower_and_brings_it_down() {
@@ -934,6 +936,16 @@ fn c02_m02s_hq_driven_by_the_hero_locks_its_winged_missiles_on_a_tower_and_bring
     // between it and the tower's middle. Toward the tower from the HQ's own start the hill's
     // crest hides it: a winged missile flies straight at its target, and meets the crest.
     let aim = play.battle.combat.targets[tower].aim;
+    // The player's target is handed with node 0, whose own sphere the gate measures to and
+    // the seeker steers at.
+    let (steered_at, radius) = play.battle.combat.targets[tower].slot_sphere((0, 0)).unwrap();
+    let origin = play.battle.combat.targets[tower].position;
+    eprintln!(
+        "the tower's node 0's own sphere, radius {radius:.2}: {:.2} m over its origin and {:.2} m \
+         under its node sphere's centre",
+        steered_at.z - origin.z,
+        aim.z - steered_at.z
+    );
     let way = -glam::Vec2::new(30f32.to_radians().cos(), 30f32.to_radians().sin());
     {
         let Play { robots, ground, .. } = &mut play;

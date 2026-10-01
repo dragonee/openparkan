@@ -18,7 +18,7 @@ use parkan_formats::mission::{self, Mission, Value};
 use parkan_formats::ndp::{self, NodeDamage};
 use parkan_formats::objects::ResourceRef;
 use parkan_formats::pose::Pose;
-use parkan_sim::combat::{Combat, Part, RoundKind, Seeker, Target};
+use parkan_sim::combat::{Combat, Device, Part, RoundKind, Seeker, Target};
 use parkan_sim::damage::{Life, NEVER_HIDDEN_NODE_FLAG, VITAL_NODE_FLAG};
 
 use crate::assembly::Assembly;
@@ -192,6 +192,45 @@ pub fn part_damage(
     (Some(life), blasts)
 }
 
+/// The `.ndp` flags that mark a node the fight module weighs as running gear: `ILifeSystem`
+/// slot 3 answers its id 2 for a node whose row carries any of them
+/// (`Control.dll:0x1000dc76`–`0x1000dc88`). `0x20` and `0x40` are a machine's left and right
+/// gear, and all three are on a round's one node (docs/07, "`.ndp` is a damage table").
+pub const GEAR_FLAGS: i32 = 0x70;
+
+/// The running-gear nodes of the object built from `path`, each as its part and its node.
+pub fn gear(assembly: &mut Assembly, kind: u32, path: &str) -> Vec<(usize, usize)> {
+    let mut out = Vec::new();
+    for (p, part) in assembly.parts(kind, path).iter().enumerate() {
+        let rows = table(assembly, &part.record).unwrap_or_default();
+        out.extend(rows.iter().enumerate().filter(|(_, d)| d.flags & GEAR_FLAGS != 0).map(|(n, _)| (p, n)));
+    }
+    out
+}
+
+/// An object's devices as its target keeps them, from [`crate::shields::devices`]'s list:
+/// `loaded` gives an assembly part's index among the target's parts and `host` the socket a
+/// target part hangs on. A fitted part's node 0 is not in the merged model — the socket
+/// stands for it (`Control.dll:0x1000906a`–`0x10009095`, docs/39, "The turret's life is its
+/// body's, node 1") — so a device on it sits on the socket.
+pub fn devices_of(
+    listed: Vec<(usize, i32, usize)>,
+    loaded: impl Fn(usize) -> Option<usize>,
+    host: impl Fn(usize) -> Option<(usize, usize)>,
+) -> Vec<Device> {
+    listed
+        .into_iter()
+        .filter_map(|(p, class, node)| {
+            let p = loaded(p)?;
+            let node = match (node, host(p)) {
+                (0, Some(socket)) => socket,
+                (n, _) => (p, n),
+            };
+            Some(Device { class, node })
+        })
+        .collect()
+}
+
 /// A pose placed at `position`, turned `yaw` about z.
 fn placement(position: [f32; 3], yaw: f32) -> Pose {
     let half = f64::from(yaw) / 2.0;
@@ -260,6 +299,7 @@ impl Battle {
         let (mut lo, mut hi) = (Vec3::splat(f32::MAX), Vec3::splat(f32::MIN));
         // Each assembly part's index among the parts that load, which a part's host names.
         let mut loaded_as: Vec<Option<usize>> = Vec::new();
+        let mut gear = Vec::new();
         for part in assembly.parts(object.kind, &object.path) {
             loaded_as.push(None);
             let Some(loaded) = assembly.mesh(&part.reference) else { continue };
@@ -308,6 +348,13 @@ impl Battle {
                 .and_then(|h| loaded_as.get(h).copied().flatten())
                 .zip(usize::try_from(part.node).ok());
             *loaded_as.last_mut().unwrap() = Some(parts.len());
+            let rows = table(assembly, &part.record).unwrap_or_default();
+            gear.extend(
+                rows.iter()
+                    .enumerate()
+                    .filter(|(_, d)| d.flags & GEAR_FLAGS != 0)
+                    .map(|(n, _)| (parts.len(), n)),
+            );
             parts.push(Part { mesh, nodes, scale, life, portals, host });
             part_wears.push(loaded.wear.materials.clone());
         }
@@ -329,10 +376,17 @@ impl Battle {
             Vec3::new(agent_centre[0] as f32, agent_centre[1] as f32, agent_centre[2] as f32),
             agent_radius * scale,
         );
-        let shield = if matches!(object.kind, mission::KIND_UNIT | mission::KIND_BUILDING) {
+        let assembled = matches!(object.kind, mission::KIND_UNIT | mission::KIND_BUILDING);
+        let shield = if assembled {
             crate::shields::load(assembly, object.kind, &object.path, object_ratio)
         } else {
             None
+        };
+        let devices = if assembled {
+            let listed = crate::shields::devices(assembly, object.kind, &object.path);
+            devices_of(listed, |p| loaded_as.get(p).copied().flatten(), |p| parts.get(p).and_then(|x| x.host))
+        } else {
+            Vec::new()
         };
         self.combat.targets.push(Target {
             parts,
@@ -343,6 +397,8 @@ impl Battle {
             aim,
             shield,
             agent_sphere,
+            devices,
+            gear,
         });
         self.objects.push(index);
         self.explosions.push(blasts);

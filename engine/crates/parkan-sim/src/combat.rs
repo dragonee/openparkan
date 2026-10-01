@@ -88,6 +88,11 @@ pub struct Round {
     pub life: f32,
     /// The target its gun handed it (`0x1002a514`), which its seeker follows.
     pub target: Option<usize>,
+    /// The node of that target the gun handed it with the id (`0x1002a514`, the gun's pair at
+    /// `+0x108`): the player's target is handed with node 0 (`iron3d.dll:0x10091b0e`), an AI
+    /// gun's with the part its fight module picked ([`Target::aim_part`]). The seeker steers
+    /// at that node's own sphere (`Control.dll:0x100247c0`). `None` steers at [`Target::aim`].
+    pub part: Option<(usize, usize)>,
     expired: bool,
 }
 
@@ -145,6 +150,43 @@ impl Part {
     }
 }
 
+/// A component of an object's device manager: its class, and the node it sits on as a part
+/// and a node of it (the record's `+4`, which the manager's query answers for id `0x200`,
+/// docs/13, "The component record").
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Device {
+    pub class: i32,
+    pub node: (usize, usize),
+}
+
+/// What a running-gear node weighs when the fight module picks the part to aim at
+/// (`Behavior.dll:0x10025830`, the 7.5 at `0x10059978`).
+pub const GEAR_WEIGHT: f32 = 7.5;
+
+/// What a device of `class` weighs in that pick (the jump table at `0x100259c8` through the
+/// byte map at `0x100259e8`): a deflector 30, a turret 20, a gun 15, an engine or a radar 14, a
+/// power store 10, a fight shield 7, a repair system 3, anything else 1.
+pub fn device_weight(class: i32) -> f32 {
+    match class {
+        21 => 30.0,
+        1 => 20.0,
+        2 => 15.0,
+        5 | 8 => 14.0,
+        19 => 10.0,
+        9 => 7.0,
+        15 => 3.0,
+        _ => 1.0,
+    }
+}
+
+/// An AI unit's line of fire is a sphere this thick, swept from end to end past each unit of
+/// its own owner (`Behavior.dll:0x10024954`, into `0x10025c60`).
+pub const LINE_RADIUS: f32 = 0.5;
+/// A line shorter than this is clear though it meets a face flagged [`LINE_PASSES_FACE`]
+/// (`0x100247aa`–`0x100247eb`, the 20 at `0x1005960c`).
+pub const LINE_NEAR: f32 = 20.0;
+pub const LINE_PASSES_FACE: u16 = 0x20;
+
 /// Something a round can strike.
 #[derive(Clone, Debug)]
 pub struct Target {
@@ -155,9 +197,10 @@ pub struct Target {
     pub alive: bool,
     /// The object's placement.
     pub position: Vec3,
-    /// Its node sphere's centre in the world, the point a gun's gate measures to and a seeker
-    /// steers at: interface `0x20` slot 3 asked with no node (`Control.dll:0x1002a8c0`,
-    /// `0x100248b6`, docs/29, "A guided gun waits for a lock").
+    /// Its node sphere's centre in the world: interface `0x20` slot 3 asked by the default
+    /// request with no node (docs/24, "Finding the ground"). A gate or a seeker with a target
+    /// is always handed a node and asks that node's own sphere ([`Target::slot_sphere`],
+    /// docs/29, "The part the AI aims at"); this is what one handed none falls back on.
     pub aim: Vec3,
     /// Its fight shield and deflector, where it has both; the bubble is its bounding sphere.
     pub shield: Option<Shield>,
@@ -165,6 +208,11 @@ pub struct Target {
     /// spheres joined (`AniMesh.dll:0x10009510`), which interface `0x18` slot 9 hands out
     /// (`0x10014580`). The world's object pick asks for it (docs/42, "The object pick").
     pub agent_sphere: (Vec3, f32),
+    /// Its device manager's components in its own order: the root's, then each fitted part's,
+    /// an internal part standing in the slot it was fitted to.
+    pub devices: Vec<Device>,
+    /// The nodes whose `.ndp` flags carry `0x70`, a machine's running gear, in node order.
+    pub gear: Vec<(usize, usize)>,
 }
 
 impl Target {
@@ -189,6 +237,60 @@ impl Target {
             return 1.0;
         };
         if n.destroyed || n.max <= 0.0 { if n.destroyed { 0.0 } else { 1.0 } } else { n.life / n.max }
+    }
+
+    /// One node's own sphere in the world: what interface `0x20` slot 3 answers a request whose
+    /// fourth word is 1 (`AniMesh.dll:0x1000f3c5`) -- the sphere of the node's level-0 slot in
+    /// its current variant, through the node's matrix, or the node's origin with no radius
+    /// where it has no such slot (`0x1000f40e`). The turret, the gun's gate, the seeker and the
+    /// fight module's line all ask it of the node they are handed.
+    pub fn slot_sphere(&self, (part, node): (usize, usize)) -> Option<(Vec3, f32)> {
+        let p = self.parts.get(part)?;
+        let pose = p.nodes.get(node)?;
+        let Some(slot) = p.slot(node).and_then(|s| p.mesh.slots.get(usize::from(s))) else {
+            return Some((vec(pose.translation), 0.0));
+        };
+        let [cx, cy, cz, r] = slot.sphere;
+        let centre = pose.apply([cx, cy, cz].map(|v| f64::from(v * p.scale)));
+        Some((vec(centre), r * p.scale))
+    }
+
+    /// The part of it an AI unit aims at (`Behavior.dll:0x10025830`), the node the fight module
+    /// hands the turret with the target (`0x10024b1b`, `0x10024f8f`): the heaviest of its
+    /// running-gear nodes and its devices that still has life, each weighing its class's
+    /// figure × (2 − its node's share of life), so a damaged part outweighs a whole one of
+    /// its class. Both lists are walked from the last, and only a greater weight takes the
+    /// pick, so among equals the last listed keeps it. `None` where nothing has life, which
+    /// the callers take as node 0.
+    pub fn aim_part(&self) -> Option<(usize, usize)> {
+        self.aim_part_by(|node| self.condition(node))
+    }
+
+    /// [`Target::aim_part`] with each node's share of life from `share`: the hero's lives are
+    /// its own between the battle's frames.
+    pub fn aim_part_by(&self, share: impl Fn((usize, usize)) -> f32) -> Option<(usize, usize)> {
+        let mut best: Option<((usize, usize), f32)> = None;
+        let gear = self.gear.iter().rev().map(|&node| (node, GEAR_WEIGHT));
+        let devices = self.devices.iter().rev().map(|d| (d.node, device_weight(d.class)));
+        for (node, weight) in gear.chain(devices) {
+            let share = share(node);
+            if share <= 0.0 {
+                continue;
+            }
+            let score = (2.0 - share) * weight;
+            if score > best.map_or(0.0, |(_, b)| b) {
+                best = Some((node, score));
+            }
+        }
+        best.map(|(node, _)| node)
+    }
+
+    /// Where a seeker handed `part` steers (`Control.dll:0x100247c0`): at that node's own
+    /// sphere's centre while the node has life, then at node 0's, and nowhere once node 0's is
+    /// gone.
+    pub fn seeker_point(&self, part: (usize, usize)) -> Option<Vec3> {
+        let node = if self.condition(part) > 0.0 { part } else { (0, 0) };
+        (self.condition(node) > 0.0).then(|| self.slot_sphere(node)).flatten().map(|(c, _)| c)
     }
 
     /// Its shield's bubble while it is up.
@@ -413,6 +515,7 @@ impl Combat {
             ratio,
             life: ratio * k.hit_points,
             target,
+            part: None,
             expired: false,
         });
         Some(self.fired)
@@ -468,11 +571,26 @@ impl Combat {
         passes: u16,
         water: bool,
     ) -> Option<(Strike, Option<usize>, usize)> {
+        let skip = skip.unwrap_or(self.hero_index());
+        self.nearest_among(ground, p0, p1, radius, passes, water, |id| id != skip)
+    }
+
+    /// [`Combat::nearest_over`] among the live targets `visit` admits.
+    #[allow(clippy::too_many_arguments)]
+    fn nearest_among(
+        &self,
+        ground: &Ground,
+        p0: Vec3,
+        p1: Vec3,
+        radius: f32,
+        passes: u16,
+        water: bool,
+        visit: impl Fn(usize) -> bool,
+    ) -> Option<(Strike, Option<usize>, usize)> {
         let ray = if water { ground.segment_including_water(p0, p1) } else { ground.segment(p0, p1) };
         let mut best: Option<(Strike, Option<usize>, usize)> = ray.map(|s| (s, None, 0));
-        let skip = skip.unwrap_or(self.hero_index());
         for (id, target) in self.every() {
-            if !target.alive || id == skip {
+            if !target.alive || !visit(id) {
                 continue;
             }
             let still = (target.centre, target.centre);
@@ -488,6 +606,47 @@ impl Combat {
             }
         }
         best
+    }
+
+    /// Whether an AI unit's line of fire from `p0` to `p1` is clear (`Behavior.dll:0x10024464`–
+    /// `0x10024989`), the ends being [`crate::behaviour::fire_line`]'s.
+    ///
+    /// The line goes into `IWorld` slot 12 (`Terrain.dll:0x10025540`), the segment query that
+    /// leaves out the objects whose ids it is handed: the firing unit and its target. Its record
+    /// is `[0x40a, 0, 0, 0, 0, 8, 0, 0]` (`0x10024470`–`0x100244bc`): classes 1, 3 and 10 -- the
+    /// landscape, buildings and scenery, and no unit -- with no triangle passed and no face
+    /// class excluded, so a lake's sheet stops it as it stops the sight. `solid` says which
+    /// targets are of those classes. Whatever it meets blocks the line, but for a face flagged
+    /// [`LINE_PASSES_FACE`] met by a line under [`LINE_NEAR`] long.
+    ///
+    /// With nothing met, each unit in `allies` -- the units of the firing unit's owner, itself
+    /// left out (`0x10024802`–`0x1002497b`) -- blocks it when a sphere of [`LINE_RADIUS`] swept
+    /// along the line touches its agent sphere (`0x10025c60`).
+    pub fn fire_line_clear(
+        &self,
+        ground: &Ground,
+        p0: Vec3,
+        p1: Vec3,
+        solid: impl Fn(usize) -> bool,
+        allies: impl IntoIterator<Item = usize>,
+    ) -> bool {
+        if let Some((strike, struck, part)) =
+            self.nearest_among(ground, p0, p1, 0.0, SIGHT_SKIPS_FACE, true, solid)
+        {
+            let flags = struck
+                .and_then(|id| self.target(id))
+                .and_then(|t| t.parts.get(part))
+                .zip(strike.triangle)
+                .and_then(|(p, t)| p.mesh.face_flags.get(t).copied());
+            return flags.is_some_and(|f| f & LINE_PASSES_FACE != 0) && p0.distance(p1) < LINE_NEAR;
+        }
+        // `0x10025d79`: a line with no length to speak of sweeps nothing.
+        let sweeps = (p1 - p0).length_squared() >= 0.001;
+        !allies.into_iter().filter_map(|id| self.target(id)).any(|ally| {
+            let (centre, radius) = ally.agent_sphere;
+            let inside = p0.distance_squared(centre) < (LINE_RADIUS + radius).powi(2);
+            inside || (sweeps && swept_spheres((p0, p1), LINE_RADIUS, (centre, centre), radius).is_some())
+        })
     }
 
     /// The sight's aim point (`0x1002a610`): the first thing the ray from `origin` along
@@ -553,7 +712,13 @@ impl Combat {
             if let Some(seeker) = k.seeker
                 && let Some(target) = r.target.and_then(target_at).filter(|t| t.alive)
             {
-                steer(r, seeker, k.turn_rate, target.aim, dt);
+                let point = match r.part {
+                    Some(part) => target.seeker_point(part),
+                    None => Some(target.aim),
+                };
+                if let Some(point) = point {
+                    steer(r, seeker, k.turn_rate, point, dt);
+                }
             }
             if k.mode == MODE_FALLING {
                 // A lobbed round falls, and turns along its flight.
@@ -989,6 +1154,8 @@ mod tests {
             aim: at,
             shield: None,
             agent_sphere: (at + Vec3::Z, 1.5),
+            devices: Vec::new(),
+            gear: Vec::new(),
         }
     }
 
@@ -1448,6 +1615,141 @@ mod tests {
         let over = Vec3::new(10.0, 10.0, 8.0);
         assert!(c.clear_line(&g, eye, over));
         assert!(c.first_hit(&g, None, eye, over, 0.0).is_none());
+    }
+
+    /// The fight module's line is the world's query over the landscape, buildings and scenery,
+    /// the firing unit and its target left out, and then a sweep past the firer's own units
+    /// (docs/29, "The line every gun waits on").
+    #[test]
+    fn an_ai_units_line_is_blocked_by_ground_buildings_and_its_own_units_and_by_no_other_unit() {
+        let g = floor();
+        // The floor's dry half, a post standing across the line 18 m along it.
+        let c = Combat { targets: vec![post(Vec3::new(10.0, 30.0, 0.0), 500.0)], ..Default::default() };
+        let (a, b) = (Vec3::new(10.0, 12.0, 1.0), Vec3::new(10.0, 38.0, 1.0));
+        let (nothing, no_one) = (|_: usize| false, [0usize; 0]);
+        assert!(!c.fire_line_clear(&g, a, b, |_| true, no_one), "a building or a tree stops it");
+        assert!(c.fire_line_clear(&g, a, b, nothing, no_one), "a unit does not: class 4 is not asked");
+
+        // One of the firer's own units, by its agent sphere of 1.5 about (10, 30, 1) and the
+        // line's own half metre: on the line, 1.9 m beside it, and 2.1 m beside it.
+        assert!(!c.fire_line_clear(&g, a, b, nothing, [0]));
+        let beside = |x: f32| (Vec3::new(10.0 + x, 12.0, 1.0), Vec3::new(10.0 + x, 38.0, 1.0));
+        let (a1, b1) = beside(1.9);
+        assert!(!c.fire_line_clear(&g, a1, b1, nothing, [0]));
+        let (a2, b2) = beside(2.1);
+        assert!(c.fire_line_clear(&g, a2, b2, nothing, [0]));
+        // Past the line's end or behind its start it is not in the way; about the start it is.
+        assert!(c.fire_line_clear(&g, a, Vec3::new(10.0, 27.0, 1.0), nothing, [0]), "short of it");
+        assert!(c.fire_line_clear(&g, Vec3::new(10.0, 33.0, 1.0), b, nothing, [0]), "behind the start");
+        assert!(!c.fire_line_clear(&g, Vec3::new(10.0, 31.0, 1.0), b, nothing, [0]), "the start inside it");
+
+        // The landscape, and a lake's sheet as the sight meets it.
+        assert!(!c.fire_line_clear(&g, a, Vec3::new(10.0, 38.0, -1.0), nothing, no_one), "into the floor");
+        let (over, under) = (Vec3::new(30.0, 10.0, 8.0), Vec3::new(30.0, 12.0, 2.0));
+        assert!(!c.fire_line_clear(&g, over, under, nothing, no_one), "through the water's sheet");
+    }
+
+    /// A face flagged `0x20` does not block a line under 20 m long (`0x100247aa`–`0x100247eb`).
+    #[test]
+    fn a_line_under_twenty_metres_passes_a_face_flagged_0x20_and_a_longer_one_does_not() {
+        let g = floor();
+        let leaves = |flags: u16| {
+            let mut t = post(Vec3::new(10.0, 30.0, 0.0), 500.0);
+            let mut mesh = (*t.parts[0].mesh).clone();
+            mesh.face_flags = vec![flags; 2];
+            t.parts[0].mesh = Rc::new(mesh);
+            Combat { targets: vec![t], ..Default::default() }
+        };
+        let far = (Vec3::new(10.0, 12.0, 1.0), Vec3::new(10.0, 38.0, 1.0));
+        let near = (Vec3::new(10.0, 25.0, 1.0), Vec3::new(10.0, 35.0, 1.0));
+        let no_one = [0usize; 0];
+        let c = leaves(LINE_PASSES_FACE);
+        assert!(c.fire_line_clear(&g, near.0, near.1, |_| true, no_one), "10 m through a flagged face");
+        assert!(!c.fire_line_clear(&g, far.0, far.1, |_| true, no_one), "26 m through the same face");
+        let c = leaves(0x4);
+        assert!(
+            !c.fire_line_clear(&g, near.0, near.1, |_| true, no_one),
+            "another flag blocks, however near"
+        );
+    }
+
+    /// The part an AI unit aims at (`Behavior.dll:0x10025830`): the heaviest live device or gear
+    /// node, a damaged one outweighing a whole one of its class, the last listed among equals.
+    #[test]
+    fn the_part_aimed_at_is_the_heaviest_with_life_and_a_damaged_one_weighs_more() {
+        // A body (node 1 a wheel), a turret on it (node 1 its body, node 2 its deflector) and a
+        // gun on the turret.
+        let mut unit = turret_unit();
+        unit.gear = vec![(0, 1)];
+        unit.devices = vec![
+            Device { class: 5, node: (0, 0) },
+            Device { class: 1, node: (1, 1) },
+            Device { class: 21, node: (1, 2) },
+            Device { class: 2, node: (2, 1) },
+        ];
+        let lose = |unit: &mut Target, (p, n): (usize, usize), damage: f32| {
+            unit.parts[p].life.as_mut().unwrap().lose(n, damage);
+        };
+        assert_eq!(unit.aim_part(), Some((1, 2)), "the deflector, 30 against the turret's 20");
+        lose(&mut unit, (1, 2), 1.0);
+        assert_eq!(unit.aim_part(), Some((1, 1)), "a part with no life left is passed over: the turret");
+        // The gun at 60% weighs 15 × 1.4 = 21, over the whole turret's 20.
+        lose(&mut unit, (2, 1), 60.0);
+        assert_eq!(unit.aim_part(), Some((2, 1)));
+        // The turret at half weighs 30.
+        lose(&mut unit, (1, 1), 135.0);
+        assert_eq!(unit.aim_part(), Some((1, 1)));
+
+        // Among equals the last listed keeps the pick, and gear weighs 7.5 under an engine's 14.
+        let mut unit = turret_unit();
+        unit.devices = vec![Device { class: 2, node: (2, 0) }, Device { class: 2, node: (2, 1) }];
+        assert_eq!(unit.aim_part(), Some((2, 1)));
+        unit.devices.reverse();
+        assert_eq!(unit.aim_part(), Some((2, 0)));
+        unit.devices = vec![Device { class: 5, node: (0, 0) }];
+        unit.gear = vec![(0, 1)];
+        assert_eq!(unit.aim_part(), Some((0, 0)));
+        unit.devices.clear();
+        assert_eq!(unit.aim_part(), Some((0, 1)), "the wheel, with no device listed");
+        unit.gear.clear();
+        assert_eq!(unit.aim_part(), None, "nothing to pick: the callers take node 0");
+        assert_eq!(
+            [21, 1, 2, 5, 8, 19, 9, 15, 3].map(device_weight),
+            [30., 20., 15., 14., 14., 10., 7., 3., 1.]
+        );
+    }
+
+    /// A node's own sphere is its level-0 slot's through its matrix, and a seeker handed a part
+    /// steers at that sphere's centre, not at the object's node sphere.
+    #[test]
+    fn a_seeker_handed_a_part_steers_at_that_nodes_own_sphere() {
+        let g = floor();
+        let missile = RoundKind {
+            name: "bm_m_04".into(),
+            top_speed: 45.0,
+            range: 700.0,
+            radius: 0.4,
+            hit_points: 200.0,
+            seeker: Some(Seeker { cone: 0.7, reach: 500.0, lock_ms: 7000.0 }),
+            turn_rate: [0.5, 0.5, 0.5],
+            ..RoundKind::default()
+        };
+        // A post dead ahead whose node sphere's centre is put well to the left of it.
+        let mut ahead = post(Vec3::new(10.0, 110.0, 29.0), 5000.0);
+        assert_eq!(ahead.slot_sphere((0, 0)), Some((Vec3::new(10.0, 110.0, 30.0), 1.5)));
+        ahead.aim = Vec3::new(-40.0, 110.0, 30.0);
+        let mut c = Combat { kinds: vec![missile], targets: vec![ahead], ..Default::default() };
+        let from = Vec3::new(10.0, 10.0, 30.0);
+        c.fire(0, None, from, Vec3::Y, Vec3::ZERO, 1.0, Some(0));
+        c.fire(0, None, from, Vec3::Y, Vec3::ZERO, 1.0, Some(0));
+        c.rounds[1].part = Some((0, 0));
+        c.tick(1.0 / 60.0, &g);
+        assert!(c.rounds[0].forward.x < -1e-3, "with no part it turns toward the node sphere");
+        assert!(c.rounds[1].forward.x.abs() < 1e-5, "with the part it flies on at the node's own");
+        // Its part's life gone it has node 0 to fall back on, and with node 0's gone nothing.
+        assert_eq!(c.targets[0].seeker_point((0, 0)), Some(Vec3::new(10.0, 110.0, 30.0)));
+        c.targets[0].parts[0].life.as_mut().unwrap().lose(0, 5000.0);
+        assert_eq!(c.targets[0].seeker_point((0, 0)), None);
     }
 
     #[test]

@@ -1835,9 +1835,32 @@ pub const SCORE_ANYWHERE_HIGH: f32 = 1.1;
 /// The ramp a score rises over from 0: 5 m, and none for an animal (`+0x44`, `0x1001b5e0`).
 pub const SCORE_RAMP: f32 = 5.0;
 
+/// The share of its sphere's radius an AI unit's line of fire starts out from the centre
+/// (`Behavior.dll:0x10024512`, the 0.7 at `0x10059968`).
+pub const LINE_FROM: f32 = 0.7;
+
+/// The two ends of the line an AI unit must have clear before any of its guns fires
+/// (`Behavior.dll:0x10024464`–`0x1002468b`). `from` is the sphere of the node its first turret
+/// sits on, and `to` the sphere of the target's node the fight module aims at, each the
+/// node's own as interface `0x20` slot 3 answers it for one node (`0x10016100`, `0x10016050`).
+/// The line runs between the centres, started [`LINE_FROM`] of the first radius out and
+/// stopped the whole of the second short — unless those two lengths together reach the
+/// distance between the centres, when it runs centre to centre.
+pub fn fire_line(from: (Vec3, f32), to: (Vec3, f32)) -> (Vec3, Vec3) {
+    let (mut a, mut b) = (from.0, to.0);
+    let out = from.1 * LINE_FROM;
+    if out + to.1 < a.distance(b) {
+        a += (b - a).normalize_or_zero() * out;
+        b -= (b - a).normalize_or_zero() * to.1;
+    }
+    (a, b)
+}
+
 /// The fight module's distance score (`0x1001b9f0`): for a round whose frame flags carry bit
 /// `0x10`, 1.1, and bit 8, 1.0, wherever the target stands; otherwise 0 to 1 over the first
-/// `ramp` m, 1 out to (v + 1) ÷ 2, 0 at 2 (v + 1), times 1 − height ÷ v.
+/// `ramp` m, 1 out to (v + 1) ÷ 2, 0 at 2 (v + 1), times 1 − height ÷ v. `height` is how far
+/// the firing unit's origin stands **above** its target's (`0x10024337`, `0x10024381`): a
+/// unit firing down loses score and one firing up gains it.
 pub fn distance_score(distance: f32, height: f32, round_speed: f32, flags: i32, ramp: f32) -> f32 {
     if flags & SCORE_FLAG_ANYWHERE_HIGH != 0 {
         return SCORE_ANYWHERE_HIGH;
@@ -2669,6 +2692,35 @@ mod tests {
         assert_eq!(distance_score(900.0, 0.0, 80.0, 16, SCORE_RAMP), 1.1);
         assert_eq!(fire_wait_ms(-1, 0.0), 500.0);
         assert_eq!(fire_wait_ms(10, 1.0), 6000.0);
+        // The height is the firing unit's above its target (`0x10024337`): a unit 35 m over
+        // its target loses a tenth of a 350 m/s round's score, and one 35 m under gains it.
+        assert!((distance_score(100.0, 35.0, 350.0, 4, SCORE_RAMP) - 0.9).abs() < 1e-6);
+        assert!((distance_score(100.0, -35.0, 350.0, 4, SCORE_RAMP) - 1.1).abs() < 1e-6);
+    }
+
+    /// The line an AI unit asks for runs from 0.7 of its turret's sphere's radius out of the
+    /// centre to the whole radius short of the aimed part's centre (`0x10024512`–`0x1002468b`).
+    #[test]
+    fn the_fire_line_starts_out_of_the_turrets_sphere_and_stops_short_of_the_parts() {
+        let turret = (Vec3::new(0.0, 0.0, 2.0), 2.0);
+        let part = (Vec3::new(100.0, 0.0, 2.0), 3.0);
+        let (a, b) = fire_line(turret, part);
+        assert!((a - Vec3::new(1.4, 0.0, 2.0)).length() < 1e-5, "{a}");
+        assert!((b - Vec3::new(97.0, 0.0, 2.0)).length() < 1e-5, "{b}");
+        // It keeps its direction: up a slope both ends move along it.
+        let (a, b) = fire_line((Vec3::ZERO, 10.0), (Vec3::new(30.0, 0.0, 40.0), 5.0));
+        assert!(
+            (a - Vec3::new(4.2, 0.0, 5.6)).length() < 1e-4
+                && (b - Vec3::new(27.0, 0.0, 36.0)).length() < 1e-4
+        );
+        // Spheres that reach each other leave the line centre to centre: 0.7 × 10 + 5 against 12.
+        assert_eq!(
+            fire_line((Vec3::ZERO, 10.0), (Vec3::new(12.0, 0.0, 0.0), 5.0)).1,
+            Vec3::new(12.0, 0.0, 0.0)
+        );
+        assert_eq!(fire_line((Vec3::ZERO, 10.0), (Vec3::new(12.0, 0.0, 0.0), 5.0)).0, Vec3::ZERO);
+        // And a unit with no turret, or a node with no slot, is a point.
+        assert_eq!(fire_line((Vec3::ZERO, 0.0), (Vec3::X * 50.0, 0.0)), (Vec3::ZERO, Vec3::X * 50.0));
     }
 
     #[test]

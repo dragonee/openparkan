@@ -838,6 +838,18 @@ Feedback on the first chapter's *The Arrival* and *Outflanking Maneuver*.
   follower's within 2 × radius + 20 of its leader, and an attack an interrupt made switches to a
   nearer firer; a migrating animal's runs 10, 20, 25 or 35 s within its pasture's outer radius
   plus 20, 80 or 100, by where it and the firer stand, and fires on the firer within 200.
+- **An AI unit aims at a part, and its guns wait on one line** (docs/29, "The part the AI
+  aims at", "The line every gun waits on"). The fight module picks the heaviest live device of
+  its target by class — a deflector 30, a turret 20, a gun 15 — each weighing up to twice as
+  much as it is damaged; its turret traces that node's own sphere, its gates measure to it and
+  its rounds' seekers steer at it. Its guns fire only while the unit has a clear line from its
+  first turret's sphere to that part's, stopped the part's radius short: over the landscape,
+  buildings and scenery, past no unit but its own side's, the target and itself left out. A
+  gun whose line is blocked spends its wait and looks again a wait later. On C03 M02 the
+  raider aims at the Small Bunker's deflector on the roof, where the line clears 423 m off,
+  and lands its winged SSM from there; a line to the bunker's box had kept it to 106 m. The
+  score's distance and height are between the two origins, the height the firing unit's
+  above its target's, and its radius the target's agent sphere's reach from its origin.
 - **A lobbed round flies as read** (docs/29, "How the AI fires"). The distance score skips the
   distance for a round whose frame flags carry bit `0x10` (1.1) or 8 (1.0), and has no ramp on
   an animal; *Outflanking Maneuver*'s Small Bunker, whose `bf_f_01` carries 8, had scored
@@ -895,8 +907,10 @@ More feedback on the first chapter: armour, docks, turrets, batteries and repair
   hard they steer"). The target list is the driven unit's, and its target goes to that unit's
   guided guns, and their gate measures to it; before, the hero's own guns took it, so a bot the
   player drove, *Ballen's Crossing*'s HQ among them, reported every target out of range. A
-  gun's gate and a seeker find a target at its node sphere's centre, not its placement, so the
-  HQ's winged missiles, 380 m off a tower on the hill, clear the crest and bring it down.
+  gun's gate and a seeker find a target at the own sphere of the node they are handed with it
+  (docs/29, "The part the AI aims at") — node 0's for the player's target, the part its fight
+  module picked for an AI unit's — and the HQ's winged missiles, 380 m off a tower on the hill,
+  clear the crest and bring it down.
 - **A deleted unit leaves the scripts' view** (docs/15, "65534 is a destroyed object's
   owner"). Function 52 answers 65534 for a dead unit until it is deleted, its controller's
   `+92` ms later, and `ERROR` after, as no object answers its id; a building's shell answers
