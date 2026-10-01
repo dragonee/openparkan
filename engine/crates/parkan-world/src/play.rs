@@ -1817,6 +1817,9 @@ impl Play {
             self.hero.time_ms += dt_ms;
             Vec::new()
         } else {
+            // While the player drives a unit or a building's guns, the mouse is theirs and the
+            // hero stands with its keys let go (`enter_manual`, the takeover).
+            let mouse = if self.driving.is_some() { [0.0; 2] } else { mouse };
             let from = self.hero.collision_centre();
             let shots = self.hero.tick(dt_ms, mouse, &self.ground);
             let lives = std::mem::take(&mut self.hero.lives);
@@ -2245,9 +2248,12 @@ impl Play {
         }
     }
 
-    /// Whether the hero is out of the world: aboard a bot, or driving one from afar.
+    /// Whether the hero is out of the world: aboard a bot. Only boarding detaches its object
+    /// (mode 0 → 1, `0x100637ed`, docs/39, "Boarding"). A unit driven from a command view (mode
+    /// 2) or a building's guns (mode 6, docs/27, "What the modes show") leave it standing in
+    /// the room where it was, where it can still be struck.
     pub fn hero_away(&self) -> bool {
-        self.driving.is_some() || self.aboard().is_some()
+        self.aboard().is_some()
     }
 
     /// Where the hero's own behaviour reports it to the routes (docs/39, "What becomes of the

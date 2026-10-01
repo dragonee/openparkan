@@ -458,6 +458,37 @@ fn c03_m02s_raider_takes_up_the_attack_on_the_bunker_and_closes_on_it() {
     assert!((28..=42).contains(&clock), "the enemy clan's clock reads {clock} after 30 s");
 }
 
+/// C03 Mission 02 as the let's play's Part 6 has it at 13:54: the player at the Small Bunker's
+/// guns is lost as the raider's winged SSM lands on the bunker, and the mission fails. Taking a
+/// building's guns (mode 6) leaves the hero standing in the pod room (docs/27, "What the modes
+/// show"); only boarding a bot takes it out of the world (docs/39, "Boarding"). So the missile's
+/// 45 m blast on the bunker's roof reaches the hero under it.
+#[test]
+#[ignore = "needs the game install"]
+fn c03_m02s_hero_at_the_bunkers_guns_is_lost_to_a_winged_ssm_on_the_roof() {
+    use parkan_world::play::Mode;
+
+    let mut play = campaign_play(gamedir::C03_MISSION_02);
+    let bunker = play.units.iter().position(|u| u.logical_id == 0x8000_0001_u32 as i32).expect("the bunker");
+    let raider = play.units.iter().position(|u| u.logical_id == 15).expect("the medium raider");
+    assert!(play.stand_on_pod(bunker));
+    play_for(&mut play, 1.0, |_| {});
+    assert!(play.enter_manual(bunker), "the bunker's guns are open");
+    assert_eq!(play.mode(), Mode::Manual(bunker));
+    assert!(!play.hero_away(), "the hero stays in the pod room");
+    assert!(play.battle.combat.hero.as_ref().is_some_and(|h| h.alive), "and can be struck there");
+
+    // The raider's own round, `bm_m_04`, dropped on the roof straight above the pod.
+    let kind = play.battle.combat.kinds.iter().position(|k| k.name.eq_ignore_ascii_case("bm_m_04"));
+    let kind = kind.expect("the winged SSM is loaded with the raider's guns");
+    let at = play.hero.walker.body.position;
+    let muzzle = glam::Vec3::new(at.x, at.y, at.z + 45.0);
+    play.battle.combat.fire(kind, Some(raider), muzzle, -glam::Vec3::Z, glam::Vec3::ZERO, 1.0, None);
+    play_for(&mut play, 3.0, |_| {});
+    assert!(play.hero.dead(), "the blast reached the hero in the pod room");
+    assert_eq!(play.progression.as_ref().unwrap().progress.outcome, Some(false), "and the mission fails");
+}
+
 /// Mission 01's three clans hold the words its file gives them, and the clan brains' takt
 /// keeps them there: each attitude drifts 0.0033 a takt toward its band's rest point and stops
 /// (docs/25, "Clan relations"), so `Plr`'s hostility toward `Enm` climbs from 0.16665 to 0.2833

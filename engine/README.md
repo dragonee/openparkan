@@ -1142,7 +1142,11 @@ C02 M03 and M04.
   zooms in view state 6 as in 1, and the building records' update steps a building's zoom as
   the unit records' does a unit's (docs/30, "The zoom"). The building moves nothing
   and its turret's takt runs with its own; its fire control steps aside while the player holds
-  it. Esc rolls back to the hero standing on the pod, the guns back to the AI. A tower whose
+  it. The hero stays in the world, standing on the pod, as it does while the player drives a
+  unit from a command view: only boarding a bot takes it out (docs/39, "Boarding"). So a blast
+  on the building reaches it there, as the winged SSM that lands on C03 M02's Small Bunker in
+  Part 6 of the let's play does. Esc rolls back to the hero standing on the pod, the guns back
+  to the AI. A tower whose
   turret is shot off is captured and opens nothing, until its own repair gives the turret its
   first points back, which takes it a second. The commander panel's *Manual* button on a
   bunker's or a tower's row opens the same control from command mode or on foot, grey and inert

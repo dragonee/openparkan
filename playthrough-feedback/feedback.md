@@ -202,10 +202,11 @@ replaces, route 0 completing objective 3, and the win once all three primaries a
     - In the recording the MWW-4 Warrior, raid 1's unit 15, stands 345 to 292 m off the Small Bunker (13:49.5–13:53.5), and its missile's trail runs from it to the bunker, which it strikes at 13:54.2
     - In the engine the same unit fires from 159 m and its missile meets the ground 13 m ahead; with the player at the bunker's guns it drives in to about 20 m first and strikes the bunker. Either way its own 45 m blast kills it in that tick (585 s and 584 s, on the medium level)
     - docs/29 reads a winged SSM (`bm_m_04`, 45 m/s, turning 0.5 rad/s) flying straight at its target's node-sphere centre; what carries the recording's over 300 m of ground is not read (queued)
-  - [ ] The hero at a building's guns cannot be hurt
+  - [x] The hero at a building's guns cannot be hurt
     - In the recording the player is at the Small Bunker's guns (its own panel reads "Small Bunker") when that missile strikes the bunker: one white flash, and *MISSION FAILED* over the fallen hero's camera (13:54.2–13:54.6). The player loads the quick save (14:00)
     - docs/27 reads mode 6 as clearing only the driven unit, with the hero left standing in the pod room. The engine sets `driving` for mode 6, so `hero_away()` holds and the hero's target leaves the world: the missile's blast, 17 m from it in the engine's run, leaves it whole
     - Whether a blast reaches a hero in the room under a building is C02 M04's queued question; this is its second sighting
+    - Fixed 2026-10-01: only boarding a bot takes the hero out of the world; at a building's guns or driving a unit from a command view it stands in its room, struck as anything there is, and the raider's missile on the bunker's roof kills it
   - [ ] Objective 1 does not reopen when a generator is lost
     - In the recording *"Objective is completed"* shows at 53:57, as the third generator becomes the player's. Enemy 2 takes its generator back by 59:05, and when the player's Comm. Center retakes it, *"Objective is completed"* shows again (59:15–59:17). Part 6.5 does the same: 24:34–24:35, then 32:20–32:21
     - `c3m2p` calls `OBJECTIVE_PROGRESS 0` when `fn34(BUILDING_GENERATOR)` falls from 3, and completes the objective again when it comes back; docs/34 reads `OBJECTIVE_COMPLETE` as acting only on an open objective, so the call reopened it. Nothing shows in either message box as it does (54:30–59:15)

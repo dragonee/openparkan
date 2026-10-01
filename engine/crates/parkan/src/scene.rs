@@ -918,9 +918,10 @@ pub fn place_own_view(
     use glam::Mat4;
     // Aboard a bot the hero is out of the world, and the bot's cockpit is drawn in place of
     // its hull (docs/39, "Boarding"). In an HQ's command view the hero stays aboard, and the
-    // HQ, driven by its AI, is drawn whole.
+    // HQ, driven by its AI, is drawn whole. Driving from afar or at a building's guns, the hero
+    // stands in its room and the view is the driven one's.
     let driven = play.driving.as_ref().map(|d| d.target);
-    let away = play.hero_away();
+    let away = play.hero_away() || driven.is_some();
     let first_person = !outside && !away;
     let outside = outside && !away;
     let hero = &play.hero;
