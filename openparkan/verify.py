@@ -14340,7 +14340,7 @@ def check_ai_aim(check, game: Path) -> None:
           f"with part 0 (iron3d.dll:0x10091b0e)")
 
     line = (behavior(0x10024470, 5) == bytes.fromhex("680a040000")
-            and behavior(0x100244AA, 11) == bytes.fromhex("c78424740100000800 0000".replace(" ", ""))
+            and behavior(0x100244AA, 11) == bytes.fromhex("c7842474010000" "08000000")
             and behavior(0x10024954, 11) == bytes.fromhex("c78424f80000000000003f"))
     check("Behavior.dll: the line a unit's guns wait on asks classes 0x40a and no unit",
           line and round(f32(behavior, 0x10059968), 3) == weapons.AI_LINE_FROM
