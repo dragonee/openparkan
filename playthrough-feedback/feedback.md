@@ -147,6 +147,20 @@ warbots' captures at pods; the names on the target panel and the pages (Small Fa
 Mine, Medium Res. Center, Tiny Tower, the SWC, MTW, MWW and LSW units); Z's frameless zoom with
 its narrowed radar cone; and the win on the Research Center's capture already match the recording.
 
+Mission 02 checked against "Let's Play - Parkan: Iron Strategy, Part 6" (-yNnsqudMzw), played on
+the easy level, and its bonus "Part 6.5" (9SBZOCWv_vE), which plays it again from the campaign
+menu. The briefing's 4.5 s black lead-in and 4 s fade-in, its camera, both jump cuts through black
+and its subtitles; the objectives screen; the first cockpit's weapons, counters and radar;
+`c3m2e2`'s two raids on the easy level's clock (the first warning at 12:44, the clock past 622 s,
+and the second at 22:32, past 1120 s, at 7.3–7.5 s a takt) and the raider's *"MWW-4 Warrior /
+Dangerous!"*; the Small Bunker's guns taken from command mode; Enemy 2 taking back the generator
+the player captured within about a minute, the player's generator count falling as it does, and
+the bonus objective completing once the enemies' robots are destroyed (33:32 in Part 6.5);
+*"Vacant vehicle detected..."* by the LSW-1 Warrior, Enter capturing and boarding it, objective 2
+with the information assistant's *"Excellent, captain!"* over the *"Objective is completed"* it
+replaces, route 0 completing objective 3, and the win once all three primaries are in; and the
+*MISSION FAILED* panel's three lines over the fallen hero's camera already match the recording.
+
 ## Mission 01 - The Silver Eye
 
 - Mechanics
@@ -180,3 +194,29 @@ its narrowed radar cone; and the win on the Research Center's capture already ma
   - [ ] The orb the two standing figures hold is a small orange ball in the recording and a large rayed orange glow in the engine (briefing time 10–19 s, 0:57–1:06), as Campaign 02's generator core
   - [ ] The lava glows bright red in the recording (briefing time 38 s, 1:25; 14:15) and is a dim pink-red in the engine
   - [ ] As on Campaign 02, the engine's haze is far heavier and its ground paler: command mode's first view over the Small Bunker's roof (4:46) is dark, crisp ground in the recording and a pink wash in the engine, and so are the Research Center (briefing time 43–46.5 s) and the far hills of the first cockpit (1:42)
+
+## Mission 02 - The Convoy
+
+- Mechanics
+  - [ ] The raid's winged SSM never reaches the bunker from range
+    - In the recording the MWW-4 Warrior, raid 1's unit 15, stands 345 to 292 m off the Small Bunker (13:49.5–13:53.5), and its missile's trail runs from it to the bunker, which it strikes at 13:54.2
+    - In the engine the same unit fires from 159 m and its missile meets the ground 13 m ahead; with the player at the bunker's guns it drives in to about 20 m first and strikes the bunker. Either way its own 45 m blast kills it in that tick (585 s and 584 s, on the medium level)
+    - docs/29 reads a winged SSM (`bm_m_04`, 45 m/s, turning 0.5 rad/s) flying straight at its target's node-sphere centre; what carries the recording's over 300 m of ground is not read (queued)
+  - [ ] The hero at a building's guns cannot be hurt
+    - In the recording the player is at the Small Bunker's guns (its own panel reads "Small Bunker") when that missile strikes the bunker: one white flash, and *MISSION FAILED* over the fallen hero's camera (13:54.2–13:54.6). The player loads the quick save (14:00)
+    - docs/27 reads mode 6 as clearing only the driven unit, with the hero left standing in the pod room. The engine sets `driving` for mode 6, so `hero_away()` holds and the hero's target leaves the world: the missile's blast, 17 m from it in the engine's run, leaves it whole
+    - Whether a blast reaches a hero in the room under a building is C02 M04's queued question; this is its second sighting
+  - [ ] Objective 1 does not reopen when a generator is lost
+    - In the recording *"Objective is completed"* shows at 53:57, as the third generator becomes the player's. Enemy 2 takes its generator back by 59:05, and when the player's Comm. Center retakes it, *"Objective is completed"* shows again (59:15–59:17). Part 6.5 does the same: 24:34–24:35, then 32:20–32:21
+    - `c3m2p` calls `OBJECTIVE_PROGRESS 0` when `fn34(BUILDING_GENERATOR)` falls from 3, and completes the objective again when it comes back; docs/34 reads `OBJECTIVE_COMPLETE` as acting only on an open objective, so the call reopened it. Nothing shows in either message box as it does (54:30–59:15)
+    - The engine leaves `OBJECTIVE_PROGRESS` unanswered (`progression.rs`'s STAND-IN): the objective stays complete through the loss, says nothing when retaken, and the mission can be won with a generator in Enemy 2's hands (queued: what the call does)
+  - [ ] As on Mission 01, F7's quick save does nothing: the recording saves at 8:38, 12:57, 13:18 and on, and after the failure the panel's L loads the save (13:55–14:00). The engine has neither (queued)
+- Visuals
+  - [ ] Every building wears the arrow emblem
+    - The recording's emblem follows the owner. Enemy 1's Medium Mine wears cell 6 of the insignia sheet `PG27`, a filled triangle over a bar (briefing time 11 s; 37.4 s in Part 6.5, 0:55 in Part 6). The player's Small Bunker wears cell 0, the arrow (2:15 in Part 6.5)
+    - `B_LBL_01`'s eight tracks name cells 0, 6, 5, 4, 3, 2, 1, 7, so Enemy 1, clan 1, wears track 1 and the player, clan 0, track 0. The engine draws track 0 on every building (queued: who sets the track). Campaign 02's Outpost emblem may be the same thing
+  - [ ] The Medium Mine's plume and two purple lights are missing in the engine (briefing time 8.5–11 s, 61–62 s)
+    - On the Medium Mine, a dense dark plume rises from its tower's top and the platform's underside is lit purple. The engine draws thin grey streaks there and no purple light, and puts a large green rayed glow over the drill at 11 s
+    - Enemy 2's Large Factory's mast is lit purple, and the engine lights it with nothing
+  - [ ] The generator's core, the light between the horned arch's two horns, is a small yellow light in the recording and a large rayed orange glow in the engine (briefing time 8.5, 11, 41.5, 46.5, 54 s). It is Mission 01's "orb" and Campaign 02's generator core
+  - [ ] As on Mission 01: no falling red dust, the hard-edged cloud layer, and the heavier haze and paler ground, in every briefing pair
