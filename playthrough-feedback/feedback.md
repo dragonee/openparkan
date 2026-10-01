@@ -81,6 +81,7 @@ already match the recording.
 - Visuals
   - [ ] Outpost (shang03) facade is orange with an arrow emblem, should be bright yellow with a diamond emblem (briefing, 1:22)
   - [ ] Generator (gener01) has a large yellow-green glow at its core, should be a small green light (briefing, 1:27)
+    - Likely the type-4 glow fixed 2026-10-01 on C03 M02 (the same `gener01` and `f_gener_ball`); not yet set against this recording again
   - [ ] Birds are rust-red, should be dark green-grey with glowing spots (4:26)
   - [ ] Clouds have bright yellow streaks and the ground is washed out compared to the recording (both briefings)
 
@@ -190,7 +191,8 @@ replaces, route 0 completing objective 3, and the win once all three primaries a
   - [ ] The crater's flame is about twice as large in the recording, and its brightness varies a third as much as the engine's (4:19–4:24; queued with the stream's pace)
   - [ ] No weather: the recording's red dust falls the whole mission (the sky's snow spell 00:00–23:59 with `DUST_ADD` in its slot, e.g. 0:55–1:35 and every cockpit frame after), and lightning strikes at 1:55; the engine draws neither (queued: how the weather is drawn)
   - [ ] The engine draws a grey-brown cloud layer with hard, stepped edges over the upper sky, in every briefing shot from briefing time 15 s and in play; the recording's sky is a smooth red, magenta later, with faint wisps at most (0:57–1:25, 2:40, 12:20)
-  - [ ] The orb the two standing figures hold is a small orange ball in the recording and a large rayed orange glow in the engine (briefing time 10–19 s, 0:57–1:06), as Campaign 02's generator core
+  - [x] The orb the two standing figures hold is a small orange ball in the recording and a large rayed orange glow in the engine (briefing time 10–19 s, 0:57–1:06), as Campaign 02's generator core
+    - Fixed 2026-10-01 with C03 M02's generator ball: the glow is a type-4 sprite, which sizes itself by the eye's distance in its frame. At briefing time 14 s the engine shows a small orange ball between the figures, as the recording does at 1:00
   - [ ] The lava glows bright red in the recording (briefing time 38 s, 1:25; 14:15) and is a dim pink-red in the engine
   - [ ] As on Campaign 02, the engine's haze is far heavier and its ground paler: command mode's first view over the Small Bunker's roof (4:46) is dark, crisp ground in the recording and a pink wash in the engine, and so are the Research Center (briefing time 43–46.5 s) and the far hills of the first cockpit (1:42)
 
