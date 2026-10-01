@@ -43,6 +43,13 @@ remainder a closed line names stays here as a line of its own.
   to be. What slot 5 computes is still unread: the object's vtable is installed outside `Terrain.dll` and
   its class was not found ([10-sky](docs/10-sky.md)).
 - [ ] Who sets an object's material track (`ILifeSystem` slot 16), and who calls IAnimation slot 27.
+  *Narrowed 2026-10-01* from checking C03 M02 against a recording ("Let's Play - Parkan: Iron
+  Strategy, Part 6.5", 9SBZOCWv_vE, 37.4 s and 2:15). *Seen*: the insignia follows the building's
+  owner. Enemy 1's Medium Mine wears `B_LBL_01`'s track 1 (cell 6 of `PG27`), and the player's
+  Small Bunker wears track 0 (cell 0, the arrow). So something writes the control system's
+  `+0x554` for each clan. Not read: what writes it, whether it takes the clan's index or its sign
+  (the clan record's `+0x14`, which a single-player game makes the same), and whether a capture
+  changes it. The engine draws track 0 on every object ([07-objects](docs/07-objects.md)).
 - [ ] Whether any caller besides the round's hit test and the collision pass hands a face query a
   triangle mask carrying 2 or 16 — the round builds its filter inline, so enumerating the filter
   constructor's call sites is not a complete enumeration. (~~What reads object face flags 2 and 16~~ —
@@ -227,7 +234,23 @@ remainder a closed line names stays here as a line of its own.
   the tower died then and its death killed who stood inside, or another gun reached the room.
   Nothing read kills a unit inside a building — a building whose node 0 dies becomes a shell with
   its model standing ([26-damage](docs/26-damage.md)) — and the engine leaves a hero standing
-  there unharmed.
+  there unharmed. *Seen a second time* 2026-10-01 on C03 M02 ("Let's Play - Parkan: Iron
+  Strategy, Part 6", -yNnsqudMzw, 13:54.2). The player is at the Small Bunker's guns, the hero in
+  its pod room, when the raider's winged SSM lands on the bunker (60,000 a round, a 45 m blast;
+  in the engine's run it burst 17 m from the pod). One white flash, and the mission fails over
+  the fallen hero's camera. So a blast at least that large reaches the room under a building.
+  Still not read: the blast's own test against a hero indoors.
+- [ ] **What carries a winged SSM over the ground to a building.** Raised 2026-10-01 from checking
+  C03 M02 against a recording ("Let's Play - Parkan: Iron Strategy, Part 6", -yNnsqudMzw,
+  13:49.5–13:54.2). The raider is `32_m_w2`, with two `e_gun_ml_18`: `bm_m_04`, 60,000 a round, a
+  45 m blast, 45 m/s, turning 0.5 rad/s. It stands 345 to 292 m off the player's Small Bunker, and
+  its missile lands on the bunker. *Read*: the round leaves along its gun's facing at its top
+  speed and steers at its target's node-sphere centre, so a crest takes it
+  ([29-weapons](docs/29-weapons.md#guided-rounds-differ-in-how-hard-they-steer--read-and-measured)),
+  and the AI fires one only at a building. In the engine the same unit fires from 159 m, and the
+  missile meets the ground 13 m out; its blast kills the launcher. Not read: which way the gun
+  faces as a guided round leaves it (the turret's pitch, or a loft); where a bunker's node-sphere
+  centre stands against its ground; and whether a blast spares the round's owner.
 
 ## AI, scripts, packages and economy
 
@@ -266,6 +289,17 @@ remainder a closed line names stays here as a line of its own.
 [34-progression](docs/34-progression.md#not-established)
 
 - [ ] What the behaviour does with the message 6 it sends itself.
+- [ ] **What `OBJECTIVE_PROGRESS` does.** Raised 2026-10-01 from checking C03 M02 against a
+  recording ("Let's Play - Parkan: Iron Strategy, Part 6", -yNnsqudMzw, 53:57–59:17). `c3m2p` calls
+  `OBJECTIVE_PROGRESS 0` when the player's generators fall from three, and `OBJECTIVE_COMPLETE 0`
+  when they come back. In the recording *"Objective is completed"* shows at 53:57. Enemy 2 retakes
+  its generator, and the message shows again as the player takes it back (59:17). Nothing shows in
+  between. Its bonus "Part 6.5" (9SBZOCWv_vE) does the same at 24:35 and 32:21. docs/21 reads
+  callback kinds 3 to 5 as setting an objective's state, and docs/34 reads `OBJECTIVE_COMPLETE` as
+  acting only on an open objective. So the call reopened the objective without a word (*seen*). Not read: the handler itself, and whether it voices anything or only
+  sets state 0. The engine answers nothing (`progression.rs`'s STAND-IN, docs/21's
+  [messages.cfg](docs/21-briefing.md#messagescfg--the-in-mission-dialogue)), so the objective
+  stays complete.
 
 ## Files and formats
 

@@ -174,6 +174,23 @@ resolved to its pool constant or the literal its handler last wrote to it:
   and the `CLASS_BUILDING` one beside it never complete, and the four campaign
   missions' bonus objectives do not either. Whether the shipped game really
   behaves that way has not been watched; the reading is of the code alone.
+  - **Seen against it**, on C03 M02, in "Let's Play - Parkan: Iron Strategy,
+    Part 6" (-yNnsqudMzw) and its bonus "Part 6.5" (9SBZOCWv_vE).
+    - **For a captured building.** `c3m2p` completes its first objective on
+      `fn34(BUILDING_GENERATOR) == 3` and calls `OBJECTIVE_PROGRESS` when the
+      count is anything else. The objective completes at 53:57 in Part 6, once
+      the third generator is the player's. Enemy 2 takes its generator back,
+      and *"Objective is completed"* shows again a second or two after the
+      player retakes it (59:17). Part 6.5 does the same: complete at 24:35,
+      and again at 32:21. So the player's count fell when the building left it.
+    - **For a destroyed unit.** In Part 6.5 a lone *"Objective is completed"*
+      shows at 33:32, after objective 1 at 32:21 and before the warbot is
+      taken at 36:10. The one objective it can be is the bonus, which
+      `c3m2p` completes on `fn31(1, CLASS_ROBOT) == 0` and `fn31(2,
+      CLASS_ROBOT) == 0`. So both enemies' robot counts fell to 0 as their
+      robots were destroyed.
+    - Both counts fall as the engine's do. What in the game takes an object
+      off is not read.
 - **What Mission 01 needs** (*derived* from the objectives' text): destroyed
   and captured robots leave their old clan's count, and a captured one joins
   the player's. That is what the engine does, against the reading above, so
