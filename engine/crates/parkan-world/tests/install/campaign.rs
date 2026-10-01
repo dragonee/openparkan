@@ -453,6 +453,69 @@ fn c03_m02s_raids_come_at_622_and_1120_on_the_easy_level() {
     assert_eq!(play.level, Some(0));
 }
 
+/// C03 Mission 02's bonus objective, the enemy's mobile forces destroyed: `c3m2p`'s `Mission`
+/// completes it once `fn31(1, CLASS_ROBOT)` and `fn31(2, CLASS_ROBOT)` are both 0, and reopens
+/// it with `OBJECTIVE_PROGRESS` when clan 1 has a robot again -- its node 60 asks Enemy 1's
+/// count alone, so a unit Enemy 2 makes leaves it complete. The let's play's Part 6.5 shows
+/// *"Objective is completed"* for it at 33:32. Played through the play itself: the six placed
+/// warbots lost, the objective completes and says so; Enemy 2's factory makes units and it
+/// stays; Enemy 1's makes one and it is in progress again, without a word.
+#[test]
+#[ignore = "needs the game install"]
+fn c03_m02s_bonus_objective_completes_with_the_last_enemy_robot_and_reopens_at_enemy_1s_next() {
+    use parkan_world::progress::Say;
+
+    const ROBOTS: i64 = 0x0100_0000;
+    let mut play = campaign_play_at(gamedir::C03_MISSION_02, Some(0));
+    for _ in 0..(5 * 60) {
+        play.tick(1000.0 / 60.0, [0.0; 2]);
+    }
+    assert_eq!(play.progression.as_ref().unwrap().progress.objectives[3].state, 0);
+    let robots: Vec<usize> = (0..play.units.len())
+        .filter(|&t| matches!(play.units[t].clan, Some(1 | 2)) && play.robots.iter().any(|(r, _)| *r == t))
+        .collect();
+    assert_eq!(robots.len(), 6, "two of Enemy 1's and four of Enemy 2's are placed");
+    for &t in &robots {
+        let events = play.battle.combat.life_kill(t);
+        play.pending_events.extend(events);
+    }
+    play.says.clear();
+    let made = play.units.len();
+    let (mut completed, mut reopened, mut held) = (None, None, false);
+    for tick in 0..(120 * 60) {
+        play.tick(1000.0 / 60.0, [0.0; 2]);
+        let p = play.progression.as_ref().unwrap();
+        let state = p.progress.objectives[3].state;
+        let (first, second) = (p.progress.robots(1, ROBOTS), p.progress.robots(2, ROBOTS));
+        if completed.is_none() && state == 1 {
+            completed = Some(tick);
+            assert_eq!(play.units.len(), made, "before either factory has made another");
+            assert!(
+                play.says.iter().any(|s| matches!(s, Say::Text(_, t) if t == "Objective is completed")),
+                "and the message box says so"
+            );
+            play.says.clear();
+        }
+        // Enemy 2's robots alone do not reopen it.
+        held |= completed.is_some() && state == 1 && first == 0 && second > 0;
+        if completed.is_some() && state == 0 {
+            assert!(first > 0, "it reopens on Enemy 1's count");
+            reopened = Some(tick);
+            break;
+        }
+    }
+    let completed = completed.expect("the bonus objective completed");
+    assert!(completed < 120, "on the next `Mission` handler, within two seconds: tick {completed}");
+    assert!(held, "it stood complete while Enemy 2 alone had made a unit");
+    reopened.expect("and it is in progress again once Enemy 1's factory has made one");
+    assert!(
+        !play.says.iter().any(|s| matches!(s, Say::Text(_, t) if t.starts_with("Objective"))),
+        "`OBJECTIVE_PROGRESS` says nothing"
+    );
+    let p = play.progression.as_ref().unwrap();
+    assert!(p.progress.objectives[..3].iter().all(|o| o.state == 0), "the primaries are untouched");
+}
+
 /// And the raid order reaches the warbot: given the attack its clan's script gives at the first
 /// timer, unit 15 takes it up and drives at the player's bunker across the map (docs/31, "The
 /// attack"), rather than standing where it was placed.
