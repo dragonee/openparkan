@@ -84,15 +84,41 @@ class Work:
             saved.write_text(crop + "\n")
         self.crop = crop or (saved.read_text().strip() if saved.exists() else None)
         self.video = video
+        self._colour: tuple[str, str] | None = None
+
+    def colour(self) -> tuple[str, str]:
+        """The video's own matrix and range, for the one conversion to RGB."""
+        if self._colour is None:
+            out = subprocess.run(
+                ["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries",
+                 "stream=color_space,color_range,height", "-of", "json", str(self.video)],
+                check=True, capture_output=True, text=True,
+            ).stdout
+            stream = (json.loads(out).get("streams") or [{}])[0]
+            matrix = stream.get("color_space")
+            if matrix not in ("bt709", "bt601", "smpte170m", "bt470bg"):
+                # An untagged picture is taken by its size, as players take it.
+                matrix = "bt709" if int(stream.get("height") or 0) >= 720 else "bt601"
+            self._colour = (matrix, "pc" if stream.get("color_range") == "pc" else "tv")
+        return self._colour
 
     def filter(self, width: int | None, *before: str) -> str:
-        """The filter chain: `before`, the crop, then a scale to `width`."""
+        """The filter chain: `before`, the crop, a scale to `width`, and the picture in RGB.
+
+        The conversion is by the video's own matrix. Left to the JPEG a frame is written as
+        it is and read back as BT.601, and a BT.709 recording's colours shift: its greens
+        come out a tenth brighter -- (107, 172, 25) reads (111, 189, 28) -- which is enough
+        to misjudge a sky or a fog against the engine's.
+        """
         chain = list(before)
         if self.crop:
             chain.append(f"crop={self.crop}")
-        if width:
-            chain.append(f"scale={width}:-2")
-        return ",".join(chain) or "null"
+        matrix, span = self.colour()
+        size = f"{width}:-2" if width else "iw:ih"
+        chain.append(f"scale={size}:in_color_matrix={matrix}:in_range={span}:out_range=pc")
+        # Tagged BT.601 from here, which is what a JPEG is read back as.
+        chain += ["format=rgb24", "setparams=colorspace=bt470bg"]
+        return ",".join(chain)
 
     def path(self, *parts: str) -> Path:
         p = self.dir.joinpath(*parts)
