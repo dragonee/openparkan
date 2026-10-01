@@ -172,8 +172,10 @@ the speed figure, 50 walking, whose 2 at 1:52.5 and 2:02 is the hero starting an
 one Enter taking and boarding the vacant LWW-2 (3:37 in Part 6.5); the Small Bunker's dock
 bringing a hurt hero back to whole in about six seconds (28:24–28:30); the satellite map
 showing an enemy building only while one of the player's units has it in range (no icon at
-1:52 or 48:05, Enemy 1's factory at 8:00 in Part 6.5 beside the LWW-2); and the bonus
-objective completing with the last enemy warbot. Campaign 02's generator core, set against
+1:52 or 48:05, Enemy 1's factory at 8:00 in Part 6.5 beside the LWW-2); the bonus
+objective completing with the last enemy warbot; and Enemy 2 taking its Large Factory back, an
+SWW of its own at the pod 17 s after the player's taker has left it (Part 6.5 has it retaken
+six times, 23:45–31:45; while the taker stands on the pod the pod serves no one else). Campaign 02's generator core, set against
 Parts 3 and 4 again, is the small light of the recording.
 
 ## Mission 01 - The Silver Eye
