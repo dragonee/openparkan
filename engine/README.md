@@ -29,7 +29,7 @@ has been checked.
 | | M03 *The Lost Key* | 30% | Playable |
 | | M04 *The Last Bastion* | 30% | Playable |
 | **C03** *The Flame of Logy* | M01 *The Silver Eye* | 30% | Playable |
-| | M02 *The Convoy* | — | Untested |
+| | M02 *The Convoy* | 30% | Playable |
 | | M03 *Interception* | — | Untested |
 | | M04 *Foggy Island* | — | Untested |
 | **C04** *The Labyrinths of Timango* | M01 *Brute Force* | — | Untested |
