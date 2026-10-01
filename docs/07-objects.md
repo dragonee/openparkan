@@ -1276,10 +1276,13 @@ the caller picks one:
 - the **43** two-track materials are the ground, and track 1 is the `M` twin
   the landscape lays over the base as a second texture stage — see
   [03-terrain.md](03-terrain.md#who-asks-for-track-1--read-and-measured);
-- the **two** eight-track ones, `B_LBL_01` and `R_LBL_01`, name cells 0 to 7
-  of one insignia sheet, blue and red. `R_LBL_01` is in the wear of 23
-  turrets, 12 chassis and 7 static models, `B_LBL_01` in 19 buildings'
-  (*measured*).
+- the **two** eight-track ones, `B_LBL_01` and `R_LBL_01`, are the clans'
+  signs: each names cells 0, 6, 5, 4, 3, 2, 1 and 7 of the one sheet `PG27` on
+  its tracks 0 to 7. They are not a blue and a red sheet, as an earlier draft
+  had it: both name `PG27.0`, and they differ in their diffuse, `#cdcdcd`
+  against `#e6e6e6`, and their specular, `#0a0a0a` against `#818181`. `B_` is
+  on buildings and `R_` on robots
+  ([below](#who-picks-an-object-meshs-material-track--read)).
 
 See `openparkan/materials.py`.
 
@@ -1293,26 +1296,150 @@ manager and a track; `CShade` keeps them at `+0xcb8` and `+0xcbc` and passes
 the track to the manager's slot 5 (`Terrain.dll:0x100454e6`) or slot 3
 (`0x10045521`) for every batch.
 
-- **The track** is what the unit's `ILifeSystem` slot 15 answers
-  (`AniMesh.dll:0x10014dee`, through the mesh's `+0x30`, `QueryInterface`
-  0x16): the control system's `+0x554` (`Control.dll:0x10008800`). The
-  constructor sets it to 0 (`0x100070d1`) and only slot 16 (`0x10008810`)
-  writes it; no caller of slot 16 has been found, so as far as is read an
-  object draws track 0 — cell 0 of an insignia sheet.
-  - **Seen otherwise** in "Let's Play - Parkan: Iron Strategy, Part 6.5"
-    (9SBZOCWv_vE, 37.4 s and 2:15). On C03 M02, Enemy 1's Medium Mine wears
-    `B_LBL_01`'s track 1, cell 6 of `PG27` (a filled triangle over a bar), and
-    the player's Small Bunker track 0, the arrow. So something writes the track
-    per clan, and the clan's index, the sign a single-player game gives clan
-    *i*, picks it. The engine draws a building so; what writes it is not read.
-- **The manager** is the mesh's own (`+0x24`, `QueryInterface` 0xd, taken at
-  `0x10007022`) — unless IAnimation slot 27 (`AniMesh.dll:0x10005970`) has
-  given it another. Slot 27 takes a face reference, asks the object that owns
-  the face for *its* manager (`0x100059e3`, into mesh `+0x204`) and keeps the
-  face's material handle at `+0x208`. From then on the mesh draws every batch
-  in that one material (interface `0x18` slot 3, `0x10013595`) with the owner's
-  manager and track 0. Who calls slot 27 is not established; something that
-  wants to wear the surface it hit is the obvious reader.
+**The track is the clan's sign** — *read*.
+
+- **Where the draw gets it.** The mesh asks its object's `ILifeSystem` slot 15
+  (`AniMesh.dll:0x10014dee`; the interface is at the mesh's `+0x30`, taken by
+  `QueryInterface` 0x16 at `0x10007048`). Slot 15 answers the control system's
+  `+0x554` (`Control.dll:0x10008800`). Nothing else is read at draw time: a
+  mesh wearing another surface draws track 0 instead (below).
+- **Who writes it.** The constructor sets it to 0 (`0x100070d1`), and
+  `ILifeSystem` slot 16 (`0x10008810`) is its only other writer: the setter's
+  address is held in three tables, slot 16 of the system's three `ILifeSystem`
+  vtables (`0x1003b59c`, `0x1003b888`, `0x1003d254`), and nowhere else.
+  ~~No caller of slot 16 has been found~~ — **read**: it has three, all in
+  `iron3d.dll`, each on the `ILifeSystem` a unit or building record keeps at
+  its `+0x48`.
+  - **A building record's step** (`0x10033020`, at `0x10033072`) writes it
+    first thing, before its first-run gate: the clan record's `+0x14` of the
+    clan the record holds at `+0x24`. The game frame runs the step for every
+    building record (`0x1005eaa0` → `0x1007db30`). In a network game it runs
+    only the player's own clan's (`0x1007db57`).
+  - **A unit record's takt** (`0x10075680`, at `0x10075727`) writes the same
+    word each game frame (`0x1007d6e0`), once past its dead check.
+  - **A unit record's bind** (`0x10074d30`, slot 3 of the record's vtable
+    `0x100e64d0`) writes the record's clan **index** as both the owner word
+    (slot 10, `0x10074d99`) and the track (`0x10074da0`). The takt replaces it
+    with the sign on the next frame.
+- **The value.** The clan record's `+0x14` is the clan's sign, the index of
+  its emblem on the HUD
+  ([25-sensors.md](25-sensors.md#the-unit-markers-layout--read-and-measured)).
+  A single-player game gives clan *i* sign *i* as the mission loads
+  (`0x100a2420`); a network game takes each from the session's table
+  (`0x100a23e1`). So in the campaign the track is the clan's index, and the
+  two words the question could not tell apart are the same number.
+- **A track a material has not got is track 0.** Both of the manager's fetches
+  compare the track with the material's count and take 0 at or past it, or
+  below 0 (`World3D.dll:0x1000322f`, `0x10003709`). So a sign changes only a
+  batch whose material has that many tracks, and every one-track skin draws
+  the same for every clan.
+- **A capture changes it** — *read*. Both writers take the sign from the clan
+  the record holds, every frame, and a capture rewrites that clan: a building's
+  at `0x10033012`, in the owner change `0x10032fd0`
+  ([27-ownership.md](27-ownership.md#capture--read)); a unit's through the
+  record's slot 2 (`0x100355a0`, called by Enter at `0x10072035`). The next
+  frame draws the new clan's sign.
+- **A unit is one mesh**, its parts merged into it
+  ([How parts attach](#how-parts-attach)), so a turret's sign is the unit's.
+- **Scenery keeps 0** (*inferred*): the three writers are a building record's
+  and a unit record's, and a placed tree or rock has neither. How the records
+  are made was not read here.
+
+**How the callers were found, and why they were missed.** Slot 16 is reached
+only through a pointer an object answered `QueryInterface` with, which a
+search that starts from a stored global cannot follow.
+`analysis/slotcalls.py` lists every `call [reg + 0x40]` in the install, 116
+of them, and keeps those whose receiver was loaded from a field a
+`QueryInterface` for 0x16 fills, or that sit in a function that asks for
+0x16: 10 sites. Read one by one, three are the writers above, and the other
+seven are calls on another object in a function that also asks for the
+interface. The control is slot 10, the owner word's setter: the same search
+over the 223 calls at `+0x28` finds `MBehaviour::Capture`'s three
+(`Behavior.dll:0x10008f7b`, `0x10009058`, `0x100090c3`) and the bind's
+(`iron3d.dll:0x10074d99`). No `jmp [reg + 0x40]` or register call reaches the
+slot either (one `jmp` at that offset, on a `this` in `ecx`).
+
+**What wears a sign** — *measured*, `openparkan verify`'s `check_insignia`:
+
+| material | tracks | batches | meshes |
+|---|---:|---:|---|
+| `R_LBL_01` | 8 | 108 | 42: 23 turrets (`turrets.rlb`), 12 chassis (`bases.rlb`: `R_B_01`–`04`, `R_L_02`–`05`, `R_M_01`–`04`), 7 scenery (`s_tree_60`–`65`, `68`) |
+| `B_LBL_01` | 8 | 37 | 19 buildings (`fortif.rlb`) |
+| `L00`, `L18`, `L23` | 2 | 4 each | one scenery mesh, `s_tree_80` |
+
+- Those 157 are all of the 15153 batches, in 435 object meshes, that draw a
+  material with more than one track. The other 40 two-track materials are in
+  no object batch.
+- **329 of the 361 robot assemblies** carry `R_LBL_01` in a chassis or a
+  turret, **48 of the 76 buildings** `B_LBL_01`, and **0 of the 21 heroes**
+  either.
+- The 29 missions place 133 such buildings of 167, owned by clans 0 to 4 as
+  44, 57, 25, 6 and 1, and 209 such robots of 254, as 43, 125, 29, 10 and 2.
+  None of the 42 placed heroes wears one.
+- A mission has at most 6 clans, against the sheet's 8 cells.
+- Ten placed scenery objects wear `R_LBL_01` (`s_tree_60` three times, `61`,
+  `62` and `65` twice, `68` once): track 0, the arrow, by the rule above.
+  `s_tree_63`, `64` and `80` are placed nowhere.
+
+**Seen**, each emblem in the diamond its quad is cut to:
+
+- **A building wears its owner's.** In "Let's Play - Parkan: Iron Strategy,
+  Part 6.5" (9SBZOCWv_vE) on C03 M02, Enemy 1's Medium Mine wears cell 6, a
+  wedge over two leaves, which reads as a filled triangle over a bar from
+  afar: track 1 (37.4 s). The player's Small Bunker wears cell 0, the arrow
+  (2:15). Campaign 02's Outpost, the enemy's on C02 M01, wears cell 6 too
+  ("Part 3", UfyUzq8k2kY, 1:22).
+- **A unit wears its clan's.** The vacant LWW-2 Warrior of C03 M02 (`32_l_pl`,
+  the neutral clan 3) wears cell 4 on its turret, a disc low in the ring,
+  track 3 (Part 6.5, 3:37, from 25 m).
+- **A capture changes it.** In the first run of the same mission the same
+  placed warbot wears the arrow, cell 0, once the hero has taken it with Enter
+  and stepped out again ("Part 6", -yNnsqudMzw, 7:30, from 16 m, its panel
+  reading *[searching]*). Before the capture that run shows it only from the
+  front, where the turret's sides do not show (7:04–7:09).
+- **Not seen**: a captured building's emblem. No frame in the passages looked
+  through shows one legibly (Part 6 at 8:21–8:26 and 53:30–54:20, Part 6.5 at
+  2:16–4:10 and 20:00–22:35, Part 5 at 7:50–10:20, Part 4 at 2:20–3:50,
+  26:14–27:30 and 38:00–41:30).
+
+**The manager** is the mesh's own (`+0x24`, `QueryInterface` 0xd, taken at
+`0x10007022`) — unless IAnimation slot 27 (`AniMesh.dll:0x10005970`) has given
+it another. Slot 27 takes a face reference, asks the object that owns the face
+for *its* manager (`0x100059e3`, into mesh `+0x204`) and keeps the face's
+material handle at `+0x208`. From then on the mesh draws every batch in that
+one material (interface `0x18` slot 3, `0x10013595`) with the owner's manager
+and track 0 (`0x10014ddf`: a handle other than −1 skips slot 15). A reference
+with no face puts the mesh's own manager back and the handle to −1
+(`0x10005993`).
+
+~~Who calls slot 27 is not established~~ — **read**: the ground contact, and
+it is what camouflage looks like.
+
+- `Control.dll`'s ground contact (`0x1001a450`, the control system's slot 24,
+  run for an agent of kind 4,
+  [24-motion.md](24-motion.md)) calls it at `0x1001a95d` on the system's
+  `+0x20`, its interface `0xb` (taken at `0x10007912`).
+- It has one other caller, the mesh itself: its set-up hands its own slot 27
+  an empty reference (`AniMesh.dll:0x100070ae`, the zeroed `0x10026008`),
+  which is what first puts the handle to −1.
+- These two are all `analysis/slotcalls.py` finds. The address `0x10005970`
+  is held in one table, the mesh's vtable `0x1002057c`, and of the 54
+  `call [reg + 0x6c]` in the install two are on a pointer that may be
+  interface `0xb`. The control: the same search for that interface's slot 16
+  finds `Effect.dll:0x100061ce`, on the interface an effect keeps at `+0x1c`.
+- The contact asks for the system's first class-10 item, the detection shield
+  (`0x1001a903`), and that item's state, property `0x600`. When the state
+  reads **`0x1000`, camouflage on** (`0x1001a923`,
+  [25-sensors.md](25-sensors.md#the-detection-shield-hides-all-three-and-camouflage-hides-them-again--read-and-measured)),
+  the reference is the contact's `+0xa4`, the world face under the machine.
+- Otherwise it is the empty reference at `0x10046338`, which undoes it.
+- So **a camouflaged machine is drawn in the material of the ground it stands
+  on**, every batch, sign and all, and in its own skin again when the shield
+  is switched off. The names say so: `CMD_CAMOUFLAGE_WEAR`,
+  `CIS_CHAMELEON_INV`, `VOICE_CHAMELEON_SYS_ON`.
+- *Not read*: which of the face's two layers the handle names (the world
+  face's `+0x74`), and what a machine standing on a building's floor wears.
+  *Not seen*: no recording looked at shows a machine with its camouflage on.
 
 The landscape draws through the same call with its own manager and track 0
 (`Terrain.dll:0x1001b95e`).

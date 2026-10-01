@@ -351,6 +351,36 @@ Four more ways to be wrong, all of which this cost:
   that ended at `0x1000e59a`, under a quarter of the way in. It now restarts a
   byte later, as `vcalls.py` always did.
 
+## `slotcalls.py`, for an interface nobody stores
+
+```
+uv run --group analysis python analysis/slotcalls.py            # ILifeSystem slot 16
+uv run --group analysis python analysis/slotcalls.py 0x16 10    # the control: slot 10
+uv run --group analysis python analysis/slotcalls.py 0xb 27     # IAnimation slot 27
+```
+
+The blind spot above, searched for directly. An interface an object hands out by
+`QueryInterface` is in no global and no factory's result, so `vcalls.py` cannot
+start from it. This starts from the request instead: a `lea reg, [obj + N]`
+pushed before `mov edx, ID` is where an answer is kept, and a function that
+asks for the id at all is worth reading. It lists every `call [reg + 4 × slot]`
+in the install and keeps the ones on such a pointer.
+
+It was written for a published negative that was false. docs/07 said no caller
+of `ILifeSystem` slot 16, the material track's setter, had been found, and a
+recording showed the track changing with the owner. The slot has three callers
+in `iron3d.dll`, each on the interface a unit or building record keeps at its
+`+0x48`: 116 calls at `+0x40` in the install, 10 on a pointer that may be the
+interface, 3 of those the writers
+([../docs/07-objects.md](../docs/07-objects.md#who-picks-an-object-meshs-material-track--read)).
+The control, slot 10, finds `MBehaviour::Capture`'s three calls and the unit
+record's bind.
+
+What it still leaves to the reader: a function that asks for the interface
+makes other calls at the same offset on other objects, and the list has those
+too. The arity settles each — a setter that pops one dword is not a getter
+called with none.
+
 
 ## Message dispatch, and the constant that is never compared
 

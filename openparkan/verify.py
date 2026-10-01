@@ -9787,6 +9787,200 @@ def check_owner_word(check, game: Path) -> None:
                          for m, n, life in sorted(set(rows))))
 
 
+#: Where ``iron3d.dll`` writes an object's material track, ``ILifeSystem`` slot 16: the
+#: building record's step, the unit record's bind and the unit record's takt (docs/07, "Who
+#: picks an object mesh's material track").
+TRACK_WRITERS = (0x10033072, 0x10074DA0, 0x10075727)
+
+
+def check_insignia(check, game: Path) -> None:
+    """An object's emblem is its clan's sign: who writes the track, and what wears one."""
+    # 1. The track is the control system's +0x554, behind ILifeSystem slots 15 and 16, and
+    # iron3d's records write it from the clan they hold.
+    dlls = {n: game / n for n in ("Control.dll", "iron3d.dll", "World3D.dll", "AniMesh.dll")}
+    if all(p.exists() for p in dlls.values()):
+        images = {n: p.read_bytes() for n, p in dlls.items()}
+        at = {n: _image_at(i) for n, i in images.items()}
+        ctl = at["Control.dll"]
+        holders = sorted(_relocations(images["Control.dll"])[0x10008810])
+        vtables = (0x1003B59C, 0x1003B888, 0x1003D254)
+        check("Control.dll: the material track is the system's +0x554, behind slots 15 and 16",
+              holders == [v + 0x40 for v in vtables]
+              and ctl(0x10008810, 17) == bytes.fromhex("8b4424048b4c2408898850050000c20800")
+              and ctl(0x10008800, 13) == bytes.fromhex("8b4424048b8050050000c20400")
+              and ctl(0x100070D1, 6) == bytes.fromhex("899e54050000"),
+              f"the setter 0x10008810 writes this+0x550, the system's +0x554, which the "
+              f"constructor zeroes (0x100070d1) and slot 15 (0x10008800) reads; its address "
+              f"is held at {[hex(h) for h in holders]}, slot 16 of the three ILifeSystem "
+              f"vtables, and nowhere else")
+
+        iron = at["iron3d.dll"]
+        sign = bytes.fromhex("8b46246bc0688b8c3838070000")   # ecx = clan[record+0x24].+0x14
+        calls = [iron(a, 3) for a in TRACK_WRITERS]
+        check("iron3d.dll: a record writes its clan's sign as its object's material track",
+              calls == [bytes.fromhex(h) for h in ("ff5240", "ff5140", "ff5240")]
+              and iron(0x10033053, 13) == sign and iron(0x1007570C, 13) == sign
+              # the bind: slot 10 and slot 16 with the same word, the record's +0x24
+              and iron(0x10074D92, 17) == bytes.fromhex("8b7e488b075557ff50288b0f5557ff5140")
+              # a single-player game: clan i's +0x14 is i
+              and iron(0x100A2413, 6) == bytes.fromhex("8d8d38070000")
+              and iron(0x100A2420, 2) == bytes.fromhex("8901")
+              # the capture's two writers of the record's clan
+              and iron(0x10033012, 3) == bytes.fromhex("897e24")
+              and iron(0x100355A0, 10) == bytes.fromhex("8b442404894124c20400")
+              and iron(0x10072030, 8) == bytes.fromhex("8b06558bceff5008"),
+              "the building record's step (0x10033072) and the unit record's takt "
+              "(0x10075727) call ILifeSystem slot 16 with the clan record's +0x14 of the "
+              "clan the record holds at +0x24, and the unit record's bind (0x10074da0) with "
+              "that clan's index; a single-player game gives clan i sign i (0x100a2420); a "
+              "capture rewrites the record's +0x24 (0x10033012 for a building, slot 2 "
+              "0x100355a0 from Enter's 0x10072035 for a unit), so the next step writes the "
+              "new clan's sign")
+
+        w3d, ani = at["World3D.dll"], at["AniMesh.dll"]
+        check("World3D.dll: a track a material has not got is track 0",
+              w3d(0x1000322F, 14) == bytes.fromhex("3bb2006a06107d0485f67d0233f6")
+              and w3d(0x10003709, 14) == bytes.fromhex("3b86006a06107d0485c07d0233d2")
+              and ani(0x10014DDF, 18) == bytes.fromhex("83be04020000ff750b8b462c508b08ff513c"),
+              "both of the manager's fetches compare the track with the material's count "
+              "and take 0 outside it (0x1000322f, 0x10003709), so the sign the mesh draw "
+              "asks slot 15 for (AniMesh.dll:0x10014dee) picks a cell only on a material "
+              "with that many tracks")
+
+        check("Control.dll: the ground contact hands the mesh the face a camouflaged unit wears",
+              ctl(0x1001A923, 8) == bytes.fromhex("817c241800100000")
+              and ctl(0x1001A952, 14) == bytes.fromhex("8b46208d54244c52508b08ff516c")
+              and ctl(0x10007912, 13) == bytes.fromhex("8d7d2057ba0b0000008bcdff10")
+              and sorted(_relocations(images["AniMesh.dll"])[0x10005970]) == [0x1002057C + 0x6C]
+              # the mesh's own set-up: an empty reference, and what one does
+              and ani(0x100070A6, 11) == bytes.fromhex("680860021053f3a5ff526c")
+              and ani(0x10005993, 21) == bytes.fromhex(
+                  "8b44240c5f5e8b5024898808020000899004020000"),
+              "IAnimation slot 27 (AniMesh.dll:0x10005970, the vtable's +0x6c) is called at "
+              "0x1001a95d on the system's +0x20, its interface 0xb, with the face under the "
+              "unit when its class-10 item's state 0x600 reads 0x1000, camouflage on, and "
+              "with an empty reference otherwise; the mesh's own set-up calls it with an "
+              "empty one too (0x100070ae), which puts its own manager at +0x204 and -1 at "
+              "+0x208")
+
+    # 2. What wears a sign: the batches of every object mesh that draw a material with more
+    # than one track.
+    lib = materials.MaterialLibrary(game / "Material.lib")
+    multi = {m.name.upper(): m.track_count for m in lib.materials.values() if m.track_count > 1}
+    opened: dict[str, NResArchive] = {}
+
+    def worn(library: str, mesh_name: str, wear_name: str) -> Counter:
+        """How many batches of a mesh draw each multi-track material."""
+        ar = opened.setdefault(library.lower(), NResArchive.open(game / library))
+        try:
+            wear = objmesh.read_wea(ar.read_name(wear_name))
+            model = objmesh.parse(ar.read_name(mesh_name), mesh_name, wear)
+        except (KeyError, ValueError, struct.error):
+            return Counter()
+        return Counter(wear[b.material].upper() for b in model.batches
+                       if b.material < len(wear) and wear[b.material].upper() in multi)
+
+    batches: Counter[str] = Counter()
+    meshes: defaultdict[str, Counter] = defaultdict(Counter)
+    total_meshes = total_batches = 0
+    for name in MESH_ARCHIVES:
+        ar = NResArchive.open(game / name)
+        opened[name.lower()] = ar
+        for e in ar:
+            if e.tag != "MESH":
+                continue
+            try:
+                wear = objmesh.read_wea(ar.read_name(e.name.rsplit(".", 1)[0] + ".wea"))
+            except KeyError:
+                wear = []
+            try:
+                total_batches += len(objmesh.parse(ar.read(e), e.name, wear).batches)
+            except (ValueError, struct.error):
+                continue
+            total_meshes += 1
+            for material, n in worn(name, e.name, e.name.rsplit(".", 1)[0] + ".wea").items():
+                batches[material] += n
+                meshes[material][name] += 1
+    ground = sorted(m for m in batches if multi[m] == 2)
+    check("objects: the batches that draw a material with several tracks are the two signs'",
+          batches["R_LBL_01"] == 108 and batches["B_LBL_01"] == 37
+          and dict(meshes["R_LBL_01"]) == {"static.rlb": 7, "turrets.rlb": 23, "bases.rlb": 12}
+          and dict(meshes["B_LBL_01"]) == {"fortif.rlb": 19}
+          and ground == ["L00", "L18", "L23"]
+          and all(dict(meshes[m]) == {"static.rlb": 1} and batches[m] == 4 for m in ground),
+          f"of {total_batches} batches in {total_meshes} object meshes, "
+          f"{sum(batches.values())} draw a material with more than one track: R_LBL_01 on "
+          f"{batches['R_LBL_01']} in {dict(meshes['R_LBL_01'])}, B_LBL_01 on "
+          f"{batches['B_LBL_01']} in {dict(meshes['B_LBL_01'])}, and the two-track ground "
+          f"materials {ground} on 4 each in one scenery mesh")
+
+    # 3. Which assemblies carry one, and whose they are where the missions place them.
+    library = objects.ObjectLibrary(game / "objects.rlb")
+
+    def record_signs(member: str) -> set[str]:
+        record = library.get(member)
+        if record is None:
+            return set()
+        if record.tag == "FORT":
+            return set(worn("fortif.rlb", record.name + ".msh", record.name + ".wea"))
+        if record.mesh is None or record.textures is None:
+            return set()
+        return set(worn(record.mesh.library, record.mesh.member, record.textures.member))
+
+    def unit_signs(unit) -> tuple[str, set[str]]:
+        signs: set[str] = set()
+        for part in unit.components:
+            signs |= record_signs(part.ref.member)
+        root = unit.components[0].ref.member.lower() if unit.components else ""
+        kind = "building" if unit.is_building else "hero" if root.startswith("r_h_") else "unit"
+        return kind, signs
+
+    carried: Counter = Counter()
+    for f in sorted((game / "UNITS").rglob("*.dat")):
+        kind, signs = unit_signs(objects.load_unit(f))
+        carried[(kind, tuple(sorted(signs)))] += 1
+    placed: Counter = Counter()
+    by_clan: defaultdict[str, Counter] = defaultdict(Counter)
+    scenery: Counter = Counter()
+    clans: Counter = Counter()
+    for p in sorted(game.glob("MISSIONS/**/data.tma")):
+        m = mission.load(p)
+        clans[len(m.clans)] += 1
+        for o in m.objects:
+            if o.is_static:
+                if record_signs(o.path):
+                    scenery[o.path.lower()] += 1
+                continue
+            f = game / o.path.replace("\\", "/")
+            if not f.exists() and f.parent.exists():
+                f = next((x for x in f.parent.iterdir() if x.name.lower() == f.name.lower()), f)
+            if not f.exists():
+                continue
+            kind, signs = unit_signs(objects.load_unit(f))
+            placed[(kind, bool(signs))] += 1
+            if signs:
+                by_clan[kind][o.clan_id] += 1
+    check("UNITS: a robot's chassis or turret and a building carry a sign, a hero none",
+          carried[("unit", ("R_LBL_01",))] == 329 and carried[("unit", ())] == 32
+          and carried[("building", ("B_LBL_01",))] == 48 and carried[("building", ())] == 28
+          and carried[("hero", ())] == 21 and sum(carried.values()) == 458
+          and placed[("building", True)] == 133 and placed[("unit", True)] == 209
+          and placed[("hero", True)] == 0 and placed[("hero", False)] == 42
+          and max(clans) == 6
+          and dict(by_clan["building"]) == {0: 44, 1: 57, 2: 25, 3: 6, 4: 1}
+          and dict(by_clan["unit"]) == {0: 43, 1: 125, 2: 29, 3: 10, 4: 2},
+          f"329 of the 361 robot assemblies carry R_LBL_01, 48 of the 76 buildings "
+          f"B_LBL_01 and 0 of the 21 heroes either; the missions place "
+          f"{placed[('building', True)]} such buildings of "
+          f"{placed[('building', True)] + placed[('building', False)]}, by clan "
+          f"{dict(sorted(by_clan['building'].items()))}, and {placed[('unit', True)]} such "
+          f"robots of {placed[('unit', True)] + placed[('unit', False)]}, by clan "
+          f"{dict(sorted(by_clan['unit'].items()))}, and none of the "
+          f"{placed[('hero', False)]} heroes, in missions of at most {max(clans)} "
+          f"clans against the sheet's 8 cells; {sum(scenery.values())} placed scenery "
+          f"objects wear R_LBL_01 too: {dict(sorted(scenery.items()))}")
+
+
 #: The command the hero presses at a neutral bot (``iron3d.dll:0x10071f08``).
 ENTER = "CMD_ENTER_STATE"
 
@@ -26586,7 +26780,7 @@ def run(game: Path) -> int:
         check_mission_03_economy,
         check_motion, check_playback, check_ground, check_sensors, check_hit_test,
         check_collision, check_lake_and_buoys,
-        check_combat, check_ownership, check_owner_word, check_hall_way_gates,
+        check_combat, check_ownership, check_owner_word, check_insignia, check_hall_way_gates,
         check_batch_word_and_collision_flags,
         check_capture, check_building_entry, check_pod_zone, check_door_shot,
         check_building_lighting,

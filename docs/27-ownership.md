@@ -303,6 +303,17 @@ building's task list is dropped, it leaves its old clan's power distributor,
 takes the new clan, and joins the new clan's distributor and SuperAI. The
 clan's minds do not come into it — buildings hold none.
 
+**And what it wears** — *read*. The owner change is the building record's
+slot 6 (`iron3d.dll:0x10032fd0`, vtable `0x100e5c4c`): it gives the building a
+place in the new clan's list (`0x10032ffa`), calls `Capture` when its flag is
+set (`0x1003300c`), and stores the new clan at the record's `+0x24`
+(`0x10033012`). The record's step writes that clan's sign into the building's
+control system as its material track every game frame (`0x10033072`), so from
+the next frame the emblem on the building's walls, `B_LBL_01`, is the taker's
+([07-objects.md](07-objects.md#who-picks-an-object-meshs-material-track--read)).
+A captured unit's changes the same way
+([below](#a-neutral-unit-is-taken-by-the-hero--read-and-measured)).
+
 **What the player hears** (`iron3d.dll:0x100a48a0`, *read*). The routine
 first compares the taker's clan with the player's (`0x100a4950`).
 
@@ -749,6 +760,17 @@ takes holds none, where a placed or built one takes a free entry as it is made
 Nothing else found calls `Capture` on a unit: the AI clans have no way to take
 a neutral bot (a search, not a proof).
 
+**The record's new owner changes the unit's emblem** — *read*, and *seen*.
+Enter stores the player's clan at the record's `+0x24` through the record's
+slot 2 (`0x100355a0`, called at `0x10072035`). The record's takt writes that
+clan's sign as the unit's material track every game frame (`0x10075727`), which
+picks the cell of the insignia sheet its `R_LBL_01` batches draw
+([07-objects.md](07-objects.md#who-picks-an-object-meshs-material-track--read)).
+C03 M02's vacant LWW-2 Warrior (`32_l_pl`, of the neutral clan 3) wears a disc
+low in a ring, cell 4, before the hero takes it ("Let's Play - Parkan: Iron
+Strategy, Part 6.5", 9SBZOCWv_vE, 3:37) and the arrow, cell 0, after, in the
+mission's first run ("Part 6", -yNnsqudMzw, 7:30).
+
 *Measured:* the 22 units owned by neutral clans, all in the campaign, are
 18 warriors (`0x1008000`), 2 HQs (`0x1010000`), a builder and a transport.
 Every one passes the handler's unit test, and none of the neutral clans' 28
@@ -859,8 +881,13 @@ in these docs:
 - **One more** (1): `0x10074ec9`, inside `0x10074d30` — a record method with no
   direct caller (a table entry at `0x100e64dc`) that pushes the record's clan
   onto its object through `ILifeSystem` slot 10 and rebuilds the record's name.
-  The compare cuts the rest of that short for a dead record. What calls it was
-  not traced.
+  The compare cuts the rest of that short for a dead record. It is slot 3 of
+  the unit record's vtable (`0x100e64d0`), the bind: it takes the object's
+  interfaces (`0x1007e3c0`), and beside the owner word it writes the same clan
+  index as the object's material track (slot 16, `0x10074da0`,
+  [07-objects.md](07-objects.md#who-picks-an-object-meshs-material-track--read)).
+  The building record's slot 3 is `0x10032d30` (vtable `0x100e5c4c`). Which
+  call reaches slot 3 was not traced.
 - **The view and the player's own unit** (6): the building-entry test
   (`0x10033e4d`, [below](#what-0x10033e40-refuses-on-a-tower--read-and-measured)),
   the Upgrade row's building (`0x100342d4`), the outer camera each frame
@@ -993,6 +1020,13 @@ mask and 3 — 1 in mode 5, `0x20` in mode 6, and `0x40` in the takeover
   building and make it the interface's current one
   ([Capture](#capture--read)).
 - The hero's target field (record `+0x38`, `+4`) and what sets it.
+- A captured **building's** emblem has not been seen in a recording. That it
+  becomes the taker's is *read*
+  ([Capture](#capture--read)), and a captured unit's is *seen*
+  ([A neutral unit is taken by the hero](#a-neutral-unit-is-taken-by-the-hero--read-and-measured)).
+- What gives another clan's building its sign in a network game, where the
+  game frame steps only the player's own clan's building records
+  (`iron3d.dll:0x1007db57`).
 - ~~The other four writers of a unit record's `+0xa2` (`0x1005e7e8`,
   `0x10074dbf`, `0x1007e2ad`, `0x100a2a73`).~~ The briefing's end, the
   record's binding and constructor, and the briefing's start
