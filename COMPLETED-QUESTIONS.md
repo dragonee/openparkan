@@ -1415,6 +1415,36 @@ tests, 1015 of 1015 checks, 509 engine tests and 201 install tests, `ruff` clean
   the gun's sight ray. So a hero in a pod room is reached through the building's own children. The
   tower's own death is ruled out as the killer, every node of a building naming a kind-1 explosion.
   Which gun's blast it was stays queued ([26-damage](docs/26-damage.md#what-a-blast-reaches)).
+- [x] ~~What the AI's clear line is~~ — raised and closed 2026-10-01, **read**, and **measured** on
+  C03 M02. Raised when a read fix to the collision's sphere moved the raider's first winged SSM from
+  363 m off the Small Bunker to 106 m, where the recording has 345 to 292: the engine's line, each
+  gun's muzzle to the middle of the target's box, ran under the plateau the bunker is sunk in.
+  - **`Behavior.dll:0x10025c60` is not a line query** but a sweep of two spheres, the last of three
+    steps the fight module runs once a pass for the whole unit (`0x10024464`–`0x10024989`); every gun
+    then reads the one flag (`0x10024f69`).
+  - **The two ends.** The line starts at the own sphere of the node the unit's *first turret* sits on,
+    0.7 of its radius out (`0x10059968`), and ends at the own sphere of **the part of the target the
+    module aims at**, the whole of that radius short. Both are interface `0x20` slot 3 asked for one
+    node's level-0 slot sphere.
+  - **The query** is `IWorld` slot 12 (`Terrain.dll:0x10025540`), the segment walk with a list of
+    ids left out, the unit's own and the target's; its record takes the landscape, buildings and
+    `STAT` scenery and no unit, and excludes no face class. With nothing met, every unit of the
+    firer's own owner is swept past as a sphere of 0.5.
+  - **The part** (`0x10025830`) is the heaviest live device by class times (2 − its node's share of
+    life): deflector 30, turret 20, gun 15, engine or radar 14, power store 10, fight shield 7,
+    repair 3. A whole target is aimed at by its deflector on 435 of the 458 assemblies. The turret's
+    trace, its guns' gates and its rounds' seekers all ask that node's sphere.
+  - **No round flag and no target class is asked**: a guided or lobbed round waits on the line like
+    any other.
+  - *Measured* on the raider's own approach, each half second: the line to the bunker's origin or box
+    centre first clears at 106 m, to its node-sphere centre at 390 m, and **the read's, turret sphere
+    to the roof's deflector, at 423 m**. The recording's launch works out to 365–390 m.
+  - **docs/29 corrected on the way**: the gate and the seeker always ask one node's sphere, never the
+    object's; a gun's timer re-arms when it is asked, before the line is looked at; free fire
+    applies only on a clear line; the height in the distance score is origin over origin.
+  - The engine now launches from 414 m and one missile lands 1.2 m from the deflector with the raider
+    314 m off; no install test's outcome changed, 236 passing before and after
+    ([29-weapons](docs/29-weapons.md#how-the-ai-fires--read), [30-turrets](docs/30-turrets.md)).
 - [x] ~~How the camera applies the colour it is handed in mode 2~~ — closed 2026-10-01 but for one
   figure, **read**, **measured** and **seen**. Raised by two frames of "Let's Play - Parkan: Iron
   Strategy, Part 6.5" (8:13.0, 8:15.5) in which a building's placement ghost is one flat colour, red

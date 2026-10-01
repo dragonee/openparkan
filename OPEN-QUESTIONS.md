@@ -234,6 +234,15 @@ remainder a closed line names stays here as a line of its own.
   `Type` comes from the turret either way ([38-designs](docs/38-designs.md#not-established),
   [30-turrets](docs/30-turrets.md)).
 - [ ] Where the unit constructor's page item names (`+0xc4`) come from.
+- [ ] The fire line's remainders, left when the AI's clear line closed 2026-10-01
+  ([COMPLETED-QUESTIONS](COMPLETED-QUESTIONS.md#turrets-weapons-and-camera)): whether a building's mesh
+  agent answers the building's id, so that leaving the target's id out of `IWorld` slot 12's walk
+  leaves its faces out (the engine leaves the whole target out); whether the landscape's slot-4
+  record `+0x3c`, compacted into the word the 20 m exception reads, is the file's face dword
+  (*inferred*; if it is, the exception never fires on ground, 0 of 275882 faces carrying `0x80`);
+  and the 25 to 50 m between the engine's 414 m launch on C03 M02 and the recording's 365–390. The
+  turret's property `0xf00` and the gun's report codes stay the README's M8 stand-in
+  ([29-weapons](docs/29-weapons.md#not-established)).
 - [ ] **Which gun killed the hero in C02 M04's valley Light Tower.** *Narrowed 2026-10-01*
   ([COMPLETED-QUESTIONS](COMPLETED-QUESTIONS.md#turrets-weapons-and-camera)). A blast is stopped by
   nothing but distance, so one landing on a building reaches a hero in its pod room, as C03 M02's
