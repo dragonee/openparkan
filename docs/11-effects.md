@@ -747,10 +747,89 @@ through the window** (`0x1000f6e0`):
 | +16 → +28 | position, in the effect's frame, then the owner's | (0, 0, 0) on 427 |
 | +40 → +52 | direction | `(1, 0, 0)` at +52 on 542 |
 | +64 → +80 | colour, RGBA | overbright starts: (3, 2, 0) on 140, (2, 1, 0) on 110 |
-| +96 | colour jitter, ± half of each | 0 on 511 |
-| +112 → +116 | range, × the length of the light's own direction through the instance's matrix (`0x1000f884`, `0x1000f891`, `0x1000fb13`) — the frame stretched by the instance's size times the header's scale, so an explosion's light grows with the explosion — then clamped to at least 0.01 (`0x1000fb7b`) | 30 → 3 on the hero's cannon |
-| +120 | range jitter (the read map missed it) | 0 on 560 |
+| +96 | colour jitter, a spread for each of the four channels: an update adds a uniform in ± half of each, a draw apiece ([below](#a-lights-jitter-is-five-draws-an-update--read-and-measured)) | (0, 0, 0, 0) on 511; the alpha's is 0 on all 618 |
+| +112 → +116 | range, its jitter added, × the length of the light's own direction through the instance's matrix (`0x1000f884`, `0x1000f891`, `0x1000fb13`) — the frame stretched by the instance's size times the header's scale, so an explosion's light grows with the explosion — and then **0.01 where it is not above 0** (`0x1000fb7b`–`0x1000fb8c`, a compare against 0.0 at `0x1001e224`; an earlier reading here had "clamped to at least 0.01", and a range between the two is kept) | 30 → 3 on the hero's cannon |
+| +120 | range jitter, ± half of it, one draw an update, added before the stretch | 0 on 560 |
 | +124..+132 | the three attenuation terms, handed on unchanged | (0, 1, 0) on 447, (0, 1, 1) on 170, (0, 0, 1) on 1 — never a constant term |
+
+### A light's jitter is five draws an update — *read*, and *measured*
+
+The update (`Effect.dll:0x1000f6e0`, slot 2 of the emitter's vtable `0x1001e78c`) first
+switches the light: on as *t* enters the window, off as it leaves (`0x1000f703`–`0x1000f74c`,
+manager slot 6). It then asks the manager for the record's active word (slot 11,
+`Terrain.dll:0x10080660`, record `+0x4c`) and **returns at once when the light is off**
+(`0x1000f75a`–`0x1000f76d`). So nothing below runs outside the window, and a light that is
+off takes no draw.
+
+**The colour takes four draws, one for each channel, and the range a fifth** — in the order
+alpha, blue, green, red, range:
+
+| draw | spread | routine | state |
+|---|---|---|---|
+| alpha | +108 | `0x10002220`, called at `0x1000f8c7` | `0x10024c80` |
+| blue | +104 | the same, at `0x1000f90a` | `0x10024c80` |
+| green | +100 | the same, at `0x1000f94d` | `0x10024c80` |
+| red | +96 | the wrapper `0x10002680`, called at `0x1000f99f` | **`0x10023688`**, the wrapper's own |
+| range | +120 | the step inlined at `0x1000fa8e`–`0x1000facc` | `0x10024c80` |
+
+Each is the house generator's `rand16 × v ÷ 65536 − v ÷ 2`, a uniform in ± half of the
+spread *v* ([The generator](#the-generator--read-and-measured)); the 1 ÷ 65536 is the float
+at `0x1001e248` and the half the one at `0x1001e21c`. `0x10024c80` is the light emitter's
+translation unit's state, one of the seven that are ever read, seeded at `0x10010370`. **The
+red comes off another stream**: the compiler kept the wrapper for that one channel, and the
+wrapper draws from the state of the unit it was compiled in, the one a header's flag-8
+offset and a burst's spawn draw from. The five draws are taken **whether a spread is 0 or
+not** — there is no test of the spread anywhere in the routine — so every lit light steps
+`0x10024c80` four times and `0x10023688` once an update.
+
+The four colour draws make a vector (`0x100102d0`) that is added to the lerped colour
+(`0x1000fa4e`–`0x1000fa71`) and handed to the manager's slot 3, which **stores the four
+floats as they come** (`Terrain.dll:0x10080040`): nothing holds the colour to 0 or to 1, in
+the emitter or in the manager. The range's draw is added to the lerped range before the
+frame's stretch multiplies it (`0x1000faf7`, `0x1000fb13`), and the floor of 0.01 comes last.
+
+**How often.** The update is the instance's, which the manager runs once 100 ms have passed
+since its last, or on every tick within 50 ms of a command to it (`0x1000817a`–`0x100081bc`,
+[above](#how-an-effect-runs--read)). So a jittered light **steps ten times a second** and
+holds each value between steps: it flickers, it does not shimmer. The draw is not per
+instance or per window — a light that stays on redraws for as long as it is on.
+
+*Measured* over the 618 light blocks: **107** carry a colour jitter and **58** a range jitter
+— 111 carry either and 54 both — and the alpha's spread is 0 on every one, as the colour's
+alpha is, so the first of the five draws moves nothing. By the block's kind:
+
+| kind | blocks | colour jitter | range jitter |
+|---:|---:|---:|---:|
+| 1 | 12 | 12 | 12 |
+| 2 | 1 | 0 | 0 |
+| 5 | 416 | 18 | 8 |
+| 6 | 175 | 74 | 37 |
+| 7 | 14 | 3 | 1 |
+
+All twelve kind-1 lights carry both: the engine glows `eng_rb_07_*`, `eng_rb_08_bottom`,
+`eng_rl_06_*`, `eng_rl_07_*` and `engine_rbr_fly_*`. The kind-6 ones span 66 effects, among
+them `HelperLight`, `SignLight` and `PointerLight`, the `breath_anl_*` family, the `*smoke*`
+and `tree_light*` effects, `hero_helm_light` and `tur_deflectorlight`. The three of kind 7
+are `env_lightning` — (1, 1, 2) on a colour that starts at (7, 7, 10), and 10 on a range of
+100 — `f_ol_store_w` and `f_teleport_on`.
+
+**22 blocks over 19 effects are of kind 5**, the lights the landscape's emulation draws
+([below](#what-a-light-does-to-a-surface--read-and-measured)):
+
+- the **construction sphere**, `B_Sphere_Main`, `B_Sphere_Start` and `B_Sphere_Start_BT`, two
+  blocks each: (0.3, 0.3, 0.6) on a colour that reaches (5, 5, 10), and no range jitter;
+- four **explosions**, `exp_b_be`, `exp_b_be_metal`, `exp_leaf` and `exp_tree_30`: a range
+  jitter alone, 0.5, 0.5, 1 and 0.1 on ranges of 10 → 1, 10 → 1, 3 → 12 and 6 → 15;
+- twelve **`tree_*`** effects, the burning and the glowing plants: `tree_A_76`, `tree_B_76`
+  and `tree_C_76` (0.2 a channel on a white that fades from 5), `tree_firesmoke_71a`,
+  `tree_flame`, `tree_flame_06` and `tree_flame_30` (0.1 on (1.2, 1, 0), and 0.03 to 0.2 on
+  the range), `tree_light_45a` to `tree_light_48a` (up to (3.5, 1, 1.5) on a magenta of
+  (7, 2, 7) to (10, 4, 10)) and `tree_lightDn_79` ((1, 1, 1) on (3, 3, 0.01)).
+
+**No gun's flash carries either**: the other 394 kind-5 lights, `hero_cannon`'s two among
+them, have both at 0. On 27 of the 111 the colour's spread can take a
+channel below 0 — `tree_lightDn_79`'s blue is 0.01 ± 0.5 — and on 8 the range's can take the
+range to 0 or under, where the floor catches it.
 
 ### What a light does to a surface — *read*, and *measured*
 
@@ -1597,6 +1676,15 @@ Read one slot either way, none of the seven name witnesses agrees.
   eight device lights off — so the triple is dead data, and what the artists wrote
   into it is measured
   ([above](#what-a-light-does-to-a-surface--read-and-measured)).
+- ~~**A light's colour and range jitter** (+96, +120): which stream each is drawn from,
+  how often, one draw or one a channel, and whether the result is held to a bound.~~
+  Answered: five draws on every update of a light that is on — alpha, blue, green and the
+  range from the light emitters' state `Effect.dll:0x10024c80`, the red through the wrapper
+  from the bursts' `0x10023688` — each a uniform in ± half of its spread, redrawn every
+  100 ms, added to the lerped value and not held to anything but the range's floor of 0.01
+  where it is not above 0; 111 of the 618 blocks carry a jitter, 22 of them of the kind the
+  landscape's emulation draws
+  ([A light's jitter is five draws an update](#a-lights-jitter-is-five-draws-an-update--read-and-measured)).
 - ~~**Who passes the draw's pass argument** that flag 0x800 waits for (manager
   slot 3, `0x10004050`; the landscape's call at `Terrain.dll:0x1001f178` pushes
   one argument fewer than the slot takes), what draw flag 4 (header

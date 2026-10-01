@@ -122,10 +122,26 @@ pub const LIGHT_POSITION_AT: (usize, usize) = (16, 28);
 pub const LIGHT_DIRECTION_AT: (usize, usize) = (40, 52);
 pub const LIGHT_COLOUR_AT: (usize, usize) = (64, 80);
 pub const LIGHT_RANGE_AT: (usize, usize) = (112, 116);
+/// The colour's jitter, a spread for each of its four channels, and the range's: every update
+/// of a light that is on adds a uniform in ± half of each (`Effect.dll:0x1000f89a`–`0x1000f9a4`,
+/// `0x1000fa8e`–`0x1000faf7`).
+pub const LIGHT_COLOUR_JITTER_AT: usize = 96;
+pub const LIGHT_RANGE_JITTER_AT: usize = 120;
+/// The three attenuation terms, handed to the manager as they stand (`0x1000fb94`–`0x1000fbb8`,
+/// record `+0x38`, `+0x3c`, `+0x40`). The device takes them the other way round: its constant
+/// term is the third, its linear the second and its quadratic the first
+/// (`Terrain.dll:0x10030b40`–`0x10030ba9`).
+pub const LIGHT_ATTENUATION_AT: usize = 124;
 /// What a light record says of a light the light manager keeps: a point light, its flags.
-/// `0x80000000` lights only its owner; `0x20000000` is passed over by the shade's emulation.
+/// `0x80000000` lights only its owner; `0x20000000` is passed over by the shade's emulation,
+/// and lights a surface only as a device light does.
 pub const LIGHT_OWNER_ONLY: u32 = 0x8000_0000;
 pub const LIGHT_NOT_EMULATED: u32 = 0x2000_0000;
+/// How long an instance keeps what its last update drew: the manager updates one once 100 ms
+/// have passed since its last update (`Effect.dll:0x100081a7`–`0x100081bc`).
+pub const UPDATE_INTERVAL_MS: f64 = 100.0;
+/// What a range that is not above 0 becomes (`Effect.dll:0x1000fb7b`–`0x1000fb8c`).
+pub const LIGHT_LEAST_RANGE: f32 = 0.01;
 
 /// A type-1 block's kind as the light it asks the manager for (`Effect.dll:0x1000f649`): a
 /// point light's flags, or `None` for the directional (3) and parallel-point (4) kinds.
@@ -146,6 +162,38 @@ pub struct PointLight {
     pub colour: Vec3,
     pub range: f32,
     pub flags: u32,
+    /// Direct3D's attenuation, constant, linear and quadratic: the block's three terms in
+    /// reverse (`Terrain.dll:0x10030b40`–`0x10030ba9`).
+    pub attenuation: [f32; 3],
+}
+
+impl PointLight {
+    /// What the light gives a surface at `at` whose normal is `normal`, before the material's
+    /// diffuse multiplies it: Direct3D 7's point light, the colour times the cosine at the
+    /// surface over a₀ + a₁ d + a₂ d², and nothing past the range. The game hands the device
+    /// the record's colour, position, range and attenuation and no more
+    /// (`Terrain.dll:0x10030a7d`–`0x10030be6`), so the falloff is the device's own.
+    pub fn diffuse_at(&self, at: Vec3, normal: Vec3) -> Vec3 {
+        let to = self.position - at;
+        let d = to.length();
+        if d > self.range {
+            return Vec3::ZERO;
+        }
+        let [a0, a1, a2] = self.attenuation;
+        let fall = a0 + a1 * d + a2 * d * d;
+        if fall <= 0.0 {
+            return Vec3::ZERO;
+        }
+        let facing = if d > 0.0 { normal.normalize_or_zero().dot(to / d).max(0.0) } else { 0.0 };
+        self.colour * (facing / fall)
+    }
+}
+
+/// What one light emitter's last update drew: the colour's jitter and the range's.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+struct LightJitter {
+    colour: Vec3,
+    range: f32,
 }
 
 /// The shade's light template drawn over a lit triangle (`Terrain.dll:0x1002a130`, docs/11,
@@ -360,6 +408,13 @@ pub struct Instance {
     /// What flag 1 last moved *t* by: the game redraws it every time it works *t* out,
     /// which is at most once per manager tick, so it is drawn on the update instead.
     jitter: f32,
+    /// The state the lights' jitter is drawn from. The game's light emitter draws from its
+    /// translation unit's own state, `Effect.dll:0x10024c80`, apart from the instance's
+    /// (`0x10024110`) and the streams', so a light's draws leave the others' as they were.
+    light_rng: Rng,
+    /// What each light emitter's last update drew, in the emitters' order, and when.
+    light_jitter: Vec<LightJitter>,
+    light_drawn_ms: Option<f64>,
     /// The caller's number for the instance, which its sounds' keys carry.
     pub id: u64,
     /// Switched on (actions 18 and 19); header flag 0x40 starts it off. An instance
@@ -494,6 +549,11 @@ fn stream_seed(seed: u32, index: u32) -> u32 {
     seed.wrapping_mul(0x9E37_79B9) ^ index.wrapping_mul(0x85EB_CA6B) | 1
 }
 
+/// A seed for an instance's light draws, apart from its own and its streams'.
+fn light_seed(seed: u32) -> u32 {
+    stream_seed(seed, 0x4c49_4748)
+}
+
 /// The most particles one burst draws: a guard against a malformed block, since the
 /// shipped bursts are 3 to 60.
 pub const BURST_CAP: u32 = 1024;
@@ -535,6 +595,9 @@ impl Instance {
             seed,
             rng: Rng::new(seed),
             jitter: 0.0,
+            light_rng: Rng::new(light_seed(seed)),
+            light_jitter: Vec::new(),
+            light_drawn_ms: None,
             id: 0,
             on,
             silent: false,
@@ -626,6 +689,7 @@ impl Instance {
             self.jitter = self.rng.spread(spread);
         }
         let t = self.t(now_ms);
+        self.draw_light_jitter(now_ms, t);
         let seconds = self.seconds(now_ms) * self.stream_pace;
         let origin = self.frame.origin;
         let (then, from) = self.updated.unwrap_or((seconds, origin));
@@ -676,6 +740,43 @@ impl Instance {
             stream.ring.retain(|q| seconds - q.born < q.life);
         }
         self.updated = Some((seconds, origin));
+    }
+
+    /// A light emitter's update draws its jitter anew (`Effect.dll:0x1000f6e0`): while the
+    /// light is on -- *t* inside its window, the manager's record active (`0x1000f75a`) -- it
+    /// takes **five draws**, one for each channel of the colour and one for the range, each a
+    /// uniform in ± half of its spread, in the order alpha, blue, green, red, range
+    /// (`0x1000f8c7`, `0x1000f90a`, `0x1000f94d`, `0x1000f99f`, `0x1000fa8e`). The draws are
+    /// taken whether the spread is 0 or not, and a light that is off takes none.
+    ///
+    /// The update runs when the manager updates the instance, which is once 100 ms have
+    /// passed since its last (`0x100081a7`); this engine updates every instance on every
+    /// tick, so the lights keep that interval themselves, and a light holds what it drew
+    /// until the next.
+    ///
+    /// STAND-IN: docs/11-effects.md#the-generator--read-and-measured -- the game draws the
+    /// alpha, blue, green and range from the light emitters' module-wide state `0x10024c80`
+    /// and the red through the wrapper `0x10002680`, whose state `0x10023688` the bursts'
+    /// spawns share; here all five come from the instance's own state for its lights.
+    fn draw_light_jitter(&mut self, now_ms: f64, t: f32) {
+        if self.light_drawn_ms.is_some_and(|then| now_ms - then < UPDATE_INTERVAL_MS) {
+            return;
+        }
+        self.light_drawn_ms = Some(now_ms);
+        let lights = self.effect.emitters.iter().filter(|e| e.kind == EMITTER_LIGHT);
+        self.light_jitter.resize(lights.clone().count(), LightJitter::default());
+        for (e, jitter) in lights.zip(&mut self.light_jitter) {
+            if progress(e, t).is_none() {
+                continue;
+            }
+            let spread = |at: usize| e.f(LIGHT_COLOUR_JITTER_AT + at * 4);
+            let _alpha = self.light_rng.spread(spread(3));
+            let blue = self.light_rng.spread(spread(2));
+            let green = self.light_rng.spread(spread(1));
+            let red = self.light_rng.spread(spread(0));
+            let range = self.light_rng.spread(e.f(LIGHT_RANGE_JITTER_AT));
+            *jitter = LightJitter { colour: Vec3::new(red, green, blue), range };
+        }
     }
 
     /// What the sound emitters ask for at `now_ms` (`Effect.dll:0x10012eb0`). A one-shot
@@ -771,36 +872,46 @@ impl Instance {
     /// The point lights this instance's type-1 emitters drive at `now_ms`: each inside its
     /// window, its position, colour and range lerped by the progress through it, the position
     /// in the effect's frame and the range times the instance's scale (docs/11, "Type 1 is a
-    /// light").
+    /// light"), with what its last update drew added to the colour and the range.
     ///
-    /// The range is multiplied by the length of the light's own direction (+40 → +52) put
-    /// through the instance's matrix, its 3 × 3 part (`Effect.dll:0x1000f884`, `0x1000f891`,
-    /// `0x1000fb13`): the frame stretched by the instance's size times the header's scale
-    /// (slot 0x20, `0x100047d0`), so an explosion's light grows with the explosion.
-    ///
-    /// STAND-IN: docs/11-effects.md#type-1-is-a-light--read-and-measured -- the colour's and the
-    /// range's jitter (+96, +120) are left out, 0 on 511 and 560 of the 618 blocks.
+    /// The range, its jitter added, is multiplied by the length of the light's own direction
+    /// (+40 → +52) put through the instance's matrix, its 3 × 3 part (`Effect.dll:0x1000f884`,
+    /// `0x1000f891`, `0x1000fb13`): the frame stretched by the instance's size times the
+    /// header's scale (slot 0x20, `0x100047d0`), so an explosion's light grows with the
+    /// explosion. A range that is then not above 0 becomes 0.01 (`0x1000fb7b`). The colour is
+    /// handed on as it comes out, not held to any bound (`Terrain.dll:0x10080040`).
     pub fn lights(&self, now_ms: f64, out: &mut Vec<PointLight>) {
         if !self.on {
             return;
         }
         let t = self.t(now_ms);
-        for e in self.effect.emitters.iter().filter(|e| e.kind == EMITTER_LIGHT) {
+        let lights = self.effect.emitters.iter().filter(|e| e.kind == EMITTER_LIGHT);
+        for (k, e) in lights.enumerate() {
             let Some(p) = progress(e, t) else { continue };
             let kind =
                 u32::from_le_bytes(e.body[LIGHT_KIND_AT..LIGHT_KIND_AT + 4].try_into().unwrap_or([0; 4]));
             let Some(flags) = point_light_flags(kind) else { continue };
+            let jitter = self.light_jitter.get(k).copied().unwrap_or_default();
             let lerp = |a: f32, b: f32| a + (b - a) * p;
             let local = Vec3::from_array(e.triple(LIGHT_POSITION_AT.0))
                 .lerp(Vec3::from_array(e.triple(LIGHT_POSITION_AT.1)), p);
             let colour = Vec3::from_array(e.triple(LIGHT_COLOUR_AT.0))
-                .lerp(Vec3::from_array(e.triple(LIGHT_COLOUR_AT.1)), p);
+                .lerp(Vec3::from_array(e.triple(LIGHT_COLOUR_AT.1)), p)
+                + jitter.colour;
             let direction = Vec3::from_array(e.triple(LIGHT_DIRECTION_AT.0))
                 .lerp(Vec3::from_array(e.triple(LIGHT_DIRECTION_AT.1)), p);
             let [x, y, z] = self.frame.axes;
             let factor = (x * direction.x + y * direction.y + z * direction.z).length() * self.scale;
-            let range = lerp(e.f(LIGHT_RANGE_AT.0), e.f(LIGHT_RANGE_AT.1)).max(0.01) * factor;
-            out.push(PointLight { position: self.frame.point(local * self.scale), colour, range, flags });
+            let range = (lerp(e.f(LIGHT_RANGE_AT.0), e.f(LIGHT_RANGE_AT.1)) + jitter.range) * factor;
+            let range = if range > 0.0 { range } else { LIGHT_LEAST_RANGE };
+            let [first, second, third] = e.triple(LIGHT_ATTENUATION_AT);
+            out.push(PointLight {
+                position: self.frame.point(local * self.scale),
+                colour,
+                range,
+                flags,
+                attenuation: [third, second, first],
+            });
         }
     }
 
@@ -1299,6 +1410,109 @@ mod tests {
         assert!((out[0].range - 16.5).abs() < 1e-4 && (out[0].colour.x - 1.75).abs() < 1e-5);
         assert!((out[0].position - Vec3::new(11.0, 0.0, 0.0)).length() < 1e-5, "{:?}", out[0].position);
         assert_eq!((out[0].flags, out[1].flags), (0, LIGHT_NOT_EMULATED));
+    }
+
+    /// A light block of `kind` on over the window `low`..`high`, pointing along x, with
+    /// `floats` over the rest.
+    fn light(kind: u32, (low, high): (f32, f32), floats: &[(usize, f32)]) -> Emitter {
+        let mut e = block(1, 224, &[(8, low), (12, high), (40, 1.0), (52, 1.0)], "");
+        e.body[4..8].copy_from_slice(&kind.to_le_bytes());
+        floats.iter().fold(e, |e, &(at, v)| with_word(e, at, v.to_bits()))
+    }
+
+    fn lit(fx: &Instance, now_ms: f64) -> Vec<PointLight> {
+        let mut out = Vec::new();
+        fx.lights(now_ms, &mut out);
+        out
+    }
+
+    /// The construction sphere's light, (5, 5, 10) with a colour jitter of (0.3, 0.3, 0.6) and
+    /// -- an explosion's -- a range jitter: an update of a light that is on takes five draws
+    /// from the lights' state, alpha, blue, green, red, range, each a uniform in ± half of its
+    /// spread (`Effect.dll:0x1000f8c7`–`0x1000faf7`), adds the three colours and the range's to
+    /// what the window gives, and holds them until 100 ms have passed (`0x100081a7`). A light
+    /// outside its window takes no draw (`0x1000f75a`).
+    #[test]
+    fn a_lights_jitter_is_five_draws_an_update_and_holds_for_100_ms() {
+        let colour = [(64, 5.0), (68, 5.0), (72, 10.0), (80, 5.0), (84, 5.0), (88, 10.0)];
+        let spread = [(96, 0.3), (100, 0.3), (104, 0.6), (112, 10.0), (116, 10.0), (120, 2.0)];
+        let on = light(5, (0.0, 1.0), &[&colour[..], &spread[..]].concat());
+        let off = light(5, (0.6, 1.0), &[&colour[..], &spread[..]].concat());
+        let mut whole = effect(TIME_MANUAL, 0.0, 0, vec![off, on]);
+        Rc::get_mut(&mut whole).unwrap().header.scale = [1.0; 3];
+        let mut fx = Instance::new(whole, Frame::along(Vec3::ZERO, Vec3::X, 1.0), 1.0, 0.0, None, 7);
+        fx.value = 0.5;
+        let still = lit(&fx, 0.0);
+        assert_eq!(still.len(), 1, "the first light is outside its window");
+        assert_eq!(
+            (still[0].colour, still[0].range),
+            (Vec3::new(5.0, 5.0, 10.0), 10.0),
+            "no update, no draw"
+        );
+
+        let mut state = Rng::new(light_seed(7));
+        let mut drawn = || {
+            let _alpha = state.spread(0.0);
+            let blue = state.spread(0.6);
+            let green = state.spread(0.3);
+            let red = state.spread(0.3);
+            (Vec3::new(5.0 + red, 5.0 + green, 10.0 + blue), 10.0 + state.spread(2.0))
+        };
+        let first = drawn();
+        fx.update(0.0);
+        let a = lit(&fx, 0.0)[0];
+        assert_eq!((a.colour, a.range), first, "the lit light takes the state's first five draws");
+        assert!(a.colour != Vec3::new(5.0, 5.0, 10.0) && a.range != 10.0);
+        assert!((a.colour - Vec3::new(5.0, 5.0, 10.0)).abs().cmple(Vec3::new(0.15, 0.15, 0.3)).all());
+        assert!((a.range - 10.0).abs() <= 1.0);
+        assert_ne!(a.colour.x - 5.0, a.colour.y - 5.0, "a draw for each channel, not one for all");
+
+        fx.update(50.0);
+        let held = lit(&fx, 50.0)[0];
+        assert_eq!((held.colour, held.range), first, "held until the next update, 100 ms on");
+        fx.update(100.0);
+        let b = lit(&fx, 100.0)[0];
+        assert_eq!((b.colour, b.range), drawn(), "then the next five");
+        assert_ne!(b.colour, a.colour);
+    }
+
+    /// The range's jitter goes on before the frame's stretch, and a range that comes out not
+    /// above 0 becomes 0.01 (`Effect.dll:0x1000faf7`–`0x1000fb8c`): a small range is kept as
+    /// it is, where an earlier reading here held it to at least 0.01 before the stretch.
+    #[test]
+    fn a_range_not_above_0_becomes_a_hundredth() {
+        let none = light(5, (0.0, 1.0), &[(112, 0.0), (116, 0.0)]);
+        let small = light(5, (0.0, 1.0), &[(112, 0.004), (116, 0.004)]);
+        let below = light(5, (0.0, 1.0), &[(112, -3.0), (116, -3.0)]);
+        let mut whole = effect(TIME_MANUAL, 0.0, 0, vec![none, small, below]);
+        Rc::get_mut(&mut whole).unwrap().header.scale = [1.0; 3];
+        let fx = Instance::new(whole, Frame::along(Vec3::ZERO, Vec3::X, 2.0), 1.0, 0.0, None, 1);
+        let ranges: Vec<f32> = lit(&fx, 0.0).iter().map(|l| l.range).collect();
+        assert_eq!(ranges, [LIGHT_LEAST_RANGE, 0.008, LIGHT_LEAST_RANGE]);
+    }
+
+    /// `mineglow`'s light, blue (0, 0, 0.9) with the terms (0, 1, 1): the device's constant
+    /// term is the block's third and its linear the second (`Terrain.dll:0x10030b40`), so it
+    /// falls as 1 ÷ (1 + d) and stops at its range; a surface turned away takes nothing, and
+    /// the guns' (0, 1, 0) is 1 ÷ d, above 1 inside one unit.
+    #[test]
+    fn a_device_light_falls_by_the_blocks_terms_in_reverse_and_stops_at_its_range() {
+        let glow =
+            light(7, (0.0, 1.0), &[(72, 0.9), (88, 0.9), (112, 7.0), (116, 7.0), (128, 1.0), (132, 1.0)]);
+        let flash = light(5, (0.0, 1.0), &[(64, 3.0), (80, 3.0), (112, 30.0), (116, 30.0), (128, 1.0)]);
+        let mut whole = effect(TIME_MANUAL, 0.0, 0, vec![glow, flash]);
+        Rc::get_mut(&mut whole).unwrap().header.scale = [1.0; 3];
+        let fx =
+            Instance::new(whole, Frame::along(Vec3::new(0.0, 0.0, 3.0), Vec3::X, 1.0), 1.0, 0.0, None, 1);
+        let out = lit(&fx, 0.0);
+        assert_eq!((out[0].attenuation, out[1].attenuation), ([1.0, 1.0, 0.0], [0.0, 1.0, 0.0]));
+        let under = out[0].diffuse_at(Vec3::ZERO, Vec3::Z);
+        assert!((under - Vec3::new(0.0, 0.0, 0.9 / 4.0)).length() < 1e-6, "{under}");
+        assert_eq!(out[0].diffuse_at(Vec3::ZERO, Vec3::NEG_Z), Vec3::ZERO, "turned away");
+        assert_eq!(out[0].diffuse_at(Vec3::new(7.0, 0.0, 3.0), Vec3::NEG_X).z, 0.9 / 8.0, "at its range");
+        assert_eq!(out[0].diffuse_at(Vec3::new(7.01, 0.0, 3.0), Vec3::NEG_X), Vec3::ZERO, "past it");
+        let near = out[1].diffuse_at(Vec3::new(0.0, 0.0, 2.5), Vec3::Z);
+        assert!((near.x - 6.0).abs() < 1e-5, "1 / d passes 1 inside a unit: {near}");
     }
 
     /// A building's light glows (`glow_y` and its kin) grow 0.2 → 9 over their window, and a
