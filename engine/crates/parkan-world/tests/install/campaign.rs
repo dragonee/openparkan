@@ -516,6 +516,21 @@ fn c03_m02s_raider_lands_its_winged_ssm_on_the_bunker_from_afar_and_spends_none_
     assert!(at > 250.0, "with the raider still {at:.0} m off");
 }
 
+/// C03 Mission 02's raider is *"Dangerous!"* on the target panel, as the let's play's Part 6 shows
+/// it at 13:44: its winged SSM launchers' round does 60,000, at least the 10,000 the panel asks
+/// for (docs/35, "Name and status"). The enemy's tracked warbots carry nothing so heavy.
+#[test]
+#[ignore = "needs the game install"]
+fn c03_m02s_raider_is_dangerous_and_a_tracked_warbot_is_not() {
+    use parkan_world::cockpit::panels::dangerous;
+
+    let play = campaign_play(gamedir::C03_MISSION_02);
+    let unit = |id: i32| play.units.iter().position(|u| u.logical_id == id).expect("a placed unit");
+    assert!(dangerous(&play, unit(15)), "the Medium Wheel Chassis with two winged SSMs");
+    assert!(dangerous(&play, unit(14)), "the Large one with four");
+    assert!(!dangerous(&play, unit(6)), "Enemy 1's tracked warbot");
+}
+
 /// C03 Mission 02's first objective, every generator captured, follows the player's count both
 /// ways: `c3m2p` completes it on `fn34(BUILDING_GENERATOR) == 3` and calls `OBJECTIVE_PROGRESS`
 /// when the count falls, which puts it back to open without a word (`iron3d.dll:0x10060e44`). The

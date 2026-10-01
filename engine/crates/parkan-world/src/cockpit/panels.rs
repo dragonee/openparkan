@@ -36,6 +36,8 @@ pub const STRING_HUMAN: u32 = 6230;
 pub const STRING_ANIMAL: u32 = 6253;
 pub const STRING_TINY_TOWER: u32 = 6076;
 pub const STRING_METRES: u32 = 6178;
+/// "Dangerous!", under a unit carrying a heavy gun (`0x100766f0`).
+pub const STRING_DANGEROUS: u32 = 6255;
 pub const STRING_NO_ORDER: u32 = 6180;
 pub const STRING_TRANSPORT: u32 = 6200;
 pub const STRING_BUILDER: u32 = 6201;
@@ -472,14 +474,15 @@ fn panel(
     };
     ink.centred(&name, x0, 138.0, 460.0, NAME_COLOUR);
     // A unit of the player's clan gets its status under its name; a hero or a building none.
-    //
-    // STAND-IN: docs/35-hud.md#name-and-status--read-and-seen -- the component value `0x400`
-    // the "Dangerous!" test asks for is not read: no other unit is called dangerous.
-    if let Some(t) = shown.filter(|&t| {
-        !building && play.units[t].type_word != ROBOT_HERO && play.units[t].clan == Some(play.player_clan)
-    }) {
-        let status = status(play, t);
-        ink.centred(&format!("[{}]", cockpit.string(status)), x0, 138.0, 469.0, NAME_COLOUR);
+    // Any other unit is "Dangerous!" in red while it carries a gun whose node has life left and
+    // whose round does at least 10,000 (`0x100766f0`, `IDeviceManager` values `0x400` and 6).
+    if let Some(t) = shown.filter(|&t| !building && play.units[t].type_word != ROBOT_HERO) {
+        if play.units[t].clan == Some(play.player_clan) {
+            let status = status(play, t);
+            ink.centred(&format!("[{}]", cockpit.string(status)), x0, 138.0, 469.0, NAME_COLOUR);
+        } else if dangerous(play, t) {
+            ink.centred(cockpit.string(STRING_DANGEROUS), x0, 138.0, 469.0, DANGEROUS_COLOUR);
+        }
     }
     if !own && distance > 0.0 {
         put(ink, skin, "targeter_range", [108.0, 440.0, 147.0, 456.0]);
@@ -487,6 +490,13 @@ fn panel(
         ink.centred(&text, 112.0, 31.0, 444.0, RANGE_COLOUR);
     }
     Some(view)
+}
+
+/// Whether unit `t` carries a heavy gun: one whose node has life left (value `0x400` above 0) and
+/// whose round does at least 10,000 (value 6, docs/35, "Name and status").
+pub fn dangerous(play: &Play, t: usize) -> bool {
+    play.machine(t)
+        .is_some_and(|r| r.guns.iter().any(|g| !g.broken && g.round_damage >= parkan_sim::guns::HEAVY_ROUND))
 }
 
 /// A unit of the player's clan's status: its head order's string, or "no order".

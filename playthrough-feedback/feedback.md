@@ -152,8 +152,7 @@ the easy level, and its bonus "Part 6.5" (9SBZOCWv_vE), which plays it again fro
 menu. The briefing's 4.5 s black lead-in and 4 s fade-in, its camera, both jump cuts through black
 and its subtitles; the objectives screen; the first cockpit's weapons, counters and radar;
 `c3m2e2`'s two raids on the easy level's clock (the first warning at 12:44, the clock past 622 s,
-and the second at 22:32, past 1120 s, at 7.3–7.5 s a takt) and the raider's *"MWW-4 Warrior /
-Dangerous!"*; the Small Bunker's guns taken from command mode; Enemy 2 taking back the generator
+and the second at 22:32, past 1120 s, at 7.3–7.5 s a takt); the Small Bunker's guns taken from command mode; Enemy 2 taking back the generator
 the player captured within about a minute, the player's generator count falling as it does, and
 the bonus objective completing once the enemies' robots are destroyed (33:32 in Part 6.5);
 *"Vacant vehicle detected..."* by the LSW-1 Warrior, Enter capturing and boarding it, objective 2
@@ -215,6 +214,10 @@ replaces, route 0 completing objective 3, and the win once all three primaries a
     - Fixed 2026-10-01 from the read: `OBJECTIVE_PROGRESS` puts a complete or failed objective back to open without a word (`iron3d.dll:0x10060e44`), `OBJECTIVE_COMPLETE` completes only an open one, and `OBJECTIVE_FAILED` now fails it (state −1) besides showing its string
   - [ ] As on Mission 01, F7's quick save does nothing: the recording saves at 8:38, 12:57, 13:18 and on, and after the failure the panel's L loads the save (13:55–14:00). The engine has neither (queued)
 - Visuals
+  - [x] The target panel never says *"Dangerous!"*
+    - The recording's raider reads *"MWW-4 Warrior"* over a red *"Dangerous!"* at 13:44 and 13:49.5–13:53.5, and the LWW-3 at 30:45
+    - docs/35 reads it for any unit not the player's that carries a gun whose node has life left and whose round does at least 10,000. The engine left it unwritten, a stand-in, and wrongly counted among this mission's matches until 2026-10-01
+    - Fixed 2026-10-01: a gun keeps its round's damage, and the panel says *"Dangerous!"* under a unit carrying one of 10,000 or more
   - [ ] Every building wears the arrow emblem
     - The recording's emblem follows the owner. Enemy 1's Medium Mine wears cell 6 of the insignia sheet `PG27`, a filled triangle over a bar (briefing time 11 s; 37.4 s in Part 6.5, 0:55 in Part 6). The player's Small Bunker wears cell 0, the arrow (2:15 in Part 6.5)
     - `B_LBL_01`'s eight tracks name cells 0, 6, 5, 4, 3, 2, 1, 7, so Enemy 1, clan 1, wears track 1 and the player, clan 0, track 0. The engine draws track 0 on every building (queued: who sets the track). Campaign 02's Outpost emblem may be the same thing

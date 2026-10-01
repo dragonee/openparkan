@@ -1080,6 +1080,9 @@ for a building (its object's slot 11 answering 3). Otherwise:
   damage of the last round it made
   ([13-control.md](13-control.md#not-established)); heavy rounds are 10,000 or
   more ([29-weapons.md](29-weapons.md)).
+  *Seen* in "Let's Play - Parkan: Iron Strategy, Part 6" (-yNnsqudMzw, 13:44):
+  C03 M02's raider, two winged SSM launchers of 60,000 a round, reads
+  *"MWW-4 Warrior"* over *"Dangerous!"* in red.
 
 ### Distance — *read*
 
