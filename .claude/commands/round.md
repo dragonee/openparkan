@@ -78,7 +78,10 @@ findings, the stand-in's current wording, the doc's own "next place to look").
 > against the whole install.
 >
 > **The install** is found by `uv run python -c "from openparkan import gamedir;
-> print(gamedir.find())"`. The Python toolkit `openparkan/` parses the formats;
+> print(gamedir.find())"` from the main checkout; a worktree is one directory too deep for
+> its guess, so export `PARKAN_DIR` with that path in every command that needs it. Your
+> worktree starts at the commit the session began on: run `git merge-base HEAD main`, and
+> if `main` has moved on, rebase onto it before anything else. The Python toolkit `openparkan/` parses the formats;
 > `tests/` checks it against the install; `analysis/pe.py` wraps pefile+capstone
 > for the DLLs (`uv sync --group analysis` first; the recipe is in
 > docs/09-method.md). `engine/` is the Rust engine. `codegraph explore
