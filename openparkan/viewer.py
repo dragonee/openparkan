@@ -303,9 +303,11 @@ def build_map_payload(mesh: landmesh.LandMesh, resolver: TextureResolver, name: 
     # Game space is Z-up with +Y north; WebGL wants Y-up.  Recentre on the way
     # so the camera maths is about a map sitting at the origin.
     # Attributes keep their source precision rather than being widened to
-    # float32: normals are int8 in the file and UVs are 8.8 fixed point, so
-    # storing them narrow is both smaller and closer to what the game shipped.
-    # The viewer restores the UV scale with texture.repeat = 1/256.
+    # float32: normals are int8 in the file and UVs are uint16, so storing
+    # them narrow is both smaller and closer to what the game shipped.
+    # The viewer restores a UV scale with texture.repeat = 1/256, which is
+    # the viewer's own: the game's unit is 1024 (docs/03, "The UV unit is
+    # 1024"), so its ground tiles four times as wide as the viewer's.
     # Terrain positions are quantised the same way object meshes are: int16
     # over the map's own bounding box, dequantised by a scale and offset that
     # the viewer applies to the mesh object rather than to the geometry.
@@ -342,10 +344,12 @@ def build_map_payload(mesh: landmesh.LandMesh, resolver: TextureResolver, name: 
                 min(0xFFFF, round(u * landmesh.UV_FIXED_POINT_SCALE)),
                 min(0xFFFF, round(v * landmesh.UV_FIXED_POINT_SCALE)),
             )
-        # Stream 14 is the weight of layer 1: it is exactly 1.0 on every
-        # vertex that no layer-2 face touches, and drops below it on 46% of
-        # the ones that do.  The viewer draws layer 2 over layer 1 with
-        # alpha 1 - blend, which is the same mix.
+        # Stream 14 is exactly 1.0 on every vertex that no two-material face
+        # touches, and drops below it on 46% of the ones that do.  In the game
+        # it is the alpha of the face's second material, a Land1.wea one,
+        # drawn over its first, and Land2.wea holds the microtextures (docs/03,
+        # "A face's second material").  The viewer still draws an earlier
+        # reading: Land2.wea's material under the first at 1 - blend.
         blend += struct.pack("B", max(0, min(255, round(mesh.blend[i] * 255))))
 
     # One draw group per (layer 1, layer 2, water) combination -- 5 to 8 per

@@ -29,6 +29,58 @@ fn tut_1_builds_its_ground_from_resolved_textures() {
     assert!(near(w.level, -1.7255), "{w:?}");
 }
 
+/// docs/03-terrain.md, "The microtexture is `Land2.wea`'s" and "A face's second material":
+/// on *The Last Bastion*'s map `Land1.wea` is `B_S0, L33, L00, L32` and `Land2.wea`
+/// `DEFAULT, L05, L01, L32`.
+#[test]
+#[ignore = "needs the game install"]
+fn km_6bis_wears_land1s_materials_under_land2s_microtextures() {
+    let game = gamedir::find(None).expect("a Parkan install: set PARKAN_DIR");
+    let dir = terrain::map_dir(&game, "DATA\\MAPS\\KM_6bis\\land").unwrap();
+    let mut store = TextureStore::open(&game).unwrap();
+    let t = terrain::build(&dir, &mut store).unwrap();
+    let name = |i: Option<usize>| i.map(|i| store.textures[i].name.to_ascii_uppercase());
+    let rock = t.groups.iter().find(|g| g.layer1.material == "L33" && g.layer2.is_none()).expect("L33 alone");
+    assert_eq!(name(rock.layer1.still.texture).as_deref(), Some("L33.0"));
+    assert_eq!(
+        name(rock.micro1).as_deref(),
+        Some("L05M.0"),
+        "track 1 of Land2.wea's material at the same index"
+    );
+    // A second material is one of Land1.wea's own, never Land2.wea's L05 or L01, and brings
+    // its own microtexture.
+    let pairs: Vec<_> = t.groups.iter().filter_map(|g| g.layer2.as_ref().map(|l| (g, l))).collect();
+    assert!(!pairs.is_empty());
+    for (g, second) in &pairs {
+        assert!(["L33", "L00", "L32"].contains(&second.material.as_str()), "{}", second.material);
+        let twin = match second.material.as_str() {
+            "L33" => "L05M.0",
+            "L00" => "L01M.0",
+            // L32 has one track, and the manager answers a track it lacks with track 0.
+            _ => "L32.0",
+        };
+        assert_eq!(name(g.micro2).as_deref(), Some(twin));
+    }
+    // The UV unit is 1024: this map's own texture turns once in 256 world units across its
+    // whole width, and its microtexture once in 20 -- 51.2 of the 16-bit unit a world unit,
+    // wrapping at 64 turns.
+    let span = |v: &dyn Fn(usize) -> f32| {
+        let all = (0..t.land.positions.len()).map(v);
+        let (lo, hi) = all.fold((f32::MAX, f32::MIN), |(lo, hi), x| (lo.min(x), hi.max(x)));
+        hi - lo
+    };
+    let width = span(&|i| t.land.positions[i][0]);
+    assert!((span(&|i| t.land.uv1[i][0]) / width - 1.0 / 256.0).abs() < 1e-5);
+    let far = t.land.faces.iter().take(t.land.lod_split()).filter_map(|f| {
+        let [a, b] = [f.vertices[0], f.vertices[1]].map(usize::from);
+        let dx = t.land.positions[b][0] - t.land.positions[a][0];
+        let du = t.land.uv2[b][0] - t.land.uv2[a][0];
+        (dx.abs() > 20.0 && du.abs() < 16.0).then(|| du / dx)
+    });
+    let turns: Vec<f32> = far.collect();
+    assert!(turns.len() > 100 && turns.iter().all(|t| (t.abs() - 0.05).abs() < 2e-4), "{turns:?}");
+}
+
 #[test]
 #[ignore = "needs the game install"]
 fn a_buoys_beam_flickers_through_three_cells_of_sun4_in_pinkish_red() {

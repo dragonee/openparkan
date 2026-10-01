@@ -44,8 +44,8 @@ pub const FOUNDATION_LAYER: u8 = 0;
 /// How far a footing corner's layer-1 UV travels across a world unit.
 ///
 /// The engine multiplies the corner's world x and y by `0.066` (`0x1009a214`) and packs the
-/// result at 1024 to the UV unit (`0x1009a1f4`), while the streams are read here at
-/// [`UV_FIXED_POINT_SCALE`] to the unit: the foundation tiles every 3.8 world units.
+/// result at 1024 to the UV unit (`0x1009a1f4`), the unit the streams are read at
+/// ([`UV_FIXED_POINT_SCALE`]): the foundation tiles every 15.15 world units.
 pub const FOUNDATION_PER_UNIT: f32 = 0.066 * (1024.0 / UV_FIXED_POINT_SCALE);
 
 /// How far apart the apron's inner edge is sampled along the contour, in world units.
@@ -505,7 +505,7 @@ mod tests {
         let c = f.faces[0].corners[0];
         assert!((c.uv1[0] - c.position[0] * FOUNDATION_PER_UNIT).abs() < 1e-6);
         assert!((c.uv1[1] - c.position[1] * FOUNDATION_PER_UNIT).abs() < 1e-6);
-        assert!((FOUNDATION_PER_UNIT - 0.264).abs() < 1e-6, "3.8 world units a tile");
+        assert!((FOUNDATION_PER_UNIT - 0.066).abs() < 1e-6, "15.15 world units a tile");
     }
 
     #[test]

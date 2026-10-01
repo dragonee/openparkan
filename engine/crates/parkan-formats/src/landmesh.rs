@@ -17,7 +17,12 @@ pub const STREAM_UV2: u32 = 18;
 pub const STREAM_FACE: u32 = 21;
 pub const FACE_STRIDE: usize = 28;
 pub const NO_TEXTURE: u8 = 0xFF;
-pub const UV_FIXED_POINT_SCALE: f32 = 256.0;
+/// The engine's UV unit: a stream's `uint16` pair is that many to one turn of the texture
+/// (`Terrain.dll:0x10035070` keeps `1.0 / 1024.0` at `0x100a5c6c`, and every strided expansion
+/// scales a `uint16` UV by it, `0x10038876`; the landscape's own face query the same,
+/// `0x100227cf` into `0x100a5a04`). Stream 18's gradient is 51.2 a world unit on all 33 maps,
+/// which is the unread setting `MicroTexScale`'s 0.05 at this unit (docs/03, "The UV unit").
+pub const UV_FIXED_POINT_SCALE: f32 = 1024.0;
 pub const SURFACE_WATER_BIT: u16 = 0x02;
 pub const FLAGS_LIQUID_BED_BIT: u16 = 0x2000;
 /// The two levels of detail a map is stored at.
@@ -33,8 +38,11 @@ pub struct Face {
     pub adjacency: [u16; 3],
     pub flags: u16,
     pub surface: u16,
+    /// The face's material, an index into `Land1.wea`; its microtexture is the material at the
+    /// same index of `Land2.wea`.
     pub tex1: u8,
-    /// `NO_TEXTURE` when the face has no second layer.
+    /// A second material drawn over the first, an index into the same two tables;
+    /// `NO_TEXTURE` when the face has none.
     pub tex2: u8,
     pub normal: [f32; 3],
     pub edge_twins: u16,
@@ -56,9 +64,14 @@ pub struct Cell {
 pub struct LandMesh {
     pub positions: Vec<[f32; 3]>,
     pub normals: Vec<[f32; 3]>,
+    /// Stream 5, the first texture stage's coordinates: the material's own texture, across
+    /// 170 to 256 world units a turn.
     pub uv1: Vec<[f32; 2]>,
+    /// Stream 18, the second stage's: the microtexture, a turn every 20 world units.
     pub uv2: Vec<[f32; 2]>,
-    /// The weight of layer 1: the ground is `mix(layer2, layer1, blend)`.
+    /// Stream 14, the vertex alpha of a face's **second** material, which is drawn over its
+    /// first (`Terrain.dll:0x1002c000`, alpha mode 2 and `SRCALPHA`/`INVSRCALPHA`): the
+    /// ground is `mix(first, second, blend)`. 1.0 on every vertex no such face touches.
     pub blend: Vec<f32>,
     pub faces: Vec<Face>,
     pub cells: Vec<Cell>,
@@ -67,7 +80,12 @@ pub struct LandMesh {
     /// (`Terrain.dll:0x100178e6`–`0x1001794f`). 16 x 16 on 28 of the 33 shipped maps and
     /// 8 x 8 on the other five.
     pub grid: [usize; 2],
+    /// `Land1.wea`: the materials a face's two bytes index, its first and its second alike.
     pub layer1: Vec<String>,
+    /// `Land2.wea`, index for index with `Land1.wea`: the material whose track 1 is the
+    /// **microtexture** of the one at the same index (`Terrain.dll:0x10017215` loads it as the
+    /// landscape manager's second wear, and the cell draw asks for it under that wear's index,
+    /// `0x100445c0`). Not a second layer's table: a face's second byte indexes `Land1.wea`.
     pub layer2: Vec<String>,
 }
 

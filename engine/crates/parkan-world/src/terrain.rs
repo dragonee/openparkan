@@ -1,9 +1,11 @@
 //! A map's ground, ready to draw: level-0 geometry grouped by the pair of
 //! materials a face wears, and the textures those materials name.
 //!
-//! See `docs/03-terrain.md`: layer names are materials, not textures; the
-//! ground is `mix(layer2, layer1, blend)` in one pass; one level of detail is
-//! drawn, never both.
+//! See `docs/03-terrain.md`: a face's two bytes both index `Land1.wea`, whose names are
+//! materials; each material's **microtexture** is track 1 of the material at the same index
+//! of `Land2.wea`, drawn as a second texture stage on stream 18's coordinates and doubled
+//! (render phase 9); the face's second material is drawn over its first on stream 14's alpha;
+//! one level of detail is drawn, never both.
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -18,22 +20,38 @@ use crate::textures::{Look, TextureStore};
 pub struct Vertex {
     pub position: [f32; 3],
     pub normal: [f32; 3],
+    /// The material's own texture's coordinates, stream 5.
     pub uv1: [f32; 2],
+    /// The microtexture's, stream 18.
     pub uv2: [f32; 2],
-    /// The weight of layer 1.
+    /// The alpha of the face's second material over its first, stream 14.
     pub blend: f32,
 }
 
-/// One material as the ground wears it: its texture, tinted by its diffuse colour.
+/// One material as the ground wears it: its texture, lit by its own colours.
 pub type Layer = Look;
+
+/// The landscape face flag the microtexture is drawn under (`Terrain.dll:0x1004456a`): every
+/// shipped face carries it in its constant `0x600`, and a basement face's `0x300` does not.
+pub const FACE_MICROTEXTURED: u16 = 0x400;
 
 /// Faces that wear the same layer pair, as a range of `Terrain::indices`.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Group {
     pub start: u32,
     pub count: u32,
+    /// The face's material, `Land1.wea` at its first byte.
     pub layer1: Layer,
+    /// That material's microtexture: the texture of track 1 of `Land2.wea`'s material at the
+    /// same index, or of its track 0 where it has one track (the manager holds a track outside
+    /// a material's count to 0, `World3D.dll:0x1000322f`). `None` where none is drawn: on
+    /// water, and on a face without [`FACE_MICROTEXTURED`].
+    pub micro1: Option<usize>,
+    /// The face's second material, `Land1.wea` at its second byte, drawn over the first on
+    /// the vertices' [`Vertex::blend`].
     pub layer2: Option<Layer>,
+    /// The second material's microtexture.
+    pub micro2: Option<usize>,
     pub water: bool,
     /// A liquid's bed (face flag `0x2000`), which is not drawn while the camera is above the
     /// liquid (`Terrain.dll:0x10043c43`).
@@ -90,17 +108,19 @@ impl Terrain {
                     self.vertices.push(corner);
                 }
             }
-            let name1 = self.land.layer1.get(usize::from(tex1)).cloned().unwrap_or_default();
-            let layer1 = store.look(&name1)?;
-            let layer2 = match self.land.layer2.get(usize::from(tex2)) {
-                Some(name) if tex2 != NO_TEXTURE => Some(store.look(name)?),
-                _ => None,
+            // A basement face's flags are 0x300, without the microtexture's 0x400.
+            let (layer1, _) = surface(&self.land, store, tex1, false)?;
+            let layer2 = match tex2 {
+                NO_TEXTURE => None,
+                _ => Some(surface(&self.land, store, tex2, false)?.0),
             };
             self.groups.push(Group {
                 start,
                 count: facets.len() as u32 * 3,
                 layer1,
+                micro1: None,
                 layer2,
+                micro2: None,
                 water: false,
                 bed: false,
                 basement: true,
@@ -108,6 +128,25 @@ impl Terrain {
         }
         Ok(())
     }
+}
+
+/// The material at `index` of `Land1.wea` and, where `micro`, its microtexture: the texture of
+/// track 1 of `Land2.wea`'s material at the same index (`Terrain.dll:0x1002b4a7`, the handle
+/// `index + (wear << 16)` built at `0x100445c0` with the second wear's index the landscape
+/// keeps from loading `Land2.wea`, `0x10017215` → `0x10018cef`).
+fn surface(
+    land: &LandMesh,
+    store: &mut TextureStore,
+    index: u8,
+    micro: bool,
+) -> Result<(Layer, Option<usize>)> {
+    let name = land.layer1.get(usize::from(index)).cloned().unwrap_or_default();
+    let look = store.look(&name)?;
+    let micro = match land.layer2.get(usize::from(index)) {
+        Some(twin) if micro => store.look_on_track(twin, 1)?.still.texture,
+        _ => None,
+    };
+    Ok((look, micro))
 }
 
 /// The box `land`'s water faces' vertices widen from empty (`0x1001d5d0`), its corners handed
@@ -151,32 +190,44 @@ pub fn build(map_dir: &Path, store: &mut TextureStore) -> Result<Terrain> {
         })
         .collect();
 
-    let mut buckets: BTreeMap<(u8, u8, bool, bool), Vec<usize>> = BTreeMap::new();
+    let mut buckets: BTreeMap<(u8, u8, bool, bool, bool), Vec<usize>> = BTreeMap::new();
     for fi in land.lod_faces(0) {
         let f = &land.faces[fi];
+        // The microtexture is the second stage of every face that carries the flag and is not
+        // water (`Terrain.dll:0x1002b49d`, `0x1004456a`).
+        //
+        // STAND-IN: docs/03-terrain.md#not-established -- a water face drawn without its
+        // reflection takes the microtexture in passes of its own, within 260 units of the eye
+        // over the field of view and at an alpha of at most 0.3 (`0x1002b512` on); here it
+        // takes none.
+        let micro = f.flags & FACE_MICROTEXTURED != 0 && !f.is_water();
         buckets
-            .entry((f.tex1, f.tex2, f.is_water(), f.flags & FLAGS_LIQUID_BED_BIT != 0))
+            .entry((f.tex1, f.tex2, f.is_water(), f.flags & FLAGS_LIQUID_BED_BIT != 0, micro))
             .or_default()
             .push(fi);
     }
     let mut indices = Vec::new();
     let mut groups = Vec::new();
-    for ((tex1, tex2, water, bed), faces) in buckets {
+    for ((tex1, tex2, water, bed, micro), faces) in buckets {
         let start = indices.len() as u32;
         for fi in &faces {
             indices.extend(land.faces[*fi].vertices.map(u32::from));
         }
-        let name1 = land.layer1.get(usize::from(tex1)).cloned().unwrap_or_default();
-        let layer1 = store.look(&name1)?;
-        let layer2 = match land.layer2.get(usize::from(tex2)) {
-            Some(name) if tex2 != NO_TEXTURE => Some(store.look(name)?),
-            _ => None,
+        let (layer1, micro1) = surface(&land, store, tex1, micro)?;
+        let (layer2, micro2) = match tex2 {
+            NO_TEXTURE => (None, None),
+            _ => {
+                let (look, twin) = surface(&land, store, tex2, micro)?;
+                (Some(look), twin)
+            }
         };
         groups.push(Group {
             start,
             count: faces.len() as u32 * 3,
             layer1,
+            micro1,
             layer2,
+            micro2,
             water,
             bed,
             basement: false,

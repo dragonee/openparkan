@@ -16,6 +16,7 @@ pub mod flare;
 pub mod frame;
 pub mod hud;
 pub mod models;
+pub mod shade;
 pub mod sprites;
 pub mod terrain;
 pub mod text;
@@ -109,9 +110,10 @@ impl Gpu {
 }
 
 pub struct Renderer {
-    format: wgpu::TextureFormat,
-    /// The same target without its sRGB decoding, which the HUD's art and text blend in, as
-    /// the game's 16-bit surfaces did.
+    /// The format everything is drawn in: the target's, read without sRGB decoding. The game's
+    /// device writes and blends the values its surface holds, the scene's as much as the
+    /// HUD's, so the frame is written with the stored values and no encoding between
+    /// (docs/10-sky.md, "The frame holds what the files hold").
     display: wgpu::TextureFormat,
     solid: wgpu::RenderPipeline,
     lines: wgpu::RenderPipeline,
@@ -146,7 +148,10 @@ pub struct Renderer {
 }
 
 impl Renderer {
+    /// A renderer for a target of `format`, which it draws into through a view of the same
+    /// format without the sRGB suffix ([`Renderer::display_format`]).
     pub fn new(device: &wgpu::Device, format: wgpu::TextureFormat) -> Self {
+        let display = format.remove_srgb_suffix();
         let shader = device.create_shader_module(wgpu::include_wgsl!("shader.wgsl"));
         let camera = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("camera"),
@@ -204,15 +209,14 @@ impl Renderer {
                     module: &shader,
                     entry_point: Some("fs_main"),
                     compilation_options: Default::default(),
-                    targets: &[Some(format.into())],
+                    targets: &[Some(display.into())],
                 }),
                 multiview_mask: None,
                 cache: None,
             })
         };
         Self {
-            format,
-            display: format.remove_srgb_suffix(),
+            display,
             solid: pipeline(wgpu::PrimitiveTopology::TriangleList, "solid"),
             lines: pipeline(wgpu::PrimitiveTopology::LineList, "lines"),
             camera,
@@ -241,11 +245,7 @@ impl Renderer {
         }
     }
 
-    pub fn format(&self) -> wgpu::TextureFormat {
-        self.format
-    }
-
-    /// The format the HUD is drawn in: the target's, read without sRGB decoding.
+    /// The format the frame is drawn in: the target's, read without sRGB decoding.
     pub fn display_format(&self) -> wgpu::TextureFormat {
         self.display
     }
@@ -281,8 +281,8 @@ impl Renderer {
         objects: Option<&parkan_world::models::Objects>,
     ) {
         let bank = GpuTextures::new(device, queue, textures);
-        self.terrain = terrain.map(|t| TerrainRenderer::new(device, queue, self.format, t, &bank));
-        self.objects = objects.map(|o| ModelRenderer::new(device, self.format, o, &bank));
+        self.terrain = terrain.map(|t| TerrainRenderer::new(device, queue, self.display, t, &bank));
+        self.objects = objects.map(|o| ModelRenderer::new(device, self.display, o, &bank));
         self.reflection_frame = self.objects.as_ref().map(|o| o.view_frame(device));
         self.bank = Some(bank);
     }
@@ -292,8 +292,8 @@ impl Renderer {
         if self.bodies.is_none()
             && let Some(bank) = &self.bank
         {
-            // The scene's format, not the display's: a body draws in the dome's own pass.
-            self.bodies = Some(body::BodyRenderer::new(device, self.format, bank));
+            // A body draws in the dome's own pass.
+            self.bodies = Some(body::BodyRenderer::new(device, self.display, bank));
         }
         self.body_sprites = sprites;
     }
@@ -320,7 +320,7 @@ impl Renderer {
     /// nebula and clouds draw with textures from its bank.
     pub fn set_dome(&mut self, device: &wgpu::Device, positions: &[glam::Vec3], indices: &[u32]) {
         if let Some(bank) = &self.bank {
-            let dome = dome::DomeRenderer::new(device, self.format, positions, indices, bank);
+            let dome = dome::DomeRenderer::new(device, self.display, positions, indices, bank);
             self.dome = Some((dome, Vec::new()));
         }
     }
@@ -465,7 +465,7 @@ impl Renderer {
         objects: &parkan_world::models::Objects,
     ) {
         let bank = GpuTextures::new(device, queue, textures);
-        self.previews = Some(ModelRenderer::new(device, self.format, objects, &bank));
+        self.previews = Some(ModelRenderer::new(device, self.display, objects, &bank));
         self.preview_bank = Some(bank);
         // Frames made for the old previews' layout are not kept.
         self.views.retain(|(v, _)| !v.previews);
@@ -527,13 +527,12 @@ impl Renderer {
         }
     }
 
-    /// Draw the scene into `target`, a view of a `width` × `height` texture, and the HUD into
-    /// `display`, a view of the same texture in [`Renderer::display_format`].
+    /// Draw the scene and the HUD into `display`, a view of a `width` × `height` texture in
+    /// [`Renderer::display_format`].
     pub fn draw(
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        target: &wgpu::TextureView,
         display: &wgpu::TextureView,
         (width, height): (u32, u32),
         view_proj: Mat4,
@@ -553,7 +552,7 @@ impl Renderer {
         }
         queue.write_buffer(&self.camera, 0, bytemuck::bytes_of(&view_proj.to_cols_array()));
         if let Some((dome, colours)) = &self.dome {
-            dome.prepare(queue, view_proj, self.lighting.eye, colours);
+            dome.prepare(queue, view_proj, &self.lighting, colours);
         }
         if let Some(bodies) = self.bodies.as_mut() {
             bodies.prepare(queue, view_proj, self.lighting.eye, &self.body_sprites);
@@ -655,7 +654,7 @@ impl Renderer {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("scene"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: target,
+                    view: display,
                     depth_slice: None,
                     resolve_target: None,
                     ops: wgpu::Operations { load: wgpu::LoadOp::Clear(clear), store: wgpu::StoreOp::Store },
@@ -701,8 +700,7 @@ impl Renderer {
             }
         }
         let depth = &self.depth.as_ref().expect("made above").0;
-        // The effects over the scene, blending in display space as the game's device blends what
-        // its surface holds.
+        // The effects over the scene, in a pass of their own after it.
         if let Some(sprites) = &self.sprites {
             let mut pass = pass_over(&mut encoder, display, depth, "effects", wgpu::LoadOp::Load);
             sprites.draw(&mut pass);
@@ -712,12 +710,12 @@ impl Renderer {
             let mut pass = pass_over(&mut encoder, display, depth, "flare", wgpu::LoadOp::Load);
             f.draw(&mut pass);
         }
-        self.draw_views(&mut encoder, target, depth, (width, height), true);
+        self.draw_views(&mut encoder, display, depth, (width, height), true);
         if let Some(ui) = &self.ui {
             let mut pass = pass_over(&mut encoder, display, depth, "hud under", wgpu::LoadOp::Load);
             ui.draw(&mut pass, Layer::UnderViews);
         }
-        self.draw_views(&mut encoder, target, depth, (width, height), false);
+        self.draw_views(&mut encoder, display, depth, (width, height), false);
         {
             let mut pass = pass_over(&mut encoder, display, depth, "overlay", wgpu::LoadOp::Load);
             if let Some(ui) = &self.ui {
@@ -836,14 +834,7 @@ pub fn capture(
         format: Some(CAPTURE_FORMAT.remove_srgb_suffix()),
         ..Default::default()
     });
-    renderer.draw(
-        device,
-        &gpu.queue,
-        &texture.create_view(&Default::default()),
-        &display,
-        (width, height),
-        view_proj,
-    );
+    renderer.draw(device, &gpu.queue, &display, (width, height), view_proj);
 
     let row = 4 * width;
     let padded = row.div_ceil(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT) * wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;

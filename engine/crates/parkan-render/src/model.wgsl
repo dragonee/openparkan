@@ -1,7 +1,8 @@
-// Placed objects: a texture lit fixed-function style, per instance transform.
+// Placed objects: a texture by the colours the game's shade gives each vertex, per instance
+// transform (shade.wgsl is prepended).
 
 // A point light as the shade's lighter takes it (Terrain.dll:0x1004eacc-0x1004ecc9): where it
-// stands and its range; its colour, display space, and the owner it lights alone; its
+// stands and its range; its colour, as the files give it, and the owner it lights alone; its
 // constant, linear and quadratic attenuation.
 struct PointLight {
     position: vec4<f32>,
@@ -12,16 +13,16 @@ struct PointLight {
 struct Frame {
     view_proj: mat4x4<f32>,
     // The sun object's two directional lights: the direction each travels, and its
-    // colour in the files' display space (docs/10-sky.md).
+    // colour as the files give it (docs/10-sky.md).
     light_direction: vec4<f32>,
     light_colour: vec4<f32>,
     second_direction: vec4<f32>,
     second_colour: vec4<f32>,
-    // The colour added to every material's emissive (sky slot 20), display space.
+    // The floor under every lit colour (sky slot 20).
     scene_colour: vec4<f32>,
-    // Linear.
+    // As the files give it.
     fog_colour: vec4<f32>,
-    // x start, y end: linear range fog from the eye (docs/10-sky.md, "Fog"); z the height
+    // x start, y end of the fog, from the eye (docs/10-sky.md, "Fog"); z the height
     // nothing below draws at where w is 1, a reflection's clip plane.
     fog: vec4<f32>,
     // The eye; w its field of view across, radians.
@@ -34,25 +35,6 @@ struct Frame {
     point_counts: vec4<f32>,
     points: array<PointLight, 64>,
 };
-
-// A display-space colour as the linear value an sRGB target needs (frame.rs `linear`).
-fn linear(c: vec3<f32>) -> vec3<f32> {
-    let low = c / 12.92;
-    let high = pow((max(c, vec3<f32>(0.0)) + 0.055) / 1.055, vec3<f32>(2.4));
-    return select(high, low, c <= vec3<f32>(0.04045));
-}
-
-// The scene's linear range fog: the game asks Direct3D for it on the distance to the eye and
-// lets the device compute it per vertex (docs/10, "Nobody reads ForceSWFog" -- the one setting
-// that might have said otherwise is read by nothing in the install). Taken per fragment here,
-// which is the same fog without the seams a coarse mesh gives it.
-fn fogged(colour: vec3<f32>, world: vec3<f32>, toward: vec4<f32>) -> vec3<f32> {
-    let d = distance(world, frame.eye.xyz);
-    let span = max(frame.fog.y - frame.fog.x, 0.001);
-    let keep = clamp((frame.fog.y - d) / span, 0.0, 1.0);
-    let fog = mix(frame.fog_colour.rgb, toward.rgb, toward.w);
-    return mix(fog, colour, keep);
-}
 
 struct Instance {
     model: mat4x4<f32>,
@@ -99,9 +81,10 @@ fn point_lights(world: vec3<f32>, normal: vec3<f32>, owner: f32) -> vec3<f32> {
 }
 
 struct Look {
-    // The material's own colours, display space.
+    // The material's own colours, as the files give them: its diffuse with its ambient alpha,
+    // and its ambient, the self-light.
     diffuse: vec4<f32>,
-    emissive: vec4<f32>,
+    ambient: vec4<f32>,
     // The fog colour this material's blend mode draws toward; w 1 where it overrides.
     fog: vec4<f32>,
     // The cell's rectangle: u0, v0, du, dv.
@@ -113,6 +96,8 @@ struct Look {
     // Its fade under a field of one radian: where it starts, where it is whole; z 1 where it
     // runs on the square root of the distance.
     portal_range: vec4<f32>,
+    // The material's specular colour; w its power word, 0 for no highlight.
+    specular: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> frame: Frame;
@@ -139,23 +124,13 @@ struct VertexOut {
     @location(4) lightmap: vec2<f32>,
     // The alpha a portal quad draws with in place of its material's; 1 on anything else.
     @location(5) fade: f32,
-    // What the point lights give the vertex.
-    @location(6) points: vec3<f32>,
-    // A painted vertex's specular, display space: what its lit colour passes 1 by.
-    @location(7) gloss: vec3<f32>,
+    // The vertex's two colours as the shade leaves them: the diffuse, which the texture stages
+    // modulate, and the specular, added after; w of the second is what the fog keeps.
+    @location(6) lit: vec3<f32>,
+    @location(7) spill: vec4<f32>,
+    // A painted vertex's specular: what its lit colour passes 1 by.
+    @location(8) gloss: vec3<f32>,
 };
-
-// The lit colour's knee and the specular's (frame.rs `knee`, `specular_knee`;
-// Terrain.dll:0x1004f25a, 0x1004f4c3).
-fn knee(c: vec3<f32>) -> vec3<f32> {
-    let bent = min(c / 6.0 + vec3<f32>(5.0 / 6.0), vec3<f32>(2.0));
-    return select(bent, c, c <= vec3<f32>(1.0));
-}
-
-fn specular_knee(s: vec3<f32>) -> vec3<f32> {
-    let bent = min(0.1 * s + vec3<f32>(0.7), vec3<f32>(1.0));
-    return select(bent, 0.8 * s, s <= vec3<f32>(1.0));
-}
 
 // A portal quad's alpha by the eye's distance from its first corner (Terrain.dll:0x1002c4d0,
 // docs/24, "A building is drawn cell by cell through its portals"): 0 up to where its fade
@@ -185,24 +160,57 @@ fn vs_main(v: VertexIn) -> VertexOut {
     out.lightmap = v.lightmap;
     out.paint = instance.paint;
     out.fade = portal_fade();
-    out.points = point_lights(world.xyz, out.normal, instance.owner.x);
+    // The shade (`CShade::ShadeIndexedStrided`, Terrain.dll:0x1004df70) colours the vertex,
+    // and the device carries the colour across the face, so it is formed here. The item's
+    // lights: the sun's two, and the effects' point lights in the list beside them.
+    var n = vec3<f32>(0.0);
+    if dot(out.normal, out.normal) > 0.0 {
+        // The normal as the model's frame turns it; the matrix's scale goes with the length.
+        n = normalize(out.normal);
+    }
+    let a = shade_cosine(n, frame.light_direction.xyz);
+    let b = shade_cosine(n, frame.second_direction.xyz);
+    let lights = frame.light_colour.rgb * a
+        + frame.second_colour.rgb * b
+        + point_lights(world.xyz, out.normal, instance.owner.x);
+    let scene = frame.scene_colour.rgb;
     out.gloss = vec3<f32>(0.0);
     if frame.paint.x > 0.5 {
         // The camera's mode 2 (docs/35, "The unit in the middle"): the batch's self-light is
         // the colour the camera was handed, its texture is none, and its diffuse stays its
-        // own. The shade's lighter then colours the vertex (frame.rs `shade`,
-        // `CShade::ShadeIndexedStrided`): the view's lights on the diffuse plus the self-light,
-        // held up to the scene colour, through the knee, what passes 1 going to the specular.
-        // The colour is a vertex's and the device carries it across the face, so it is formed
-        // here.
-        let n = normalize(out.normal);
-        let a = max(dot(n, -frame.light_direction.xyz), 0.0);
-        let b = max(dot(n, -frame.second_direction.xyz), 0.0);
-        let lights = frame.light_colour.rgb * a + frame.second_colour.rgb * b + out.points;
-        let lit = knee(max(instance.paint.rgb + look.diffuse.rgb * lights, frame.scene_colour.rgb));
-        out.paint = vec4<f32>(min(lit, vec3<f32>(1.0)), 1.0);
-        out.gloss = specular_knee(max(lit - vec3<f32>(1.0), vec3<f32>(0.0)));
+        // own: the view's lights on the diffuse plus the self-light, held up to the scene
+        // colour, through the knee, what passes 1 going to the specular.
+        let painted = shade_lit(look.diffuse.rgb * lights, vec3<f32>(0.0), instance.paint.rgb, scene);
+        out.paint = vec4<f32>(painted.diffuse, 1.0);
+        out.gloss = painted.specular;
     }
+    // The world's own draw: the lights on the material's diffuse, and their highlights on its
+    // specular. A batch that takes a lightmap has had its diffuse made its self-light and its
+    // diffuse and power made 0 before this (`0x1002c1a0`, docs/07, "How a lightmapped batch
+    // is drawn"), so no light reaches it and the scene colour is the floor under that colour
+    // alone.
+    var diffuse = look.diffuse.rgb * lights;
+    var highlight = vec3<f32>(0.0);
+    var ambient = look.ambient.rgb;
+    if look.lit.x > 0.5 {
+        diffuse = vec3<f32>(0.0);
+        ambient = look.diffuse.rgb;
+    } else {
+        let to_eye = normalize(frame.eye.xyz - world.xyz);
+        // STAND-IN: docs/10-sky.md#the-lit-colour-is-the-games-own--read-and-measured -- a
+        // point light's highlight is taken the same way (Ngi32.dll:0x100166b5); here the
+        // sun's two alone.
+        highlight = look.specular.rgb
+            * (frame.light_colour.rgb * shade_highlight(n, frame.light_direction.xyz, to_eye, a, look.specular.w)
+                + frame.second_colour.rgb
+                    * shade_highlight(n, frame.second_direction.xyz, to_eye, b, look.specular.w));
+    }
+    let shaded = shade_lit(diffuse, highlight, ambient, scene);
+    out.lit = shaded.diffuse;
+    out.spill = vec4<f32>(
+        shaded.specular,
+        shade_fog(distance(world.xyz, frame.eye.xyz), frame.fog.x, frame.fog.y),
+    );
     return out;
 }
 
@@ -214,34 +222,24 @@ fn fs_main(v: VertexOut) -> @location(0) vec4<f32> {
     if frame.paint.x > 0.5 {
         // Stage 0 has no texture in mode 2, so the vertex's colour is the pixel's, and the
         // device adds the specular after it (docs/37, "The scan bands").
-        return vec4<f32>(linear(min(v.paint.rgb + v.gloss, vec3<f32>(1.0))), 1.0);
+        return vec4<f32>(min(v.paint.rgb + v.gloss, vec3<f32>(1.0)), 1.0);
     }
     // The cell rewrites the coordinates in place: u0 + u × du, v0 + v × dv.
     let texel = textureSample(skin, skin_sampler, look.cell.xy + v.uv * look.cell.zw);
     let baked = textureSample(lightmap, skin_sampler, v.lightmap);
+    // What the fog draws toward: the frame's colour, or the one the blend mode swaps in.
+    let fog = mix(frame.fog_colour.rgb, look.fog.rgb, look.fog.w);
     if look.lit.x > 0.5 {
-        // A lit batch (docs/07, "How a lightmapped batch is drawn"): the material's diffuse
-        // becomes its self-light and its diffuse 0, so no light reaches it; the emissive is
-        // the scene colour plus that diffuse, held to 1, and the texture and the lightmap
-        // modulate it. Its alpha is the material's ambient alpha alone.
-        let emissive = min(vec3<f32>(1.0), frame.scene_colour.rgb + look.diffuse.rgb);
-        let colour = texel.rgb * baked.rgb * linear(emissive);
-        return vec4<f32>(fogged(colour, v.world, look.fog), look.diffuse.a);
+        // A lit batch (docs/07, "How a lightmapped batch is drawn"): the texture and the
+        // lightmap modulate the vertex's colour -- render phase 3 -- and the specular is added.
+        // Its alpha is the material's ambient alpha alone.
+        let colour = min(texel.rgb * baked.rgb * v.lit + v.spill.rgb, vec3<f32>(1.0));
+        return vec4<f32>(mix(fog, colour, v.spill.w), look.diffuse.a);
     }
-    let n = normalize(v.normal);
-    let a = max(dot(n, -frame.light_direction.xyz), 0.0);
-    let b = max(dot(n, -frame.second_direction.xyz), 0.0);
-    // D3D's lit vertex colour, modulated by the texture: emissive (the material's ambient
-    // colour plus the scene colour the sky adds to every material) and the diffuse lights,
-    // held to 1 as fixed-function lighting holds it, then decoded. The alpha is the
+    // The texture by the vertex's diffuse colour, the specular added, each held to 1 as the
+    // device holds it, and the fog's share taken from the specular's alpha. The alpha is the
     // texture's times the material's ambient alpha.
-    // The effects' point lights are in the item's list beside the sun's two, summed with them.
-    let lights = frame.light_colour.rgb * a + frame.second_colour.rgb * b + v.points;
-    let lit = clamp(
-        look.emissive.rgb + frame.scene_colour.rgb + look.diffuse.rgb * lights,
-        vec3<f32>(0.0),
-        vec3<f32>(1.0),
-    );
+    let colour = min(texel.rgb * v.lit + v.spill.rgb, vec3<f32>(1.0));
     // A portal quad's fade stands in for the material's ambient alpha (Terrain.dll:0x1002c63a).
     let alpha = texel.a * select(look.diffuse.a, v.fade, look.portal.w > 0.5);
     // Every blend mode but 0 alpha-tests GREATEREQUAL against ALPHAREF 1 (docs/07, "What a
@@ -249,5 +247,5 @@ fn fs_main(v: VertexOut) -> @location(0) vec4<f32> {
     if look.lit.y > 0.5 && round(alpha * 255.0) < 1.0 {
         discard;
     }
-    return vec4<f32>(fogged(texel.rgb * linear(lit), v.world, look.fog), alpha);
+    return vec4<f32>(mix(fog, colour, v.spill.w), alpha);
 }

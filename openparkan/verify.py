@@ -594,9 +594,39 @@ def check_uv(check, game: Path) -> None:
     (minx, miny, _), (maxx, maxy, _) = m.bounds()
     for i, (x, y, _) in enumerate(m.positions):
         u, v = m.uv1[i]
-        worst = max(worst, abs(u - x / 50.0), abs(v - (maxy - y) / 50.0))
-    check("Land.msh: layer-1 UV == world XY / 50", worst < 0.35,
-          f"SC_3 worst residual {worst:.3f} texel units")
+        worst = max(worst, abs(u - x / 200.0), abs(v - (maxy - y) / 200.0))
+    check("Land.msh: stream 5 == world XY / 200 on SC_3, at 1024 to the turn", worst < 0.09,
+          f"SC_3 worst residual {worst:.3f} of a turn")
+
+    # Stream 18's gradient across a face, in uint16 a world unit: the same on
+    # every map, which is what makes it the microtexture's mapping.
+    grads: list[float] = []
+    base_turns: list[float] = []
+    for folder in gamedir.maps(game):
+        mesh = landmesh.load(folder / "Land.msh")
+        archive = NResArchive.open(folder / "Land.msh")
+        per_map: dict[int, list[float]] = {}
+        for stream in (landmesh.STREAM_UV1, landmesh.STREAM_UV2):
+            raw = archive.one_of_type(stream)
+            us = [struct.unpack_from("<h", raw, 4 * i)[0] for i in range(mesh.vertex_count)]
+            found = per_map.setdefault(stream, [])
+            for a, b, c in mesh.faces[:2000]:
+                (x0, y0, _), (x1, y1, _), (x2, y2, _) = (mesh.positions[i] for i in (a, b, c))
+                det = (x1 - x0) * (y2 - y0) - (x2 - x0) * (y1 - y0)
+                d1, d2 = us[b] - us[a], us[c] - us[a]
+                if abs(det) > 1e-3 and max(abs(d1), abs(d2)) < 20000:
+                    found.append(abs((d1 * (y2 - y0) - d2 * (y1 - y0)) / det))
+        grads.append(statistics.median(per_map[landmesh.STREAM_UV2]))
+        base_turns.append(
+            landmesh.UV_FIXED_POINT_SCALE / statistics.median(per_map[landmesh.STREAM_UV1]))
+    check("Land.msh: stream 18 turns once in 20 world units on every map, the microtexture",
+          grads and all(abs(g - 51.2) < 0.05 for g in grads)
+          and landmesh.MICROTEXTURE_PER_UNIT * landmesh.UV_FIXED_POINT_SCALE == 51.2
+          and max(base_turns) > 2 * min(base_turns),
+          f"its gradient is {min(grads):.2f} to {max(grads):.2f} uint16 a world unit on all "
+          f"{len(grads)} maps: 51.2, which at 1024 to the turn is 0.05 a unit, the setting "
+          f"MicroTexScale nothing reads.  Stream 5 varies by map instead, one turn in "
+          f"{min(base_turns):.0f} to {max(base_turns):.0f} units")
 
     names = {m.texture_name(1, t) for t in m.face_tex1}
     check("Land.msh: texture indices resolve through Land1.wea", "WATER" in names,
@@ -806,14 +836,54 @@ def check_layers(check, game: Path) -> None:
           f"{tight}/{tight + loose} groups are tighter than a random subset of "
           f"the same size, so it cannot be used for culling")
 
-    check("Land.msh: stream 14 is the weight of layer 1", dirty == 0,
-          f"exactly 1.0 on all {clean} vertices no layer-2 face touches; "
+    check("Land.msh: stream 14 is 1.0 wherever no two-material face reaches", dirty == 0,
+          f"exactly 1.0 on all {clean} vertices no such face touches; "
           f"below it on {varying} of the {touched} that one does")
 
-    # The landscape's draw asks the material manager for track 1 on every face
-    # that is not water (Terrain.dll:0x1002b4b6) and binds its texture as the
-    # second stage at render phase 9; a material with one track answers with
-    # track 0.  What that reaches, over the fine level of every map:
+    # Which material a two-material face shows at its edge: across an edge it
+    # shares with a one-material face, the neighbour's material against its
+    # own two, by the edge's two stream-14 values.
+    at_one = at_zero = other = within = two = 0
+    same_tables = 0
+    for folder in maps:
+        m = landmesh.load(folder / "Land.msh")
+        same_tables += len(m.layer1_names) == len(m.layer2_names)
+        level0 = m.lod_faces(0)
+        fine = set(level0)
+        for f in level0:
+            if m.face_tex2[f] == landmesh.NO_TEXTURE:
+                continue
+            two += 1
+            within += m.face_tex2[f] < len(m.layer1_names)
+            for e in range(3):
+                n = m.adjacency[f][e]
+                if n == 0xFFFF or n not in fine or m.face_tex2[n] != landmesh.NO_TEXTURE:
+                    continue
+                weights = (m.blend[m.faces[f][e]], m.blend[m.faces[f][(e + 1) % 3]])
+                if weights == (1.0, 1.0) and m.face_tex1[n] == m.face_tex2[f]:
+                    at_one += 1
+                elif weights == (0.0, 0.0) and m.face_tex1[n] == m.face_tex1[f]:
+                    at_zero += 1
+                else:
+                    other += 1
+    check("Land.msh: stream 14 is the alpha of a face's second material, "
+          "and both bytes index Land1.wea",
+          at_one > 7000 and at_zero > 7000 and other < 40 and within == two
+          and same_tables == len(maps),
+          f"of the {at_one + at_zero + other} edges a two-material face shares with a "
+          f"one-material face, {at_one} carry 1.0 at both ends and meet a neighbour whose "
+          f"material is the face's SECOND byte, and {at_zero} carry 0.0 and meet one whose "
+          f"material is its first; {other} are neither.  So 1.0 is the second material whole, "
+          f"and its byte names the same table the first does: all {within}/{two} second bytes "
+          f"lie inside Land1.wea, and Land2.wea is the same length on {same_tables}/{len(maps)} "
+          f"maps (Terrain.dll:0x1002c000 draws it over the first, SRCALPHA/INVSRCALPHA)")
+
+    # The landscape's draw asks the material manager for track 1 of the handle
+    # `index + (wear << 16)` on every face that is not water
+    # (Terrain.dll:0x1002b4b6, the handle built at 0x100445c0), the wear being
+    # the second one the landscape loaded, Land2.wea (0x10017215), and binds
+    # its texture as the second stage at render phase 9; a material with one
+    # track answers with track 0.  What that reaches, over the fine level:
     lib = materials.MaterialLibrary(game / "Material.lib")
     ground_twin = ground_all = water_twin = water_all = base_flag = faces_seen = 0
     layer2_twin = layer2_all = 0
@@ -824,7 +894,7 @@ def check_layers(check, game: Path) -> None:
             faces_seen += 1
             # the draw's lighting path also wants face flag 0x400
             base_flag += bool(m.face_flags[f] & 0x400)
-            name = m.texture_name(1, m.face_tex1[f])
+            name = m.texture_name(2, m.face_tex1[f])
             record = lib.get(name) if name else None
             twin = bool(record and record.track_count >= materials.TWIN_TRACKS)
             if m.is_water(f):
@@ -840,13 +910,13 @@ def check_layers(check, game: Path) -> None:
                 record2 = lib.get(name2) if name2 else None
                 layer2_all += 1
                 layer2_twin += bool(record2 and record2.track_count >= materials.TWIN_TRACKS)
-    check("Land.msh: the ground the draw asks for a second track has one",
-          ground_twin > ground_all * 0.9 and water_all and water_twin == 0
+    check("Land.msh: the microtexture material the draw asks for a second track has one",
+          ground_twin > ground_all * 0.98 and water_all and water_twin == 0
           and base_flag == faces_seen,
-          f"{ground_twin}/{ground_all} level-0 faces that are not water name a "
-          f"layer-1 material with a second track (the rest: {sorted(no_twin)}), "
-          f"and {layer2_twin}/{layer2_all} of their layer-2 materials do; none of "
-          f"the {water_all} water faces', which the draw never asks.  Face flag "
+          f"{ground_twin}/{ground_all} level-0 faces that are not water have, at their "
+          f"material's index in Land2.wea, a material with a second track (the rest: "
+          f"{sorted(no_twin)}), and {layer2_twin}/{layer2_all} of their second materials "
+          f"do; none of the {water_all} water faces', which the draw never asks.  Face flag "
           f"0x400, which the same path wants, is on {base_flag}/{faces_seen}")
 
 
@@ -3677,6 +3747,103 @@ def _check_fog_setting(check, game: Path) -> None:
           f"({animesh}).  World3D's getter keys on the low word and forwards the high word "
           f"({registry}).  'ForceSWFog' is a string in {named} alone and Iron_3D.ini has no "
           f"fog key, so the setting holds its compiled 1 and nothing asks")
+
+
+def check_shade(check, game: Path) -> None:
+    """The game's own shade: what lights and fogs a vertex while ``UseDXLighting`` is 0."""
+    paths = {n: game / n for n in ("Terrain.dll", "Ngi32.dll")}
+    if not all(p.exists() for p in paths.values()):
+        return
+    t_at, n_at = (_image_at(p.read_bytes()) for p in paths.values())
+
+    def f32(at, va: int) -> float:
+        return struct.unpack("<f", at(va, 4))[0]
+
+    # RenderVB asks entry 29 of the settings page, compiled 0, and with it 0 hands the item
+    # to the shader component's slot 8 instead of building a device material.
+    off = (t_at(0x1005FCCE, 7) == bytes.fromhex("c7417800000000")
+           and t_at(0x1002FE48, 15) == bytes.fromhex("ba1d000000c1e20283baac6c0a1000")
+           and t_at(0x1002FFA1, 3) == bytes.fromhex("ff5020")
+           and RENDER_SETTINGS[0x1D] == "UseDXLighting")
+    # The reset leaves SPECULARENABLE (29) at 1: ebx is 1, and the state's cache is +0x190.
+    specular = (n_at(0x10006BE4, 5) == bytes.fromhex("bb01000000")
+                and n_at(0x10006C38, 6) == bytes.fromhex("899f90010000")
+                and 0x11C + 4 * 29 == 0x190)
+    check("Terrain.dll: UseDXLighting is compiled 0, so the shade lights every lit item itself",
+          off and specular,
+          f"0x1005fcce stores 0 at the page's +0x78, entry 29; RenderVB tests it at "
+          f"0x1002fe50 and with it 0 calls slot 8 of the shader component, "
+          f"CShade::ShadeIndexedStrided ({off}).  Ngi32.dll's reset leaves SPECULARENABLE "
+          f"at 1, so the device adds the vertex's specular colour after the texture ({specular})")
+
+    # g_FastProc's slot 0x50 in its four builds: add the material's ambient to the lights'
+    # sum, then take the larger of that and the third argument, the scene colour.
+    x87 = n_at(0x100248A0, 29) == bytes.fromhex(
+        "d901d802d94104d84204d94108d842088b542404d9cad812dfe09ed919")
+    sse = n_at(0x1001D980, 16) == bytes.fromhex("0f10028b4424040f58010f10100f5fc2")
+    now = n_at(0x1001BDD0, 24) == bytes.fromhex("0f6f010f6f49080f0f029e8b4424040f0f4a089e0f0f00a4")
+    p6 = n_at(0x1001FFC0, 16) == bytes.fromhex("8b442404d901d802d900dbf1dad1d919")
+    call = t_at(0x1004F225, 27) == bytes.fromhex(
+        "8b450883c078508d9560ffffff8b8d60feffffa1f8a00910ff5050")
+    check("Ngi32.dll: the scene colour is a floor under a lit vertex, not a term of it",
+          x87 and sse and now and p6 and call,
+          f"g_FastProc +0x50, called at Terrain.dll:0x1004f23d with the lights' sum, the "
+          f"material's ambient and the state block's colour at +0x78: the x87 build adds and "
+          f"then stores the third argument where the sum is below it ({x87}), the SSE build is "
+          f"addps then maxps ({sse}), the 3DNow! one pfadd then pfmax ({now}), the P6 one fadd "
+          f"then fcomi and fcmovbe ({p6})")
+
+    knee = (f32(t_at, 0x100A2354), f32(t_at, 0x100A2360), f32(t_at, 0x1009B35C))
+    spill = (f32(t_at, 0x100A2374), f32(t_at, 0x100A2378), f32(t_at, 0x100A2384),
+             f32(t_at, 0x1009B354))
+    over = t_at(0x1004F3FA, 30) == bytes.fromhex(
+        "8b8d18ffffffd901d82568a109108b9564feffffd8028b8564feffffd918")
+    check("Terrain.dll: a lit channel past 1 is kneed, "
+          "and what is left over 1 goes to the specular",
+          abs(knee[0] - 1 / 6) < 1e-7 and abs(knee[1] - 5 / 6) < 1e-7 and knee[2] == 7.0
+          and abs(spill[0] - 0.8) < 1e-7 and abs(spill[1] - 0.1) < 1e-7
+          and abs(spill[2] - 0.7) < 1e-7 and spill[3] == 3.0 and over,
+          f"c x {knee[0]:.4f} + {knee[1]:.4f} up to {knee[2]:g} and 2 beyond "
+          f"(0x1004f26d); the diffuse is held at 1 and the excess added to the specular sum "
+          f"(0x1004f3fa: {over}), which is scaled {spill[0]:.1f} up to 1, x {spill[1]:.1f} + "
+          f"{spill[2]:.1f} up to {spill[3]:g} and 1 beyond (0x1004f4c3)")
+
+    # The fog factor: the distance squared, against the squared start and end.
+    squared = (t_at(0x1004F19F, 12) == bytes.fromhex("d98558feffffd88d58feffff")
+               and t_at(0x1004F1F5, 36) == bytes.fromhex(
+                   "8b4d08d98558feffffd8a1a40000008b5508d88ab0000000d82d68a10910d99d50feffff"))
+    clouds = (f32(t_at, 0x1009BF10), f32(t_at, 0x1009BF14), f32(t_at, 0x1009B354))
+    cloud_code = (t_at(0x10077C43, 18) == bytes.fromhex("d90510bf0910d80514bf0910d91db4720a10")
+                  and t_at(0x10077C73, 18) == bytes.fromhex("d905b8720a10d83554b30910d91db0720a10")
+                  and t_at(0x1007AAEB, 8) == bytes.fromhex("6a006a016a026a14"))
+    radius = sky.DOME_HEIGHT / (2.0 * math.sin(sky.DOME_ANGLE / 2.0) ** 2)
+    check("Terrain.dll: the fog is linear in the squared distance, "
+          "and the clouds have a range of their own",
+          squared and clouds == (10000.0, -5000.0, 3.0) and cloud_code,
+          f"the shade squares the vertex's distance and writes 1 - (d^2 - start^2) / "
+          f"(end^2 - start^2) into the specular alpha (0x1004f19f-0x1004f213: {squared}).  "
+          f"The cloud layer is filed lit, flags 0x14, with a record of its own whose range is "
+          f"{clouds[0] + clouds[1]:g} to the sphere's radius over {clouds[2]:g}, "
+          f"{radius / 3:.1f} ({cloud_code})")
+
+    # The UV unit, and the microtexture's wear.
+    unit = f32(t_at, 0x1009A950)
+    wear = (t_at(0x10017212, 6) == bytes.fromhex("8b0a50ff5118")
+            and t_at(0x100445BD, 20) == bytes.fromhex("8b55d88b4270c1e0108b4dd88b511803d08955d0")
+            and t_at(0x1002B4A3, 22) == bytes.fromhex(
+                "8d45fc506a018b4d10518b550c8b028b4d0c51ff500c"))
+    over_first = t_at(0x1002C0D7, 44) == bytes.fromhex(
+        "8b45cc8b88f00b0000894ddc8b55f88b45dc8982cc0000008b4df8c78100010000020000008b55f881c2f000")
+    lit_item = t_at(0x10044627, 10) == bytes.fromhex("c78560ffffff14040000")
+    check("Terrain.dll: the UV unit is 1024, the microtexture is Land2.wea's track 1, "
+          "and a second material goes over the first",
+          unit == 1024.0 and wear and over_first and lit_item,
+          f"0x10035070 keeps 1 / {unit:g} for every uint16 UV.  The landscape loads Land2.wea "
+          f"as its manager's second wear (0x10017215), the cell draw adds that wear's index "
+          f"<< 16 to the face's material index (0x100445c0) and asks track 1 of it for the "
+          f"second stage (0x1002b4a7) ({wear}); the face's second material is a copy of the "
+          f"item in blend CShade+0xbf0 and alpha mode 2 (0x1002c0d7: {over_first}); the "
+          f"item's flags are 0x414, lit ({lit_item})")
 
 
 def check_blend_depth(check, game: Path) -> None:
@@ -27132,7 +27299,7 @@ def run(game: Path) -> int:
         check_nres, check_texm, check_terrain, check_uv,
         check_water, check_water_reflection, check_layers, check_materials, check_material_draw,
         check_sky,
-        check_render_state, check_blend_depth, check_minimap_agreement, check_arealmap,
+        check_render_state, check_shade, check_blend_depth, check_minimap_agreement, check_arealmap,
         check_grid, check_missions, check_scale, check_objects, check_poses, check_lod,
         check_damage, check_blasts, check_node_stages, check_scenery_life,
         check_effects, check_effect_timing, check_sprite_modes, check_sounds, check_music,

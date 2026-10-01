@@ -1119,7 +1119,7 @@ impl App {
         if let Some(srgb) = caps.formats.iter().copied().find(wgpu::TextureFormat::is_srgb) {
             config.format = srgb;
         }
-        // The HUD draws into the same frame read without sRGB decoding.
+        // Everything draws into the frame read without sRGB decoding.
         config.view_formats = vec![config.format.remove_srgb_suffix()];
         surface.configure(&gpu.device, &config);
         let mut renderer = Renderer::new(&gpu.device, config.format);
@@ -1800,7 +1800,9 @@ impl App {
                 return;
             }
         };
-        let view = frame.texture.create_view(&Default::default());
+        // The whole frame is written through the view that reads the target without sRGB
+        // encoding: the stored values the game's device writes (docs/10, "The frame holds what
+        // the files hold").
         let display = frame.texture.create_view(&wgpu::TextureViewDescriptor {
             format: Some(r.renderer.display_format()),
             ..Default::default()
@@ -1886,14 +1888,7 @@ impl App {
             }
             None => self.camera.view_proj(aspect),
         };
-        r.renderer.draw(
-            &r.gpu.device,
-            &r.gpu.queue,
-            &view,
-            &display,
-            (r.config.width, r.config.height),
-            view_proj,
-        );
+        r.renderer.draw(&r.gpu.device, &r.gpu.queue, &display, (r.config.width, r.config.height), view_proj);
         r.gpu.queue.present(frame);
     }
 }

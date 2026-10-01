@@ -10,9 +10,9 @@ selector.  Every stream is a flat array indexed by vertex or by face.
      2      68  cell        the spatial index: 8 bbox corners, then the cells
      3      12  vertex      position, float32 x/y/z  (z is up)
      4       4  vertex      normal, int8 x/y/z / 127, then one padding byte
-     5       4  vertex      layer-1 UV, uint16 8.8 fixed point
-    18       4  vertex      layer-2 UV, uint16 8.8 fixed point
-    14       4  vertex      layer blend weight, float32 in 0..1
+     5       4  vertex      the material's UV, uint16 over 1024
+    18       4  vertex      the microtexture's UV, uint16 over 1024
+    14       4  vertex      alpha of a face's second material, float32 in 0..1
     11       4  face        the draw order: a face index, a flags byte
                              and a byte that is zero on 275566 of 275882
     21      28  face        the face record, see FACE below
@@ -41,8 +41,9 @@ FACE, as 14 little-endian uint16::
      0  flags over a constant 0x600: bit 0x004 marks a face with a second
         texture layer, 0x008 water and 0x2000 the bed beneath a liquid
      1  surface bitfield; bit 0x02 marks water and bit 0x10 is clear on lava
-     2  lo byte = layer-1 texture index, hi byte = layer-2 (0xFF = none);
-        both index the map's Land1.wea / Land2.wea name tables
+     2  lo byte = the face's material, hi byte = a second material drawn
+        over it (0xFF = none); both index Land1.wea, and the material at the
+        same index of Land2.wea carries the microtexture as its track 1
      3  always 0xFFFF
      4  vertex 0
      5  vertex 1
@@ -181,9 +182,20 @@ SURFACE_NOT_LAVA_BIT = 0x10
 #: An independent corroboration of SURFACE_WATER_BIT.
 FLAGS_WATER = 1544
 
-#: UV values are 8.8 fixed point and the layer-1 mapping tiles every 50 world
-#: units, which is how ``u == x / 50`` comes out as ``u16 == x * 5.12``.
-UV_FIXED_POINT_SCALE = 256.0
+#: The engine's UV unit: a ``uint16`` pair is that many to one turn of the
+#: texture (``Terrain.dll:0x10035070`` keeps 1/1024 at ``0x100a5c6c``, which
+#: every strided expansion scales a ``uint16`` UV by, and the landscape's own
+#: face query the same, ``0x100227cf``).  Stream 5 turns once in 170 to 256
+#: world units, SC_3's ``u16 == x * 5.12`` being one turn in 200; stream 18,
+#: the microtexture's, once in 20 on every map -- the unread setting
+#: ``MicroTexScale``'s 0.05.
+UV_FIXED_POINT_SCALE = 1024.0
+
+#: A world unit's share of a turn of stream 18 on every map: 51.2 / 1024.
+MICROTEXTURE_PER_UNIT = 0.05
+
+#: The face flag the microtexture is drawn under (``Terrain.dll:0x1004456a``).
+FLAGS_MICROTEXTURED_BIT = 0x400
 
 #: Field 13 is three 2-bit codes packed low to high, one per edge.  Edge `e`
 #: of a face reads `(field13 >> 2 * e) & 3`, and the code is **the index of
@@ -492,6 +504,11 @@ class LandMesh:
         return list(range(0, split) if level == 0 else range(split, self.face_count))
 
     def texture_name(self, layer: int, index: int) -> str | None:
+        """The name at ``index`` of ``Land1.wea`` (``layer`` 1) or ``Land2.wea``.
+
+        A face's two bytes both index ``Land1.wea``; ``Land2.wea`` holds, index
+        for index, the material whose track 1 is the microtexture.
+        """
         table = self.layer1_names if layer == 1 else self.layer2_names
         if index == NO_TEXTURE or index >= len(table):
             return None

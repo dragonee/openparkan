@@ -405,7 +405,8 @@ impl SpriteRenderer {
         let mut camera = [0.0_f32; 32];
         camera[..16].copy_from_slice(&view_proj.to_cols_array());
         camera[16..20].copy_from_slice(&[lighting.eye.x, lighting.eye.y, lighting.eye.z, 1.0]);
-        let [r, g, b] = lighting.fog_colour;
+        // The frame's fog colour is the stored one; this shader encodes what it is handed.
+        let [r, g, b] = crate::frame::linear(lighting.fog_colour);
         camera[20..24].copy_from_slice(&[r, g, b, 1.0]);
         camera[24..28].copy_from_slice(&[lighting.fog_start, lighting.fog_end, 0.0, 0.0]);
         let [r, g, b] = lighting.scene_colour;

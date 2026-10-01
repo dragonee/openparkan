@@ -33,7 +33,7 @@ struct GpuVertex {
 #[derive(Clone, Copy, Pod, Zeroable)]
 struct LookUniform {
     diffuse: [f32; 4],
-    emissive: [f32; 4],
+    ambient: [f32; 4],
     fog: [f32; 4],
     cell: [f32; 4],
     /// x 1: a lit batch, which its lightmap shades in place of the scene's lights; y 1: the
@@ -44,14 +44,15 @@ struct LookUniform {
     /// Its fade under a field of one radian: where it starts, where it is whole, and z 1 where
     /// it runs on the square root of the distance (`parkan_world::models::Portal::range`).
     portal_range: [f32; 4],
+    /// The specular colour, and its power word in w.
+    specular: [f32; 4],
 }
 
 impl LookUniform {
-    /// A phase as the device material takes it (docs/07, "How a material reaches the
-    /// device"): diffuse with the ambient alpha, the ambient colour as the emissive the
-    /// scene colour is added to, and the cell's rectangle. A lit batch keeps its diffuse,
-    /// which the shader moves into the emissive (docs/07, "How a lightmapped batch is
-    /// drawn").
+    /// A phase as the shade takes it (docs/10, "The lit colour is the game's own"): diffuse
+    /// with the ambient alpha, the ambient colour, the specular with its power, and the
+    /// cell's rectangle. A lit batch keeps its diffuse, which the shader makes its
+    /// self-light (docs/07, "How a lightmapped batch is drawn").
     ///
     /// A portal quad's alpha replaces the phase's by its distance from the eye
     /// (`Terrain.dll:0x1002c4d0`, docs/24, "A building is drawn cell by cell through its
@@ -59,6 +60,7 @@ impl LookUniform {
     fn new(phase: &Phase, blend_mode: u8, lit: bool, portal: Option<PortalQuad>) -> Self {
         let [dr, dg, db] = phase.diffuse;
         let [ar, ag, ab] = phase.ambient;
+        let [sr, sg, sb] = phase.specular;
         let (portal, portal_range) = match portal {
             Some(p) => {
                 let [x, y, z] = p.anchor;
@@ -69,14 +71,20 @@ impl LookUniform {
         };
         Self {
             diffuse: [dr, dg, db, phase.alpha],
-            emissive: [ar, ag, ab, 1.0],
-            fog: crate::frame::fog_override(blend_mode),
+            ambient: [ar, ag, ab, 1.0],
+            fog: crate::frame::fog_toward(blend_mode),
             cell: phase.cell,
             lit: [f32::from(u8::from(lit)), f32::from(u8::from(blend_mode != 0)), 0.0, 0.0],
             portal,
             portal_range,
+            specular: [sr, sg, sb, f32::from(phase.power)],
         }
     }
+}
+
+/// The objects' shader: the shade's functions, then the objects' own.
+pub(crate) fn source() -> String {
+    format!("{}\n{}", crate::shade::SHADE_WGSL, include_str!("model.wgsl"))
 }
 
 /// An instance's uniform: its matrix, the colour a view paints it in, and whose it is.
@@ -192,7 +200,10 @@ impl ModelRenderer {
         objects: &Objects,
         textures: &GpuTextures,
     ) -> Self {
-        let shader = device.create_shader_module(wgpu::include_wgsl!("model.wgsl"));
+        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("model.wgsl"),
+            source: wgpu::ShaderSource::Wgsl(source().into()),
+        });
         let frame_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("model frame"),
             entries: &[uniform_entry(0, wgpu::ShaderStages::VERTEX_FRAGMENT)],

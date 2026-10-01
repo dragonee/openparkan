@@ -1,7 +1,8 @@
-// The ground: two material layers mixed by the layer-1 weight, lit.
+// The ground: a face's material and its microtexture, and its second material over the first,
+// lit and fogged a vertex at a time as the game's shade does it (shade.wgsl is prepended).
 
 // A point light as the shade's lighter takes it (Terrain.dll:0x1004eacc-0x1004ecc9): where it
-// stands and its range; its colour, display space, and the owner it lights alone; its
+// stands and its range; its colour, as the files give it, and the owner it lights alone; its
 // constant, linear and quadratic attenuation.
 struct PointLight {
     position: vec4<f32>,
@@ -12,16 +13,16 @@ struct PointLight {
 struct Frame {
     view_proj: mat4x4<f32>,
     // The sun object's two directional lights: the direction each travels, and its
-    // colour in the files' display space (docs/10-sky.md).
+    // colour as the files give it (docs/10-sky.md).
     light_direction: vec4<f32>,
     light_colour: vec4<f32>,
     second_direction: vec4<f32>,
     second_colour: vec4<f32>,
-    // The colour added to every material's emissive (sky slot 20), display space.
+    // The floor under every lit colour (sky slot 20).
     scene_colour: vec4<f32>,
-    // Linear.
+    // As the files give it.
     fog_colour: vec4<f32>,
-    // x start, y end: linear range fog from the eye (docs/10-sky.md, "Fog"); z the height
+    // x start, y end of the fog, from the eye (docs/10-sky.md, "Fog"); z the height
     // nothing below draws at where w is 1, a reflection's clip plane.
     fog: vec4<f32>,
     eye: vec4<f32>,
@@ -63,30 +64,17 @@ fn point_lights(world: vec3<f32>, normal: vec3<f32>) -> vec3<f32> {
     return sum;
 }
 
-// A display-space colour as the linear value an sRGB target needs (frame.rs `linear`).
-fn linear(c: vec3<f32>) -> vec3<f32> {
-    let low = c / 12.92;
-    let high = pow((max(c, vec3<f32>(0.0)) + 0.055) / 1.055, vec3<f32>(2.4));
-    return select(high, low, c <= vec3<f32>(0.04045));
-}
-
-// The scene's linear range fog: the game asks Direct3D for it on the distance to the eye and
-// lets the device compute it per vertex (docs/10, "Nobody reads ForceSWFog" -- the one setting
-// that might have said otherwise is read by nothing in the install). Taken per fragment here,
-// which is the same fog without the seams a coarse mesh gives it.
-fn fogged(colour: vec3<f32>, world: vec3<f32>, toward: vec4<f32>) -> vec3<f32> {
-    let d = distance(world, frame.eye.xyz);
-    let span = max(frame.fog.y - frame.fog.x, 0.001);
-    let keep = clamp((frame.fog.y - d) / span, 0.0, 1.0);
-    let fog = mix(frame.fog_colour.rgb, toward.rgb, toward.w);
-    return mix(fog, colour, keep);
-}
-
 struct Layers {
-    // Each layer material's diffuse, decoded to linear.
-    tint1: vec4<f32>,
-    // w is 1 when the faces wear a second layer.
-    tint2: vec4<f32>,
+    // The first material's diffuse; w 1 where its microtexture is drawn.
+    diffuse1: vec4<f32>,
+    // Its ambient, the self-light.
+    ambient1: vec4<f32>,
+    // The second material's diffuse; w 1 where the faces wear one.
+    diffuse2: vec4<f32>,
+    // Its ambient; w 1 where its microtexture is drawn.
+    ambient2: vec4<f32>,
+    // x the second material's ambient alpha, which scales the vertices' own.
+    alpha: vec4<f32>,
     // The buildings' cut mask: its origin x and y, texels a unit, and w 1 when there is one;
     // then its width and height.
     cut: vec4<f32>,
@@ -99,6 +87,8 @@ struct Layers {
 @group(1) @binding(2) var layer2: texture_2d<f32>;
 @group(1) @binding(3) var ground: sampler;
 @group(1) @binding(4) var cuts: texture_2d<f32>;
+@group(1) @binding(5) var micro1: texture_2d<f32>;
+@group(1) @binding(6) var micro2: texture_2d<f32>;
 
 // Whether a building has cut the landscape away here (docs/03, "Placing a building cuts the
 // landscape").
@@ -123,13 +113,16 @@ struct VertexIn {
 
 struct VertexOut {
     @builtin(position) clip: vec4<f32>,
-    @location(4) world: vec3<f32>,
-    @location(0) normal: vec3<f32>,
+    @location(0) world: vec3<f32>,
     @location(1) uv1: vec2<f32>,
     @location(2) uv2: vec2<f32>,
     @location(3) blend: f32,
-    // What the point lights give the vertex.
-    @location(5) points: vec3<f32>,
+    // Each material's two vertex colours, and what the fog keeps.
+    @location(4) lit1: vec3<f32>,
+    @location(5) spill1: vec3<f32>,
+    @location(6) lit2: vec3<f32>,
+    @location(7) spill2: vec3<f32>,
+    @location(8) keep: f32,
 };
 
 @vertex
@@ -137,22 +130,37 @@ fn vs_main(v: VertexIn) -> VertexOut {
     var out: VertexOut;
     out.clip = frame.view_proj * vec4<f32>(v.position, 1.0);
     out.world = v.position;
-    out.normal = v.normal;
     out.uv1 = v.uv1;
     out.uv2 = v.uv2;
     out.blend = v.blend;
-    out.points = point_lights(v.position, v.normal);
+    // The landscape's item is lit (flags 0x414, `Terrain.dll:0x10044627`) with the stream's
+    // normals as they are: unit, or zero on a basement corner. No ground material carries a
+    // specular colour, so no highlight is taken.
+    // The effects' point lights are in the item's list beside the sun's two, summed with them.
+    let light = frame.light_colour.rgb * shade_cosine(v.normal, frame.light_direction.xyz)
+        + frame.second_colour.rgb * shade_cosine(v.normal, frame.second_direction.xyz)
+        + point_lights(v.position, v.normal);
+    let scene = frame.scene_colour.rgb;
+    let first = shade_lit(light * layers.diffuse1.rgb, vec3<f32>(0.0), layers.ambient1.rgb, scene);
+    let second = shade_lit(light * layers.diffuse2.rgb, vec3<f32>(0.0), layers.ambient2.rgb, scene);
+    out.lit1 = first.diffuse;
+    out.spill1 = first.specular;
+    out.lit2 = second.diffuse;
+    out.spill2 = second.specular;
+    out.keep = shade_fog(distance(v.position, frame.eye.xyz), frame.fog.x, frame.fog.y);
     return out;
 }
 
-// The lit colour a face's lights give it, the sun's two and the point lights its vertices
-// took, held to 1 as Direct3D's fixed-function lighting holds it.
-fn lit_at(normal: vec3<f32>, points: vec3<f32>) -> vec3<f32> {
-    let n = normalize(normal);
-    let a = max(dot(n, -frame.light_direction.xyz), 0.0);
-    let b = max(dot(n, -frame.second_direction.xyz), 0.0);
-    let lights = frame.light_colour.rgb * a + frame.second_colour.rgb * b + points;
-    return clamp(frame.scene_colour.rgb + lights, vec3<f32>(0.0), vec3<f32>(1.0));
+// One material's surface: its texture by the vertex's diffuse colour, by its microtexture
+// doubled where it has one -- render phase 9, `MODULATE2X` over the second texture stage
+// (`Terrain.dll:0x1002b4c2`-`0x1002b505`) -- and the specular colour added. The device holds
+// each step to 1.
+fn surface(base: vec3<f32>, micro: vec3<f32>, detailed: bool, lit: vec3<f32>, spill: vec3<f32>) -> vec3<f32> {
+    var colour = base * lit;
+    if detailed {
+        colour = min(colour * micro * 2.0, vec3<f32>(1.0));
+    }
+    return min(colour + spill, vec3<f32>(1.0));
 }
 
 @fragment
@@ -160,12 +168,21 @@ fn fs_main(v: VertexOut) -> @location(0) vec4<f32> {
     if (frame.fog.w > 0.5 && v.world.z < frame.fog.z) || cut_away(v.world) {
         discard;
     }
-    var colour = textureSample(layer1, ground, v.uv1).rgb * layers.tint1.rgb;
-    let under = textureSample(layer2, ground, v.uv2).rgb * layers.tint2.rgb;
-    if layers.tint2.w > 0.5 {
-        colour = mix(under, colour, v.blend);
+    // Both materials take stream 5's coordinates and both microtextures stream 18's: the
+    // second material's item is a copy of the first's (`0x1002c02d`-`0x1002c044`).
+    let base1 = textureSample(layer1, ground, v.uv1).rgb;
+    let detail1 = textureSample(micro1, ground, v.uv2).rgb;
+    let base2 = textureSample(layer2, ground, v.uv1).rgb;
+    let detail2 = textureSample(micro2, ground, v.uv2).rgb;
+    var colour = surface(base1, detail1, layers.diffuse1.w > 0.5, v.lit1, v.spill1);
+    if layers.diffuse2.w > 0.5 {
+        // The second material goes over the first, `SRCALPHA`/`INVSRCALPHA` on the vertex
+        // alpha of stream 14 (`0x1002c0d7`-`0x1002c0f2`). Both are fogged alike, so mixing
+        // them before the fog is the same as blending one fogged surface over the other.
+        let over = surface(base2, detail2, layers.ambient2.w > 0.5, v.lit2, v.spill2);
+        colour = mix(colour, over, clamp(v.blend * layers.alpha.x, 0.0, 1.0));
     }
-    return vec4<f32>(fogged(colour * linear(lit_at(v.normal, v.points)), v.world, vec4<f32>(0.0)), 1.0);
+    return vec4<f32>(mix(frame.fog_colour.rgb, colour, v.keep), 1.0);
 }
 
 // The water under `REFLECTION_SHIFTED` (`Terrain.dll:0x1002ca80`, render phase 10): the
@@ -203,7 +220,9 @@ fn fs_water(v: VertexOut) -> @location(0) vec4<f32> {
     let size = water.box_.zw - water.box_.xy;
     let over = vec2<f32>(1.0 - (v.world.y - water.box_.y) / size.y, 1.0 - (v.world.x - water.box_.x) / size.x);
     let bumped = over + water.bump.z * bump_at(water.bump.y * over + vec2<f32>(water.bump.x));
+    // The reflection holds the frame's own stored values, and the water's vertices carry the
+    // material's shade like any ground's.
     let seen = textureSample(reflection, reflection_sampler, bumped).rgb;
-    let colour = seen * layers.tint1.rgb * linear(lit_at(v.normal, v.points));
-    return vec4<f32>(fogged(colour, v.world, vec4<f32>(0.0)), 1.0);
+    let colour = min(seen * v.lit1 + v.spill1, vec3<f32>(1.0));
+    return vec4<f32>(mix(frame.fog_colour.rgb, colour, v.keep), 1.0);
 }

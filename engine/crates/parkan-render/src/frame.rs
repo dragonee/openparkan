@@ -1,8 +1,9 @@
 //! What every lit pipeline reads once a frame: the camera, the lights and the fog.
 //!
-//! The lit colour is formed as fixed-function lighting forms it, from the files' own
-//! display-space colours, and held to 1; the shaders decode it once, and decode the
-//! fog, the dome and the textures, to the linear values an sRGB target blends.
+//! Every colour here is the value the files hold. The game's device multiplies, adds and
+//! blends the values its textures and its frame store, with no decoding between, and so does
+//! this renderer: the scene is drawn into the frame read without sRGB decoding, from textures
+//! read the same way (docs/10-sky.md, "The frame holds what the files hold").
 
 use bytemuck::{Pod, Zeroable};
 use glam::{Mat4, Vec3};
@@ -102,11 +103,14 @@ pub struct Lighting {
     /// The sun object's two directional lights (`docs/10-sky.md`, "What the sun does
     /// with its seven values").
     pub lights: [Light; 2],
-    /// Added to every material's emissive (sky slot 20), in display space.
+    /// The floor under every lit colour (sky slot 20), as the file gives it: a vertex the
+    /// lights leave darker is held up to it, and nothing is added to one they leave brighter
+    /// ([`crate::shade::lit`]).
     pub scene_colour: [f32; 3],
-    /// Linear, as the target blends it.
+    /// As the file gives it: the horizon the camera looks along.
     pub fog_colour: [f32; 3],
-    /// Linear range fog from the eye: none at `fog_start`, whole at `fog_end`.
+    /// The fog's range from the eye, none at `fog_start` and whole at `fog_end`, linear in
+    /// the squared distance between ([`crate::shade::fog`]).
     pub fog_start: f32,
     pub fog_end: f32,
     pub eye: Vec3,
@@ -211,13 +215,9 @@ impl FrameUniform {
     }
 }
 
-/// A colour the files give in display space, as the linear value a shader writing to
-/// an sRGB target needs; the shaders' `linear` is the same curve.
-///
-/// STAND-IN: docs/10-sky.md#the-dome-the-fog-and-the-scene-colour--read-and-measured --
-/// how the files' colours meet textures decoded to linear is not read (the game blends
-/// in display space); the sky's, the fog's, the texture tints and the lit colour are
-/// decoded from sRGB, so blends come out as the game's display-space ones.
+/// A stored colour as the value an sRGB decode makes of it. Nothing the scene draws wants
+/// this: it is what the effect sprites' shader is handed, which still samples its textures
+/// decoded and encodes its result back (`sprite.wgsl`'s `display`).
 pub fn linear(c: [f32; 3]) -> [f32; 3] {
     c.map(|v| if v <= 0.04045 { v / 12.92 } else { ((v + 0.055) / 1.055).powf(2.4) })
 }
@@ -225,25 +225,13 @@ pub fn linear(c: [f32; 3]) -> [f32; 3] {
 /// The lit colour's knee (`Terrain.dll:0x1004f25a`-`0x1004f3cd`): as it is up to 1, a sixth of
 /// it and five sixths up to 7, and 2 past that.
 pub fn knee(c: f32) -> f32 {
-    if c <= 1.0 {
-        c
-    } else if c > 7.0 {
-        2.0
-    } else {
-        c / 6.0 + 5.0 / 6.0
-    }
+    crate::shade::knee(c)
 }
 
 /// The specular's knee (`0x1004f4c3`-`0x1004f648`): 0.8 of it up to 1, a tenth of it and 0.7
 /// up to 3, and 1 past that.
 pub fn specular_knee(s: f32) -> f32 {
-    if s <= 1.0 {
-        0.8 * s
-    } else if s > 3.0 {
-        1.0
-    } else {
-        0.1 * s + 0.7
-    }
+    crate::shade::spill(s)
 }
 
 /// One vertex as the software shade colours it (`CShade::ShadeIndexedStrided`,
@@ -251,17 +239,12 @@ pub fn specular_knee(s: f32) -> f32 {
 /// material's diffuse, plus the material's self-light, **held up to the scene colour** channel
 /// by channel (`Ngi32.dll:0x100248a0`: the two added, then the larger of that and the scene
 /// colour), through the knee; what passes 1 is cut off the diffuse and goes on to the
-/// specular, which the device adds after the texture stage. Display space; returns the
-/// vertex's diffuse and its specular.
+/// specular, which the device adds after the texture stage. Stored values; returns the
+/// vertex's diffuse and its specular. [`crate::shade::lit`] is the same arithmetic, with a
+/// highlight besides, and what the world's pipelines follow.
 pub fn shade(self_light: [f32; 3], lit: [f32; 3], scene: [f32; 3]) -> ([f32; 3], [f32; 3]) {
-    let mut diffuse = [0.0; 3];
-    let mut specular = [0.0; 3];
-    for k in 0..3 {
-        let c = knee((self_light[k] + lit[k]).max(scene[k]));
-        diffuse[k] = c.min(1.0);
-        specular[k] = specular_knee((c - 1.0).max(0.0));
-    }
-    (diffuse, specular)
+    let shaded = crate::shade::lit(lit, [0.0; 3], self_light, scene);
+    (shaded.diffuse, shaded.specular)
 }
 
 /// What the directional lights lay on a vertex of diffuse `diffuse` whose unit normal is
@@ -279,15 +262,25 @@ pub fn lit(normal: Vec3, diffuse: [f32; 3], lights: &[Light; 2]) -> [f32; 3] {
     sum
 }
 
+/// The grey a mode-5 batch fogs toward, `0x7f7f7f` (`Terrain.dll:0x1009a9d0`).
+pub const FOG_GREY: f32 = 127.0 / 255.0;
+
 /// The fog colour a blend mode draws toward (`Terrain.dll:0x1002ffea`): additive to black,
-/// mode 3 to white, mode 5 to grey `0x7f7f7f` (as linear); `w` 1 where it overrides the scene's.
-pub fn fog_override(mode: u8) -> [f32; 4] {
+/// mode 3 to white, mode 5 to grey `0x7f7f7f`; `w` 1 where it overrides the scene's.
+pub fn fog_toward(mode: u8) -> [f32; 4] {
     match mode {
         2 => [0.0, 0.0, 0.0, 1.0],
         3 => [1.0, 1.0, 1.0, 1.0],
-        5 => [0.212, 0.212, 0.212, 1.0],
+        5 => [FOG_GREY, FOG_GREY, FOG_GREY, 1.0],
         _ => [0.0; 4],
     }
+}
+
+/// [`fog_toward`] through [`linear`], for the effect sprites' shader, which encodes it back.
+pub fn fog_override(mode: u8) -> [f32; 4] {
+    let [r, g, b, w] = fog_toward(mode);
+    let [r, g, b] = linear([r, g, b]);
+    [r, g, b, w]
 }
 
 #[cfg(test)]

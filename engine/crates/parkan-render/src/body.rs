@@ -185,7 +185,7 @@ impl BodyRenderer {
         });
         let skin_layout = skin_layout(device, "sky body skin");
         let skin = |view, label| skin_group(device, &skin_layout, bank, view, label);
-        let skins = bank.views.iter().map(|v| skin(v, "sky body skin")).collect();
+        let skins = bank.stored.iter().map(|v| skin(v, "sky body skin")).collect();
         let white = skin(&bank.white, "sky body white");
         let camera = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("sky body camera"),

@@ -32,6 +32,15 @@ pub const DOME_RADIUS: f32 = DOME_HEIGHT * (2.0 + std::f32::consts::SQRT_2);
 /// The clouds are the same cap with its origin this far below the camera (`0x1007a08e`).
 pub const CLOUD_DROP: f32 = 5000.0;
 
+/// The clouds' own fog (`0x1007a5d4`, the item's record of mask `0x40`): none up to the
+/// dome's height less the drop, the 5000 the apex of their cap stands over the eye
+/// (`0x10077c43`), and whole from a third of the sphere's radius, 11380.7 (`0x10077c73`).
+/// Between, as every fog here, linear in the squared distance: the layer is whole overhead,
+/// 0.77 of itself on the cap's first ring, 0.07 on its second, and the fog's colour from the
+/// third ring out to the rim.
+pub const CLOUD_FOG_START: f32 = DOME_HEIGHT - CLOUD_DROP;
+pub const CLOUD_FOG_END: f32 = DOME_RADIUS / 3.0;
+
 /// The cap carries **three** texture-coordinate sets, one a layer, and each is the same
 /// top-down planar projection of the vertex -- `(x / R, y / R)` -- times its own constant
 /// (`0x10078f2f`, `0x10078fa9`, `0x10079023`). The layer each belongs to is read from the
@@ -622,6 +631,17 @@ pub fn dome() -> Vec<Vec3> {
         }
     }
     out
+}
+
+/// A cap vertex's normal, the stream the cap keeps at `+0x3c` for its lit layer, the clouds
+/// (`0x10078c39`–`0x10078edd`, a `{pointer, 4}` pair in the normal place of the block at
+/// `+0x134`): the unit vector **out** from the sphere's centre, each component a signed byte
+/// at 127 -- (0, 0, 1) at the apex, 45° off it at the rim. It points up and away from the eye
+/// inside, so the layer is lit by whichever of the sun object's two lights comes down at it:
+/// the main one while the body is above the horizon, the second while it is below.
+pub fn dome_normal(vertex: Vec3) -> Vec3 {
+    let out = (vertex - Vec3::new(0.0, 0.0, DOME_HEIGHT - DOME_RADIUS)) / DOME_RADIUS;
+    (out * 127.0).round() / 127.0
 }
 
 /// The dome's triangles over [`dome`]'s vertices, wound to face its centre.

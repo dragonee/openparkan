@@ -27,18 +27,23 @@ pub struct Texture {
 /// The whole texture as a cell: `(u0, v0, du, dv)`.
 pub const WHOLE_CELL: [f32; 4] = [0.0, 0.0, 1.0, 1.0];
 
-/// One entry of a material as the device takes it (`Terrain.dll:0x10030819`).
+/// One entry of a material as the shade takes it (`CShade::ShadeIndexedStrided`,
+/// `Terrain.dll:0x1004df70`; docs/10, "The lit colour is the game's own").
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Phase {
     /// Index into `TextureStore::textures`, or `None` when nothing resolves.
     pub texture: Option<usize>,
-    /// The diffuse colour the scene light multiplies, 0..1 in display space as the file
-    /// gives it; the renderer decodes it with the rest of the lit colour.
+    /// The diffuse colour the lights multiply, 0..1 as the file gives it.
     pub diffuse: [f32; 3],
-    /// The entry's ambient colour, the material's self-light: the device's emissive is
-    /// the scene colour plus this. The entry's own emissive is never read.
+    /// The entry's ambient colour, the material's self-light: added to what the lights give
+    /// before the scene colour floors the sum. The entry's own emissive is never read.
     pub ambient: [f32; 3],
-    /// The ambient alpha, × 0.01: the device's diffuse alpha, which scales the texture's.
+    /// The specular colour a light's highlight multiplies.
+    pub specular: [f32; 3],
+    /// The specular power word: 0 for no highlight, else the highlight's cosine is squared
+    /// `power − 1` times (`Ngi32.dll:0x100161b3`).
+    pub power: u8,
+    /// The ambient alpha, × 0.01: the vertex colour's alpha, which scales the texture's.
     pub alpha: f32,
     /// The cell's rectangle, `(u0, v0, du, dv)`: a UV becomes `u0 + u × du`,
     /// `v0 + v × dv`.
@@ -47,13 +52,21 @@ pub struct Phase {
 
 impl Phase {
     /// White, lit, and whole: a material that does not resolve.
-    pub const PLAIN: Phase =
-        Phase { texture: None, diffuse: [1.0; 3], ambient: [0.0; 3], alpha: 1.0, cell: WHOLE_CELL };
+    pub const PLAIN: Phase = Phase {
+        texture: None,
+        diffuse: [1.0; 3],
+        ambient: [0.0; 3],
+        specular: [0.0; 3],
+        power: 0,
+        alpha: 1.0,
+        cell: WHOLE_CELL,
+    };
 }
 
 /// A track's lerp mask bits (`World3D.dll:0x10003030`): which fields glide between keys.
 pub const LERP_AMBIENT: u32 = 1;
 pub const LERP_DIFFUSE: u32 = 2;
+pub const LERP_SPECULAR: u32 = 4;
 pub const LERP_AMBIENT_ALPHA: u32 = 0x10;
 /// A track's modes (`0x10003668`): loop, ping-pong, once, jump.
 pub const TRACK_LOOP: u32 = 0;
@@ -124,6 +137,9 @@ impl Animation {
         }
         if self.mask & LERP_DIFFUSE != 0 {
             phase.diffuse = lerp3(a.diffuse, b.diffuse);
+        }
+        if self.mask & LERP_SPECULAR != 0 {
+            phase.specular = lerp3(a.specular, b.specular);
         }
         if self.mask & LERP_AMBIENT_ALPHA != 0 {
             phase.alpha = a.alpha + (b.alpha - a.alpha) * f;
@@ -288,6 +304,8 @@ impl TextureStore {
             texture,
             diffuse: unit(entry.diffuse),
             ambient: unit(entry.ambient),
+            specular: unit(entry.specular),
+            power: entry.power,
             alpha: f32::from(entry.alphas[0]) * 0.01,
             cell,
         })

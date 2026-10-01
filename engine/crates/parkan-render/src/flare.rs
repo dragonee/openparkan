@@ -104,7 +104,7 @@ impl FlareRenderer {
         let shader = device.create_shader_module(wgpu::include_wgsl!("flare.wgsl"));
         let layout = skin_layout(device, "flare skin");
         let skin = |view, label| skin_group(device, &layout, bank, view, label);
-        let skins = bank.views.iter().map(|v| skin(v, "flare skin")).collect();
+        let skins = bank.stored.iter().map(|v| skin(v, "flare skin")).collect();
         let white = skin(&bank.white, "flare white");
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("flare"),

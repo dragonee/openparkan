@@ -7,7 +7,7 @@ use parkan_world::terrain::{Layer, Terrain, WaterBox};
 use wgpu::util::DeviceExt;
 
 use crate::DEPTH_FORMAT;
-use crate::frame::{FrameUniform, linear};
+use crate::frame::FrameUniform;
 use crate::textures::GpuTextures;
 
 #[repr(C)]
@@ -23,11 +23,45 @@ struct GpuVertex {
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 struct LayersUniform {
-    tint1: [f32; 4],
-    tint2: [f32; 4],
+    /// The first material's diffuse, and 1 where its microtexture is drawn.
+    diffuse1: [f32; 4],
+    ambient1: [f32; 4],
+    /// The second material's diffuse, and 1 where the faces wear one.
+    diffuse2: [f32; 4],
+    /// Its ambient, and 1 where its microtexture is drawn.
+    ambient2: [f32; 4],
+    /// The second material's ambient alpha.
+    alpha: [f32; 4],
     /// The cut mask's origin x and y, texels a unit, and 1 when there is one; its size.
     cut: [f32; 4],
     cut_size: [f32; 4],
+}
+
+impl LayersUniform {
+    /// A group's two materials as the shade takes them: each one's own diffuse and ambient,
+    /// as the files give them (the landscape's item copies the entry whole,
+    /// `Terrain.dll:0x1004465e`-`0x10044756`).
+    fn new(
+        first: &Layer,
+        micro1: bool,
+        second: Option<&Layer>,
+        micro2: bool,
+        cut: [f32; 4],
+        cut_size: [f32; 4],
+    ) -> Self {
+        let rgb = |c: [f32; 3], w: bool| [c[0], c[1], c[2], f32::from(u8::from(w))];
+        let (diffuse2, ambient2, alpha2) =
+            second.map_or(([0.0; 3], [0.0; 3], 0.0), |l| (l.still.diffuse, l.still.ambient, l.still.alpha));
+        Self {
+            diffuse1: rgb(first.still.diffuse, micro1),
+            ambient1: rgb(first.still.ambient, false),
+            diffuse2: rgb(diffuse2, second.is_some()),
+            ambient2: rgb(ambient2, micro2),
+            alpha: [alpha2, 0.0, 0.0, 0.0],
+            cut,
+            cut_size,
+        }
+    }
 }
 
 /// Whether (x, y) lies inside an outline, by the crossing test.
@@ -40,6 +74,11 @@ fn contains(points: &[[f32; 2]], x: f32, y: f32) -> bool {
         }
     }
     inside
+}
+
+/// The ground's shader: the shade's functions, then the ground's own.
+fn source() -> String {
+    format!("{}\n{}", crate::shade::SHADE_WGSL, include_str!("terrain.wgsl"))
 }
 
 /// Texels a unit in the mask of where buildings cut the landscape away.
@@ -181,7 +220,10 @@ impl TerrainRenderer {
         terrain: &Terrain,
         textures: &GpuTextures,
     ) -> Self {
-        let shader = device.create_shader_module(wgpu::include_wgsl!("terrain.wgsl"));
+        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("terrain.wgsl"),
+            source: wgpu::ShaderSource::Wgsl(source().into()),
+        });
         let uniform = |binding, visibility| wgpu::BindGroupLayoutEntry {
             binding,
             visibility,
@@ -209,7 +251,8 @@ impl TerrainRenderer {
         let group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("terrain layers"),
             entries: &[
-                uniform(0, wgpu::ShaderStages::FRAGMENT),
+                // The vertex stage shades with the materials' colours.
+                uniform(0, wgpu::ShaderStages::VERTEX_FRAGMENT),
                 texture(1),
                 texture(2),
                 wgpu::BindGroupLayoutEntry {
@@ -219,6 +262,8 @@ impl TerrainRenderer {
                     count: None,
                 },
                 texture(4),
+                texture(5),
+                texture(6),
             ],
         });
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -393,25 +438,23 @@ impl TerrainRenderer {
         ];
         let cut_size = [cut_w as f32, cut_h as f32, 0.0, 0.0];
         let view_of = |layer: Option<&Layer>| textures.view(layer.and_then(|l| l.still.texture));
+        let entry = |binding, view| wgpu::BindGroupEntry {
+            binding,
+            resource: wgpu::BindingResource::TextureView(view),
+        };
         let groups = terrain
             .groups
             .iter()
             .map(|g| {
-                // A texture tinted by a display-space colour: both decoded, then multiplied.
-                let tint = |l: Option<&Layer>, on: bool| {
-                    let [r, gr, b] = linear(l.map_or([1.0; 3], |l| l.still.diffuse));
-                    [r, gr, b, f32::from(u8::from(on))]
-                };
-                let uniform = LayersUniform {
-                    tint1: tint(Some(&g.layer1), true),
-                    tint2: tint(
-                        g.layer2.as_ref(),
-                        g.layer2.as_ref().is_some_and(|l| l.still.texture.is_some()),
-                    ),
+                let uniform = LayersUniform::new(
+                    &g.layer1,
+                    g.micro1.is_some(),
+                    g.layer2.as_ref(),
+                    g.micro2.is_some(),
                     // A building's own footing stands where the cut is: it is what fills it.
-                    cut: if g.basement { [cut[0], cut[1], cut[2], 0.0] } else { cut },
+                    if g.basement { [cut[0], cut[1], cut[2], 0.0] } else { cut },
                     cut_size,
-                };
+                );
                 let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                     label: Some("terrain layers"),
                     contents: bytemuck::bytes_of(&uniform),
@@ -422,22 +465,15 @@ impl TerrainRenderer {
                     layout: &group_layout,
                     entries: &[
                         wgpu::BindGroupEntry { binding: 0, resource: buffer.as_entire_binding() },
-                        wgpu::BindGroupEntry {
-                            binding: 1,
-                            resource: wgpu::BindingResource::TextureView(view_of(Some(&g.layer1))),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 2,
-                            resource: wgpu::BindingResource::TextureView(view_of(g.layer2.as_ref())),
-                        },
+                        entry(1, view_of(Some(&g.layer1))),
+                        entry(2, view_of(g.layer2.as_ref())),
                         wgpu::BindGroupEntry {
                             binding: 3,
                             resource: wgpu::BindingResource::Sampler(&textures.sampler),
                         },
-                        wgpu::BindGroupEntry {
-                            binding: 4,
-                            resource: wgpu::BindingResource::TextureView(&cut_view),
-                        },
+                        entry(4, &cut_view),
+                        entry(5, textures.view(g.micro1)),
+                        entry(6, textures.view(g.micro2)),
                     ],
                 });
                 DrawGroup { start: g.start, count: g.count, bind_group, water: g.water, bed: g.bed }
@@ -581,6 +617,39 @@ mod tests {
     use super::*;
 
     const TUT_1: WaterBox = WaterBox { min: [385.5, 255.8], max: [1480.5, 1531.7], level: -1.7255 };
+
+    #[test]
+    fn the_grounds_and_the_objects_shaders_parse_with_the_shade_ahead_of_them() {
+        for (label, text) in [("terrain", source()), ("model", crate::models::source())] {
+            let module = wgpu::naga::front::wgsl::parse_str(&text).unwrap_or_else(|e| panic!("{label}: {e}"));
+            wgpu::naga::valid::Validator::new(
+                wgpu::naga::valid::ValidationFlags::all(),
+                wgpu::naga::valid::Capabilities::empty(),
+            )
+            .validate(&module)
+            .unwrap_or_else(|e| panic!("{label}: {e:?}"));
+        }
+    }
+
+    #[test]
+    fn a_groups_uniform_carries_each_materials_own_colours() {
+        use parkan_world::textures::{Look, Phase};
+        let look = |diffuse: [f32; 3], ambient: [f32; 3]| Look {
+            material: "M".into(),
+            blend_mode: 0,
+            still: Phase { diffuse, ambient, ..Phase::PLAIN },
+            animation: None,
+        };
+        // ENV_NLAVA's diffuse and ambient, alone and with its microtexture drawn.
+        let lava = look([180.0 / 255.0, 30.0 / 255.0, 0.0], [0.0, 47.0 / 255.0, 0.0]);
+        let u = LayersUniform::new(&lava, true, None, false, [0.0; 4], [0.0; 4]);
+        assert_eq!(u.diffuse1, [180.0 / 255.0, 30.0 / 255.0, 0.0, 1.0]);
+        assert_eq!(u.ambient1, [0.0, 47.0 / 255.0, 0.0, 0.0]);
+        assert_eq!((u.diffuse2[3], u.ambient2[3]), (0.0, 0.0), "no second material");
+        let over = look([1.0; 3], [0.0; 3]);
+        let u = LayersUniform::new(&lava, false, Some(&over), true, [0.0; 4], [0.0; 4]);
+        assert_eq!((u.diffuse1[3], u.diffuse2, u.ambient2[3], u.alpha[0]), (0.0, [1.0; 4], 1.0, 1.0));
+    }
 
     #[test]
     fn the_reflection_is_256_at_any_real_screen_and_a_power_of_two_below() {

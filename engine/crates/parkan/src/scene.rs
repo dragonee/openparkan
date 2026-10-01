@@ -101,7 +101,7 @@ pub fn world(game: &Path, loaded: &Loaded) -> Result<World> {
     let sky_layers = parkan_render::dome::Layers {
         nebula: role("nebula").and_then(|l| l.still.texture),
         clouds: role("clouds").and_then(|l| l.still.texture),
-        cloud_tint: [1.0; 4],
+        cloud_colour: [1.0; 3],
     };
     let flare_looks = ["flare", "flare2"].map(|r| {
         role(r).map_or_else(Default::default, |l| parkan_render::flare::Look {
@@ -149,7 +149,7 @@ pub fn lighting(
     forward: Vec3,
     field: f32,
 ) -> Option<(parkan_render::frame::Lighting, Vec<[f32; 4]>)> {
-    use parkan_render::frame::{Light, linear};
+    use parkan_render::frame::Light;
     use parkan_sim::sky as atm;
     let a = world.atmosphere.as_ref()?;
     let now = atm::position(a, seconds);
@@ -174,7 +174,7 @@ pub fn lighting(
     let lighting = parkan_render::frame::Lighting {
         lights,
         scene_colour: sky.scene_colour,
-        fog_colour: linear(fog),
+        fog_colour: fog,
         fog_start: sky.fog_start,
         fog_end: sky.fog_end,
         eye,
@@ -183,31 +183,24 @@ pub fn lighting(
         // The effects' point lights follow, once the battle is synced ([`sync`]).
         points: Default::default(),
     };
-    let colours = sky
-        .dome_colours(fog)
-        .into_iter()
-        .map(|[r, g, b, a]| {
-            let [r, g, b] = linear([r, g, b]);
-            [r, g, b, a]
-        })
-        .collect();
-    Some((lighting, colours))
+    // The dome's colours go to its vertices as the file gives them: the frame holds stored
+    // values (docs/10, "The frame holds what the files hold").
+    Some((lighting, sky.dome_colours(fog)))
 }
 
-/// The sky's textured layers this frame: the mission's own nebula and clouds, the clouds
-/// tinted by slot 18 (`docs/10-sky.md`, "The three layers and their texture coordinates").
+/// The sky's textured layers this frame: the mission's own nebula and clouds, the clouds'
+/// material wearing slot 18 as its diffuse colour (`docs/10-sky.md`, "The clouds are lit, and
+/// fogged on a range of their own"); the slot's alpha is not read.
 /// The stars are not among them -- the game does not draw those.
 pub fn sky_layers(world: &World, seconds: f64) -> parkan_render::dome::Layers {
-    use parkan_render::frame::linear;
     let mut layers = world.sky_layers;
-    layers.cloud_tint = world
+    layers.cloud_colour = world
         .atmosphere
         .as_ref()
         .and_then(|a| parkan_sim::sky::at(a, parkan_sim::sky::position(a, seconds)))
-        .map_or([1.0; 4], |s| {
-            let [r, g, b, a] = s.cloud_colour;
-            let [r, g, b] = linear([r, g, b]);
-            [r, g, b, a]
+        .map_or([1.0; 3], |s| {
+            let [r, g, b, _] = s.cloud_colour;
+            [r, g, b]
         });
     layers
 }
