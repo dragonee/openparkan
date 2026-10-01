@@ -85,7 +85,9 @@ already match the recording.
   - [x] Generator (gener01) has a large yellow-green glow at its core, should be a small green light (briefing, 1:27)
     - Fixed 2026-10-01 on C03 M02 (the same `gener01` and `f_gener_ball`): a type-4 glow sizes itself by the eye's distance. Set against this recording again at briefing time 57.5 and 59 s: a small yellow-green light between the horns in both
   - [ ] Birds are rust-red, should be dark green-grey with glowing spots (4:26)
-  - [ ] Clouds have bright yellow streaks and the ground is washed out compared to the recording (both briefings)
+  - [x] Clouds have bright yellow streaks and the ground is washed out compared to the recording (both briefings)
+    - Read 2026-10-01 (docs/10, "The frame holds what the files hold", "The lit colour is the game's own", "Fog", "The clouds are lit, and fogged on a range of their own"; docs/03, "The UV unit is 1024", "A face's second material"). Four things made the ground pale: the engine added the scene colour to every lit vertex where the game only holds a vertex up to it (`Ngi32.dll:0x1001d980`); it fogged on the distance where the game fogs each vertex on the squared distance; it blended in linear light where the game blends the stored values; and it drew the ground's textures four times too fine with the second material's mix reversed, without `Land2.wea`'s microtexture. The clouds are the one lit sky item and carry a fog of their own that takes them to nothing from the third ring out; the engine drew them unlit and unfogged
+    - Fixed 2026-10-01. Sampled over the same areas, recording against engine: C02 M04 at briefing time 43.5 s, the hill behind (35, 57, 11) against (37, 61, 13), where it was (91, 136, 27), and the sky (105, 169, 22) against (107, 171, 24); C02 M01 at 57.5 s, the near ground (27, 50, 11) against (29, 53, 12), where it was (56, 93, 19); C03 M02 at 29 s, the sky (158, 8, 21) against (161, 9, 22), where it was (102, 20, 20)
 
 ## Mission 02 - Ballen's Crossing
 
@@ -114,7 +116,8 @@ already match the recording.
   - [ ] The Small Factory (splant01) is dim and its pad unlit (briefing time 32 s, 1:04)
     - The recording shows the pad's octagonal border solid lime-green and the factory's roof wing lit yellow-green, crisp through the haze
     - The engine draws the border dark with four yellow lights at its corners and green ones at the door, and the roof orange-brown under heavy haze
-  - [ ] As on Mission 01, the clouds carry bright yellow streaks and a sun glare, and the ground is washed out, in every briefing pair
+  - [x] As on Mission 01, the clouds carry bright yellow streaks and a sun glare, and the ground is washed out, in every briefing pair
+    - Fixed 2026-10-01 with Mission 01's
 
 ## Mission 04 - The Last Bastion
 
@@ -136,7 +139,7 @@ already match the recording.
     - The recording shows the tower's mast closed, a blue-violet shaft capped by a blue cylinder, and the arch's opening a pale blue-white face
     - The engine spreads three red vanes on a grey shaft and puts an orange glow at the arch's foot
   - [ ] As on Mission 01: the Outpost's facade carries a teal diamond in the recording and an orange light in the engine (briefing time 11-16.3 s, 15:40-15:45); the Generator's core is a small green light in the recording and a large yellow-green glow in the engine (43.5 s, 16:12.5); and the clouds and washed-out ground
-    - The Generator's core matches since 2026-10-01 (briefing time 43.5 and 46 s: a small light between the horns in both); the Outpost's shot here is too distant to judge its emblem; the clouds and the ground stand
+    - The Generator's core matches since 2026-10-01 (briefing time 43.5 and 46 s: a small light between the horns in both); the Outpost's shot here is too distant to judge its emblem; the clouds and the ground are fixed with Mission 01's
 
 # Campaign 03
 
@@ -150,6 +153,12 @@ same framing; the builder's upgrade of the Small Factory to a Medium one; the bu
 warbots' captures at pods; the names on the target panel and the pages (Small Factory, Medium
 Mine, Medium Res. Center, Tiny Tower, the SWC, MTW, MWW and LSW units); Z's frameless zoom with
 its narrowed radar cone; and the win on the Research Center's capture already match the recording.
+
+A colour quoted here from a frame grabbed before 2026-10-01 is off: the tool wrote its JPEGs in
+the video's own BT.709 values, which a JPEG's reader takes as BT.601, so greens read about a
+tenth too bright, a sky of (107, 172, 25) as (111, 189, 28). Shapes and times are not touched.
+The colours of 2026-10-01's haze, ground, HUD and ghost items were sampled after the fix or
+from the video directly.
 
 Mission 02 checked against "Let's Play - Parkan: Iron Strategy, Part 6" (-yNnsqudMzw), played on
 the easy level, and its bonus "Part 6.5" (9SBZOCWv_vE), which plays it again from the campaign
@@ -211,11 +220,14 @@ Parts 3 and 4 again, is the small light of the recording.
   - [x] No weather: the recording's red dust falls the whole mission (the sky's snow spell 00:00–23:59 with `DUST_ADD` in its slot, e.g. 0:55–1:35 and every cockpit frame after), and lightning strikes at 1:55; the engine draws neither (queued: how the weather is drawn)
     - Read 2026-10-01 (docs/10, "The weather"): rain and snow are up to 1000 points kept in the camera's box, 2 to 50 ahead, drawn after the world with the depth test off; snow falls at (0.5, 0, −4) a second with a flutter, rain at (0.5, 0, −60). Lightning plays `env_lightning`, a 600-high bolt with a light and its thunder, at a point drawn over the map every six to nine seconds, and does no damage
     - Fixed 2026-10-01: the engine draws all three. Its dust matches the recording's in count, size, shape and colour (about 40 specks against about 35 in a 500 × 320 patch of sky), and the bolt is the recording's jagged streak with a fainter branch. The flash on the ground is real but stops at the texture's own colour, where the recording's goes to a pale lilac-white: the engine holds a lit colour at 1
-  - [ ] The engine draws a grey-brown cloud layer with hard, stepped edges over the upper sky, in every briefing shot from briefing time 15 s and in play; the recording's sky is a smooth red, magenta later, with faint wisps at most (0:57–1:25, 2:40, 12:20)
+  - [x] The engine draws a grey-brown cloud layer with hard, stepped edges over the upper sky, in every briefing shot from briefing time 15 s and in play; the recording's sky is a smooth red, magenta later, with faint wisps at most (0:57–1:25, 2:40, 12:20)
+    - Fixed 2026-10-01 with Campaign 02's clouds: the layer is lit and fogged out from its third ring, a smooth sky
   - [x] The orb the two standing figures hold is a small orange ball in the recording and a large rayed orange glow in the engine (briefing time 10–19 s, 0:57–1:06), as Campaign 02's generator core
     - Fixed 2026-10-01 with C03 M02's generator ball: the glow is a type-4 sprite, which sizes itself by the eye's distance in its frame. At briefing time 14 s the engine shows a small orange ball between the figures, as the recording does at 1:00
   - [ ] The lava glows bright red in the recording (briefing time 38 s, 1:25; 14:15) and is a dim pink-red in the engine
-  - [ ] As on Campaign 02, the engine's haze is far heavier and its ground paler: command mode's first view over the Small Bunker's roof (4:46) is dark, crisp ground in the recording and a pink wash in the engine, and so are the Research Center (briefing time 43–46.5 s) and the far hills of the first cockpit (1:42)
+    - Narrowed 2026-10-01: the ground and the haze about it now match, and the lava does not, (208, 7, 4) in the recording against (137, 20, 22). The recording shows the lava's own bright texture and the mirrored plant together, which neither of the two reflection modes as read draws; lava faces carry water's flags exactly, all 2624. What draws it is not read (docs/03, "Not established")
+  - [x] As on Campaign 02, the engine's haze is far heavier and its ground paler: command mode's first view over the Small Bunker's roof (4:46) is dark, crisp ground in the recording and a pink wash in the engine, and so are the Research Center (briefing time 43–46.5 s) and the far hills of the first cockpit (1:42)
+    - Fixed 2026-10-01 with Campaign 02's: at briefing time 38 s the ground by the bridge is (96, 9, 15) in the recording and (100, 12, 19) in the engine, where it was (143, 8, 19)
 
 ## Mission 02 - The Convoy
 
@@ -288,4 +300,6 @@ Parts 3 and 4 again, is the small light of the recording.
   - [x] The building placement ghost is shaded in the engine and one flat colour in the recording
     - The first pass had these down as *"flat solid-red vehicle silhouettes"* (6:20, 7:35, 8:15, 12:20–13:05, 14:25). They are the ghost of a building being placed: red where it may not stand, (253, 23, 42) at every pixel at 8:13.0 in Part 6.5, and green where it may, (129, 253, 42) at 8:15.5 — the ghost's colour held up to the scene colour, (129, 23, 42) at 11:23 on the day's clock, with no light on it
     - Fixed 2026-10-01 with the figures: the engine's ghost was (255, 26–49, 26–49), lit by the sun; it is flat, its colour over the scene's
-  - [ ] As on Mission 01: the hard-edged cloud layer, and the heavier haze and paler ground, in every briefing pair
+  - [x] As on Mission 01: the hard-edged cloud layer, and the heavier haze and paler ground, in every briefing pair
+    - Fixed 2026-10-01 with Campaign 02's: at briefing time 29 s the left hill is (112, 25, 36) in the recording and (113, 27, 37) in the engine, where it was (164, 42, 54); at 54 s the cracked ground (59, 7, 10) against (57, 11, 14), where it was (89, 8, 15)
+  - [ ] One face of the Outpost at briefing time 54 s is plain red in the recording, (136, 14, 24), and lavender in the engine, (188, 42, 71), lit there by the second light; the ground and the sky of the same frame agree (queued in docs/10)
