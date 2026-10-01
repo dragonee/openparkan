@@ -415,6 +415,44 @@ fn c03_m02s_enemy_raids_the_players_bunker_twice_on_its_own_timers() {
     );
 }
 
+/// On the easy level, which both recordings of the mission play, `fDifficulty` is 0 and the
+/// two raids come on the timers as `c3m2e2`'s `Init` writes them: 622 and 1120. The let's
+/// play's Part 6 has the first warning at 12:44, the clock past 622, and the second at 22:32.
+/// The enemy clans' units take half their hit points, the easy level's ratio.
+#[test]
+#[ignore = "needs the game install"]
+fn c03_m02s_raids_come_at_622_and_1120_on_the_easy_level() {
+    use parkan_sim::orders;
+    use parkan_sim::progression::Notice;
+
+    let (mut p, _) = campaign_progression_at(gamedir::C03_MISSION_02, 0);
+    let enemy = p.others.iter().position(|o| o.clan == 2).expect("Enm2 runs c3m2e2");
+    assert_eq!(p.others[enemy].script.float("fDifficulty"), Some(0.0), "easy is 0");
+    p.orders.clear();
+    let (mut raids, mut messages) = (Vec::new(), Vec::new());
+    let mut now = 0.0;
+    while now < 1_400_000.0 {
+        now += 100.0;
+        for notice in p.tick(now, |_| None) {
+            if let Notice::Message { id, first: true } = notice {
+                messages.push(id);
+            }
+        }
+        // Both enemy clans' planners order builds on the same takts; the raid is the attack.
+        let given = std::mem::take(&mut p.orders);
+        if let Some(attack) = given.iter().find(|o| o.order.code == orders::ATTACK) {
+            raids.push((p.others[enemy].takt.clock(), attack.id));
+        }
+    }
+    // The clock steps 7 a takt, and a timer is passed once the clock is above it.
+    assert_eq!(raids, [(623, 15), (1127, 14)], "unit 15 past 622, unit 14 past 1120");
+    assert_eq!(messages, [0, 1], "each raid says its own message");
+
+    let play = campaign_play_at(gamedir::C03_MISSION_02, Some(0));
+    assert_eq!(play.ratio, 0.5, "the easy level's ratio, `Iron_3D.ini`'s `[LEVEL_RATIO] EASY`");
+    assert_eq!(play.level, Some(0));
+}
+
 /// And the raid order reaches the warbot: given the attack its clan's script gives at the first
 /// timer, unit 15 takes it up and drives at the player's bunker across the map (docs/31, "The
 /// attack"), rather than standing where it was placed.

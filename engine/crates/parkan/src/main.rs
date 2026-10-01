@@ -5,7 +5,7 @@
 //! ```text
 //! parkan [--game DIR] [--mission MISSIONS/…] [--fly]
 //!        [--screenshot OUT.png] [--size WxH] [--top-down] [--look X,Y,Z,TX,TY,TZ]
-//!        [--headless] [--ticks N] [--hold SCAN_W,SCAN_A] [--press N] [--release N] [--mouse DX,DY] [--trace] [--sway]
+//!        [--headless] [--log] [--level easy|medium|hard] [--ticks N] [--hold SCAN_W,SCAN_A] [--press N] [--release N] [--mouse DX,DY] [--trace] [--sway]
 //!        [--capture-idle] [--god-mode] [--stretch-hud] [--save-to-game] [--outcome won|lost] [--text "…"] [--face NAME,DISTANCE] [--at X,Y,YAW[,Z]] [--pod NAME] [--drive PATH] [--hq] [--take NAME] [--designer] [--design PART,…]
 //!        [--skip-briefing] [--briefing-at SECONDS] [--objectives] [--map] [--game-menu]
 //! ```
@@ -64,6 +64,7 @@
 
 mod audio;
 mod camera;
+mod chronicle;
 mod scene;
 
 use std::collections::HashSet;
@@ -104,8 +105,15 @@ struct Args {
     sway: bool,
     /// `--capture-idle`: a captured bot is given no order, as the game's capture gives none.
     capture_idle: bool,
+    /// `--log`: with `--headless`, a line for each unit made, lost or captured, each task a
+    /// robot takes up and each objective's change, in place of the line a second.
+    log: bool,
     /// `--god-mode`: the hero is 2.5× as fast, has 10× the hit points and does 10× the damage.
     god_mode: bool,
+    /// `--level easy|medium|hard`, or 0 to 2: the game level, in place of `Iron_3D.ini`'s
+    /// `[CS] GAME_LEVEL`. The clans' scripts take their `fDifficulty` from it and the other
+    /// clans' units their hit points.
+    level: Option<usize>,
     /// `--fire-below`: a building's guns fire on a target below the lowest its turret looks, as
     /// the game's do.
     fire_below: bool,
@@ -190,7 +198,9 @@ fn args() -> Result<Args> {
         sway: false,
         capture_idle: false,
         fire_below: false,
+        log: false,
         god_mode: false,
+        level: None,
         stretch_hud: false,
         save_to_game: false,
         outcome: None,
@@ -237,7 +247,16 @@ fn args() -> Result<Args> {
             "--sway" => out.sway = true,
             "--capture-idle" => out.capture_idle = true,
             "--fire-below" => out.fire_below = true,
+            "--log" => out.log = true,
             "--god-mode" => out.god_mode = true,
+            "--level" => {
+                out.level = Some(match value()?.to_ascii_lowercase().as_str() {
+                    "easy" => 0,
+                    "medium" => 1,
+                    "hard" => 2,
+                    n => n.parse().context("--level is easy, medium, hard or 0 to 2")?,
+                })
+            }
             "--stretch-hud" => out.stretch_hud = true,
             "--save-to-game" => out.save_to_game = true,
             "--outcome" => out.outcome = Some(value()? == "won"),
@@ -430,6 +449,7 @@ fn rehearse(play: &mut scene::Play, loaded: &scene::Loaded, args: &Args) {
         play.hq_command(2);
     }
     let mut kills = Vec::new();
+    let mut chronicle = (args.headless && args.log).then(|| chronicle::Chronicle::open(play));
     for tick in 0..args.ticks {
         if tick == args.press {
             for key in &args.hold {
@@ -457,11 +477,16 @@ fn rehearse(play: &mut scene::Play, loaded: &scene::Loaded, args: &Args) {
             // With no window, what the game says is printed.
             for say in std::mem::take(&mut play.says) {
                 if let parkan_world::progress::Say::Text(_, text) = say {
-                    println!("  says: {text}");
+                    match chronicle {
+                        Some(_) => println!("t {:7.1}  says   {text}", play.hero.time_ms / 1000.0),
+                        None => println!("  says: {text}"),
+                    }
                 }
             }
-            if (tick + 1) % 60 == 0 {
-                report(play);
+            match &mut chronicle {
+                Some(c) => c.step(play),
+                None if (tick + 1) % 60 == 0 => report(play),
+                None => {}
             }
         }
     }

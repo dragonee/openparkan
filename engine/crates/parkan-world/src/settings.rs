@@ -28,6 +28,11 @@ pub fn value(game: &Path, section: &str, key: &str) -> Option<String> {
 /// anything else `HARD`. See `docs/26-damage.md`, "The difficulty ratio".
 pub fn level_ratio(game: &Path) -> f32 {
     let level = value(game, "CS", "GAME_LEVEL").and_then(|v| v.parse::<i32>().ok()).unwrap_or(1);
+    level_ratio_at(game, usize::try_from(level).unwrap_or(usize::MAX))
+}
+
+/// The level ratio of game level `level`, whatever `GAME_LEVEL` says.
+pub fn level_ratio_at(game: &Path, level: usize) -> f32 {
     let (key, default) = match level {
         0 => ("EASY", 0.5),
         1 => ("MEDIUM", 0.7),

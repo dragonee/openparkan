@@ -823,8 +823,15 @@ impl Progression {
     /// The progression of `mission`, in `mission_dir`, for the clan of its object `hero`.
     /// Every placed unit with a logical id joins its clan's list and reports where it
     /// stands, and every clan's script runs its `Init` once (SuperAI slot 5), the placed
-    /// units already in their clans (docs/34, "Mission 03").
-    pub fn load(game: &Path, mission_dir: &Path, mission: &Mission, hero: usize) -> Result<Self> {
+    /// units already in their clans (docs/34, "Mission 03"). `level` is the game level
+    /// every clan's `fDifficulty` is written from.
+    pub fn load(
+        game: &Path,
+        mission_dir: &Path,
+        mission: &Mission,
+        hero: usize,
+        level: usize,
+    ) -> Result<Self> {
         let clan = mission.objects.get(hero).and_then(mission::Object::clan_id).unwrap_or(0);
         let record = usize::try_from(clan).ok().and_then(|c| mission.clans.get(c));
         let objectives = resources::objectives(mission_dir)?;
@@ -853,7 +860,7 @@ impl Progression {
         }
         // `fDifficulty` as the SuperAI's constructor writes it, out of the game level
         // (docs/15, "The planner"): every clan's script is built with the same one.
-        let difficulty = planner::difficulty(crate::settings::game_level(game));
+        let difficulty = planner::difficulty(level);
         let script = match record.map(|c| c.ai_script.as_str()).filter(|s| !s.is_empty()) {
             Some(path) => Some(load_script(game, path)?),
             None => None,

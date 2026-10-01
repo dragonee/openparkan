@@ -221,6 +221,15 @@ pub(crate) fn command_frames(
 pub(crate) fn campaign_progression(
     path: &str,
 ) -> (parkan_world::progress::Progression, parkan_formats::mission::Mission) {
+    let game = gamedir::find(None).expect("a Parkan install: set PARKAN_DIR");
+    campaign_progression_at(path, parkan_world::settings::game_level(&game))
+}
+
+/// [`campaign_progression`] at game level `level`: 0 easy, 1 medium, 2 hard.
+pub(crate) fn campaign_progression_at(
+    path: &str,
+    level: usize,
+) -> (parkan_world::progress::Progression, parkan_formats::mission::Mission) {
     use parkan_formats::mission;
 
     let game = gamedir::find(None).expect("a Parkan install: set PARKAN_DIR");
@@ -228,12 +237,17 @@ pub(crate) fn campaign_progression(
     let name = path.rsplit('/').next().unwrap();
     let m = mission::parse(&std::fs::read(dir.join("data.tma")).unwrap(), name).unwrap();
     let hero = m.objects.iter().position(|o| parkan_world::hero::is_hero(&o.path)).expect("a hero");
-    let p = parkan_world::progress::Progression::load(&game, &dir, &m, hero).unwrap();
+    let p = parkan_world::progress::Progression::load(&game, &dir, &m, hero, level).unwrap();
     (p, m)
 }
 
 /// A campaign mission's play with its progression, the hero standing still.
 pub(crate) fn campaign_play(path: &str) -> parkan_world::play::Play {
+    campaign_play_at(path, None)
+}
+
+/// [`campaign_play`] at a game level of its own: 0 easy, 1 medium, 2 hard.
+pub(crate) fn campaign_play_at(path: &str, level: Option<usize>) -> parkan_world::play::Play {
     use parkan_formats::mission;
     use parkan_world::play::Play;
 
@@ -241,7 +255,7 @@ pub(crate) fn campaign_play(path: &str) -> parkan_world::play::Play {
     let dir = gamedir::resolve(&game, path).unwrap();
     let name = path.rsplit('/').next().unwrap();
     let m = mission::parse(&std::fs::read(dir.join("data.tma")).unwrap(), name).unwrap();
-    let mut play = Play::load(&game, &m).unwrap().expect("a hero");
+    let mut play = Play::load_at(&game, &m, level).unwrap().expect("a hero");
     play.load_progression(&game, &dir, &m).unwrap();
     play
 }

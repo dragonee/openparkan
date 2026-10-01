@@ -226,9 +226,10 @@ pub fn flare(world: &World, seconds: f64) -> Option<parkan_render::flare::Flare>
 
 /// The mission's play, with the hero's view held steady against its gait unless `--sway`,
 /// a captured bot standing by unless `--capture-idle`, a building holding its fire below its
-/// turret's reach unless `--fire-below`, and its progression when its script and messages load.
+/// turret's reach unless `--fire-below`, at `--level`'s game level where one is given, and its
+/// progression when its script and messages load.
 pub fn play(game: &Path, loaded: &Loaded, args: &crate::Args) -> Result<Option<Play>> {
-    let mut play = Play::load(game, &loaded.mission)?;
+    let mut play = Play::load_at(game, &loaded.mission, args.level)?;
     if let Some(p) = play.as_mut() {
         p.hero.steady = !args.sway;
         p.capture_standby = !args.capture_idle;

@@ -1228,10 +1228,20 @@ cargo run --release -p parkan -- --screenshot m1.png           # one frame to a 
 cargo run --release -p parkan -- --screenshot map.png --top-down --size 768x768
 cargo run --release -p parkan -- --screenshot tank.png --look 705,885,24,734,906,10   # from X,Y,Z at TX,TY,TZ
 cargo run --release -p parkan -- --mission MISSIONS/Single.01  # another mission
+cargo run --release -p parkan -- --headless --log --level easy --ticks 36000   # what happens in ten minutes, on easy
 ```
 
 `--game DIR` or `PARKAN_DIR` points at the install when it is not beside this
 repository.
+
+`--level easy|medium|hard` (or 0 to 2) plays at that game level in place of `Iron_3D.ini`'s
+`[CS] GAME_LEVEL`: the clans' scripts take their `fDifficulty` from it and the other clans'
+units their hit points. With `--headless`, `--log` prints a line as each thing happens in
+place of the line a second — a unit made, lost or captured, a building changing hands or
+losing a quarter of its life, a robot taking up another task, an objective changing state,
+the hero hurt or lost, the mission's end: `--mission MISSIONS/CAMPAIGN/CAMPAIGN.03/Mission.02
+--skip-briefing --headless --log --level easy --pod sbunk02.dat --ticks 48000` plays the
+Convoy's first raid out with the hero in its bunker.
 
 The engine never writes into the install, which need not be writable. What the game
 writes there — saved designs today, saved games and settings when they come — goes to the

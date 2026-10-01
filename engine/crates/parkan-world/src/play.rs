@@ -378,6 +378,9 @@ pub struct Play {
     pub stores: HashMap<i64, crate::factory::Store>,
     /// The difficulty's level ratio a unit's hit points take (docs/26).
     pub ratio: f32,
+    /// The game level the play was loaded at, where it is not `Iron_3D.ini`'s own: 0 easy,
+    /// 1 medium, 2 hard. The clans' scripts take their `fDifficulty` from it.
+    pub level: Option<usize>,
     /// How many units the play has made.
     pub spawned: usize,
     /// Units made since the drawing last caught up, by target.
@@ -877,6 +880,11 @@ impl Play {
     /// The mission's hero armed, its map's ground, every other object a target, and the
     /// effects they can play loaded.
     pub fn load(game: &Path, mission: &Mission) -> Result<Option<Play>> {
+        Play::load_at(game, mission, None)
+    }
+
+    /// [`Play::load`] at game level `level` rather than `Iron_3D.ini`'s `GAME_LEVEL`.
+    pub fn load_at(game: &Path, mission: &Mission, level: Option<usize>) -> Result<Option<Play>> {
         let mut assembly = Assembly::new(game)?;
         let Some(mut hero) = Hero::load(&mut assembly, mission)? else { return Ok(None) };
         let dir = terrain::map_dir(game, &mission.map_path)?;
@@ -886,7 +894,7 @@ impl Play {
             Some(Err(e)) => return Err(e.into()),
             None => None,
         };
-        let ratio = settings::level_ratio(game);
+        let ratio = level.map_or_else(|| settings::level_ratio(game), |l| settings::level_ratio_at(game, l));
         let mut battle = Battle::load(&mut assembly, mission, Some(hero.object), ratio)?;
         if let Some(graph) = &mut graph {
             graph.carve(&scenery_footprints(mission, &battle));
@@ -1101,6 +1109,7 @@ impl Play {
             factories,
             stores: HashMap::new(),
             ratio,
+            level,
             spawned: 0,
             added: Vec::new(),
             building_effects,
@@ -1303,7 +1312,8 @@ impl Play {
             .parent()
             .and_then(|c| c.file_name())
             .is_some_and(|c| c.to_string_lossy().eq_ignore_ascii_case(TRAINING_CAMPAIGN));
-        self.progression = Some(Progression::load(game, mission_dir, mission, self.hero.object)?);
+        let level = self.level.unwrap_or_else(|| settings::game_level(game));
+        self.progression = Some(Progression::load(game, mission_dir, mission, self.hero.object, level)?);
         crate::factory::prebuild(self, game, mission_dir).context("the prebuilt designs")?;
         // What the clans' `Init` handlers ordered: Mission 03's enemy patrol shut down.
         self.deliver_orders();
