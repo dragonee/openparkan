@@ -259,6 +259,28 @@ fn mission_01s_cockpit_names_its_units_lists_its_guns_and_frames_its_target_as_r
     assert_eq!((drawn.views[0].unit, drawn.views[1].unit), (Some(helic), None));
     assert_eq!(drawn.views[0].viewport, [9.0, 315.0, 128.0, 128.0]);
     assert_eq!(drawn.views[1].viewport, [503.0, 315.0, 128.0, 128.0]);
+    // Each view carries its unit's own two lights (docs/35, "The unit in the middle"): the
+    // first travels (-1, 1, -1) in the unit's own frame, the vector as it is, and the second
+    // the other way at 0.35 of its colour. The helicopter and the hero both carry a turret,
+    // and are lit twice over.
+    for v in &drawn.views {
+        let [a, b] = v.lights;
+        assert!((a.colour - 0.5).abs() < 1e-6 && (b.colour - 0.175).abs() < 1e-6, "{:?}", v.lights);
+        assert!(a.travel.abs_diff_eq(-b.travel, 1e-6));
+        assert!((a.travel.length() - 3f32.sqrt()).abs() < 1e-4, "not normalised: {:?}", a.travel);
+    }
+    let turn = play.hero.walker.drawn_turn(play.hero.time_ms);
+    assert!(drawn.views[1].lights[0].travel.abs_diff_eq(turn * Vec3::new(-1.0, 1.0, -1.0), 1e-5));
+    let turn = play.battle.combat.targets[helic].rotation();
+    assert!(drawn.views[0].lights[0].travel.abs_diff_eq(turn * Vec3::new(-1.0, 1.0, -1.0), 1e-5));
+    // A dummy is its chassis alone, and has the one pair: 0.25 and 0.0875.
+    assert_eq!(play.battle.combat.targets[dummies[0]].parts.len(), 1);
+    play.targets.set(Some(dummies[0]));
+    let dummy = cockpit.draw(&play, Space::new(640.0, 480.0), &font, &menu, view_proj);
+    let [a, b] = dummy.views[0].lights;
+    assert_eq!(dummy.views[0].unit, Some(dummies[0]));
+    assert!((a.colour - 0.25).abs() < 1e-6 && (b.colour - 0.0875).abs() < 1e-6, "{a:?} {b:?}");
+    play.targets.set(Some(helic));
     // 20 s on the box is gone.
     play.hero.time_ms += 20_001.0;
     let later = cockpit.draw(&play, Space::new(640.0, 480.0), &font, &menu, view_proj);

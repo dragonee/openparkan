@@ -26,7 +26,8 @@ struct Frame {
     fog: vec4<f32>,
     // The eye; w its field of view across, radians.
     eye: vec4<f32>,
-    // x 1: every instance draws flat in its paint (a HUD panel's view of a unit).
+    // x 1: every instance draws in its paint, the camera's mode 2 (a HUD panel's view of a
+    // unit, a building being placed).
     paint: vec4<f32>,
     // x: how many of the point lights light every surface in their range, which come first;
     // y: how many there are.
@@ -140,7 +141,21 @@ struct VertexOut {
     @location(5) fade: f32,
     // What the point lights give the vertex.
     @location(6) points: vec3<f32>,
+    // A painted vertex's specular, display space: what its lit colour passes 1 by.
+    @location(7) gloss: vec3<f32>,
 };
+
+// The lit colour's knee and the specular's (frame.rs `knee`, `specular_knee`;
+// Terrain.dll:0x1004f25a, 0x1004f4c3).
+fn knee(c: vec3<f32>) -> vec3<f32> {
+    let bent = min(c / 6.0 + vec3<f32>(5.0 / 6.0), vec3<f32>(2.0));
+    return select(bent, c, c <= vec3<f32>(1.0));
+}
+
+fn specular_knee(s: vec3<f32>) -> vec3<f32> {
+    let bent = min(0.1 * s + vec3<f32>(0.7), vec3<f32>(1.0));
+    return select(bent, 0.8 * s, s <= vec3<f32>(1.0));
+}
 
 // A portal quad's alpha by the eye's distance from its first corner (Terrain.dll:0x1002c4d0,
 // docs/24, "A building is drawn cell by cell through its portals"): 0 up to where its fade
@@ -171,6 +186,23 @@ fn vs_main(v: VertexIn) -> VertexOut {
     out.paint = instance.paint;
     out.fade = portal_fade();
     out.points = point_lights(world.xyz, out.normal, instance.owner.x);
+    out.gloss = vec3<f32>(0.0);
+    if frame.paint.x > 0.5 {
+        // The camera's mode 2 (docs/35, "The unit in the middle"): the batch's self-light is
+        // the colour the camera was handed, its texture is none, and its diffuse stays its
+        // own. The shade's lighter then colours the vertex (frame.rs `shade`,
+        // `CShade::ShadeIndexedStrided`): the view's lights on the diffuse plus the self-light,
+        // held up to the scene colour, through the knee, what passes 1 going to the specular.
+        // The colour is a vertex's and the device carries it across the face, so it is formed
+        // here.
+        let n = normalize(out.normal);
+        let a = max(dot(n, -frame.light_direction.xyz), 0.0);
+        let b = max(dot(n, -frame.second_direction.xyz), 0.0);
+        let lights = frame.light_colour.rgb * a + frame.second_colour.rgb * b + out.points;
+        let lit = knee(max(instance.paint.rgb + look.diffuse.rgb * lights, frame.scene_colour.rgb));
+        out.paint = vec4<f32>(min(lit, vec3<f32>(1.0)), 1.0);
+        out.gloss = specular_knee(max(lit - vec3<f32>(1.0), vec3<f32>(0.0)));
+    }
     return out;
 }
 
@@ -180,12 +212,9 @@ fn fs_main(v: VertexOut) -> @location(0) vec4<f32> {
         discard;
     }
     if frame.paint.x > 0.5 {
-        // STAND-IN: docs/35-hud.md#the-unit-in-the-middle--read-and-seen -- how the camera
-        // applies the colour it is handed in mode 2 is not read. Measured on the recording of
-        // Mission 01: an intact dummy flat at about (39, 162, 41) and a mostly destroyed part
-        // at (140, 59, 38), the node colour lifted by 0.15; bots shade a little with the light.
-        let lift = 0.1 + 0.1 * max(dot(normalize(v.normal), -frame.light_direction.xyz), 0.0);
-        return vec4<f32>(linear(min(v.paint.rgb + vec3<f32>(lift), vec3<f32>(1.0))), 1.0);
+        // Stage 0 has no texture in mode 2, so the vertex's colour is the pixel's, and the
+        // device adds the specular after it (docs/37, "The scan bands").
+        return vec4<f32>(linear(min(v.paint.rgb + v.gloss, vec3<f32>(1.0))), 1.0);
     }
     // The cell rewrites the coordinates in place: u0 + u × du, v0 + v × dv.
     let texel = textureSample(skin, skin_sampler, look.cell.xy + v.uv * look.cell.zw);

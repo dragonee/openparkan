@@ -475,8 +475,17 @@ pub fn draw_hud(
         .views
         .iter()
         .map(|v| {
-            // The view has no fog: it stands a unit's width from what it shows.
+            // The view has no fog: it stands a unit's width from what it shows. Its draw
+            // gathers the unit's own two lights and no other, not the sun's and no point light
+            // (docs/35, "The unit in the middle"); the shade takes a light's direction as it
+            // is stored, not normalised, so its length goes with the colour here.
+            let lights = v.lights.map(|l| parkan_render::frame::Light {
+                direction: l.travel,
+                colour: [l.colour * l.travel.length(); 3],
+            });
             let lighting = parkan_render::frame::Lighting {
+                lights,
+                points: parkan_render::frame::Points::default(),
                 fog_end: f32::MAX,
                 fog_start: f32::MAX,
                 eye: v.eye,
@@ -495,15 +504,7 @@ pub fn draw_hud(
         })
         .collect();
     let mut views: Vec<parkan_render::ModelView> = views;
-    views.extend(previews(
-        renderer,
-        device,
-        queue,
-        hud,
-        play,
-        &drawn.previews,
-        lighting.map(|l| l.scene_colour),
-    ));
+    views.extend(previews(renderer, device, queue, hud, play, &drawn.previews, lighting));
     renderer.set_views(device, views);
     (drawn.voices, drawn.sounds)
 }
@@ -518,8 +519,9 @@ fn previews(
     hud: &mut Hud,
     play: &mut Play,
     shown: &[parkan_world::cockpit::designer::Preview],
-    scene_colour: Option<[f32; 3]>,
+    world: Option<parkan_render::frame::Lighting>,
 ) -> Vec<parkan_render::ModelView> {
+    let scene_colour = world.map(|l| l.scene_colour);
     let keys: Vec<_> = shown.iter().map(|p| p.key.clone()).collect();
     if keys != hud.preview_keys {
         hud.preview_keys = keys.clone();
@@ -555,7 +557,15 @@ fn previews(
             // The two lights turn with the model and are (2, 2, 2) each (docs/37, "The
             // previews").
             let [a, b] = p.lights.map(|d| p.model.transform_vector3(d).normalize_or(glam::Vec3::NEG_Z));
-            let colour = [parkan_world::cockpit::designer::PREVIEW_LIGHT_COLOUR; 3];
+            // A building being placed takes no directional light: the recordings show it one
+            // flat colour, and its draw's gather passes over the lights of a manager whose
+            // owner is of kind 7, which the sky's is inferred to be. What reaches it is a point
+            // light that lights everything in its range, an explosion's or a gun's flash
+            // (docs/32, "How it is drawn").
+            let (colour, points) = match p.paint {
+                Some(_) => ([0.0; 3], world.map(|l| l.points).unwrap_or_default()),
+                None => ([parkan_world::cockpit::designer::PREVIEW_LIGHT_COLOUR; 3], Default::default()),
+            };
             let light = |direction| parkan_render::frame::Light { direction, colour };
             parkan_render::ModelView {
                 viewport: p.viewport,
@@ -567,6 +577,7 @@ fn previews(
                     // which the model view's draw copies as the world's does (docs/37, "The
                     // previews"): the world's this frame, or the shader's own 0.2 before any.
                     scene_colour: scene_colour.unwrap_or(parkan_render::frame::SHADER_SCENE_COLOUR),
+                    points,
                     fog_start: f32::MAX,
                     fog_end: f32::MAX,
                     eye: glam::Vec3::ZERO,

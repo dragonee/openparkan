@@ -234,9 +234,29 @@ each 1 or 0 by the colour word's bytes, with alpha 1. The camera is put in mode
 drawn through its interface `0x18` slot 11 with flags `0x5f0`. For the draw fog
 is off and the depth test is off (`D3DRS_FOGENABLE` 0, `ZENABLE` 0,
 `ZWRITEENABLE` 1, `ZFUNC` 8, always; the four put back after). So it shows whole
-over whatever stands in front of it. *Seen*, at
-183–184 s in the recording of *The Field Base*: a solid red silhouette of the
-mine, then a solid green one.
+over whatever stands in front of it.
+
+Mode 2 makes the colour every batch's self-light and takes its texture away, and
+the shade's lighter holds each vertex up to the scene colour
+([35-hud.md](35-hud.md#what-mode-2-does-with-the-colour--read-measured-and-seen)):
+**a channel the colour has at 1 stays 1, and one it has at 0 shows the scene
+colour's.** A 1 is not lifted by the scene's share, so nothing passes 1 and
+nothing reaches the specular. **No light shades it**: `0x5f0` is the HUD's
+`0x7f0` without `0x200`, so the gather's flags are 2 alone. That takes the
+lights not flagged `0x4000000` of the model's own manager and of every manager
+that lights more than its owner, and passes over a manager whose owner is of
+kind 7. The model's own six such lights are on only where the object its own
+answers gives them colours (`AniMesh.dll:0x1000b480`), and the sun's two do
+not reach it if the sky is of kind 7. Both are *inferred*: the recordings show
+no shading at all, and neither that object nor the sky's kind is read. What is
+left is a point light that lights everything in its range, an explosion's or
+a gun's flash, where one stands near.
+
+*Measured*: Part 6.5 (`9SBZOCWv_vE`), C03 M02, at 8:13.0 the ghost is one flat
+(253, 23, 42) and at 8:15.5 one flat (129, 253, 42), under a scene colour of
+(129, 23, 42). The recording of *The Field Base* (`DW8XuX10y0U`) at 183.0 s: a
+solid red silhouette of the mine, (255, 41, 40) on every pixel of it, under
+that mission's (40, 40, 40); then a solid green one.
 
 ### The test: `IsPlacementValid` — *read*
 

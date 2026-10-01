@@ -924,23 +924,165 @@ field of view (*guess*). Each frame (`0x100418a3`–`0x10041cc0`):
      model.
 
 **Each part is coloured by its life** (`AniMesh.dll:0x10014b30`). Draw flag
-`0x200`, one of the seven bits of `0x7f0`, does four things:
-- It draws at the level held in `AniMesh.dll:0x100225e8`, 1 in the image.
+`0x200`, one of the seven bits of `0x7f0`, does five things:
+- It draws at the level held in `AniMesh.dll:0x100225e8`. The mesh's own setup
+  writes it: **1 while the setting `RobotBestLOD` is not 0, else 2**
+  (`0x100071fe`, the key `0x0008001e` built at `0x100071a7`;
+  [10-sky.md](10-sky.md#the-render-settings) has the setting's default, 1).
 - It puts the camera in mode 2 (slot 8) for the draw.
 - Before each node's batches, it hands the camera (slot 30) the colour
   **(0.5, 0, 0, 1) + life × (−0.5, 0.5, 0, 0)**. Life is the node's life over
   its maximum (node `+0x124`), and the two quads are the mesh's `+0x21c` and
   `+0x22c`, set by its constructor (`0x10006b7a`).
 - Afterwards it restores the camera's colour and mode.
+- It has the shade gather the mesh's own two view lights and no other
+  ([below](#what-mode-2-does-with-the-colour--read-measured-and-seen)).
 
-So an intact part is green (0, 0.5, 0) and a destroyed one red (0.5, 0, 0). How
-the camera applies the colour in mode 2 was not read.
+So an intact part is green (0, 0.5, 0) and a destroyed one red (0.5, 0, 0), before
+the shade lights it and holds it up to the scene colour.
 
 *Seen*:
-- **Colours.** An intact dummy is a flat (39, 162, 41); a damaged part of it at
-  146 s is (140, 59, 38); a destroyed part goes brownish.
-- **Shading.** Bots show light-green shading, the dummy none.
+- **Colours.** On Mission 01 the dummy is a flat (39, 162, 40) at 143 s, and a
+  damaged part of it at 146 s is (140, 59, 38); a destroyed part goes brownish.
+  On C03 M02 the same figures are tan and cream by day and mint by night:
+  red and blue are the scene colour's wherever the light does not pass it.
+- **Shading.** Bots and the hero show light facets, the dummy one colour.
 - **Level.** The models are coarse.
+
+### What mode 2 does with the colour — *read*, *measured*, and *seen*
+
+**The colour becomes the batch's self-light, and its texture goes.** `CShade`'s
+mesh draw (`Terrain.dll:0x10044ea0`) asks the camera its mode for every draw
+item it builds (slot 9, `0x1004570f`). On 2 it takes the camera's colour
+(slot 31) and writes over the item's copy of the material:
+- **the ambient colour** — the self-light of
+  [07-objects.md](07-objects.md#how-a-material-reaches-the-device--read-and-measured)
+  — is the camera's colour, its alpha 1 (`0x1004574c`–`0x1004576e`);
+- **both textures are none** (`0x10045778`–`0x10045788`), so the texture stage
+  gives white and the vertex's colour is the pixel's;
+- **the phase** is the shade's `+0x1928`, the one a batch of one texture takes
+  anyway (`0x10045792`);
+- the diffuse, the specular, the power and the blend mode stay the material's.
+
+**The shade's lighter then colours each vertex**, as it does every lit batch
+(`CShade::ShadeIndexedStrided`, `0x1004df70`,
+[11-effects.md](11-effects.md#what-a-light-does-to-a-surface--read-and-measured)):
+
+```
+rgb = knee( max( self-light + diffuse × Σ light colour × (−n · d),  scene colour ) )
+```
+
+- **The scene colour is a floor, not an addend.** The step at
+  `0x1004f225`–`0x1004f23d` is `g_FastProc`'s `+0x50`, handed the vertex's sum,
+  the material's ambient and the scene colour. Each of its four builds adds
+  the first two and keeps the larger of that and the third, channel by channel:
+  `Ngi32.dll:0x100248a0` (`fadd`, `fcom`, `jae`), `0x1001ffc0` (`fcomi`,
+  `fcmovbe`), `0x1001bdd0` (`pfadd`, `pfmax`) and `0x1001d980` (`addps`,
+  `maxps`). So a node shows its own green over the scene's red and blue, and a
+  channel the scene colour is brighter in shows the scene's.
+  [11-effects.md](11-effects.md#what-a-light-does-to-a-surface--read-and-measured)
+  had the three summed; the measurements below are the floor's.
+- **A directional light's direction is used as stored.** The routine dots the
+  vertex's normal with the record's three floats and normalises nothing
+  (`0x10018311`–`0x1001834a`, `0x10016122`–`0x10016146`): a light whose
+  direction is longer than 1 is that much brighter.
+- **The knee** is 1 to 1 up to 1, a sixth of it and five sixths up to 7, and 2
+  past that; what a channel then has over 1 goes to the vertex's specular, 0.8
+  of it, which the device adds after the stage
+  ([37-designer.md](37-designer.md#the-scan-bands--read-and-seen)).
+
+**The seven bits of `0x7f0`** (`AniMesh.dll:0x10014b30`, the mesh's draw):
+
+| bit | what it does |
+|---|---|
+| `0x10` | the mesh's effects are not drawn (`0x10015197`) |
+| `0x20` | the mesh's second pass, through its `+0x3c`, is not drawn (`0x10014d2d`): its shadow, by the kinds and levels the pass asks for (*inferred*) |
+| `0x40` | the objects attached to it are not drawn (`0x100151f4`) |
+| `0x80` | the level is not picked by distance or by the view (`0x10014bd3`) |
+| `0x100` | nothing in this routine: none of its reads of the flags tests it, where they test 1, 8, `0x10`, `0x20`, `0x40`, `0x80`, `0x200` and `0x400` |
+| `0x200` | the view's level, mode 2 and the node colours, and the light gather's flags 1 and 4 (`0x10014c0a`, `0x10014d98`) |
+| `0x400` | the light gather's flag 2 (`0x10014daa`) |
+
+**Which lights reach the draw.** The mesh begins its batches through the
+shade's slot 13 (`Terrain.dll:0x100478c0`) with those gather flags:
+- **1**: the object's own light manager alone, its interface `0xe`
+  (`0x100472e2`–`0x1004759b`). Without it the list is every registered manager
+  that lights more than its owner, and the object's own.
+- **2**: a manager whose owner answers kind 7 is passed over
+  (`0x10047633`–`0x10047651`).
+- **4**: only lights flagged `0x4000000`, where without it only the lights not
+  flagged so (`0x10047a66`–`0x10047a81`); and no point light (`0x10047af7`).
+
+So `0x7f0`, gather flags 7, takes **the unit's own lights flagged `0x4000000`
+and nothing else**: not the sun's two, not an effect's.
+
+**The two lights.** A mesh whose agent is of kind 2, 3 or 4 makes eight
+directional lights on its own manager when it is set up (message 4's second
+phase, `AniMesh.dll:0x100070c9`–`0x1000718a`):
+- **Six** along ±x, ±y and ±z (the table at `0x10025ef8`, filled at
+  `0x10007d70`), flagged `0x80000000` and off. A draw without `0x200` asks an
+  object its own answers for six colours, and with them turns the six on
+  (`0x1000b480`); every draw turns them off after (`0x10015153`–`0x1001517f`).
+  A `0x200` draw skips the asking (`0x10014db2`), and its flag 4 would pass
+  them over anyway. What that object is was not read.
+- **Two** flagged `0x84000000` and on, their directions (−1, 1, −1) and
+  (1, −1, 1), set in space 0, which stores a vector as it is
+  ([10-sky.md](10-sky.md#where-the-two-lights-point--read)).
+- All eight are flagged against a specular (manager slot 18 with 0,
+  `0x10007187`).
+
+The same setup then calls `IAnimation` slot 28 on the mesh (`0x10005a00`, called
+at `0x1000723b`) with a direction, a colour and a share: (−1, 1, −1),
+**(0.25, 0.25, 0.25, 1)** and **0.35**. The first of the two takes the direction
+and the colour; the second takes the direction negated and 0.35 of the colour
+(`0x10005a7d`–`0x10005b26`). No other call was found: of the calls at `+0x70`,
+`iron3d.dll`'s 18, `Terrain.dll`'s 9, `World3D.dll`'s 3, `Behavior.dll`'s 2 and
+`MisLoad.dll`'s 1 pass other arguments (`Net.dll`, `Ngi32.dll` and
+`services.dll` have one each, not read), the control is that sweep finding
+`AniMesh.dll`'s own; and the HUD's routine asks no object for interface `0xe`.
+
+**They turn with the unit.** The gather takes each record through the manager's
+slot 7 in space 2 (`Terrain.dll:0x10047ab0`), which copies it and turns the
+copy's direction through the placement of the manager's owner
+(`0x100802f0`, `g_FastProc` `+0x1c` at `0x100803e4`). So (−1, 1, −1) is in the
+unit's own frame: the first light falls on what looks to the unit's right, its
+back and up, **0.25 × (n · (1, −1, 1))** on a white diffuse, at most
+0.25 × √3 = 0.43; the second on the opposite faces at 0.35 of that. The own
+panel's camera stands behind the unit, on the lit side.
+
+**A whole node's vertex** is therefore
+
+```
+r = max(diffuse.r × lit, scene.r)        lit = 0.25 × max(0,  n · (1, −1, 1))
+g = 0.5 + diffuse.g × lit                    + 0.0875 × max(0, −n · (1, −1, 1))
+b = max(diffuse.b × lit, scene.b)
+```
+
+with n in the unit's frame, and green past 1 whitening the vertex through the
+specular.
+
+*Measured*, at the recordings' own resolution, against the engine drawing this:
+
+| recording | what | recording | as read |
+|---|---|---|---|
+| Part 6 (`-yNnsqudMzw`), 1:52.5, the hero's own panel | a patch of its back the light does not reach, under a scene colour of (156, 40, 59), the keyframes' at 02:25 of the day | (151, 127, 57) | (154, 127, 58) |
+| *Line of Fire* (`9wNogdbFvec`), 143 s, a dummy, a chassis alone (`l_targ` as read) | its face, under (40, 40, 40) | (39, 162, 40) | (40, 163, 40) |
+| Part 6, 1:52.5, the hero, a chassis and a turret | the figure's median green, and blue's 75th percentile | 219, 151 | 173, 80 with one pair of lights; 210, 154 with two |
+
+- The first row is the floor: an addend would make the green 167.
+- The dummy's green over its node's 0.5 is 0.136 in the recording and 0.139 as
+  read. A damaged part of it at (140, 59, 38) is the same light on a node at
+  about a sixth of its life (*derived*).
+- **A unit of more than one part is lit twice as strongly as read.** The hero's
+  figure is 2.06, 1.98 and 2.03 times as far over its floor as one pair of
+  lights puts it (the median green, and blue's ninetieth and ninety-ninth
+  percentiles); *seen* the same on Mission 01's spider `tut1_e1`, a chassis and
+  a turret, at 240 s, and on the driven warbot of Part 6 at 48:05, whose
+  lightest faces are (155, 252, 156) under a scene colour of (91, 63, 114).
+  What makes the second pair is not read: one agent's setup makes one.
+
+*Seen*, Part 6 at 48:05: the figures are mint under the night's violet, red and
+blue held at the scene colour's 91 and 114 and green over its node's 127.
 
 ### Name and status — *read*, and *seen*
 
@@ -1147,9 +1289,20 @@ hit, and prints *"SSW-1 Warrior"* above a falling distance.
 
 ### Not established
 
-- How the camera draws a mesh in mode 2 with the colour slot 30 hands it: a
+- ~~How the camera draws a mesh in mode 2 with the colour slot 30 hands it: a
   flat or a lit tint, and why the recording's green is brighter than
-  (0, 128, 0).
+  (0, 128, 0).~~ **Read**: the colour is the batch's self-light, its texture
+  none, and the shade lights it with the unit's own two lights and holds it up
+  to the scene colour; the dummy's 162 is its node's 127 and 0.136 of light
+  ([What mode 2 does with the colour](#what-mode-2-does-with-the-colour--read-measured-and-seen)).
+- What makes a unit of more than one part twice as bright as the one pair of
+  lights the read finds: the hero's figure is 2.06, 1.98 and 2.03 times as far
+  over its floor, and the one-part dummy is as read.
+- That the sky's light manager's owner answers kind 7, which is what gather
+  flag 2 passes over: the test is read (`Terrain.dll:0x1004764b`), the
+  atmosphere's kind is not.
+- What the shade's phase `+0x1928` sets on the device (2 where the device
+  answers for it, `Terrain.dll:0x1004115b`).
 - The panel camera's three figures (300, 0.5, 1.2) as far, near and field; and
   what `GetShade()` slot 12's `+4` and `+8` are.
 - The driven unit record's `+0x10` and `+0x14` in the frame's scale.
@@ -1162,8 +1315,10 @@ hit, and prints *"SSW-1 Warrior"* above a falling distance.
   all on the Small Tower chassis `R_B_06` and its battery of −1, and 28 of the
   267 placed robots. The name raises its clan's count for every unit, the hero's
   and a *Tiny Tower*'s too
-  ([Name and status](#name-and-status--read-and-seen)). Still open: who writes
-  the panel level at `AniMesh.dll:0x100225e8`.
+  ([Name and status](#name-and-status--read-and-seen)). ~~Still open: who writes
+  the panel level at `AniMesh.dll:0x100225e8`.~~ **Read**: the mesh's own
+  setup, 1 while `RobotBestLOD` is not 0 and 2 otherwise (`0x100071fe`,
+  [The unit in the middle](#the-unit-in-the-middle--read-and-seen)).
 - ~~The routine that names a building (strings 6031–6098).~~ **Read**:
   `0x100338d0`, from the building record's slot 1, by the behaviour's Type and
   its size class `0x201`; all 167 placed buildings get a string
@@ -1172,7 +1327,10 @@ hit, and prints *"SSW-1 Warrior"* above a falling distance.
   life left in the device's node over its maximum, `IDeviceManager` slot 6's
   case `0x1002bc3c`
   ([Name and status](#name-and-status--read-and-seen)).
-- The other six bits of draw flags `0x7f0`.
+- ~~The other six bits of draw flags `0x7f0`.~~ **Read**: no effects, no
+  shadow, no attached objects, no level pick, and the light gather's flag 2;
+  `0x100` is tested by nothing in the mesh's draw
+  ([What mode 2 does with the colour](#what-mode-2-does-with-the-colour--read-measured-and-seen)).
 - Whether the view's begin (interface `0x12` slot 3) clears depth.
 
 ## The objectives screen

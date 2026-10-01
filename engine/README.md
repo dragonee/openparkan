@@ -264,7 +264,8 @@ the interface's pages and `ui/compaund.cfg` and `ui/hq.cfg`'s pieces.
   auto-driver's level (Y).
 - The target panel at the bottom left and the hero's at the bottom right: the
   unit seen through its panel's camera, each node green whole and red
-  destroyed; six shield sectors for a unit with a fight shield and a deflector;
+  destroyed, lit by the unit's own two lights and held up to the scene colour
+  of the hour; six shield sectors for a unit with a fight shield and a deflector;
   its life arc and its battery arc; its name ("TFW-2 Warrior", "Human") and,
   for a wingman, its order; the target's distance, and a square about it in
   the world, easing in from the screen's middle.
@@ -452,8 +453,8 @@ the own panel's unit while aboard.
   cursor shows the pick: `PICK`, `PLACE`, `TARGET`, `GUARD`, `CAPTURE`, `WRONG_PLACE`. Route
   collects places on the map until the right button gives them as a chain of Go orders; Guard
   takes the next click. The right button undoes the most specific thing open.
-- A Build row raises the building's full-size ghost under the cursor, drawn flat, green on a
-  good site and red on a bad one (a mine needs a found lode within 20), turned 0.05 rad a
+- A Build row raises the building's full-size ghost under the cursor, drawn flat over the scene
+  colour, green on a good site and red on a bad one (a mine needs a found lode within 20), turned 0.05 rad a
   press by `,` and `.`; a click on a good site orders the builder, and the right button or
   Esc puts it away with *"Building was cancelled by user"*.
 - The selected units and the unit under the cursor are bracketed in the world in the marking
@@ -1522,7 +1523,7 @@ a row here. A row leaves this table when research closes it.
 | M9 | The charge level of a gun with no capacity, which only a shot sets | its bar shows full | [29](../docs/29-weapons.md#a-gun-is-a-capacitor-a-magazine-and-a-clock--read) |
 | M9 | A wingman's order queue, which its status line names | the running task names the order: none *no order*, standby *standing*, follow *following*, search *searching* (*capturing* for a capture), refit *refitting*, attack *attacking* | [31](../docs/31-packages.md#the-orders--measured) |
 | M9 | The driven unit record's `+0x10 ÷ +0x14` in the scale of the square about the target | the camera's focal length: the square's half-side is two thirds of the target's projected radius, then held as read | [35](../docs/35-hud.md#the-frame-around-the-target-in-the-world--read) |
-| M9 | How the panel camera draws a mesh in the colour it is handed in mode 2 | flat, untextured and opaque, the node colour lifted by 0.1 and by 0.1 more with the light: an intact dummy (38, 166, 38) against the recording's (39, 162, 41) | [35](../docs/35-hud.md#the-unit-in-the-middle--read-and-seen) |
+| M9 | What makes a unit of more than one part twice as bright in a panel's view as the one pair of lights its mesh is read to make | the two lights at twice their colour on a unit that carries a turret, at their own on a chassis alone: the hero's figure is 2.06, 1.98 and 2.03 times as far over its floor in the recording, the one-part dummy 0.136 against the read's 0.139 | [35](../docs/35-hud.md#what-mode-2-does-with-the-colour--read-measured-and-seen) |
 | M9 | The interface's `CState` and the landing warning the indicators show; the repair system, camouflage and infrared themselves | the figure is lit and the warning grey; G, H and N turn switches that only the indicators read | [35](../docs/35-hud.md#the-indicators--read-and-seen) |
 | M9 | What the camera view's property 0, which places the reticle's dot, is | the dot stays at the middle | [35](../docs/35-hud.md#the-reticle--read) |
 | M9 | The stage sets a sprite may pick, and how the 2D layer samples | every sprite the default; pages sampled nearest | [35](../docs/35-hud.md#how-the-radar-draws--read) |

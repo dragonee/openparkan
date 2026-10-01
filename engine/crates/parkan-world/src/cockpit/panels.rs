@@ -6,7 +6,7 @@
 
 use std::collections::BTreeMap;
 
-use glam::{Mat4, Vec3};
+use glam::{Mat4, Quat, Vec3};
 use parkan_formats::mission::{KIND_BUILDING, KIND_UNIT};
 use parkan_sim::behaviour::Task;
 use parkan_sim::damage::Life;
@@ -90,6 +90,48 @@ pub struct UnitView {
     pub far: f32,
     /// A battle target, or the hero with none.
     pub unit: Option<usize>,
+    /// The unit's two lights for this view ([`view_lights`]).
+    pub lights: [ViewLight; 2],
+}
+
+/// A light of a unit's view: the way it travels in the world, the vector's length the
+/// light's own, and its grey.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ViewLight {
+    pub travel: Vec3,
+    pub colour: f32,
+}
+
+/// The first of the two lights a unit's mesh keeps for a panel's view
+/// (`AniMesh.dll:0x10007102`-`0x1000723b`, docs/35, "The unit in the middle"): directional,
+/// of its own light manager, flagged `0x84000000`, which is what the view's draw gathers and
+/// the world's passes over. It travels (−1, 1, −1) **in the unit's own frame** -- the gather
+/// turns it through the unit's placement (`Terrain.dll:0x100802f0`) -- so it falls on the
+/// unit's right, back and top however the unit stands. The vector is stored and used as it is,
+/// not normalised, and the colour is grey 0.25.
+pub const VIEW_LIGHT_TRAVEL: Vec3 = Vec3::new(-1.0, 1.0, -1.0);
+pub const VIEW_LIGHT_COLOUR: f32 = 0.25;
+/// The second light travels the other way at this share of the first's colour (`0x10005a7d`).
+pub const VIEW_COUNTER_SHARE: f32 = 0.35;
+
+/// How many times over a unit that carries a turret is lit by them, against a unit that is
+/// its chassis alone.
+///
+/// STAND-IN: docs/35-hud.md#the-unit-in-the-middle--read-and-seen -- the read finds one pair of
+/// lights on a unit's mesh, and the recordings show that much on a unit of one part and twice
+/// it on one of two or more. Measured: Mission 01's dummy, a chassis alone, is 0.136 over its
+/// node's green in the recording and 0.139 here at one pair; C03 M02's hero, a chassis and a
+/// turret, is lit 2.06, 1.98 and 2.03 times what one pair gives (the median green, and blue's
+/// ninetieth and ninety-ninth percentiles). What makes the second pair is not read.
+pub const VIEW_LIGHT_PAIRS_WITH_A_TURRET: f32 = 2.0;
+
+/// The two lights of a unit standing at `turn`, lit `pairs` times over.
+pub fn view_lights(turn: Quat, pairs: f32) -> [ViewLight; 2] {
+    let travel = turn * VIEW_LIGHT_TRAVEL;
+    [
+        ViewLight { travel, colour: VIEW_LIGHT_COLOUR * pairs },
+        ViewLight { travel: -travel, colour: VIEW_LIGHT_COLOUR * VIEW_COUNTER_SHARE * pairs },
+    ]
 }
 
 impl UnitView {
@@ -411,6 +453,18 @@ fn panel(
     let space = ink.painter.space;
     let [px0, py0] = space.pixel([rect[0], rect[1]], pin);
     let [px1, py1] = space.pixel([rect[2], rect[3]], pin);
+    // The shown object's turn, which its two lights turn with, and how many parts it is: the
+    // hero is its chassis and its turret.
+    let (turn, parts) = match shown {
+        Some(t) => play
+            .battle
+            .combat
+            .targets
+            .get(t)
+            .map_or((Quat::IDENTITY, 1), |target| (target.rotation(), target.parts.len())),
+        None => (play.hero.walker.drawn_turn(play.hero.time_ms), 2),
+    };
+    let pairs = if parts > 1 { VIEW_LIGHT_PAIRS_WITH_A_TURRET } else { 1.0 };
     let direction = if own {
         // The object's y column, as it is drawn.
         let unit = play.driven();
@@ -444,6 +498,7 @@ fn panel(
         near: CAMERA_NEAR,
         far: CAMERA_FAR,
         unit: shown,
+        lights: view_lights(turn, pairs),
     };
 
     // 7–10, over the view.
@@ -642,6 +697,26 @@ mod tests {
         // No battery at all fails the query: the dummies read "SSW-1 Warrior" (docs/35).
         let dummy = Designation { size_class: 2, chassis_type: 2, ..Designation::default() };
         assert_eq!(name(TYPE_WARRIOR, dummy, 1, &s), "SSW-1 Warrior");
+    }
+
+    #[test]
+    fn the_views_lights_turn_with_the_unit() {
+        // Standing as placed, the first falls on the faces that look right, back and up, and
+        // the second, 0.35 of it, on the opposite ones.
+        // 0x3e800000 four times but the alpha, and 0x3eb33333 (`AniMesh.dll:0x100071d3`-
+        // `0x1000721f`).
+        assert_eq!((f32::from_bits(0x3e80_0000), f32::from_bits(0x3eb3_3333)), (0.25, 0.35));
+        let [a, b] = view_lights(Quat::IDENTITY, 1.0);
+        assert_eq!((a.travel, a.colour), (Vec3::new(-1.0, 1.0, -1.0), 0.25));
+        assert_eq!(b.travel, Vec3::new(1.0, -1.0, 1.0));
+        assert!((b.colour - 0.0875).abs() < 1e-6);
+        // Turned a quarter left about z, the unit's right is the world's +y and its back the
+        // world's +x: the light still comes from its right, its back and above.
+        let [a, _] = view_lights(Quat::from_rotation_z(std::f32::consts::FRAC_PI_2), 1.0);
+        assert!(a.travel.abs_diff_eq(Vec3::new(-1.0, -1.0, -1.0), 1e-5), "{:?}", a.travel);
+        // A unit with a turret has both at twice that.
+        let [a, b] = view_lights(Quat::IDENTITY, VIEW_LIGHT_PAIRS_WITH_A_TURRET);
+        assert!((a.colour - 0.5).abs() < 1e-6 && (b.colour - 0.175).abs() < 1e-6);
     }
 
     #[test]

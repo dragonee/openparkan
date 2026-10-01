@@ -222,6 +222,63 @@ pub fn linear(c: [f32; 3]) -> [f32; 3] {
     c.map(|v| if v <= 0.04045 { v / 12.92 } else { ((v + 0.055) / 1.055).powf(2.4) })
 }
 
+/// The lit colour's knee (`Terrain.dll:0x1004f25a`-`0x1004f3cd`): as it is up to 1, a sixth of
+/// it and five sixths up to 7, and 2 past that.
+pub fn knee(c: f32) -> f32 {
+    if c <= 1.0 {
+        c
+    } else if c > 7.0 {
+        2.0
+    } else {
+        c / 6.0 + 5.0 / 6.0
+    }
+}
+
+/// The specular's knee (`0x1004f4c3`-`0x1004f648`): 0.8 of it up to 1, a tenth of it and 0.7
+/// up to 3, and 1 past that.
+pub fn specular_knee(s: f32) -> f32 {
+    if s <= 1.0 {
+        0.8 * s
+    } else if s > 3.0 {
+        1.0
+    } else {
+        0.1 * s + 0.7
+    }
+}
+
+/// One vertex as the software shade colours it (`CShade::ShadeIndexedStrided`,
+/// `Terrain.dll:0x1004df70`, docs/35, "The unit in the middle"): the lights' sum on the
+/// material's diffuse, plus the material's self-light, **held up to the scene colour** channel
+/// by channel (`Ngi32.dll:0x100248a0`: the two added, then the larger of that and the scene
+/// colour), through the knee; what passes 1 is cut off the diffuse and goes on to the
+/// specular, which the device adds after the texture stage. Display space; returns the
+/// vertex's diffuse and its specular.
+pub fn shade(self_light: [f32; 3], lit: [f32; 3], scene: [f32; 3]) -> ([f32; 3], [f32; 3]) {
+    let mut diffuse = [0.0; 3];
+    let mut specular = [0.0; 3];
+    for k in 0..3 {
+        let c = knee((self_light[k] + lit[k]).max(scene[k]));
+        diffuse[k] = c.min(1.0);
+        specular[k] = specular_knee((c - 1.0).max(0.0));
+    }
+    (diffuse, specular)
+}
+
+/// What the directional lights lay on a vertex of diffuse `diffuse` whose unit normal is
+/// `normal` (`Ngi32.dll:0x10018260`): each light's colour on the diffuse, times how far the
+/// normal faces against the light's travel. The game does not normalise a light's direction
+/// there, so a light's `colour` here carries its direction's length.
+pub fn lit(normal: Vec3, diffuse: [f32; 3], lights: &[Light; 2]) -> [f32; 3] {
+    let mut sum = [0.0; 3];
+    for light in lights {
+        let facing = normal.dot(-light.direction.normalize_or(Vec3::NEG_Z)).max(0.0);
+        for k in 0..3 {
+            sum[k] += light.colour[k] * diffuse[k] * facing;
+        }
+    }
+    sum
+}
+
 /// The fog colour a blend mode draws toward (`Terrain.dll:0x1002ffea`): additive to black,
 /// mode 3 to white, mode 5 to grey `0x7f7f7f` (as linear); `w` 1 where it overrides the scene's.
 pub fn fog_override(mode: u8) -> [f32; 4] {
@@ -300,6 +357,69 @@ mod tests {
         crowded.push(light(5000.0, 0));
         let kept = Points::nearest(&crowded, Vec3::ZERO);
         assert_eq!((kept.shared, kept.as_slice()[0].position.x), (1, 5000.0));
+    }
+
+    #[test]
+    fn the_knees_bend_at_1_and_flatten_at_7_and_3() {
+        // 0x3e2aaaab and 0x3f555555 at `Terrain.dll:0x100a2354` and `0x100a2360`; 7 at
+        // `0x1009b35c`; 0.8, 0.1 and 0.7 at `0x100a2374`, `0x100a2378` and `0x100a2384`; 3 at
+        // `0x1009b354`.
+        assert_eq!(f32::from_bits(0x3e2a_aaab), 1.0 / 6.0);
+        assert_eq!(f32::from_bits(0x3f55_5555), 5.0 / 6.0);
+        assert_eq!((knee(0.4), knee(1.0)), (0.4, 1.0));
+        assert!((knee(4.0) - 1.5).abs() < 1e-6 && (knee(7.0) - 2.0).abs() < 1e-6);
+        assert_eq!(knee(30.0), 2.0);
+        assert!((specular_knee(0.5) - 0.4).abs() < 1e-6 && (specular_knee(1.0) - 0.8).abs() < 1e-6);
+        assert!((specular_knee(2.0) - 0.9).abs() < 1e-6);
+        assert_eq!(specular_knee(5.0), 1.0);
+    }
+
+    #[test]
+    fn a_building_being_placed_is_its_colour_over_the_scene_colour_and_no_more() {
+        // Part 6.5, 8:13.0 and 8:15.5: the ghost is one flat (253, 23, 42) and then one flat
+        // (129, 253, 42), under C03 M02's scene colour (129, 23, 42). A colour's 1 is not
+        // lifted by the scene's share of that channel, so nothing passes 1 and nothing reaches
+        // the specular: the other two channels are the scene's to the unit.
+        let scene = [129.0 / 255.0, 23.0 / 255.0, 42.0 / 255.0];
+        let (red, gloss) = shade([1.0, 0.0, 0.0], [0.0; 3], scene);
+        assert_eq!((red, gloss), ([1.0, scene[1], scene[2]], [0.0; 3]));
+        let (green, gloss) = shade([0.0, 1.0, 0.0], [0.0; 3], scene);
+        assert_eq!((green, gloss), ([scene[0], 1.0, scene[2]], [0.0; 3]));
+    }
+
+    #[test]
+    fn a_whole_node_out_of_the_light_keeps_its_own_green_over_the_scenes_red_and_blue() {
+        // Part 6, 1:52.5, the hero's own panel: a patch of its back the light does not reach
+        // is (151, 127, 57) under a scene colour of (156, 40, 59) -- the node's 0.5 of green
+        // alone, where the scene's 40 added would make 167.
+        let scene = [156.0 / 255.0, 40.0 / 255.0, 59.0 / 255.0];
+        let (colour, gloss) = shade([0.0, 0.5, 0.0], [0.0; 3], scene);
+        assert_eq!(colour, [scene[0], 0.5, scene[2]]);
+        assert_eq!(gloss, [0.0; 3]);
+    }
+
+    #[test]
+    fn light_past_1_goes_to_the_specular() {
+        // 0.5 of green and a light of 0.8 on a white diffuse: 1.3 through the knee is 1.05,
+        // the diffuse holds at 1 and 0.8 of the 0.05 over is added to every channel's... own
+        // specular: green's alone here, red and blue being under 1.
+        let (colour, gloss) = shade([0.0, 0.5, 0.0], [0.8; 3], [0.2; 3]);
+        assert_eq!(colour, [0.8, 1.0, 0.8]);
+        assert!(gloss[0] == 0.0 && gloss[2] == 0.0 && (gloss[1] - 0.04).abs() < 1e-6, "{gloss:?}");
+    }
+
+    #[test]
+    fn a_lights_colour_falls_on_the_diffuse_by_how_far_the_normal_faces_it() {
+        let lights = [
+            Light { direction: Vec3::new(0.0, 0.0, -2.0), colour: [0.5; 3] },
+            Light { direction: Vec3::new(0.0, 0.0, 1.0), colour: [0.1; 3] },
+        ];
+        // Facing up, the first reaches it whole and the second, travelling up, not at all.
+        assert_eq!(lit(Vec3::Z, [1.0, 0.5, 0.0], &lights), [0.5, 0.25, 0.0]);
+        // Facing down it is the other way round.
+        assert_eq!(lit(Vec3::NEG_Z, [1.0; 3], &lights), [0.1; 3]);
+        // Side on, neither.
+        assert_eq!(lit(Vec3::X, [1.0; 3], &lights), [0.0; 3]);
     }
 
     #[test]
