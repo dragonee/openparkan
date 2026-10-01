@@ -29363,3 +29363,123 @@ kind = "site"
 name = "local path: 'Start is inside ObstacleContour'"
 read = false
 doc = "docs/24-motion.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x1000ed4e"
+kind = "site"
+name = "slot 8's firer test for a blast: the target's object id (+0x1c slot 9) against the hit's +0x18; equal, and no node is touched"
+read = true
+doc = "docs/26-damage.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x1000ee0c"
+kind = "site"
+name = "slot 8's firer test for a direct hit on a node, the same compare"
+read = true
+doc = "docs/26-damage.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x10011766"
+kind = "site"
+name = "damage stage: the hit's firer at +0x18 is the object's +0x54c (property 0x7f) or, when that is 0, its own id; no object for the id, or a mirror, and the damage is 0"
+read = true
+doc = "docs/26-damage.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x1000e9d2"
+kind = "site"
+name = "property 0x7f's setter: +0x54c, the id of the object that fired a round; then the collision object's slot 6"
+read = true
+doc = "docs/26-damage.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x10012f0b"
+kind = "site"
+name = "hit queue: a hit whose damage is not above 0 is passed over before its kind is read"
+read = true
+doc = "docs/26-damage.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10025f40"
+kind = "function"
+name = "CWorld slot 3: every object of a class mask whose sphere meets a sphere, walked from the root"
+read = true
+doc = "docs/26-damage.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10025d10"
+kind = "function"
+name = "the gather's walk: an object is taken by its class bit, interface 0x18 and d^2 <= (r + R)^2, and asked for its children near the sphere (IGameObject slot 15) whether taken or not"
+read = true
+doc = "docs/26-damage.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1008b020"
+kind = "function"
+name = "landscape IGameObject slot 15: its interface 0x18 slot 8 with the two centres and the radius, else every child"
+read = true
+doc = "docs/26-damage.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10056ae0"
+kind = "function"
+name = "CBuilding IGameObject slot 15: passed to its agent"
+read = true
+doc = "docs/26-damage.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1001cc70"
+kind = "function"
+name = "landscape interface 0x18 slot 8: the objects in the grid cells a swept sphere covers whose spheres meet it, once each"
+read = true
+doc = "docs/26-damage.md"
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x10017e00"
+kind = "function"
+name = "agent IGameObject slot 15: its interface 0x18 slot 8 with the two centres and the radius, else every child"
+read = true
+doc = "docs/26-damage.md"
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x100142d0"
+kind = "function"
+name = "mesh interface 0x18 slot 8: the attached children whose spheres meet a swept sphere"
+read = true
+doc = "docs/26-damage.md"
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x1000b620"
+kind = "function"
+name = "mesh: add a child to, or take it out of, the list of attached children that answer 0x18 (message 21 events 2 and 3)"
+read = true
+doc = "docs/26-damage.md"
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x10002fe0"
+kind = "function"
+name = "agent IGameObject slot 21: the mirror byte +0x6f0, set by message 7 with 2"
+read = true
+doc = "docs/26-damage.md"
+
+[[entry]]
+module = "World3D.dll"
+at = "0x100079d0"
+kind = "function"
+name = "queue slot 12: the world's root, the first object slot 13 lists for 1"
+read = true
+doc = "docs/26-damage.md"

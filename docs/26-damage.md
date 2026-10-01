@@ -453,7 +453,8 @@ The hit is queued on the object that exploded and applied on its tick
   third place — which is how a hit "names no node of its own and carries its
   sector" ([below](#shields-a-generator-a-deflector-six-sectors--read-and-measured)).
 - **Kind 3** hits the exploding object's own nodes, then **every object whose
-  bounds reach the blast**, through `ILifeSystem` slot 8.
+  sphere meets the blast's**, through `ILifeSystem` slot 8
+  ([What a blast reaches](#what-a-blast-reaches--read)).
 - **Before anything, the hit tells its object who fired** (message `0x19`,
   `0x1000ebdf`), whatever it goes on to do
   ([31-packages.md](31-packages.md#a-hit-pulls-a-unit-in--read)).
@@ -595,6 +596,99 @@ What follows from the order:
   0.579 sphere. **0 of the 458 shipped designs carries either turret.** So no
   placed unit's and no building's death is a blast: a tower that dies under a
   unit standing in it plays an effect and hurts nothing.
+
+### What a blast reaches — *read*
+
+**One sphere for the tick's blasts.** The queue walk (`0x10012ce0`) goes over
+its hits of kind 3 and 4 first: their centres' mean weighted by their radii
+(`0x10012d17`–`0x10012dda`), and about it the radius that holds every one of
+them, the largest distance plus radius (`0x10012de0`–`0x10012e42`). One blast
+gives its own sphere.
+
+**The world gathers by class and by sphere.** The sphere goes to `CWorld` slot 3
+(`Terrain.dll:0x10025f40`, called at `Control.dll:0x10012e82`) with a class mask
+of **`0x61c`**: the `1 << class` words of 2, 3, 4, 9 and 10
+(`0x10012e44`–`0x10012e6c`) — the `WPNS` objects, buildings, units, rounds and
+`STAT` scenery, and not the landscape, which is 1. Slot 3 starts at the world's
+root, which is the landscape (the queue's slot 12, `World3D.dll:0x100079d0`),
+and walks the tree of objects (`Terrain.dll:0x10025d10`):
+
+- an object is **taken** when its class's bit is in the mask
+  (`0x10025d1b`–`0x10025d3a`, the table at `0x1009a5f0`), it answers interface
+  `0x18`, and its sphere — slot 9 asked with 2, the agent's sphere in the world
+  ([The hit test](#the-hit-test--read-and-measured)) — comes within the sum of
+  the two radii of the blast's centre, `d² ≤ (r + R)²`
+  (`0x10025d89`–`0x10025dff`);
+- taken or not, it is **asked for its children** near the sphere (`IGameObject`
+  slot 15, `0x10025ef4`), and each of those is walked the same way.
+
+Slot 15 is one body on the landscape and on an agent (`Terrain.dll:0x1008b020`,
+`AniMesh.dll:0x10017e00`), and a building hands the call to its agent
+(`Terrain.dll:0x10056ae0`): the object's own interface `0x18` slot 8, with the
+centre twice and the radius — a swept sphere that does not move.
+
+- The landscape's (`Terrain.dll:0x1001cc70`) walks the cells of its object grid
+  that the sphere covers (that interface's `+0x7a38`, 12 bytes a cell) and
+  keeps each object in them whose sphere meets the blast's, once
+  (`0x1001cfdd`–`0x1001d090`, `0x1001d0e1`).
+- An agent's (`AniMesh.dll:0x100142d0`) goes over the list its mesh keeps of the
+  children attached to it that answer `0x18`, and keeps each whose sphere meets
+  the blast's (`0x10014388`–`0x100143fe`). The mesh adds a child to that list
+  on event 2 of message 21, a child attached, and takes it out on event 3
+  (`0x10007378`, `0x1000738f` → `0x1000b620`).
+
+**Then each object's nodes, by their spheres.** Every object gathered but the
+exploding one is handed the hit through slot 8 (`0x10012f9a`–`0x10012fb4`), and
+each of its nodes takes the falloff above against the node's own sphere,
+interface `0x20` slot 3 (`0x100100ea`).
+
+**No line is drawn and nothing stands in the way** — *read*, as a search with a
+control. The four routines a blast runs through are the queue walk
+(`0x10012ce0`–`0x1001317b`), slot 8 (`0x1000ebc0`–`0x1000ef4b`), the shield step
+(`0x1000ff00`–`0x1001001f`) and the falloff (`0x10010030`–`0x10010298`), and
+between them they call: the gather; an object's id (`IGameObject` slot 9) and
+the object an id stands for (`GetIGObject`); the life system of each object
+gathered (interface `0x16`) and its slot 8; a node's sphere (interface `0x20`
+slot 3); the shield's sphere, sector and strength (the device list's slots 12
+to 15, `+0x38`); a building's door (interface `0x17` slot 14); the node update
+(`0x10010f30`), a destroyed node's push and the two walks from a node
+(`0x10011130`, `0x10011220`); and the queue's own memory. The world's
+segment query is `CWorld` slot 7 (`Terrain.dll:0x10024fd0`), the mesh's is
+interface `0x18` slot 6 (`AniMesh.dll:0x10013ef0`) and the landscape's
+`GetFirstIntersectedFace` (`Terrain.dll:0x100205c0`), and none of the four
+calls any of them; nor do the gather's own routines, which ask slot 9 for a
+sphere and nothing that takes a face. Two of the callees were not read through
+here: the node's sphere, a getter the gun's gate and a seeker use for an aim
+point ([29-weapons.md](29-weapons.md#a-guided-gun-waits-for-a-lock--read-and-measured)),
+and the node update, which is handed an amount already settled.
+
+**The control** is the same enumeration over all of `Control.dll`: every call
+through a vtable taken from a pointer that was itself loaded from a `+0x44`
+field, which is where a control system keeps the world, slot by slot. It finds
+slot 7 **once**, at the gun's sight ray (`0x1002a768`); slot 4, gravity, at the
+integrator's read (`0x10015887`,
+[24-motion.md](24-motion.md#gravity--read-and-measured)); and slot 3 at ten
+sites, the queue walk's `0x10012e82` among them. A search that finds the
+sight's line where it is known to be drawn, and none in a hit's routines, is
+not blind to one there.
+
+So **a blast is stopped by nothing but distance**:
+
+- **A unit in a building's room is reached as one in the open is.** It is the
+  building's child while it stands on a face of it
+  ([24-motion.md](24-motion.md#walking-into-a-building--read-and-measured)), so
+  the walk comes to it through the building's slot 15, and its sphere and its
+  nodes' spheres are all that is asked of it: not the roof over it, not the
+  walls, not the ground between. A blast of 45 m on a Small Bunker's roof
+  gives every node of a hero in the pod room, 17 m from the burst, the whole of
+  it, the node's sphere lying wholly inside the blast's.
+- **The mask has the rounds' bit.** A round is an agent of class 9 with a life
+  system and hit points on its nodes, so a round the walk comes to inside a
+  blast takes it like any object, and one whose stage rises goes off where it
+  is. Whether the walk comes to a round in the air — whether one hangs in the
+  landscape's object grid — was not read.
+- **Everything gathered is told who fired**, hurt or not: the message comes
+  before the nodes, and the gather's sphere is the object's, not a node's.
 
 ### What nothing reads in an `.exp` — *read*, as a search
 
@@ -1463,17 +1557,28 @@ shield, battery and ammunition (`Behavior.dll:0x10018100`, `0x10019372`,
   whose bounds reach it and then each node by its sphere (`0x10010030`). No
   `AniMesh.dll` routine that tests node flag 1 is on that way, and whether the
   life system's own walk passes a node hidden by action 1, which is not a
-  destroyed node, was not traced.
+  destroyed node, was not traced. Narrowed: the falloff's own tests are the
+  life record's destroyed bit `0x10` on the node and on its parent and a sphere
+  of radius 0 (`0x10010052`–`0x1001008d`, `0x10010101`), so what is left is what
+  interface `0x20` slot 3 answers for a node hidden by action 1
+  ([What a blast reaches](#what-a-blast-reaches--read)).
 - ~~Where the test stands that makes a hit do nothing to "the target's own",
   and what it compares.~~ Answered: `Control.dll:0x1000ed4e` for a blast and
   `0x1000ee0c` for a direct hit, the target's object id against the id the hit
   carries at `+0x18`, the round's property `0x7f` or the exploding object's own
   id; after the shield step, before the first node, and with no clan in it
   ([Whose hit it is, and whom it spares](#whose-hit-it-is-and-whom-it-spares--read-and-measured)).
+- ~~Whether a blast's reach is tested by anything but bounds: a line, a face,
+  the building over a unit that stands in it.~~ Answered: by nothing else. The
+  world gathers by class and sphere down the tree of objects, the nodes are
+  tested by their spheres, and no segment query is on the way
+  ([What a blast reaches](#what-a-blast-reaches--read)).
 - What a unit does when message `0x19` names itself, as it does when its own
   blast reaches it: the handler is
   [31-packages.md](31-packages.md#a-hit-pulls-a-unit-in--read)'s, and its test
-  of the firer's clan is what would let it pass.
+  of the firer's clan is what would let it pass. And whether a round in the air
+  hangs in the landscape's object grid, so that a blast's walk comes to it: the
+  mask has its class.
 - How a knocked-off part flies: the push and spin it is given (`0x100102a0`,
   its subtree's box and mass from `0x10010760`),
   how its update integrates them, and what the world query at `0x100134c1`
