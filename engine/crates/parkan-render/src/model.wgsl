@@ -1,5 +1,14 @@
 // Placed objects: a texture lit fixed-function style, per instance transform.
 
+// A point light as the shade's lighter takes it (Terrain.dll:0x1004eacc-0x1004ecc9): where it
+// stands and its range; its colour, display space, and the owner it lights alone; its
+// constant, linear and quadratic attenuation.
+struct PointLight {
+    position: vec4<f32>,
+    colour: vec4<f32>,
+    attenuation: vec4<f32>,
+};
+
 struct Frame {
     view_proj: mat4x4<f32>,
     // The sun object's two directional lights: the direction each travels, and its
@@ -19,6 +28,10 @@ struct Frame {
     eye: vec4<f32>,
     // x 1: every instance draws flat in its paint (a HUD panel's view of a unit).
     paint: vec4<f32>,
+    // x: how many of the point lights light every surface in their range, which come first;
+    // y: how many there are.
+    point_counts: vec4<f32>,
+    points: array<PointLight, 64>,
 };
 
 // A display-space colour as the linear value an sRGB target needs (frame.rs `linear`).
@@ -44,7 +57,45 @@ struct Instance {
     model: mat4x4<f32>,
     // The colour a view paints the instance in.
     paint: vec4<f32>,
+    // x: whose it is, which an owner-only light is matched against; 0 on what nobody owns.
+    owner: vec4<f32>,
 };
+
+// What the frame's point lights give a vertex before its material's diffuse multiplies it
+// (CShade::ShadeIndexedStrided, Terrain.dll:0x1004df70, and Ngi32.dll:0x100164f0): each
+// light's colour times the cosine at the vertex times a0 + a1 x + a2 x^2, x the share of the
+// light's range left, and nothing past the range or on a vertex turned away (docs/11, "What a
+// light does to a surface"). The game lights per vertex, in software, and the rasteriser
+// carries the result across the face.
+fn point_lights(world: vec3<f32>, normal: vec3<f32>, owner: f32) -> vec3<f32> {
+    var sum = vec3<f32>(0.0);
+    if dot(normal, normal) <= 0.0 {
+        return sum;
+    }
+    let n = normalize(normal);
+    let everyones = i32(frame.point_counts.x);
+    let count = i32(frame.point_counts.y);
+    for (var i = 0; i < count; i++) {
+        let light = frame.points[i];
+        if i >= everyones && light.colour.w != owner {
+            continue;
+        }
+        let to = light.position.xyz - world;
+        let d = length(to);
+        if d > light.position.w || d <= 0.0 {
+            continue;
+        }
+        let facing = dot(n, to / d);
+        if facing <= 0.0 {
+            continue;
+        }
+        // The share of the range left, and the three terms on it.
+        let x = (light.position.w - d) / light.position.w;
+        let fall = light.attenuation.x + (light.attenuation.y + light.attenuation.z * x) * x;
+        sum += light.colour.rgb * (facing * fall);
+    }
+    return sum;
+}
 
 struct Look {
     // The material's own colours, display space.
@@ -87,6 +138,8 @@ struct VertexOut {
     @location(4) lightmap: vec2<f32>,
     // The alpha a portal quad draws with in place of its material's; 1 on anything else.
     @location(5) fade: f32,
+    // What the point lights give the vertex.
+    @location(6) points: vec3<f32>,
 };
 
 // A portal quad's alpha by the eye's distance from its first corner (Terrain.dll:0x1002c4d0,
@@ -117,6 +170,7 @@ fn vs_main(v: VertexIn) -> VertexOut {
     out.lightmap = v.lightmap;
     out.paint = instance.paint;
     out.fade = portal_fade();
+    out.points = point_lights(world.xyz, out.normal, instance.owner.x);
     return out;
 }
 
@@ -152,8 +206,13 @@ fn fs_main(v: VertexOut) -> @location(0) vec4<f32> {
     // colour plus the scene colour the sky adds to every material) and the diffuse lights,
     // held to 1 as fixed-function lighting holds it, then decoded. The alpha is the
     // texture's times the material's ambient alpha.
-    let lights = frame.light_colour.rgb * a + frame.second_colour.rgb * b;
-    let lit = min(vec3<f32>(1.0), look.emissive.rgb + frame.scene_colour.rgb + look.diffuse.rgb * lights);
+    // The effects' point lights are in the item's list beside the sun's two, summed with them.
+    let lights = frame.light_colour.rgb * a + frame.second_colour.rgb * b + v.points;
+    let lit = clamp(
+        look.emissive.rgb + frame.scene_colour.rgb + look.diffuse.rgb * lights,
+        vec3<f32>(0.0),
+        vec3<f32>(1.0),
+    );
     // A portal quad's fade stands in for the material's ambient alpha (Terrain.dll:0x1002c63a).
     let alpha = texel.a * select(look.diffuse.a, v.fade, look.portal.w > 0.5);
     // Every blend mode but 0 alpha-tests GREATEREQUAL against ALPHAREF 1 (docs/07, "What a

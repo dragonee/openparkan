@@ -79,8 +79,11 @@ impl LookUniform {
     }
 }
 
-/// An instance's uniform: its matrix, and the colour a view paints it in.
-const INSTANCE_FLOATS: usize = 20;
+/// An instance's uniform: its matrix, the colour a view paints it in, and whose it is.
+const INSTANCE_FLOATS: usize = 24;
+/// Where the uniform keeps the paint and the owner, in bytes.
+const INSTANCE_PAINT_AT: u64 = 64;
+const INSTANCE_OWNER_AT: u64 = 80;
 
 /// The blend modes a pipeline exists for, opaque first.
 pub const BLEND_MODES: [u8; 6] = [0, 1, 2, 3, 4, 5];
@@ -139,6 +142,8 @@ struct GpuInstance {
     buffer: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
     visible: bool,
+    /// Whose it is, which an owner-only point light is matched against; 0 on what nobody owns.
+    owner: Cell<u32>,
 }
 
 /// The frame uniforms of a second look at some instances, as [`ModelRenderer::view_frame`]
@@ -410,7 +415,7 @@ impl ModelRenderer {
                     layout: &instance_layout,
                     entries: &[wgpu::BindGroupEntry { binding: 0, resource: buffer.as_entire_binding() }],
                 });
-                GpuInstance { model: i.model, buffer, bind_group, visible: !i.hidden }
+                GpuInstance { model: i.model, buffer, bind_group, visible: !i.hidden, owner: Cell::new(0) }
             })
             .collect();
 
@@ -438,7 +443,18 @@ impl ModelRenderer {
     /// The colour instance `index` is painted in where a view paints.
     pub fn paint_instance(&self, queue: &wgpu::Queue, index: usize, colour: [f32; 4]) {
         if let Some(i) = self.instances.get(index) {
-            queue.write_buffer(&i.buffer, 64, bytemuck::cast_slice(&colour));
+            queue.write_buffer(&i.buffer, INSTANCE_PAINT_AT, bytemuck::cast_slice(&colour));
+        }
+    }
+
+    /// Whose instance `index` is: the owner an owner-only point light lights alone
+    /// (`Terrain.dll:0x10047a52`), 0 for what no light owns.
+    pub fn set_instance_owner(&self, queue: &wgpu::Queue, index: usize, owner: u32) {
+        if let Some(i) = self.instances.get(index)
+            && i.owner.replace(owner) != owner
+        {
+            let word = [owner as f32, 0.0, 0.0, 0.0];
+            queue.write_buffer(&i.buffer, INSTANCE_OWNER_AT, bytemuck::cast_slice(&word));
         }
     }
 

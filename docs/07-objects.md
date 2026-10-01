@@ -836,6 +836,18 @@ and `0x200` on none; the 633 are `fortif.rlb`'s `DEFAULT`, `PORTAL_001` and
 `+6` halfword is a node on exactly those, `0xFFFF` on the other 14520
 ([24-motion.md](24-motion.md#the-ground-inside-a-building--read-in-part-and-measured)).
 
+**The word a draw sees is the file's, with `0x20` alone or-ed in** (*read*, and
+*measured*). Slot 3 answers a module static (`AniMesh.dll:0x100270f8`) into which it
+stores the stream's dword whole (`0x10013538`) and or-s `0x20` on a portal batch
+(`0x10013647`), and the stream is the archive's own bytes in a view mapped read-only
+(`niOpenResFileEx(…, 4)`, `0x1000a52e`; `Ngi32.dll:0x10011c5e`), so nothing can write it.
+Over the 15153 batches the word takes 14 values over nine bits — 1 on 183, 2 on 1477, 4 on
+112, 8 on 633, `0x10` on 66, `0x40` on 170, `0x100` on 2953, `0x2000` on 972 and `0x4000`
+on 307 — and **`0x800`, under which the shade's mesh draw would lay an effect's light on a
+batch as a disc, on none**. What lights a batch is its vertices: the shipped setting sends
+every lit item to the shade's own lighter and never to the device material's builder
+below ([11-effects.md](11-effects.md#what-a-light-does-to-a-surface--read-and-measured)).
+
 ### Stream 7 is the per-face record
 
 The last stream the reader carried unread. **One 16-byte record per triangle

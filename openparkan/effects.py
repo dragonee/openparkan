@@ -310,7 +310,11 @@ LIGHT_COLOUR_JITTER_AT = 96
 #: Its range -- 30 to 3 on the cannon's flash -- and a jitter on it.
 LIGHT_RANGE_AT = (112, 116)
 LIGHT_RANGE_JITTER_AT = 120
-#: The three attenuation terms, handed to the manager as they are.
+#: The three attenuation terms, handed to the manager as they are: the
+#: constant, linear and quadratic terms of the falloff the shade's vertex
+#: lighter takes on the share of the range left, ``(range - d) / range``
+#: (``Ngi32.dll:0x1001669a``).  (0, 1, 0) on 447 of the 618 blocks, a straight
+#: line to nothing at the range.
 LIGHT_ATTENUATION_AT = 124
 
 #: ``Direct3D`` light types, as the manager's record takes them.

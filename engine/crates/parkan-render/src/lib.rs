@@ -310,6 +310,12 @@ impl Renderer {
         self.lighting = lighting;
     }
 
+    /// The effects' point lights the scene is lit with from now on, beside the lighting's own:
+    /// of `lights`, those whose reach comes nearest the eye.
+    pub fn set_point_lights(&mut self, lights: &[frame::PointLight], eye: Vec3) {
+        self.lighting.points = frame::Points::nearest(lights, eye);
+    }
+
     /// The sky dome's shape, drawn from now on. `set_world` must have run: the dome's
     /// nebula and clouds draw with textures from its bank.
     pub fn set_dome(&mut self, device: &wgpu::Device, positions: &[glam::Vec3], indices: &[u32]) {
@@ -502,6 +508,13 @@ impl Renderer {
     pub fn set_instance(&mut self, queue: &wgpu::Queue, index: usize, matrix: Mat4, visible: bool) {
         if let Some(objects) = self.objects.as_mut() {
             objects.set_instance(queue, index, matrix, visible);
+        }
+    }
+
+    /// Whose a placed object's instance is, for the point lights that light their owner alone.
+    pub fn set_instance_owner(&self, queue: &wgpu::Queue, index: usize, owner: u32) {
+        if let Some(objects) = &self.objects {
+            objects.set_instance_owner(queue, index, owner);
         }
     }
 

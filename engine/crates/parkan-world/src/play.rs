@@ -494,6 +494,23 @@ pub struct LightDisc {
     pub alpha: f32,
 }
 
+/// Whom a light lights (`Terrain.dll:0x100479c0`): everything in its range, or its owner
+/// alone -- the agent whose light manager holds it -- where it carries `0x80000000`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Lit {
+    Everything,
+    /// A battle target: a building, a unit, a tree or a stone.
+    Target(usize),
+    Hero,
+}
+
+/// A point light as the shade's lighter takes it, and whom it lights.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct VertexLight {
+    pub light: parkan_sim::effects::PointLight,
+    pub lit: Lit,
+}
+
 /// The pass a light's item is filed in, group 1's layer 3: its near and far planes and its
 /// depth range (docs/10, "A pass carries its own near plane, far plane and depth range").
 pub const LIGHT_PASS: (f32, f32, f32, f32) = (0.5, 700.0, 0.1, 0.99);
@@ -4798,11 +4815,16 @@ impl Play {
     /// held at 2, as its alpha (`0x1002adb4`–`0x1002ae41`). `view` places a corner's depth, the
     /// vertex nudge taking it toward `eye` ([`light_nudge`]).
     ///
-    /// STAND-IN: docs/11-effects.md#what-a-light-does-to-a-surface--read-and-measured -- no
-    /// writer of the mesh batch word's `0x800` is found and no shipped batch carries it, so
-    /// objects take no light here; the landscape's gate is `0x200` on a record its face source
-    /// answers, taken to be face field 0, which carries it on every face. A face whose centre is
-    /// cut away under a building is passed over.
+    /// No object takes the template: a mesh batch would need `0x800` in its batch word, which is
+    /// the file's own -- the mesh hands the shade the stream-13 record's first dword out of a
+    /// read-only view of the archive, or-ing in `0x20` alone (`AniMesh.dll:0x100134d0`) -- and 0
+    /// of the 15153 shipped batches carry it. What lights an object is the shade's vertex
+    /// lighter ([`Self::vertex_lights`]).
+    ///
+    /// STAND-IN: docs/11-effects.md#what-a-light-does-to-a-surface--read-and-measured -- the
+    /// landscape's gate is `0x200` on a record its face source answers, taken to be face field 0,
+    /// which carries it on every face. A face whose centre is cut away under a building is
+    /// passed over.
     pub fn light_discs(&self, eye: Vec3, view: Mat4) -> Vec<LightDisc> {
         use parkan_formats::landmesh::FLAGS_LIQUID_BED_BIT;
         use parkan_sim::effects::{LIGHT_NOT_EMULATED, LIGHT_OWNER_ONLY, light_disc};
@@ -4840,6 +4862,46 @@ impl Play {
             }
         }
         out
+    }
+
+    /// The effects' point lights the vertices are lit with this frame (docs/11, "What a light
+    /// does to a surface"): every draw item, an object's batch or a landscape cell's, carries
+    /// the lights the shade gathered for it (`Terrain.dll:0x100457c5`, `0x1004482a`), and the
+    /// item's render hands them, with its material, to the shade's own lighter
+    /// (`0x1002ff31`–`0x1002ffa1`, `CShade::ShadeIndexedStrided` at `0x1004df70`). The gather
+    /// (`0x100479c0`) keeps a point light whose range is not 0 and whose sphere meets the
+    /// object's, an owner-only one (`0x80000000`) only on its owner. **`0x20000000` is not
+    /// asked**: the lamps, the generator's ball and `mineglow` light as any other, and only
+    /// the landscape's emulation passes them over.
+    ///
+    /// Each light comes with whom it lights. An owner-only light whose owner draws nothing a
+    /// light could find here is left out.
+    ///
+    /// STAND-IN: docs/11-effects.md#what-a-light-does-to-a-surface--read-and-measured -- a
+    /// unit's parts are agents with a light manager each, and a round is one too; here an
+    /// owner-only light on a unit's gun lights the whole unit, and one on a round lights nothing.
+    pub fn vertex_lights(&self) -> Vec<VertexLight> {
+        use crate::fx::Owner;
+        use parkan_sim::effects::LIGHT_OWNER_ONLY;
+        self.fx
+            .owned_lights(self.hero.time_ms)
+            .into_iter()
+            .filter_map(|(owner, light)| {
+                let lit = if light.flags & LIGHT_OWNER_ONLY == 0 {
+                    Lit::Everything
+                } else {
+                    match owner {
+                        Owner::Building(t, _)
+                        | Owner::Gun(t, _, _)
+                        | Owner::Shot(t, _)
+                        | Owner::Shield(t, _) => Lit::Target(t),
+                        Owner::Turret(_) | Owner::Chassis(_) => Lit::Hero,
+                        Owner::World | Owner::Round(..) | Owner::Lode(_) => return None,
+                    }
+                };
+                Some(VertexLight { light, lit })
+            })
+            .collect()
     }
 
     /// Every effect sprite at the current time, as seen from `eye`: an instance that tests

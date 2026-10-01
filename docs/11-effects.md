@@ -734,23 +734,25 @@ effect manager as `0x13` (`AniMesh.dll:0x1000358f`); the effect manager binds
 `0xe` at message 4. A type-1 emitter asks that manager for a light record
 (slot 12) and then drives it. The record is **Direct3D's `D3DLIGHT2` layout** —
 type at +4, colour at +8, position +0x18, direction +0x24, range +0x30,
-attenuation +0x38..+0x40, theta and phi +0x44/+0x48, the active bit in +0x4c —
-followed by the manager's flags and 1 / range (slots 3, 4, 5, 6, 8, 9, 13;
-*derived* from the offsets each slot writes).
+attenuation +0x38..+0x40, theta and phi +0x44/+0x48, the active bit in +0x4c and
+`D3DLIGHT_NO_SPECULAR` beside it as bit 1 — followed by the manager's flags at
++0x50, 1 / range at +0x54 and a mask of the world classes it lights at +0x58
+(slots 3, 4, 5, 6, 8, 9, 13, 18 and 21; *derived* from the offsets each slot
+writes).
 
 Each quantity in the block is a **(start, end) pair lerped by the progress
 through the window** (`0x1000f6e0`):
 
 | block | field | measured over the 618 |
 |---|---|---|
-| +4 | kind: 1 point, flags `0x80000000`; 2 and 5 point; 3 directional; 4 parallel point; 6 point, `0xa0000000`; 7 point, `0x20000000` (`0x1000f649`) | 5 on 416, 6 on 175, 7 on 14, 1 on 12, 2 on 1 |
+| +4 | kind: 1 point, flags `0x80000000`; 2 and 5 point; 3 directional; 4 parallel point; 6 point, `0xa0000000`; 7 point, `0x20000000` (`0x1000f649`). `0x80000000` keeps the light to its owner and `0x20000000` keeps it out of the landscape's emulation ([below](#what-a-light-does-to-a-surface--read-and-measured)) | 5 on 416, 6 on 175, 7 on 14, 1 on 12, 2 on 1 |
 | +16 → +28 | position, in the effect's frame, then the owner's | (0, 0, 0) on 427 |
 | +40 → +52 | direction | `(1, 0, 0)` at +52 on 542 |
 | +64 → +80 | colour, RGBA | overbright starts: (3, 2, 0) on 140, (2, 1, 0) on 110 |
 | +96 | colour jitter, a spread for each of the four channels: an update adds a uniform in ± half of each, a draw apiece ([below](#a-lights-jitter-is-five-draws-an-update--read-and-measured)) | (0, 0, 0, 0) on 511; the alpha's is 0 on all 618 |
 | +112 → +116 | range, its jitter added, × the length of the light's own direction through the instance's matrix (`0x1000f884`, `0x1000f891`, `0x1000fb13`) — the frame stretched by the instance's size times the header's scale, so an explosion's light grows with the explosion — and then **0.01 where it is not above 0** (`0x1000fb7b`–`0x1000fb8c`, a compare against 0.0 at `0x1001e224`; an earlier reading here had "clamped to at least 0.01", and a range between the two is kept) | 30 → 3 on the hero's cannon |
 | +120 | range jitter, ± half of it, one draw an update, added before the stretch | 0 on 560 |
-| +124..+132 | the three attenuation terms, handed on unchanged | (0, 1, 0) on 447, (0, 1, 1) on 170, (0, 0, 1) on 1 — never a constant term |
+| +124..+132 | the three attenuation terms, handed on unchanged: the constant, linear and quadratic terms of a falloff on the share of the range left ([below](#what-a-light-does-to-a-surface--read-and-measured)) | (0, 1, 0) on 447, (0, 1, 1) on 170, (0, 0, 1) on 1 — never a constant term |
 
 ### A light's jitter is five draws an update — *read*, and *measured*
 
@@ -813,8 +815,9 @@ and `tree_light*` effects, `hero_helm_light` and `tur_deflectorlight`. The three
 are `env_lightning` — (1, 1, 2) on a colour that starts at (7, 7, 10), and 10 on a range of
 100 — `f_ol_store_w` and `f_teleport_on`.
 
-**22 blocks over 19 effects are of kind 5**, the lights the landscape's emulation draws
-([below](#what-a-light-does-to-a-surface--read-and-measured)):
+Every one of them flickers on the vertices it lights
+([below](#what-a-light-does-to-a-surface--read-and-measured)). **22 blocks over 19 effects
+are of kind 5**, the lights that also draw a disc on the landscape:
 
 - the **construction sphere**, `B_Sphere_Main`, `B_Sphere_Start` and `B_Sphere_Start_BT`, two
   blocks each: (0.3, 0.3, 0.6) on a colour that reaches (5, 5, 10), and no range jitter;
@@ -834,15 +837,181 @@ range to 0 or under, where the floor catches it.
 ### What a light does to a surface — *read*, and *measured*
 
 A light record is **0x5c bytes** in the manager's array (`Terrain.dll:0x1002a1ca`), and
-the manager's flags sit at **+0x50** (`0x100808b7`).
+the manager's flags sit at **+0x50** (`0x100808b7`). A light reaches a surface two ways.
+**Every lit draw item's vertices are lit with the lights the shade gathered for it**, an
+object's batch and a landscape cell alike, by the shade's own lighter; and **the landscape
+also takes an emulated disc** from each point light the emulation does not pass over. An
+earlier reading here had the second alone, and so had the buildings' lamps, the generator's
+ball and `mineglow` light nothing.
 
-**`EmulatePointLights` (`Terrain.dll:0x1002a130`) reads six fields and no more**: the type
-+4, and it skips anything but a point light (`0x1002a1da`); the flags +0x50, and it skips
-a light with `0x20000000` (`0x1002a200`); the colour +8..+0x14 (`0x1002ad33`); the
-position +0x18 (`0x1002a3f3`); and the range +0x30 (`0x1002a59c`, `0x1002a7d1`,
-`0x1002a804`). **The three attenuation terms at +0x38..+0x40 are never read**, nor the
-direction +0x24, nor the manager's 1 / range at +0x54. The control is in the same walk:
-it does find +0x30 and +8, which the routine plainly uses.
+**Which lights an item carries.** The shade keeps one list per draw (`shade+0x1914`, handed
+out by slot 24, `0x10045e60`), and both draws copy its count and its array into the item
+they file, at `+0x120` and `+0x124` (the mesh draw at `0x100457c5`–`0x100457f8`, the
+landscape's cell draw at `0x1004482a`–`0x1004485d`). The entries are copies of the records,
+0x5c bytes each, in world space: the manager's slot 7 with space 2 (`0x100802f0`) puts the
+position and the direction through its owner's placement and leaves the colour, the range
+and the attenuation as they are.
+
+- **For a mesh** (slot 13, `0x100478c0`, which `AniMesh.dll`'s render calls once for the
+  object, `0x10014dd0`) the shade walks the registered light managers (slot 22,
+  `0x100472b0`, over the registry slot 10 fills, `0x10046de0`), passing over one with no
+  light on, and one whose lights are all owner-only unless the object is its owner
+  (`0x1004761c`–`0x10047631`). Of each manager it keeps (`0x100479c0`) a light that is on
+  (`+0x4c` bit 0); an owner-only one (`0x80000000`) only when the object drawn is the
+  manager's owner (`0x10047a52`); one whose `0x04000000` agrees with bit 2 of the draw's
+  mode (`0x10047a66`–`0x10047a81`: a light carrying it lights only a draw carrying the bit,
+  which the mesh's render sets under `0x200` of its own argument, `AniMesh.dll:0x10014d98`,
+  and no effect's light carries it); and one whose class mask, record `+0x58`, has the bit of
+  the object's world class (`0x10047a85`–`0x10047aa9`, against `1 << class` from the table
+  at `0x1009b030`). A point light must also have a range that is not 0 (`0x10047ae2`) and
+  a sphere that meets the object's — (radius + range)² at least the squared distance
+  between the centres (`0x10047b06`–`0x10047b8b`).
+- **For a landscape cell** (slot 20, `0x10047bb0`) it keeps every directional light, and
+  every point light with a range that is not 0 whose range box meets the cell's
+  (`0x10047df8`–`0x10047f8d`); it drops an owner-only one outright (`0x10047c96`) and asks
+  neither the mask nor `0x04000000`.
+
+The mask turns nothing away: the manager's create takes it from a global that a static
+initialiser fills with classes 0 to 11, `0xfff` (`0x10080771`, `0x10080d70`), only slot 21
+writes it afterwards (`0x10080b00`), which `Effect.dll` never calls — the module has no
+call at `+0x54` at all — and the classes the install answers run to 11
+([30-turrets.md](30-turrets.md#what-the-outer-cameras-line-meets--read)).
+
+**Neither gather asks `0x20000000`.** So a kind-7 light — `mineglow`, the generator's
+ball, `f_recharge_*`, the lightning — is in the list of every object and every cell it
+reaches; a kind 6, every building lamp, is in its owner's; and so is a kind 1.
+
+**The vertices are lit by the shade's own lighter, not by the device.** An item's render,
+`CStridedPrimitive::RenderVB` (`0x1002fab0`), lights an item whose flags carry `0x10`
+(`0x1002fe3d`). That is every mesh batch: the mesh draw adds `0x10` when the batch's stream
+table has no colours of its own at `+0x10` (`0x100455d1`–`0x100455f3`), which is stream 16
+(`AniMesh.dll:0x100160af`–`0x1001611a`), and **0 of the 435 shipped meshes carry a stream
+16** (*measured*). It is also the landscape's cells (`0x414`, `0x10044627`) and the
+emulation's own item (`0x14`, below). The render then asks the setting **`UseDXLighting`**,
+the shade's page entry 29 (`0x1002fe50`), and when that is 0 it calls slot 8 of the shader
+component it was handed, with the item's material, its light array and count, its frame and
+its streams (`0x1002ff31`–`0x1002ffa1`), and clears `0x10` (`0x1002ffbc`) so that the device
+lights nothing itself on the draw.
+
+**The setting is 0.** The page's defaults write it so (`0x1005fcce`), no `shade.cfg` ships,
+the three presets `RENDER_QUALITY` picks between leave it alone (`0x1005fd70` writes
+entries 3, 4, 7 to 14, 20, 21 and 24), and no module builds its key: a sweep over the 16
+modules for a 16-bit store of the page, `0x1e`, beside a 16-bit store two bytes on finds
+the four keys already known — `AniMesh.dll:0x100071ae` (entry 8) and
+`iron3d.dll:0x10061736`, `0x1006177b` and `0x10061795` (26, 25 and 30,
+[10-sky.md](10-sky.md#the-render-settings)) — and none for 29. This page had its default
+as 2, which is its descriptor's first word, a type, and not a value. One trap on the way:
+the item's other slot, which a type-0 pass's add calls to learn the vertex buffer the item
+will use (`0x10032047`), does clear `0x10` under the same test (`0x1002f995`) — on the way
+to its choice only, and it puts the flags back before it returns (`0x1002fa96`).
+
+Slot 8 is `0x1004df70`, and its panic strings name it **`CShade::ShadeIndexedStrided()`**
+(`0x100a23bc`). It gives the item two streams of its own, a diffuse and a specular colour
+for each vertex (`0x1004e246`–`0x1004e3a1`), and **walks the whole list**
+(`0x1004ea36`–`0x1004ee38`; the bound is the item's count and nothing else). A light of
+type 1 goes to `g_FastProc`'s entry `+0xc4` and one of type 3 to `+0xc8` (`0x1004ecc9`,
+`0x1004ee17`); any other type is the panic *"Illegal light source type"*. `Ngi32.dll`
+fills each entry with one of three builds by processor (`0x100164f0`, `0x10018740` and
+`0x10014e10` for the point light, `0x10016070`, `0x10018260` and `0x10014940` for the
+directional). The point light's, read from `0x100164f0`:
+
+- a vertex **past the range** takes nothing (d² against range², `0x100165bb`);
+- nor does one **turned away**: its normal, three signed bytes, is dotted with the vector
+  to the light, and the vertex is passed over unless that is above 0 (`0x1001663d`);
+- x = (range − d) × (1 ÷ range) is **the share of the range left**
+  (`0x10016678`–`0x10016683`, the reciprocal the record's own `+0x54`), and the falloff
+  is **a₀ + a₁ x + a₂ x²** on the record's `+0x38`, `+0x3c` and `+0x40` in that order
+  (`0x1001669a`–`0x100166ac`): the block's three terms as they stand;
+- the vertex's diffuse sum takes **material diffuse × light colour × cos θ × falloff**
+  (`0x10016762`–`0x1001678a`), and, where the item wants a specular and the light is not
+  flagged against one (`+0x4c` bit 1, which the manager's slot 18 sets and clears,
+  `0x10080a60`), its specular sum takes the material's specular the same way, on a power of
+  the cosine between the light's reflection and the vertex's own vector to the eye
+  (`0x100166b5`–`0x10016750`).
+
+That is the lighting `D3DLIGHT2` describes, which the record's layout already said. The
+range and its reciprocal are put into the item's own units first (`0x1004ead5`,
+`0x1004ec5f`) and the position into its frame (`0x1004eb49`–`0x1004ec03`).
+
+When the list is done each vertex's colour is **scene colour + material ambient + its
+sum** (`0x1004f225`–`0x1004f23d`), each channel through the knee the sprites' colour has:
+as it is up to 1, c ÷ 6 + 5 ÷ 6 above, and 2 from 7 on (`0x1004f25a`–`0x1004f3cd`). What
+a channel then has over 1 is **moved into the specular colour**, and the diffuse held at
+1 (`0x1004f3e5`–`0x1004f4a5`); the specular is scaled in its turn, 0.8 of it up to 1,
+0.1 of it plus 0.7 above, and 1 from 3 on (`0x1004f4c3`–`0x1004f648`). The alpha is the
+material's ambient alpha times the item's fade, and the specular's alpha carries the fog
+factor. The device adds a vertex's specular after the texture
+([37-designer.md](37-designer.md#the-scan-bands--read-and-seen)), so **light past 1
+whitens a surface rather than stopping at its texture**.
+
+So a lit vertex, before the knee, is
+
+```
+rgb = scene colour + material ambient
+    + material diffuse × Σ light colour × cos θ × (a₀ + a₁ x + a₂ x²)      x = (range − d) ÷ range
+```
+
+with the sun's two directional lights in the same sum at a falloff of 1: their routine
+takes the cosine against the record's direction and no distance (`Ngi32.dll:0x100160c0`–
+`0x1001615f`). A batch that
+takes a lightmap has had its diffuse made 0 before this
+([07-objects.md](07-objects.md#how-a-lightmapped-batch-is-drawn--read-and-measured)), so
+no light's diffuse reaches it.
+
+*Measured* over the 618 light blocks: the triple (a₀, a₁, a₂) is (0, 1, 0) on **447**,
+(0, 1, 1) on **170** and (0, 0, 1) on **1**, `env_lightning` — nothing but 0 or 1 in any
+of the three, and **never a constant term**, so every light is nothing at its range. A
+(0, 1, 0) falls in a straight line from the light's colour to nothing; a (0, 1, 1), x + x²,
+starts at twice the colour. The colours go well past 1 — (3, 2, 0) on 140 blocks, (13, 12, 0)
+on an explosion — so the knee and the specular are what a vertex near a light shows.
+
+*Seen* on C03 M02 ("Let's Play - Parkan: Iron Strategy, Part 6", -yNnsqudMzw, 0:52–0:56):
+Enemy 1's Medium Mine stands violet about its drill — its two pillars, the underside of
+its upper platform and the face of its tower toward the drill — over the red scene colour,
+and nothing of the ground does. `mineglow` is what hangs there: a kind 7, blue (0, 0, 0.9),
+(0, 1, 1), its range the block's 7 times the length of the drill's frame, 30.6. Lit by
+this reading the engine's frame shows the same three surfaces violet, where before it
+showed none; the red rock about the mine shows nothing of it in either. At 1:44.5 Enemy 2's Large Factory's masts are lavender on one side and yellow on
+the other, the yellow its `f_smalllight_y` lamps', which are kind 6 and light their owner
+alone. At 0:52.2 one flash whitens the rock and the mine together for two frames; that it
+is `env_lightning`'s light, (7, 7, 10) and a kind 7, taken through the knee into the
+specular, is *inferred*.
+
+**Direct3D's lights are built, and not reached.** `RenderVB`'s other branch — taken when
+`UseDXLighting` is not 0, the camera's infrared is off (bit 0 of the block the shader
+component's slot 7 answers, `0x1002fe79`) and the item is not one whose `+0xf4` carries 8
+while its `+0x100` is neither 0 nor 2 (`0x1002fe98`–`0x1002ff04`) — calls `0x10030620`
+(`0x1002ff27`). That
+builds the device material
+([07-objects.md](07-objects.md#how-a-material-reaches-the-device--read-and-measured)) and
+then hands the device **the first eight lights of the item's list**
+(`0x10030972`–`0x10030993`): for each a `D3DLIGHT7` on the stack — the type; the record's
+colour as both the diffuse and the specular, the specular black on a light flagged
+against one; a type 3's direction, or else the position and the range; and **the three
+attenuation terms in reverse**, the record's `+0x40` as the constant term, `+0x3c` as the
+linear and `+0x38` as the quadratic (`0x10030b40`–`0x10030ba9`) — then `LightEnable(i, 1)`
+through a cache (`0x10030f60`, the call at `0x10030f95`) and `SetLight` at `0x10030be6`,
+the render interface's `+0x94` on the copy at `0x100a5d40`. The slots past the list are
+switched off. Direct3D 7 divides by a₀ + a₁ d + a₂ d² on the distance itself, so the
+reversal makes a (0, 1, 0) 1 ÷ d and a (0, 1, 1) 1 ÷ (1 + d): a different falloff from
+the lighter's, for whoever turns the setting on.
+
+An earlier reading here had **no** call at `+0x94` landing on a render interface, and so
+nothing ever setting a Direct3D light. The call is there; what keeps it from running is
+the setting. The four `for i in 0..7` loops it had found, which zero the cache and call
+`LightEnable(i, 0)` in each pass's render (`0x1003dbd5`, `0x1003df55`, `0x1003e348`,
+`0x1003f281`), are that builder's other half. `Ngi32.dll`'s `SetLight` forwards to the
+device's own at `[device+0x48]` (`0x10008b50`) and its `LightEnable` to `+0xb0`
+(`0x10008b20`), `IDirect3DDevice7`'s; the exported `n3dSetLighting` is a stub (`ret 8`,
+`0x100025a0`).
+
+**The landscape's disc: `EmulatePointLights` (`Terrain.dll:0x1002a130`).** It walks the
+draw's list and reads six fields of a record and no more: the type +4, and it skips
+anything but a point light (`0x1002a1da`); the flags +0x50, and it skips a light with
+`0x20000000` (`0x1002a200`); the colour +8..+0x14 (`0x1002ad33`); the position +0x18
+(`0x1002a3f3`); and the range +0x30 (`0x1002a59c`, `0x1002a7d1`, `0x1002a804`). It does
+not read the attenuation, the direction or the reciprocal of the range, which are the
+vertex lighter's.
 
 **The range is a hard cut, twice.** A triangle is dropped when the light's distance to its
 plane is past the range (`0x1002a59c`, the absolute distance: a light behind the face counts),
@@ -874,64 +1043,64 @@ falling to 0 at the rim. The light's colour **divided by its own length** goes i
 template's ambient rgb (`shade+0xc2c`, `0x1002ae12`) and **0.25 × min(length, 2)** into its
 ambient alpha (`shade+0xc38`; the clamp at `0x1002adb4`–`0x1002adc1` comes before the × 0.25
 at `0x1002ae35`, so the alpha is at most 0.5 — an earlier reading had min(0.25 × length, 2)).
-The item's flags are `0x14`, so it builds a device material: its self-light is the scene colour
-plus that ambient (*derived*, as [07-objects.md](07-objects.md#how-a-material-reaches-the-device--read-and-measured)
-has a lit batch's). So the shape of the falloff is a texture across the square, the overbright
-is the colour's length rather than its components, and 1 / (a₀ + a₁·d + a₂·d²) never happens.
+The item's flags are `0x14` and its own light list is empty (`0x1002acd9`, `0x1002ace6`,
+`0x1002acf3`), so the lighter above gives each of its vertices the scene colour plus that
+ambient. So on the disc the shape of the falloff is a texture across the square, and the
+overbright is the colour's length rather than its components.
 
-**Which lights reach it.** The shade gathers one list per draw (`0x10045e60`): for a mesh
-(`0x100478c0`) every registered manager's active lights, an owner-only light (`0x80000000`)
-only on its owner, a point light only when its range is above 0 and its sphere meets the
-object's; for a landscape cell (`0x10047bb0`) the same but owner-only lights dropped outright
-(`0x10047c96`) and a point light kept when its range box meets the cell's. Of the 618 shipped
-light blocks only kinds 2 and 5 — **417**, the explosions, the guns' flashes, the burning trees
-and the construction sphere — make a point light the landscape takes; kind 1's 12 are the
-engines' owner-only glows, and kinds 6 and 7, every building lamp, the generators' ball and
-`mineglow` among them, carry `0x20000000` and light nothing.
+**Which lights draw a disc.** Of the cell's list, the point lights without `0x20000000`:
+kinds 2 and 5, **417** of the 618 blocks — the explosions, the guns' flashes, the burning
+trees and the construction sphere. Kind 7's 14 light the landscape's vertices and draw no
+disc, and kinds 1 and 6 never reach a cell. A kind 2 or 5 does both: its disc lies over
+vertices it has already lit.
 
-**What switches it on.** A mesh batch takes emulated lights only when its batch word
-carries `0x800` and the shade's `+0xcc4` is set (`0x10045d38`, `0x10045d47`). *Measured*:
-**0 of the 15153 shipped batches carry `0x800`**, and no store of `0x800` into memory is found in
-`AniMesh.dll`, `World3D.dll` or `Terrain.dll` (a search, not a proof), so as far as is read no
-object takes them. The landscape's cell draw calls the routine instead under `0x200` on the word
-`+0x3c` of the record its face source (`shade+0xcac`, slot 4) answers for a face
+**What switches the disc on.** The landscape's cell draw calls the routine under `0x200` on
+the word `+0x3c` of the record its face source (`shade+0xcac`, slot 4) answers for a face
 (`0x10043ac7`, `0x100440bc`, `0x10044355`, `0x10044d95`, gated at `0x100444cb`–`0x10044507`);
 that the record's word is the face's field 0, which carries `0x200` over its constant `0x600`
 on every face, is *derived*. *Seen* on C03 M02 ("Let's Play - Parkan: Iron Strategy, Part 6",
--yNnsqudMzw, 11:14): an orange pool of light on the ground about a warbot as it is hit. `+0xcc4` is
-settings id 3, **`EmulatePointLight`** (`0x10046c7a`, the page's values at `0x100a6cac`),
-which `Terrain.dll` registers with a default of 1 (`0x1005ec5a`); its neighbours are
-`LightingOn` (1), `SpecularsOn` (1), `ForceSWFog` (0) and, at id 29, `UseDXLighting`
-(default 2), which `CStridedPrimitive::RenderVB` tests before it will build a device
-material at all (`0x1002fe50`). `Iron_3D.ini` sets none of the five, so every default
-stands.
+-yNnsqudMzw, 11:14): an orange pool of light on the ground about a warbot as it is hit. The
+shade's `+0xcc4`, which every call also waits on, is settings entry 3, **`EmulatePointLight`**
+(`0x10046c7a`, the page's values at `0x100a6cac`): 1 as compiled, 1 again under the two
+upper presets and 0 under the lowest, `RENDER_QUALITY=0` (`0x1005fd9c`, `0x1005fe23`,
+`0x1005fea7`); the install's 2 leaves it on.
+
+**No object takes the disc** — *read*, with its control. The mesh draw calls the routine
+for a batch when `+0xcc4` is set and the batch's word carries **`0x800`** (`0x10045d38`,
+`0x10045d47`); it is the one call outside the landscape's four (`0x10045d5f`). The word is
+a local the draw loads once (`0x1004502f`) from the first dword of the record the mesh's
+slot 3 answers, and nothing in the draw writes either again — the record's pointer is only
+ever read through. Slot 3 has one implementation, `AniMesh.dll:0x100134d0`, which a
+building's stand-in forwards to (`Terrain.dll:0x10056c10`); it answers a module static,
+`0x100270f8`, with four references in the whole module, all its own: the file's stream-13
+dword stored whole (`0x10013538`), `0x20` or-ed in on a portal batch (`0x10013640`–
+`0x10013647`), and the address returned. The stream is the archive's own bytes, and
+nothing can write them: the model's `+0x28` is what the nested resource's slot 6 answers
+for type 13 (`0x1001608a`), the view's base plus the member's offset
+(`Ngi32.dll:0x10011f80`), and the view is mapped read-only — `niOpenResFileEx(…, 4)` at
+`AniMesh.dll:0x1000a52e`, where bit 1 of the flags is what asks for a writable one
+(`PAGE_READONLY` and `FILE_MAP_READ` otherwise, `Ngi32.dll:0x10011c5e`, `0x10011c85`), and
+none of the ten calls in the install sets it (4, 0 or 8 at every one). So **the word is
+the file's with `0x20` and nothing else**, and *measured* over the 15153 shipped batches it
+takes 14 values over nine bits — 1 on 183, 2 on 1477, 4 on 112, 8 on 633, `0x10` on 66,
+`0x40` on 170, `0x100` on 2953, `0x2000` on 972 and `0x4000` on 307 — and **`0x800` on
+none**. The control is the same count finding the 633, the 2953 and the 972 this page and
+[07-objects.md](07-objects.md#materials-are-per-batch-not-per-face) already had. No
+material or texture feeds it: the record's `+4` and `+8` carry the wear's index and the
+lightmap's key and its first word nothing of either, and of `Material.lib`'s 905 directory
+words only bits 1, 2, 4 and 8 are ever set.
 
 **The manager flags, every test found.** `0x80000000` at `0x10047a52` — the light is
-skipped unless the object being drawn is its owner — at `0x10047c96`, where a second loop
-skips such a light outright, and at `0x100808c1` / `0x10080914`, the manager's set-flags
-slot, which re-registers the light when that bit changes. `0x20000000` only at
-`0x1002a200`. Nothing else in `Terrain.dll` tests either constant.
-
-**Nothing sets a Direct3D light** (*read*). `Ngi32.dll`'s render interface — the object
-`niGet3DRender` (ordinal 302) hands out, whose vtable the constructor installs at
-`0x100315e0` (`0x10005eec`) — carries `SetLight` at `+0x94` (`0x10008b50`, which forwards
-to the device's own `SetLight` at `[device+0x48]`) and `LightEnable` at `+0x90`
-(`0x10008b20`). Across all sixteen modules **no call at `+0x94` lands on a render
-interface**: the 35 that exist are on other objects, and the six inside `Ngi32.dll` itself
-are on the Direct3D device it keeps at `0x1003a488`. The control is the same sweep at
-`+0x90`, which does find the render interface — four times, in `CShade`, each a
-`for i in 0..7` loop that zeroes its own light slot and calls `LightEnable(i, 0)`
-(`Terrain.dll:0x1003dbd5`, `0x1003df55`, `0x1003e348`, `0x1003f281`, through the copy of
-the interface at `0x100a5d40` taken from `CShade+0x98`). So the shade **switches all eight
-device lights off** and never turns one on; the exported `n3dSetLighting` is a stub
-(`ret 8`, `0x100025a0`) beside it.
-
-*Measured* over every shipped light block: the attenuation triples are (0, 1, 0) on **447**
-of the 618, (0, 1, 1) on **170** and (0, 0, 1) on **1** (`env_lightning`) — never a
-constant term, never (1, 0, 0), and never anything but 0 or 1 in any of the three. With
-`EmulatePointLights` not reading them and no Direct3D light ever set, **the triple is dead
-data**: the artists wrote Direct3D's linear falloff on 617 of the 618 and added its
-quadratic term on 171, into a field the game does not read.
+skipped unless the object being drawn is its owner — and at `0x10047c96`, where the cell's
+gather skips such a light outright; at `0x1005120f`, in a routine that sums the lights about
+a point into one direction and strength (`0x10051020`, which takes the same three terms on
+the share of the range left, `0x100513c6`–`0x1005142c`, and whose caller is not read here);
+and in the manager itself, where the switch (`0x10080290`, `0x100802cf`), the set-flags slot
+(`0x100807ec`, `0x1008083b`) and its twin (`0x100808c1`, `0x10080914`) keep a count of the
+lights that are on and not owner-only (`+0x1c`, slot 20, the one the mesh's walk asks of a
+manager). `0x20000000` only at `0x1002a200`. `0x04000000` only at `0x10047a74`.
+`0x08000000`, which the sun's first light carries ([10-sky.md](10-sky.md#where-the-two-lights-point--read)),
+at `0x100510c1` and `0x100511bd` in that same routine and at `0x10028b05`.
 
 ### Type 2 is a sound — *read*, and *measured*
 
@@ -1665,17 +1834,29 @@ Read one slot either way, none of the seven name witnesses agrees.
 - ~~**How the shade lights with a type-1 light** — the falloff over range and
   attenuation (`EmulatePointLights`, `Terrain.dll:0x1002a130`, and the Direct3D
   path), and what the manager flags `0x80000000` and `0x20000000` mean beyond
-  the two tests found.~~ Answered in part: `EmulatePointLights` reads six fields of
-  the record and **not the attenuation**, cuts hard at the range and draws the light
-  as a textured disc of radius sqrt(range² − d²); every test of both flags is now
-  enumerated ([above](#what-a-light-does-to-a-surface--read-and-measured)).
+  the two tests found.~~ Answered: every lit item's vertices, an object's and the
+  landscape's, take the lights the shade gathered for it through the shade's own lighter,
+  `CShade::ShadeIndexedStrided` (`0x1004df70`), at light colour × cos θ × (a₀ + a₁ x + a₂ x²)
+  on the share x of the range left; the landscape takes an emulated disc besides, from the
+  point lights without `0x20000000`; and `0x80000000` keeps a light to its owner
+  ([above](#what-a-light-does-to-a-surface--read-and-measured)).
   ~~Still open: **what a light's attenuation triple is for**, since no path found
   reads it, and whether anything reaches `Ngi32.dll`'s `SetLight` (`0x10008b50`).~~
-  Answered: **nothing reaches it** — no call in any module lands on the render
-  interface's `+0x94`, where the same sweep at `+0x90` finds `CShade` switching all
-  eight device lights off — so the triple is dead data, and what the artists wrote
-  into it is measured
+  Answered, and an earlier answer here taken back: the triple is the vertex lighter's
+  falloff, not dead data; and a builder does hand Direct3D the item's first eight lights
+  (`0x10030620`, `SetLight` at `0x10030be6`), under the setting `UseDXLighting`, which is 0
+  as compiled and which nothing sets, so it does not run.
+- ~~**Whether an object takes an effect's light**: no shipped batch carries the `0x800`
+  the emulation waits for on a mesh, and no writer of it was found.~~ Answered both ways.
+  **No object takes the emulated disc**: the word is the file's, served out of a read-only
+  view with `0x20` alone or-ed in, and 0 of the 15153 batches carry `0x800`. **Every object
+  takes the lights on its vertices**, the lamps' and `mineglow`'s among them, which is what
+  stands C03 M02's mine violet
   ([above](#what-a-light-does-to-a-surface--read-and-measured)).
+- **What the lighter's other routines do.** The directional light's (`g_FastProc`'s `+0xc8`)
+  is read only as far as its call, and the point light's specular only in outline. How a
+  landscape cell is bounded for its gather, and the order the light managers register in —
+  which decides the eight the Direct3D builder would take — are not read either.
 - ~~**A light's colour and range jitter** (+96, +120): which stream each is drawn from,
   how often, one draw or one a channel, and whether the result is held to a bound.~~
   Answered: five draws on every update of a light that is on — alpha, blue, green and the

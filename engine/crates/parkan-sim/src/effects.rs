@@ -128,13 +128,13 @@ pub const LIGHT_RANGE_AT: (usize, usize) = (112, 116);
 pub const LIGHT_COLOUR_JITTER_AT: usize = 96;
 pub const LIGHT_RANGE_JITTER_AT: usize = 120;
 /// The three attenuation terms, handed to the manager as they stand (`0x1000fb94`–`0x1000fbb8`,
-/// record `+0x38`, `+0x3c`, `+0x40`). The device takes them the other way round: its constant
-/// term is the third, its linear the second and its quadratic the first
-/// (`Terrain.dll:0x10030b40`–`0x10030ba9`).
+/// record `+0x38`, `+0x3c`, `+0x40`): the constant, linear and quadratic terms of a falloff on
+/// the distance left to the range, as Direct3D's `D3DLIGHT2` has them
+/// ([`PointLight::diffuse_at`]).
 pub const LIGHT_ATTENUATION_AT: usize = 124;
 /// What a light record says of a light the light manager keeps: a point light, its flags.
 /// `0x80000000` lights only its owner; `0x20000000` is passed over by the shade's emulation,
-/// and lights a surface only as a device light does.
+/// and lights a surface only through its vertices.
 pub const LIGHT_OWNER_ONLY: u32 = 0x8000_0000;
 pub const LIGHT_NOT_EMULATED: u32 = 0x2000_0000;
 /// How long an instance keeps what its last update drew: the manager updates one once 100 ms
@@ -162,30 +162,37 @@ pub struct PointLight {
     pub colour: Vec3,
     pub range: f32,
     pub flags: u32,
-    /// Direct3D's attenuation, constant, linear and quadratic: the block's three terms in
-    /// reverse (`Terrain.dll:0x10030b40`–`0x10030ba9`).
+    /// The block's three attenuation terms, as they stand.
     pub attenuation: [f32; 3],
 }
 
 impl PointLight {
-    /// What the light gives a surface at `at` whose normal is `normal`, before the material's
-    /// diffuse multiplies it: Direct3D 7's point light, the colour times the cosine at the
-    /// surface over a₀ + a₁ d + a₂ d², and nothing past the range. The game hands the device
-    /// the record's colour, position, range and attenuation and no more
-    /// (`Terrain.dll:0x10030a7d`–`0x10030be6`), so the falloff is the device's own.
+    /// What the light gives a vertex at `at` whose normal is `normal`, before the material's
+    /// diffuse multiplies it, as the shade's own lighter works it out
+    /// (`CShade::ShadeIndexedStrided`, `Terrain.dll:0x1004df70`, and the point-light routine it
+    /// calls, `Ngi32.dll:0x100164f0`): nothing past the range (`0x100165bb`) or on a vertex
+    /// turned away (`0x1001663d`); otherwise the colour times the cosine at the vertex times
+    /// a₀ + a₁ x + a₂ x², where x = (range − d) ÷ range is the share of the range left
+    /// (`0x10016678`–`0x100166ac`). It is `D3DLIGHT2`'s falloff, on the record's three terms in
+    /// their own order: the 447 blocks with (0, 1, 0) fall in a straight line from the light to
+    /// nothing at their range, and the 170 with (0, 1, 1) start at twice the colour.
+    ///
+    /// The device's own lights are not used: `UseDXLighting`, the shade's setting 29, is 0 as
+    /// compiled (`0x1005fcce`) and nothing sets it, so every lit item goes to this lighter
+    /// (`0x1002fe50`) and the builder that would hand Direct3D the same list is never reached.
     pub fn diffuse_at(&self, at: Vec3, normal: Vec3) -> Vec3 {
         let to = self.position - at;
         let d = to.length();
-        if d > self.range {
+        if d > self.range || d <= 0.0 || self.range <= 0.0 {
             return Vec3::ZERO;
         }
+        let facing = normal.normalize_or_zero().dot(to / d);
+        if facing <= 0.0 {
+            return Vec3::ZERO;
+        }
+        let x = (self.range - d) / self.range;
         let [a0, a1, a2] = self.attenuation;
-        let fall = a0 + a1 * d + a2 * d * d;
-        if fall <= 0.0 {
-            return Vec3::ZERO;
-        }
-        let facing = if d > 0.0 { normal.normalize_or_zero().dot(to / d).max(0.0) } else { 0.0 };
-        self.colour * (facing / fall)
+        self.colour * (facing * (a0 + a1 * x + a2 * x * x))
     }
 }
 
@@ -904,13 +911,12 @@ impl Instance {
             let factor = (x * direction.x + y * direction.y + z * direction.z).length() * self.scale;
             let range = (lerp(e.f(LIGHT_RANGE_AT.0), e.f(LIGHT_RANGE_AT.1)) + jitter.range) * factor;
             let range = if range > 0.0 { range } else { LIGHT_LEAST_RANGE };
-            let [first, second, third] = e.triple(LIGHT_ATTENUATION_AT);
             out.push(PointLight {
                 position: self.frame.point(local * self.scale),
                 colour,
                 range,
                 flags,
-                attenuation: [third, second, first],
+                attenuation: e.triple(LIGHT_ATTENUATION_AT),
             });
         }
     }
@@ -1491,12 +1497,12 @@ mod tests {
         assert_eq!(ranges, [LIGHT_LEAST_RANGE, 0.008, LIGHT_LEAST_RANGE]);
     }
 
-    /// `mineglow`'s light, blue (0, 0, 0.9) with the terms (0, 1, 1): the device's constant
-    /// term is the block's third and its linear the second (`Terrain.dll:0x10030b40`), so it
-    /// falls as 1 ÷ (1 + d) and stops at its range; a surface turned away takes nothing, and
-    /// the guns' (0, 1, 0) is 1 ÷ d, above 1 inside one unit.
+    /// `mineglow`'s light, blue (0, 0, 0.9) with the terms (0, 1, 1): the shade's lighter
+    /// takes x + x² of it, x the share of the range left (`Ngi32.dll:0x10016678`), so it starts
+    /// near twice the colour and is nothing at its range and past it; a vertex turned away
+    /// takes nothing, and a gun's (0, 1, 0) falls in a straight line.
     #[test]
-    fn a_device_light_falls_by_the_blocks_terms_in_reverse_and_stops_at_its_range() {
+    fn a_light_falls_by_the_share_of_its_range_left_and_stops_there() {
         let glow =
             light(7, (0.0, 1.0), &[(72, 0.9), (88, 0.9), (112, 7.0), (116, 7.0), (128, 1.0), (132, 1.0)]);
         let flash = light(5, (0.0, 1.0), &[(64, 3.0), (80, 3.0), (112, 30.0), (116, 30.0), (128, 1.0)]);
@@ -1505,14 +1511,18 @@ mod tests {
         let fx =
             Instance::new(whole, Frame::along(Vec3::new(0.0, 0.0, 3.0), Vec3::X, 1.0), 1.0, 0.0, None, 1);
         let out = lit(&fx, 0.0);
-        assert_eq!((out[0].attenuation, out[1].attenuation), ([1.0, 1.0, 0.0], [0.0, 1.0, 0.0]));
-        let under = out[0].diffuse_at(Vec3::ZERO, Vec3::Z);
-        assert!((under - Vec3::new(0.0, 0.0, 0.9 / 4.0)).length() < 1e-6, "{under}");
+        assert_eq!((out[0].attenuation, out[1].attenuation), ([0.0, 1.0, 1.0], [0.0, 1.0, 0.0]));
+        // 3.5 below the light, half its range: x = 0.5, so 0.5 + 0.25 of the colour.
+        let under = out[0].diffuse_at(Vec3::new(0.0, 0.0, -0.5), Vec3::Z);
+        assert!((under - Vec3::new(0.0, 0.0, 0.9 * 0.75)).length() < 1e-6, "{under}");
+        let close = out[0].diffuse_at(Vec3::new(0.0, 0.0, 2.93), Vec3::Z);
+        assert!((close.z - 0.9 * (0.99 + 0.99 * 0.99)).abs() < 1e-4, "near twice the colour: {close}");
         assert_eq!(out[0].diffuse_at(Vec3::ZERO, Vec3::NEG_Z), Vec3::ZERO, "turned away");
-        assert_eq!(out[0].diffuse_at(Vec3::new(7.0, 0.0, 3.0), Vec3::NEG_X).z, 0.9 / 8.0, "at its range");
-        assert_eq!(out[0].diffuse_at(Vec3::new(7.01, 0.0, 3.0), Vec3::NEG_X), Vec3::ZERO, "past it");
-        let near = out[1].diffuse_at(Vec3::new(0.0, 0.0, 2.5), Vec3::Z);
-        assert!((near.x - 6.0).abs() < 1e-5, "1 / d passes 1 inside a unit: {near}");
+        assert_eq!(out[0].diffuse_at(Vec3::new(7.0, 0.0, 3.0), Vec3::NEG_X), Vec3::ZERO, "at its range");
+        assert_eq!(out[0].diffuse_at(Vec3::new(7.5, 0.0, 3.0), Vec3::NEG_X), Vec3::ZERO, "past it");
+        // The flash, 15 from a face square to it: half of its range of 30 left.
+        let lit = out[1].diffuse_at(Vec3::new(0.0, 0.0, -12.0), Vec3::Z);
+        assert!((lit.x - 1.5).abs() < 1e-5, "{lit}");
     }
 
     /// A building's light glows (`glow_y` and its kin) grow 0.2 → 9 over their window, and a

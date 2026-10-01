@@ -832,3 +832,46 @@ fn c03_m02s_blast_lights_the_ground_and_the_lamps_do_not() {
         }));
     }
 }
+
+/// C03 M02's two mines (docs/11, "What a light does to a surface"): `mineglow` hangs a blue light,
+/// (0, 0, 0.9) with the terms (0, 1, 1), on each drill. It is a kind 7, flagged `0x20000000`,
+/// which the landscape's emulation passes over and the shade's vertex lighter does not ask, so it
+/// lights every vertex in its range -- the mine's own pillars and the underside of its platform,
+/// purple over the red scene colour, as Part 6 of the let's play shows them (0:52-0:56). Its
+/// range is the block's 7 times the length of the drill's frame, and the buildings' lamps, kind
+/// 6, light their owner alone.
+#[test]
+#[ignore = "needs the game install"]
+fn c03_m02s_mine_glow_lights_the_vertices_about_it_and_a_lamp_its_owner() {
+    use glam::Vec3;
+    use parkan_sim::effects::{LIGHT_NOT_EMULATED, LIGHT_OWNER_ONLY};
+    use parkan_world::play::Lit;
+
+    let mut play = campaign_play(gamedir::C03_MISSION_02);
+    play_for(&mut play, 2.0, |_| {});
+    let lights = play.vertex_lights();
+    let glows: Vec<_> = lights
+        .iter()
+        .filter(|v| v.light.flags == LIGHT_NOT_EMULATED && v.light.colour == Vec3::new(0.0, 0.0, 0.9))
+        .collect();
+    assert_eq!(glows.len(), 2, "a glow on each of the two mines");
+    for glow in &glows {
+        assert_eq!(glow.lit, Lit::Everything, "a kind 7 is not its owner's alone");
+        assert_eq!(glow.light.attenuation, [0.0, 1.0, 1.0]);
+        assert!(glow.light.range > 70.0, "7 along a drill tens of units long: {}", glow.light.range);
+        // A pillar's face 3 units off and square to it takes nearly twice the colour: blue past
+        // 1, which the lit colour holds, and no red or green.
+        let lit = glow.light.diffuse_at(glow.light.position + Vec3::X * 3.0, Vec3::NEG_X);
+        assert!(lit.z > 1.5 && lit.x == 0.0 && lit.y == 0.0, "{lit}");
+        // A face turned away from it, and one past its range, take nothing.
+        assert_eq!(glow.light.diffuse_at(glow.light.position + Vec3::X * 3.0, Vec3::X), Vec3::ZERO);
+        let far = glow.light.position + Vec3::X * (glow.light.range + 1.0);
+        assert_eq!(glow.light.diffuse_at(far, Vec3::NEG_X), Vec3::ZERO);
+    }
+    let lamps: Vec<_> =
+        lights.iter().filter(|v| v.light.flags == LIGHT_OWNER_ONLY | LIGHT_NOT_EMULATED).collect();
+    assert!(lamps.len() > 50, "the buildings' lamps: {}", lamps.len());
+    assert!(lamps.iter().all(|v| v.lit != Lit::Everything), "each lights what it hangs on and no more");
+    assert!(lamps.iter().filter(|v| matches!(v.lit, Lit::Target(_))).count() > 50, "a building, mostly");
+    assert!(lamps.iter().any(|v| v.lit == Lit::Hero), "and the hero's helm light the hero");
+}

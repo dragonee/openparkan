@@ -1,5 +1,14 @@
 // The ground: two material layers mixed by the layer-1 weight, lit.
 
+// A point light as the shade's lighter takes it (Terrain.dll:0x1004eacc-0x1004ecc9): where it
+// stands and its range; its colour, display space, and the owner it lights alone; its
+// constant, linear and quadratic attenuation.
+struct PointLight {
+    position: vec4<f32>,
+    colour: vec4<f32>,
+    attenuation: vec4<f32>,
+};
+
 struct Frame {
     view_proj: mat4x4<f32>,
     // The sun object's two directional lights: the direction each travels, and its
@@ -16,7 +25,43 @@ struct Frame {
     // nothing below draws at where w is 1, a reflection's clip plane.
     fog: vec4<f32>,
     eye: vec4<f32>,
+    paint: vec4<f32>,
+    // x: how many of the point lights light every surface in their range, which come first;
+    // y: how many there are.
+    point_counts: vec4<f32>,
+    points: array<PointLight, 64>,
 };
+
+// What the frame's point lights give a landscape vertex: the landscape's draw item carries the
+// cell's light list as a mesh's does (Terrain.dll:0x1004482a), less the owner-only lights
+// (0x10047c96), and the shade's lighter lights its vertices with it -- the colour times the
+// cosine at the vertex times a0 + a1 x + a2 x^2, x the share of the range left, nothing past
+// the range (Ngi32.dll:0x100164f0).
+fn point_lights(world: vec3<f32>, normal: vec3<f32>) -> vec3<f32> {
+    var sum = vec3<f32>(0.0);
+    if dot(normal, normal) <= 0.0 {
+        return sum;
+    }
+    let n = normalize(normal);
+    let everyones = i32(frame.point_counts.x);
+    for (var i = 0; i < everyones; i++) {
+        let light = frame.points[i];
+        let to = light.position.xyz - world;
+        let d = length(to);
+        if d > light.position.w || d <= 0.0 {
+            continue;
+        }
+        let facing = dot(n, to / d);
+        if facing <= 0.0 {
+            continue;
+        }
+        // The share of the range left, and the three terms on it.
+        let x = (light.position.w - d) / light.position.w;
+        let fall = light.attenuation.x + (light.attenuation.y + light.attenuation.z * x) * x;
+        sum += light.colour.rgb * (facing * fall);
+    }
+    return sum;
+}
 
 // A display-space colour as the linear value an sRGB target needs (frame.rs `linear`).
 fn linear(c: vec3<f32>) -> vec3<f32> {
@@ -83,6 +128,8 @@ struct VertexOut {
     @location(1) uv1: vec2<f32>,
     @location(2) uv2: vec2<f32>,
     @location(3) blend: f32,
+    // What the point lights give the vertex.
+    @location(5) points: vec3<f32>,
 };
 
 @vertex
@@ -94,17 +141,18 @@ fn vs_main(v: VertexIn) -> VertexOut {
     out.uv1 = v.uv1;
     out.uv2 = v.uv2;
     out.blend = v.blend;
+    out.points = point_lights(v.position, v.normal);
     return out;
 }
 
-// The lit colour a face's lights give it, held to 1 as Direct3D's fixed-function lighting
-// holds it.
-fn lit_at(normal: vec3<f32>) -> vec3<f32> {
+// The lit colour a face's lights give it, the sun's two and the point lights its vertices
+// took, held to 1 as Direct3D's fixed-function lighting holds it.
+fn lit_at(normal: vec3<f32>, points: vec3<f32>) -> vec3<f32> {
     let n = normalize(normal);
     let a = max(dot(n, -frame.light_direction.xyz), 0.0);
     let b = max(dot(n, -frame.second_direction.xyz), 0.0);
-    let lights = frame.light_colour.rgb * a + frame.second_colour.rgb * b;
-    return min(vec3<f32>(1.0), frame.scene_colour.rgb + lights);
+    let lights = frame.light_colour.rgb * a + frame.second_colour.rgb * b + points;
+    return clamp(frame.scene_colour.rgb + lights, vec3<f32>(0.0), vec3<f32>(1.0));
 }
 
 @fragment
@@ -117,7 +165,7 @@ fn fs_main(v: VertexOut) -> @location(0) vec4<f32> {
     if layers.tint2.w > 0.5 {
         colour = mix(under, colour, v.blend);
     }
-    return vec4<f32>(fogged(colour * linear(lit_at(v.normal)), v.world, vec4<f32>(0.0)), 1.0);
+    return vec4<f32>(fogged(colour * linear(lit_at(v.normal, v.points)), v.world, vec4<f32>(0.0)), 1.0);
 }
 
 // The water under `REFLECTION_SHIFTED` (`Terrain.dll:0x1002ca80`, render phase 10): the
@@ -156,6 +204,6 @@ fn fs_water(v: VertexOut) -> @location(0) vec4<f32> {
     let over = vec2<f32>(1.0 - (v.world.y - water.box_.y) / size.y, 1.0 - (v.world.x - water.box_.x) / size.x);
     let bumped = over + water.bump.z * bump_at(water.bump.y * over + vec2<f32>(water.bump.x));
     let seen = textureSample(reflection, reflection_sampler, bumped).rgb;
-    let colour = seen * layers.tint1.rgb * linear(lit_at(v.normal));
+    let colour = seen * layers.tint1.rgb * linear(lit_at(v.normal, v.points));
     return vec4<f32>(fogged(colour, v.world, vec4<f32>(0.0)), 1.0);
 }

@@ -319,7 +319,12 @@ that builds what the warbot designer draws, and a warbot the hero boards.
   `shade.wea` template, `LIGHT1`, a square about the light's foot clipped to each face in
   range, added in the light's colour over its length before the effects' sprites, its corners
   drawn toward the eye. An explosion's light grows with the explosion; the buildings' lamps
-  light nothing, as their flag says.
+  draw no such disc, as their flag says.
+- Every effect's point light lights the vertices in its range, objects' and the landscape's,
+  as the shade's own lighter does: its colour times the cosine at the vertex times its three
+  terms on the share of its range left, added to the sun's two before the material's diffuse.
+  A lamp lights the building it hangs on and nothing else; `mineglow` stands C03 M02's mine
+  violet about its drill. A light with a jitter flickers ten times a second.
 - The factory screen, laid out as docs/36 reads it, replaces the HUD in view
   mode 5: the Ore and Energy rows, the header and exit, the project box with its
   icons, free minds and turning preview, and the production row. Build and
@@ -1442,7 +1447,8 @@ a row here. A row leaves this table when research closes it.
 | M4 | How an effect sprite fogs: the game puts a factor linear in the *squared* distance in its specular alpha (`Terrain.dll:0x1004bf20`) | the renderer's own fog, linear in the distance itself, as every other pipeline takes it | [11](../docs/11-effects.md#how-an-effect-sprite-is-coloured--read-and-measured) |
 | M4 | The owner values of time modes 9–14, now that each is read: the spin over the top spin, and one minus the owner's life fraction (property `0x31`) | nothing sets either, so a mode-9-to-12 effect holds *t* at 0 and a mode-14 one reads its owner as undamaged; of the 923 only the 8 burning trees and wrecks are mode 14, and none is 9–13. A tree's load group makes its fire switched off (header flag `0x40`) for block entry 6, a machine's critical damage, to switch on, and entries 6 and 7 are not run (docs/13, "Critical damage"): nothing burns, and a shot tree never catches fire | [11](../docs/11-effects.md#how-an-effect-runs--read) |
 | M4 | How a sprite whose material says opaque blends | alpha-blended, so its fade shows | [07](../docs/07-objects.md#how-a-material-draws-is-in-the-archive-directory) |
-| M4 | What writes a mesh batch word's `0x800`, the gate an object takes the effects' lights under | no object takes a light, since no shipped batch carries `0x800`; the landscape takes every point light the shade emulates | [11](../docs/11-effects.md#what-a-light-does-to-a-surface--read-and-measured) |
+| M4 | Which lights an item is lit with: the game gathers a list for each object and each landscape cell, every light whose reach meets it, and its lighter walks all of it | one list a frame, the 64 lights whose reach comes nearest the eye, those that light everything first; each lights whatever stands inside its range. A unit's parts are agents with a light manager each and a round is one: an owner-only light on a unit's gun lights the whole unit, and one on a round nothing | [11](../docs/11-effects.md#what-a-light-does-to-a-surface--read-and-measured) |
+| M4 | A lit colour past 1: the lighter knees each channel (c ÷ 6 + 5 ÷ 6, 2 from 7 on), moves what is over 1 into the specular colour, which the device adds after the texture, and lights per vertex | held at 1, so a strong light stops at the texture's own colour where the game whitens it; the sun's two lights are taken per fragment and the point lights per vertex | [11](../docs/11-effects.md#what-a-light-does-to-a-surface--read-and-measured) |
 | M4 | Which streams a light's jitter draws from: the game takes the alpha, blue, green and range from the light emitters' module-wide state and the red from the bursts' | all five from a state the instance keeps for its lights, in the game's order, redrawn every 100 ms | [11](../docs/11-effects.md#a-lights-jitter-is-five-draws-an-update--read-and-measured) |
 | M4 | When a stream emits its first particle | on its first update inside its window | [11](../docs/11-effects.md#bolts-streams-and-fades--read-and-measured) |
 | M4 | What slows an ambient stream: the read clock, emission and ageing give C03 M01's volcano smoke about twice the speed and flicker rate Part 5 of the let's play shows | the streams of every load group's effects (buildings, trees, stones) and of a lode's plume run at half pace; the construction sphere's and every gun's and round's run as read | [11](../docs/11-effects.md#bolts-streams-and-fades--read-and-measured) |

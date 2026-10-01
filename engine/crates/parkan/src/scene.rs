@@ -180,6 +180,8 @@ pub fn lighting(
         eye,
         field,
         clock_ms: seconds * 1000.0,
+        // The effects' point lights follow, once the battle is synced ([`sync`]).
+        points: Default::default(),
     };
     let colours = sky
         .dome_colours(fog)
@@ -662,8 +664,35 @@ pub fn sprite_looks(play: &Play) -> Vec<parkan_render::sprites::SpriteLook> {
         .collect()
 }
 
+/// The owner an instance carries for the point lights that light their owner alone
+/// (`Terrain.dll:0x10047a52`): the hero's, and a battle target's.
+const HERO_OWNER: u32 = 1;
+fn target_owner(target: usize) -> u32 {
+    target as u32 + 2
+}
+
+/// This frame's point lights for the renderer: the effects', each with the owner it lights
+/// alone or 0 (docs/11, "What a light does to a surface").
+fn point_lights(play: &Play) -> Vec<parkan_render::frame::PointLight> {
+    use parkan_world::play::Lit;
+    play.vertex_lights()
+        .into_iter()
+        .map(|d| parkan_render::frame::PointLight {
+            position: d.light.position,
+            range: d.light.range,
+            colour: d.light.colour.to_array(),
+            attenuation: d.light.attenuation,
+            owner: match d.lit {
+                Lit::Everything => 0,
+                Lit::Hero => HERO_OWNER,
+                Lit::Target(t) => target_owner(t),
+            },
+        })
+        .collect()
+}
+
 /// Bring the drawing up to date with the battle: hide what died, place the rounds, and
-/// hand over this frame's effect sprites as seen from `eye`.
+/// hand over this frame's effect sprites and point lights as seen from `eye`.
 pub fn sync(
     renderer: &mut parkan_render::Renderer,
     device: &wgpu::Device,
@@ -733,6 +762,15 @@ pub fn sync(
         }
     }
     renderer.set_sprites(device, queue, view_proj, &quads);
+    // The same lights as the shade's lighter takes them, and whose each whole placed object is.
+    renderer.set_point_lights(&point_lights(play), eye);
+    let target_of: std::collections::HashMap<usize, usize> =
+        play.battle.objects.iter().enumerate().map(|(t, &object)| (object, t)).collect();
+    for (i, object) in objects.placed.iter().enumerate() {
+        if let Some(&t) = target_of.get(object) {
+            renderer.set_instance_owner(queue, i, target_owner(t));
+        }
+    }
     // A dead unit is deleted its controller's +92 ms after it dies (docs/26); a building is
     // never killed. An object drawn node by node has hidden its nodes before.
     for object in std::mem::take(&mut play.killed) {
@@ -966,6 +1004,7 @@ pub fn place_own_view(
             Mount::Turret => hero.turret_node(&mount, node),
         };
         renderer.set_instance(queue, instance, unit * models::pose_matrix(&pose), first_person);
+        renderer.set_instance_owner(queue, instance, HERO_OWNER);
     }
     // From the outer camera a boarded bot is drawn whole, as any other unit.
     let driven = driven.filter(|_| !play.outer_shows());
@@ -975,6 +1014,7 @@ pub fn place_own_view(
         let placed = robot.map(|r| models::pose_matrix(&r.placement().compose(&r.part_pose(p, node))));
         renderer.set_model_phase(instance, robot.and_then(|r| r.material_phase(p, node)));
         renderer.set_instance(queue, instance, placed.unwrap_or(Mat4::IDENTITY), placed.is_some());
+        renderer.set_instance_owner(queue, instance, target_owner(t));
     }
     for &(instance, part, node, variant) in &view.outside {
         let index = match part {
@@ -992,6 +1032,7 @@ pub fn place_own_view(
             Mount::Turret => hero.turret_node(&mount, node),
         };
         renderer.set_instance(queue, instance, unit * models::pose_matrix(&pose), true);
+        renderer.set_instance_owner(queue, instance, HERO_OWNER);
     }
     for &(instance, t, p, node, variant) in &view.targets {
         let Some(part) = play.battle.combat.targets.get(t).and_then(|target| target.parts.get(p)) else {
@@ -1008,6 +1049,7 @@ pub fn place_own_view(
         // its device plays the material (docs/28, "The belt is a material a channel plays").
         renderer.set_model_phase(instance, robot_of(t).and_then(|r| r.material_phase(p, node)));
         renderer.set_instance(queue, instance, matrix, visible);
+        renderer.set_instance_owner(queue, instance, target_owner(t));
     }
 }
 

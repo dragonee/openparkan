@@ -133,9 +133,18 @@ impl Fx {
 
     /// The point lights every instance drives at `now_ms`.
     pub fn lights(&self, now_ms: f64) -> Vec<PointLight> {
+        self.owned_lights(now_ms).into_iter().map(|(_, light)| light).collect()
+    }
+
+    /// [`Self::lights`], each with what its instance hangs on: the agent whose light manager
+    /// holds it, which an owner-only light lights alone.
+    pub fn owned_lights(&self, now_ms: f64) -> Vec<(Owner, PointLight)> {
         let mut out = Vec::new();
-        for (_, instance) in &self.instances {
-            instance.lights(now_ms, &mut out);
+        let mut buffer = Vec::new();
+        for (owner, instance) in &self.instances {
+            buffer.clear();
+            instance.lights(now_ms, &mut buffer);
+            out.extend(buffer.drain(..).map(|light| (*owner, light)));
         }
         out
     }
