@@ -668,6 +668,80 @@ tests, 1015 of 1015 checks, 509 engine tests and 201 install tests, `ruff` clean
   worked out from the state's end pose as well as read from the file, so it reaches 2229 of the 2634
   contacts and every walker's feet, not twelve belts (see *Contact record flag `0x20`* below).
   Implemented ([28-chassis](docs/28-chassis.md), [24-motion](docs/24-motion.md)).
+- [x] ~~Who sets an object's material track (`ILifeSystem` slot 16), and who calls IAnimation slot 27~~ —
+  closed 2026-10-01, **read**, and **seen** for a building, a unit and a captured unit. The published
+  "no caller of slot 16" was false.
+  - **Three callers, all in `iron3d.dll`**, each on the `ILifeSystem` a record keeps at `+0x48`. The
+    building record's step (`0x10033020`, at `0x10033072`) and the unit record's takt (`0x10075680`,
+    at `0x10075727`) write the clan record's `+0x14`, its **sign**, of the clan the record holds at
+    `+0x24`, **every game frame**; the unit record's bind (`0x10074d30`, at `0x10074da0`) writes that
+    clan's index, which the takt replaces a frame later. A single-player game sets clan *i*'s sign to
+    *i* (`0x100a2420`); a network game takes it from the session table (`0x100a23e1`).
+  - **A capture changes it**: it rewrites the record's clan (`0x10033012` for a building; the unit
+    record's slot 2, `0x100355a0`, which Enter calls at `0x10072035`), and the next frame writes the
+    new sign.
+  - **The draw** reads it at one place, the mesh draw's slot 15 call (`AniMesh.dll:0x10014dee`), and
+    both manager fetches turn a track past the material's count into 0 (`World3D.dll:0x1000322f`,
+    `0x10003709`), so only the two eight-track materials change with the clan.
+  - **Slot 27** (`AniMesh.dll:0x10005970`) is camouflage: the ground contact calls it with the face
+    under the machine while its detection shield's state `0x600` reads `0x1000`
+    (`Control.dll:0x1001a95d`), and with an empty reference otherwise.
+  - **How it was missed, and the control.** The pointer comes from `QueryInterface`, which a search
+    from a stored global cannot follow. `analysis/slotcalls.py` searches from the request: 116
+    `call [reg+0x40]` in the install, 10 on a pointer that may be interface `0x16`, 3 of them the
+    writers. The control is slot 10, where the same search finds `MBehaviour::Capture`'s three calls
+    and the bind's among 223.
+  - *Measured*: 905 materials, 860 of one track, 43 of two, 2 of eight (`B_LBL_01`, `R_LBL_01`, both
+    on `PG27.0`, tracks 0–7 naming cells 0, 6, 5, 4, 3, 2, 1, 7). 157 of 15153 batches draw a
+    multi-track material. Placed in the 29 missions: 133 of 167 buildings and 209 of 254 robots wear
+    one, 0 of 42 heroes.
+  - *Seen*: Enemy 1's Medium Mine wears cell 6 and the player's Small Bunker cell 0 ("Let's Play -
+    Parkan: Iron Strategy, Part 6.5", 37.4 s, 2:15); the vacant LWW-2, of the neutral clan 3, wears
+    cell 4 (3:37) and the arrow once captured (Part 6, 7:30). Campaign 02's Outpost emblem (Part 3,
+    1:22) is cell 6 in the emblem's own diamond quad, the enemy's sign.
+  - The engine drew a building on its owner's track, a unit on track 0, and changed nothing on a
+    capture: units now wear their clan's sign and a capture re-looks the target
+    ([07-objects](docs/07-objects.md#who-picks-an-object-meshs-material-track--read),
+    [27-ownership](docs/27-ownership.md)). Remainders, queued: a captured building's emblem is unseen,
+    a network game's signs, and what camouflage wears.
+- [x] ~~How the weather is drawn~~ — closed 2026-10-01, **read**, and **seen** for the dust and the
+  lightning; the rain stands on the read alone.
+  - **Rain and snow** are `CRain` (`Terrain.dll:0x10075d00`) and `CSnow` (`0x10075560`), each owning
+    one particle system (`0x10072b40`): **up to 1000 points** kept in the camera's box, from 2 to 50
+    ahead and as wide and high as the view is at 50 (`0x100759dc`), the count 1000 × intensity ×
+    min(1, V ÷ V₀). Each draw moves them by the velocity — **(0.5, 0, −4) a second for snow** plus a
+    flutter of 0 to 1 on every axis, **(0.5, 0, −60) for rain** — wraps what left the box in at the far
+    side (`0x10073410`) and spawns or drops to the count.
+  - **The draw** is pre-transformed quads, 600 at most, depth test and write off, group 1 layer 8, in
+    the `0x1000` pass after the world: a snowflake a square or a diamond 0.0195 × viewport width ÷
+    field of view, shrinking with depth to a tenth; a raindrop 0.0065 wide, stretched from where it
+    stood a frame before. Its colour is the keyframe's slot 19 with each channel held at `0x50` and
+    alpha `0x96` (`0x1006ce63`, `0x1006d120`), unfogged; its material the start's `sky.wea` slot.
+  - **The one gate is the camera's `ICamera2` mode, which must be 0.** Neither draw asks the
+    landscape or a building anything, so it falls in the briefing, in command mode, through the
+    cockpit and indoors — which is the "black field with stars" a doorway shows (Part 6, 28:15): the
+    dust over the portal's fade quad, layer 5.
+  - **Lightning** draws nothing itself (`CLightning`, `0x10071990`; its slot 4 is empty). Six seconds
+    after a strike it draws the next one's time, rand ÷ 32767 × (1 − intensity) × 60000 ms on with the
+    intensity held at 0.95 (`0x10071920`), then plays `env_lightning` at a point drawn anywhere over
+    the landscape's box, 300 above the ground, sized (40, 40, 600), mirrored one time in two
+    (`0x10071d70`). A bolt strikes the ground and does no damage. `env_lightning` is three blocks over
+    0.75 s: a mode-1 sprite along (0, 0, 1), a kind-7 point light (7, 7, 10) of range 100 × the
+    frame's 40, and `atm_light1.wav`. The flash is that light on the vertices, through the shade's own
+    lighter; neither the sky nor the scene colour flashes.
+  - *Measured* over the 29 atmosphere files: the snow slot is `SNOWFLAKE` on 23 and `DUST_ADD` on 6,
+    and all 6 `DUST_ADD` files snow the whole day; the rain slot is `RAIN_DROP` on all 29, of which 8
+    rain; 15 of 29 start some weather.
+  - *Seen*: C03 M02's dust matches the engine's in count, size, shape and colour (about 35 against
+    about 40 in a 500 × 320 patch of sky; Part 5 1:55, Part 6 2:00); the ground lights at 9:09.7,
+    9:17.5, 9:25.6, 9:32.1, 9:46.9 and 9:54.9 of Part 6.5, gaps of 6.1 to 8.1 s against the read's 6
+    to 9, each flash bright for about 0.4 s.
+  - **This corrects [10-sky](docs/10-sky.md)'s own inference**: the world's view is not mode 1. The
+    scene camera is mode 0, and the weather returns at any other mode yet is seen everywhere, so the
+    sky's screen-wide quad is drawn there, first of all.
+  - The engine drew no weather and now draws all three as read
+    ([10-sky](docs/10-sky.md#the-weather)). The engine's flash stops at the texture's own colour
+    where the recording's goes on to a pale lilac-white, the stand-in of the lit colour held at 1.
 
 ## Effects and sound
 
@@ -805,6 +879,53 @@ tests, 1015 of 1015 checks, 509 engine tests and 201 install tests, `ruff` clean
   material byte`, and `+0x10` is written from an argument shifted 16 up (`0x1000a726`), which the
   manager splits back as `id >> 16` and `id & 0xffff`, so the base has a zero low word by construction
   and **the batch's material byte alone indexes the wear** ([11-effects](docs/11-effects.md)).
+- [x] ~~The colour and range jitter of an effect light (block `+96`, `+120`)~~ — raised and closed
+  2026-10-01, **read** and **measured**. `Effect.dll`'s light update (`0x1000f6e0`) returns at once
+  when the manager's record is off (`0x1000f75a`) and otherwise takes **five draws on every instance
+  update**: the colour's alpha, blue and green on the light emitters' own state (`0x1000f8c7`,
+  `0x1000f90a`, `0x1000f94d`), its red through the bursts' state (`0x1000f99f`), and the range's
+  (`0x1000fa8e`). Each is a uniform in ± half of its spread, taken whether the spread is 0 or not;
+  the update is the instance's, every 100 ms (`0x100081a7`), so a jittered light steps ten times a
+  second. The range's floor is 0.01 where it is not above 0, not "at least 0.01". Of the 618 light
+  blocks 107 carry a colour jitter and 58 a range jitter; the 22 point lights among them are the
+  construction sphere's three, four explosions and twelve `tree_*` fires and glows, and no gun's
+  flash. The engine left both out and now draws them in the game's order, held 100 ms
+  ([11-effects](docs/11-effects.md)).
+- [x] ~~Whether an object takes an effect's light, and what writes a batch word's `0x800`~~ — raised
+  and closed 2026-10-01: **nothing writes it, and objects are lit all the same**, on their vertices.
+  - **The negative, with its control.** The word the mesh draw tests for `0x800`
+    (`Terrain.dll:0x10045d47`) is loaded once (`0x1004502f`) from the record the mesh's slot 3
+    answers; the one implementation (`AniMesh.dll:0x100134d0`) stores the file's stream-13 dword and
+    ors in `0x20` alone. The stream is the archive's bytes in a view no call maps writable. Over the
+    15153 batches the word takes 14 values over nine bits: `0x800` on none, against 633 with 8, 2953
+    with `0x100` and 972 with `0x2000`. So no object takes the emulated **disc**.
+  - **The lighter.** Every draw item carries the shade's gathered list (`0x100457c5` for a mesh,
+    `0x1004482a` for a landscape cell), and `RenderVB` hands it to `CShade::ShadeIndexedStrided`
+    (`0x1004df70`): nothing past the range or on a vertex turned away, otherwise material diffuse ×
+    light colour × cos × (a₀ + a₁x + a₂x²), x = (range − d) ÷ range, the block's own three terms.
+    Neither gather asks `0x20000000`, which only keeps a light out of the disc.
+  - **Three statements of docs/11 are taken back**: kinds 6 and 7 do not "light nothing"; the
+    attenuation triple is not dead data; and a Direct3D light *is* built (`0x10030620`), but only
+    under `UseDXLighting`, which is 0 as compiled (`0x1005fcce`) — docs/11 had taken the descriptor's
+    type word, 2, for its default.
+  - *Seen*: C03 M02's Medium Mine is washed violet by `mineglow`'s blue light over the red scene
+    (Part 6, 0:52–0:56), and the engine now is. The engine lit no vertex by an effect's light; it now
+    carries the frame's 64 nearest and lights model and landscape vertices by the read falloff
+    ([11-effects](docs/11-effects.md#what-a-light-does-to-a-surface--read-and-measured)).
+- [x] ~~Which way a type-9 dome's pole points, and what a sprite's mode is~~ — closed 2026-10-01,
+  **read** and **measured**. A type-9 block is type 3 with one more step (`Effect.dll:0x100138c0`),
+  and `CShade::RenderEffect` (`Terrain.dll:0x100288b7`) draws it as a mesh built once: **a true half
+  sphere of radius 1, its pole at (0, 0, 1) of the sprite's own space**, 8 × 3, 16 × 6 or 24 × 9,
+  drawn from both sides. The sprite's own z is set by the **sprite mode, the block's `+4`**
+  (`Effect.dll:0x100103d2`): mode 0 faces the eye, mode 1 is a streak along the block's direction
+  channel, mode 2 is square to it (`0x1000d110`). Of 2013 sprite blocks 983 are mode 0, 251 mode 1
+  and 779 mode 2; of the 266 type-9 blocks 258 are mode 2, and **122 have a twin of the opposite
+  direction in the same effect**: balls. `f_gener_ball`'s two blocks differ in two bytes, the sign of
+  the direction's x. A block whose `+204` is set gives every facet the whole texture
+  (`Terrain.dll:0x10028bbe`), which is the construction sphere's cells. *Seen*: the generator's whole
+  gold ball (Part 6, 64:50) and the construction dome's opaque blue cells (33:32). The engine stood
+  both halves on one axis and wrapped one texture round a dome
+  ([11-effects](docs/11-effects.md)).
 
 ## Motion, ground and controls
 
@@ -1068,6 +1189,41 @@ tests, 1015 of 1015 checks, 509 engine tests and 201 install tests, `ruff` clean
   (state `+0x08`, triple 6), which only the drawn body takes, is still left out. What stops a small
   walker at the bunker is another question and stays queued in
   [OPEN-QUESTIONS](OPEN-QUESTIONS.md).
+- [x] ~~C02 M03's Small Bunker (`l_bunk1`) stops a small walker short of its pod~~ — closed
+  2026-10-01 by the sphere the pair pushes out, **read** and **measured**.
+  - **A collision object keeps two spheres.** Interface `0x18` slot 9's argument is a space, not a
+    choice of sphere (`AniMesh.dll:0x10014587`). A collision object of kind 4 or 3 keeps a second
+    sphere record (`Control.dll:0x1001f2ee`–`0x1001f332`), which message 1 fills (`0x1001fec0`): for
+    a unit its **node sphere**, interface `0x20` slot 3. The pass sweeps and orders pairs by the
+    first, the agent sphere, but the push-out's mover is the second (`0x1001dc9d`–`0x1001dcb0`), its
+    radius **held to 7.5 when the mover's Type carries `0x1000000`**, a robot
+    (`0x1001df7a`–`0x1001dfb2`).
+  - *Measured*: the node sphere is over 7.5 on 27 of the 143 placed robots, all held; against the
+    Large Factory's 22.1 × 15.4 m door the agent sphere is wider on 20 of the 37 placed
+    large-chassis models and the pair's on none.
+  - The engine pushed out the agent sphere. With the pair's, `21swlk1` takes the Small Bunker's pod in
+    61 s and `22swlk1` in 14 s, where neither did; a large walker made in C03 M02's Large Factory is
+    on the landscape 3.5 s after it is made, where it stood at the door all mission. The ground
+    contact's hold of r₂ under 20 to 7.5 is the same Type bit (`0x1001a540`), a stand-in closed with
+    it ([24-motion](docs/24-motion.md#collision-between-objects--read)).
+  - **Nothing excludes a pair** inside a building: no child relation, property or door is asked
+    before the push-out's face-by-face door test. Only the sphere differed.
+- [x] ~~What keeps a walker upright on a building's floor under a low ceiling~~ — **narrowed**
+  2026-10-01 by the same read: the ceiling presses C02 M03's `22mwlk1` 0.28 m, not 2.85. What is
+  left, where the frame is drawn in the takt, is queued.
+- [x] ~~What the eye the sprite draw is handed has been transformed by~~ — closed 2026-10-01,
+  **read**: `g_FastProc` slot `0x68` (`Ngi32.dll:0x100248f0`), the projection on each axis of the
+  matrix over that axis's squared length; the instance's scale is in the matrix
+  (`Effect.dll:0x10007c90`). The engine's assumed transform was the right one in kind and is now the
+  read's ([11-effects](docs/11-effects.md#a-sprite-is-drawn-through-its-frame--read)).
+- [x] ~~Which axis of a frame about one control point takes the point's direction~~ — raised and
+  closed 2026-10-01, **read** and **measured**. `Control.dll:0x10003ef0` writes the matrix's axes as
+  **the direction, its side, direction × side**, so the direction is the first axis. The side is the
+  level perpendicular (−y, x, 0); where x is exactly 0 it is the x axis, and where y is and x is not,
+  the y axis (`0x10003f65`–`0x10003fa8`), so a vertical direction never degenerates. 690 load-group
+  action-4 records on 101 objects name one point three times; the direction is a unit long on 689,
+  and the one other is `fr_l_gener`'s `Sign_Type1`, (0, 0, 8.98)
+  ([13-control](docs/13-control.md)).
 
 ## Turrets, weapons and camera
 
@@ -1231,6 +1387,34 @@ tests, 1015 of 1015 checks, 509 engine tests and 201 install tests, `ruff` clean
     centre, needed nothing.
   - The remainder, whether a blast spares the object that fired it, stays open
     ([31-packages](docs/31-packages.md), [29-weapons](docs/29-weapons.md)).
+- [x] ~~Whether a blast spares the object that fired it~~ — closed 2026-10-01, **read**.
+  - A hit carries its firer's object id at `+0x18`: the exploding object's property `0x7f`, or the
+    object's own id when that is 0 (`Control.dll:0x10011766`–`0x1001177b`); the gun sets the property
+    on the round it has just made (`0x1002a398`–`0x1002a3ed`).
+  - On the target, `ILifeSystem` slot 8 (`0x1000ebc0`) runs a blast in this order: message `0x19`
+    with the firer; a building's door; the shield step; nothing left; invulnerable; **the target's
+    object id against the hit's `+0x18`, end if equal** (`0x1000ed4e`–`0x1000ed59`); the nodes. A
+    direct hit on a node makes the same compare (`0x1000ee0c`).
+  - So it is **id against id, with no clan**: friendly fire is on. Every node of the firer is spared,
+    its shield still pays, and it is told of the hit. A dying object's own explosion names the object
+    itself. **A hit whose firer no longer answers its id is worth 0** (`0x10011783`–`0x100117b8`), so
+    a round in the air when its firer is deleted is a dud.
+  - *Measured*: 35 of the 66 readable rounds are blasts, 2 to 60 m; no minimum range exists in the
+    data; outside the rounds 1 node of 1,828 explodes as a blast, on a turret no shipped design
+    carries.
+  - The engine's blast reached its firer as it did any object: on C03 M02 the raider's winged SSM
+    bursting 25 m off killed it. It now leaves 7,643 of 7,643 points, and the same round fired by the
+    bunker onto the same spot leaves 0 ([26-damage](docs/26-damage.md)).
+- [x] ~~What killed the hero in C02 M04's valley Light Tower~~ — **narrowed** 2026-10-01: a blast is
+  stopped by nothing but distance. The hit queue (`Control.dll:0x10012ce0`) puts one sphere round the
+  tick's blasts and asks `CWorld` slot 3 (`Terrain.dll:0x10025f40`) with class mask `0x61c`; the
+  collector walks the object tree and takes an object on its class bit and its sphere alone, and
+  asks every object, taken or not, for its children near the sphere. **No line or occlusion test
+  exists**: none of the queue walk, slot 8, the shield step or the falloff calls the world's segment
+  query. The control is the same enumeration over all of `Control.dll`, which finds slot 7 once, at
+  the gun's sight ray. So a hero in a pod room is reached through the building's own children. The
+  tower's own death is ruled out as the killer, every node of a building naming a kind-1 explosion.
+  Which gun's blast it was stays queued ([26-damage](docs/26-damage.md#what-a-blast-reaches)).
 
 ## Damage, sensors and ownership
 
@@ -1558,6 +1742,38 @@ tests, 1015 of 1015 checks, 509 engine tests and 201 install tests, `ruff` clean
   02's line fells the stone on the site (radius 277, 20 off) and one tree (radius 88, 140 off), and
   none of the other 15 pieces of scenery
   ([15-behaviour](docs/15-behaviour.md#what-the-consoles-create-bcreate-and-death-do--read-and-measured)).
+- [x] ~~What the AI's design pick takes as its candidates, and how it ranks them~~ — raised and
+  closed 2026-10-01 from the names two recordings give the enemy's builds, **read** and **measured**.
+  - *Seen*: on C03 M02's easy level every enemy build the target panel names is wheeled or tracked
+    ("Let's Play - Parkan: Iron Strategy", Part 6.5: MTW-3, SWW-5, LWW-8, LWW-9, MTW-10, SWW-10,
+    SWW-19, MWW-21; Part 6: MTW-3 to -5, LTW-6, some two dozen SWW). The engine built small flyers and
+    walkers.
+  - **The byte at a design record's `+0x104` is the clan's research.** The fill never writes it;
+    `ai.dll:0x10010f90` does, walking each unmarked scheme's nodes against the clan's own tree and
+    setting the byte when every part is researched and in the tree. It runs when the tree is handed
+    over, when function 43 loads the store, and each time function 41 orders a research; not at the
+    pick.
+  - **`SELECT_SMALLEST` is not the last of the ranking**: the loop at `0x10010b73` takes the
+    best-ranked design of size class 2 or less.
+  - **The two floats.** Property 54 is the nodes' life ÷ the armour's linear factor, plus the
+    deflector's values × the shield's (`Control.dll:0x100138b0`); the gun total is each gun's round
+    damage ÷ magazine × rounds left (`Behavior.dll:0x1001ccb0`), a damage and not a rate. Both match
+    the 77 records the game itself writes to `preload.lda`, 70 of 70 robots to 1e-7 and 77 of 77.
+    docs/15's "the divide never happens" was wrong.
+  - *Measured* over the nine by-name scripts' 11 clans and 59 warrior designs: a clan may build 7
+    (`data`, `scream`), 11 (`c2m3e`), 27 (`c1m4e`, `c3m1e`), 28 (`c2m1e`), 43 (`c4m2e2`) or 44
+    (`c3m2e`, `c3m2e2`). On C03 M02 Enemy 2's pick is `23_swhl1.dat`, a Small Wheel, and Enemy 1's
+    seven on easy are four large tracked, two large wheeled and one medium tracked: no walker and no
+    flyer. The control: unflagged, every clan's best would be `lwing1`.
+  - **What the factory refuses** (`M_Task_Construct`'s start, `Behavior.dll:0x10029ba0`): no free
+    mind; a scheme that will not open; a chassis larger than the factory or of no known size; and,
+    for a paid bot only, a part not researched in the clan's tree. Never ore or power. No shipped clan
+    is starved by a refusal.
+  - The engine was wrong on all three — the candidates, `SELECT_SMALLEST` and the scores — and now
+    builds SWW-5, SWW-6 and LTW-3, LTW-4, LWW-5, LWW-6
+    ([15-behaviour](docs/15-behaviour.md), [36-factory](docs/36-factory.md),
+    [16-research](docs/16-research.md)). Queued: why Enemy 1's first builds are medium tracked three
+    times running, and function 41 in the engine.
 
 ## Mission progression
 
@@ -1901,6 +2117,43 @@ Added on 2026-09-15 against `950af7e`, after M12 made the mission winnable end t
 - [x] ~~[M12] Which robots answer query 2 (slot 4, `edx` 2, the one that names a *Tiny Tower*) with 0 or less: a walking warrior that does gets the towers' building cell for its first panel icon and a blank second (`0x10077342`–`0x100773d1`), and the engine draws the towers' cell alone ([41-commander](docs/41-commander.md#the-box)).~~ — closed 2026-09-29: the record's `+0x64` is the unit's `IDeviceManager`, and query 2 its id 2, **the batteries' capacity** (`Control.dll:0x1002b4e9`): over the class-`0x13` components it answers the first capacity below 0 at once (`0x1002b519`), else the sum when that is above 0, else nothing. **17 of the 374 robot designs** under `UNITS` are *Tiny Tower*s, every one a walking warrior on the *Small Tower* chassis `R_B_06`, whose own unslotted battery is −1; the control: 355 answer above 0, and the 2 target dummies, with no battery, answer nothing — the recording names one *SSW-1 Warrior*. 28 of the 267 placed robots are, in 7 missions. A building row's icon stands in the same 19-wide piece (`0x10096339`), its buttons from x 85, not 86. Along the way: every unit the game names raises its clan's count — the hero, animals and *Tiny Tower*s too (`0x10075eb2`) — and the engine skipped the hero, naming Mission 03's builder SWB-1 where the recording shows SWB-2. The engine was wrong on the icons, the piece and the count; all fixed, units counting in the clan they were placed in ([41-commander](docs/41-commander.md#the-box)). A *Tiny Tower*'s −1 battery is a line [below](#mission-03-the-field-base).
 - [x] ~~What the seven other `AniMesh.dll` routines that test node flag 1 leave a hidden building out of, and so whether a building going up still stops a ray or is struck; the engine keeps it out of everything until code 0 ([32-builder](docs/32-builder.md#not-established)).~~ — closed 2026-09-29: the sweep finds 9 sites (the draw's two the control), and of the seven others six read node records — the subtree draw (`0x100101d0`), the segment query's node visitor (`0x10010dc0`, `IJointMesh` slot 10 under `IMesh2` slot 6), a point-inside test (`0x100106d0`), the two walk-face queries (`0x1000ce90`, `0x10015b60`) and the push-out (`0x1000dfe0`) — each passing a hidden node over; the seventh (`0x1001db51`) is a C runtime routine's argument. The sphere (`IMesh2` slot 9) reads no node. So **a building going up stops no cursor ray, sight ray or round, is not stood on and pushes no walker**, but the object pick still takes it by its sphere, answering kind 2, and its own kill never does (mask `0x414` has no class 3). Behavior's hall-way searches pass it over by the same flag: the refit's dock pick, a factory's creation vertex, the transport's mine and storage. **The engine was already right** — the queue's "out of everything" was loose, its pick answering kind 2 — and a test pins it ([26-damage](docs/26-damage.md#what-a-hidden-node-is-left-out-of--read)). Two remainders are a line [below](#mission-03-the-field-base).
 - [x] ~~The Guard row's place is the first point on the pending unit's list, and nothing empties the list as the pick opens, so a unit still holding another pick's points would patrol about the first of them (*derived*). The engine keeps points only on the pending pick, as for Route ([42-selection](docs/42-selection.md#the-guard-rows-pick--read)).~~ — closed 2026-09-29, **the tenth round's derivation overturned**: every order row with a target passes through the executor's tail `0x1007bab8`, which **empties the list** (`0x1007bac4`–`0x1007bad0`) before it sets the pending byte (`0x1007bad5`). The list is an (x, y) vector at `+0xc0`–`+0xc8`, appended by kind 8, kind 12 and Route's first stage, and erased by that tail, the Go (`0x100792f6`), the upgrade (`0x10079106`) and the pending routines after their orders, so the Guard's place is always the one clicked, as the engine had it. One edge the engine had wrong: a band started on a building leaves the Guard pick open with no pick mode and can leave the pending unit out of the selection, and the game then drops the pick with no order (`0x1007a17a`) where the engine ordered it; fixed and pinned ([42-selection](docs/42-selection.md#the-guard-rows-pick--read)).
+
+**Left by the eleventh round**, closed 2026-10-01
+
+- [x] ~~What the quick save and the quick load do~~ — closed 2026-10-01, **read**, **measured** and
+  **seen**.
+  - `CMD_QUICK_SAVE` and `CMD_QUICK_LOAD` are 753 and 754, the last two rows of `iron3d.dll`'s
+    command table (`0x100726f8`). **The quick save** (`0x100a5030`) takes the save index's slot 6,
+    the seventh, which the save page does not list: it names it string 6245, *"Quick Save"*, clears
+    its empty flag, hands its filename to the one save writer (`0x100a1590`), and posts string 6246,
+    *"Game saved..."*, from the system. It is refused in the training campaign, a network game and
+    unless the state word is 4; a briefing passes no key that far.
+  - **The quick load** (`0x100a51e0`) asks whether slot 6's file exists; if not, nothing happens; if
+    so the game **exits with code 4**, which nothing else hands the exit, and `iron_3d.exe` runs the
+    same game object again with no shell between. It does not ask the state word, so it works on the
+    outcome's panel.
+  - **The failed panel's L** opens the shell's load-game screen, which lists all seven slots; it
+    loads nothing itself.
+  - *Measured*: `saveslots.cfg` holds seven slots; six are filled with files on disk, and the seventh
+    reads `empty` with no `slot7.sav`, so the quick slot was never written on this install.
+  - *Seen*: Part 6's load after the loss at 13:55.8 is ten frames of *"Exiting..."* and the loading
+    screen, no shell — F8, where the first pass had it as L. Part 6 26:14.5 and Part 6.5 13:39.0 are
+    quick loads too, and Part 6.5 has two more, at 7:22.85 and 7:50.07.
+  - **A save does not pause**, and **the clan's takt is on the wall clock** (`ai.dll:0x100017ae`,
+    `timeGetTime`); a load restores the clan's seconds clock. The 50 s by which Part 6.5's first raid
+    warning trails Part 6's are the two loads, 52 s of play discarded.
+  - The engine bound neither key. It now keeps the play itself on F7 and puts it back on F8, a
+    stand-in in two rows ([14-controls](docs/14-controls.md#quick-save-and-quick-load--read-and-seen),
+    [17-saves](docs/17-saves.md)).
+- [x] ~~[M12] The game menu's save page and the shell that *Load game* and *Quit game* hand the
+  mission to~~ — closed 2026-10-01, **read**. The page (`iron3d.dll:0x100669a0`, draw `0x10066d50`)
+  is the title 5086, six slot widgets, *Save* and *Cancel*; typing appends letters and digits to the
+  name already there up to 16, which is why the six installed names are "empty" and three to eight
+  letters. The index object (`0x1008c300`) rewrites `saveslots.cfg` whole from its constructor,
+  destructor and each setter. The exit codes are enumerated, seven callers of `0x10061a30`: 3, 1, 1,
+  1, 2, 3 and 4. What is left is queued: a quick save's own bytes, what a save keeps of the
+  interface, and what `Run` does when a slot's file is gone
+  ([39-boarding](docs/39-boarding.md#the-game-menu--read), [17-saves](docs/17-saves.md)).
 
 ## Mission 04, *Teleport*
 

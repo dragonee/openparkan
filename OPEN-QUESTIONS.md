@@ -42,15 +42,6 @@ remainder a closed line names stays here as a line of its own.
   `CIS_INFRARED_ON/OFF/INV`, `NightVisionOn`), which is also what the outer view's flag `0x20` turned out
   to be. What slot 5 computes is still unread: the object's vtable is installed outside `Terrain.dll` and
   its class was not found ([10-sky](docs/10-sky.md)).
-- [ ] Who sets an object's material track (`ILifeSystem` slot 16), and who calls IAnimation slot 27.
-  *Narrowed 2026-10-01* from checking C03 M02 against a recording ("Let's Play - Parkan: Iron
-  Strategy, Part 6.5", 9SBZOCWv_vE, 37.4 s and 2:15). *Seen*: the insignia follows the building's
-  owner. Enemy 1's Medium Mine wears `B_LBL_01`'s track 1 (cell 6 of `PG27`), and the player's
-  Small Bunker wears track 0 (cell 0, the arrow). So something writes the control system's
-  `+0x554` for each clan. Not read: what writes it, whether it takes the clan's index or its sign
-  (the clan record's `+0x14`, which a single-player game makes the same), and whether a capture
-  changes it. The engine draws a building on its owner's track and a unit on track 0, a stand-in
-  ([07-objects](docs/07-objects.md)).
 - [ ] Whether any caller besides the round's hit test and the collision pass hands a face query a
   triangle mask carrying 2 or 16 — the round builds its filter inline, so enumerating the filter
   constructor's call sites is not a complete enumeration. (~~What reads object face flags 2 and 16~~ —
@@ -60,20 +51,31 @@ remainder a closed line names stays here as a line of its own.
   2 is the walkable surface, all 6166 in a level-0 slot and 6100 above the engine's own cos-80° threshold,
   a chosen subset; 16 is the broad face of a door leaf, all 384 vertical on 52 interior nodes
   ([07-objects](docs/07-objects.md)).)
+- [ ] A captured building's emblem, and a network game's. The emblem is read to follow the owner:
+  the building's and the unit's records write their clan's sign into the life system every game
+  frame, and a capture rewrites the record's clan
+  ([COMPLETED-QUESTIONS](COMPLETED-QUESTIONS.md#sky-and-rendering)). *Seen* for a building, a unit and
+  a captured unit; a captured **building's** emblem was found in no frame of Parts 4 to 6.5 of the
+  let's play. And in a network game the frame steps only the player's own clan's building records
+  (`iron3d.dll:0x1007db57`), so what signs another clan's building there is not read
+  ([07-objects](docs/07-objects.md), [27-ownership](docs/27-ownership.md)).
+- [ ] What a camouflaged machine wears. `IAnimation` slot 27 hands the mesh the ground face under the
+  machine while its detection shield's state `0x600` reads `0x1000` (`Control.dll:0x1001a95d`), and
+  the mesh then draws every batch in that face's material. Not read: which of the face's two layers,
+  and what it wears on a building's floor. No recording looked at shows camouflage on, and the engine
+  does not model it ([07-objects](docs/07-objects.md)).
+- [ ] The weather's remainders, left when the line closed 2026-10-01
+  ([COMPLETED-QUESTIONS](COMPLETED-QUESTIONS.md#sky-and-rendering)): what the rain sound's flags
+  `0x102` mean (the engine loops it); which faces the lightning's ground query takes; who calls
+  `ICamera2` slot 23 to give a camera a mode other than 0, the one gate on the weather's draw (38
+  calls through `+0x5c` across the install, none with a constant); and whether the weather draws in a
+  pod room that is its own world ([10-sky](docs/10-sky.md#the-weather)).
 - [ ] What a type-1, 2 or 5 pass does with its items' order. The effect sprites' layer 6 is a type-3
   `CCamDistSortLayerVB`, read to draw far to near (`Terrain.dll:0x1003e090`, `0x1003e1d0`;
   [11-effects](docs/11-effects.md#effect-sprites-are-drawn-far-to-near--read-and-seen)); the see-through
   surfaces' layer 5 is type 1, and group 1's layers 0–4, 8, 10 and 13 are type 2 and layer 12 type 5
   ([10-sky](docs/10-sky.md#the-dome)), whose render slots are not read. Narrowed 2026-09-30 out of
   [07-objects](docs/07-objects.md)'s note on the queue's sort types.
-- [ ] **How the weather is drawn.** Raised 2026-09-30 from checking C03 M01 against a recording
-  ("Let's Play - Parkan: Iron Strategy, Part 5", PfAg6zSe-yM). The keyframes' opcodes start and stop
-  rain, snow and lightning, and `Terrain.dll`'s factory makes a RAIN, a SNOW and a LIGHTNING object
-  for them (*read*); this map snows all day with `DUST_ADD` (`DUST.0`, cell 0, blend 2) in its snow
-  slot, and lightning runs 00:01–23:58. The recording shows red dust falling through every frame of
-  the briefing and of play (0:55 on) and a lightning bolt at 1:55. Not read: what the three objects
-  draw — how many particles, in what box about the camera, how fast and how large they fall, and how
-  a bolt is made, where and how often. The engine draws no weather ([10-sky](docs/10-sky.md)).
 
 ## Effects and sound
 
@@ -93,6 +95,15 @@ remainder a closed line names stays here as a line of its own.
   *Stand-ins*). Seen alongside: the recording's plume is distinct billows — the spawn's read
   jitter of each particle's far ends, which the engine now draws — over a flame about twice
   the engine's, whose brightness varies a third as much (not explained).
+- [ ] What gives an effect's instance its level. A type-9 block's shape code carries the instance's
+  level in its top two bits; the level picks the half sphere's detail, 8 × 3, 16 × 6 or 24 × 9 at the
+  finest, and at 4 or more the block is not drawn (`Effect.dll:0x10007e6d`). The engine draws every
+  dome at level 0 ([11-effects](docs/11-effects.md#not-resolved)).
+- [ ] What lights the masts of C03 M02's Large Factory lavender. Raised 2026-10-01: in the briefing
+  ("Let's Play - Parkan: Iron Strategy, Part 6", -yNnsqudMzw, 1:44.5, briefing time 61–62 s) Enemy
+  2's Large Factory's masts are lavender on one side and yellow-orange on the other. With an effect's
+  light now lighting the vertices in its range the engine shows a yellow lamp tint on one mast; which
+  light the lavender is was not established ([11-effects](docs/11-effects.md)).
 - [ ] How Direct3D Sound places a sound between the speakers. (~~[M5] How a sound falls off between
   its near and far distances~~ — this half was **stale**: the game takes the Direct3D Sound path
   rather than its own mixer, so the law is DirectSound's — whole within the near distance, then
@@ -113,32 +124,23 @@ remainder a closed line names stays here as a line of its own.
 [14-controls](docs/14-controls.md)
 
 - [ ] [M14] The walker's local path and its obstacle contours: how it goes round a tree's or a stone's hole, whether it widens it by the unit's size, how a walker in one walks out, and what it does with a goal in one; the sub-areals' shapes and whether the search measures one from its centre; whether every scenery object reaches the areal map, and the box of a mesh of several parts; how it drops the points a unit has passed (`MWalker::ClearMoverReachedPoint`); how a unit's place comes onto a building's map object and which vertex the search starts from; who calls `MHallWay` slot 11; a hall-way vertex's size gate (the unit's `+0x960`, the record's `+0x28`); the link flags `0x10000` and `0x20000`; how a walker goes to the point it finds off a non-walkable areal, and what it does when its search fails; and how a walk to a door gets past the building's own walls, which cut no areal (the engine: a door more than 20 over the ground under it is passed over, and a straight line into a wall goes round the building's ground contour) ([24-motion](docs/24-motion.md#not-established)).
-- [ ] **C02 M03's Small Bunker (`l_bunk1`) stops a small walker short of its pod.** Raised
-  2026-09-20; its wheeled half closed 2026-09-30 (the hull's righting, in
-  [COMPLETED-QUESTIONS](COMPLETED-QUESTIONS.md#motion-ground-and-controls)). With the up-pass bound
-  at r a walker took it in 20 s; at r₂, now read, `21swlk1` stalls 37.8 m short of the pod and
-  `22swlk1` never comes within 90 m, while the SSW-X walker takes it in 25 s (*measured*
-  2026-09-30, each sent from 60 m north with the bunker's guns off). It is **not** the contact's
-  mechanism — no lift over 0.5 and no segment stop at the spot, so it is the AI's own legs — and
-  walkers right toward the world's up, so the hull's tilt does not reach it. It wants the inside of
-  a building looked at as a whole: the push-out keeps any face under a mover that is not flagged 2,
-  and docs/07 measures **1802 faces** of the first variant's level-0 slots pointing within 10° of up
-  and carrying no flag at all ([24-motion](docs/24-motion.md#collision-between-objects--read),
-  [07-objects](docs/07-objects.md#the-flags-word)).
-- [ ] **What keeps a walker upright on a building's floor under a low ceiling.** Raised
-  2026-09-30 from checking C02 M03 against a recording. C02 M03's Small Warehouse is 6.3–7.5 m
-  high inside, and the medium walker `22mwlk1` placed on its floor has a 5.87 m agent sphere
-  0.41 above its origin: the ceiling's faces (interior node `i09`, 42.88–44.08) press it 2.85 m
-  down. *Read*: the sphere the pair hands the push-out is that agent sphere (interface `0x18`
-  slot 9 with 2, `Control.dll:0x1001fef5`, into `+0x38`–`+0x50` at `0x1001ff36`); a machine
-  standing on a building takes a down push whole (`0x1000c9eb`); the push lands after the
-  ground contact. So drawn after the push the walker stands with its hull at the floor, and the
-  recording shows it upright in **every** frame at 60 fps ("Let's Play - Parkan: Iron Strategy,
-  Part 4", 1:43, 15:13–15:15). Not read: where the frame is drawn among move, pass, contact
-  and push, which message runs the sphere's refresh (`0x1001fec0`, case 0 of `0x1001f548`), and
-  whether anything keeps the pair from pushing. The engine draws the body where the contact
-  last held it and keeps the push in the simulation, which three install tests need to carry
-  units down a ramp into a building ([24-motion](docs/24-motion.md#not-established)).
+- [ ] **Where the frame is drawn among move, pass, contact and push.** *Narrowed 2026-10-01* out of
+  the low-ceiling line ([COMPLETED-QUESTIONS](COMPLETED-QUESTIONS.md#motion-ground-and-controls)).
+  The pair pushes out a unit's node sphere, not its agent sphere, so C02 M03's medium walker
+  `22mwlk1` under the Small Warehouse's ceiling is pressed **0.28 m**, not 2.85: its node sphere is
+  4.26 about a centre 0.67 below its origin and tops out 6.63 over the floor. The recording shows it
+  upright in every frame ("Let's Play - Parkan: Iron Strategy, Part 4", 1:43, 15:13–15:15). Still not
+  read: where the frame is drawn in the takt. The engine draws the body where the contact last held
+  it ([24-motion](docs/24-motion.md#not-established)).
+- [ ] **What a building's second sphere is.** A collision object of kind 3 or 4 keeps two spheres;
+  a round is swept against a unit's first, its agent sphere, but against a building's second
+  (`Control.dll:0x1001d6cd`), which comes from its device manager's slot 12 (`0x1002c500`). What that
+  slot answers is not read ([24-motion](docs/24-motion.md#collision-between-objects--read),
+  [26-damage](docs/26-damage.md)).
+- [ ] **Whether the walk-face query reads a door's faces.** *Seen on the engine, not read*: a large
+  walker that reaches the Large Factory's front leaf while it is still sinking is lifted 5.6 m onto
+  the leaf's top by its feet's up pass, whose bound is 7.5, and rides it down for about a second
+  ([24-motion](docs/24-motion.md#not-established)).
 - [ ] **What lets a mover past a face flagged `0x20`.** Raised 2026-09-20 from play on C02 M04,
   *The Last Bastion*. The collision's own two filters take a triangle mask of **4**
   (`Control.dll:0x1001dbad` for the segment, `0x1001dbce` for the push-out) where a round's takes
@@ -180,14 +182,6 @@ remainder a closed line names stays here as a line of its own.
   rebuilding it for a hub turning for ever would rebuild it every tick on every one of them.
   Whether the game's own `IGeometry` follows an animated node, and at what cost, is not read
   ([28-chassis](docs/28-chassis.md#every-component-is-stepped-not-only-a-device--read-and-measured)).
-- [ ] **What the eye the sprite draw is handed has been transformed by.** Raised 2026-09-21.
-  The emitter loop's context carries the instance's own matrix at `+8` and a point at `+0x48`
-  (`Effect.dll:0x10008050`, `0x100080aa`), and the draw takes that point for the eye
-  (`0x100093fc`). The sprite's position channel is in the frame's space, so the eye must be
-  too, and `[0x1001e0bc]` slot `0x68` — called just before with the matrix in `ecx` and the
-  point in `edx` (`0x100080da`) — is where it would be put there. That slot lives in the maths
-  interface, outside `Effect.dll`, and is not read; the engine assumes the transform
-  ([11-effects](docs/11-effects.md#a-sprite-is-drawn-through-its-frame--read)).
 - [ ] **What separates control message 7's argument 0 from 1**, which `Control.dll` treats alike;
   argument 2 is read, the object simulated elsewhere. No shipped section-5 record tests condition
   byte 15, so nothing an artist wrote turns on it. The remainder of the `.ctl` values line closed
@@ -226,30 +220,18 @@ remainder a closed line names stays here as a line of its own.
   `Type` comes from the turret either way ([38-designs](docs/38-designs.md#not-established),
   [30-turrets](docs/30-turrets.md)).
 - [ ] Where the unit constructor's page item names (`+0xc4`) come from.
-- [ ] **What killed the hero in C02 M04's valley Light Tower.** Raised 2026-09-30 from checking
-  C02 M04 against a recording ("Let's Play - Parkan: Iron Strategy, Part 4", Qqs8_i9IeUU, 21:53.5).
-  The hero, its own panel's life arcs full, walks up to the pod of `mtow01` at (591, 1502), whose
-  turret it has shot off — the target panel shows the turret red from 21:27 and the mast sunk by
-  21:36 — and whose shield ring is red. One white flash, the view left on a white glare, and the
-  mission fails; on the reload the same tower is captured whole (26:04). *Seen*, not read: whether
-  the tower died then and its death killed who stood inside, or another gun reached the room.
-  Nothing read kills a unit inside a building — a building whose node 0 dies becomes a shell with
-  its model standing ([26-damage](docs/26-damage.md)) — and the engine leaves a hero standing
-  there unharmed. *Seen a second time* 2026-10-01 on C03 M02 ("Let's Play - Parkan: Iron
-  Strategy, Part 6", -yNnsqudMzw, 13:54.2). The player is at the Small Bunker's guns, the hero in
-  its pod room, when the raider's winged SSM lands on the bunker (60,000 a round, a 45 m blast;
-  in the engine's run it burst 17 m from the pod). One white flash, and the mission fails over
-  the fallen hero's camera. So a blast at least that large reaches the room under a building.
-  Still not read: the blast's own test against a hero indoors.
-- [ ] **Whether a blast spares the object that fired it.** The remainder of the winged-SSM line
-  closed 2026-10-01 ([COMPLETED-QUESTIONS](COMPLETED-QUESTIONS.md#turrets-weapons-and-camera)).
-  [26-damage](docs/26-damage.md) reads that a hit does nothing if it is "the target's own", with no
-  address for the test, and the engine's blast reaches the round's owner as it does any object
-  whose bounds meet it. On C03 M02 that matters once the raider closes on the bunker: a winged SSM
-  it fires from about 25 m lands within its own 45 m blast and kills it. The recording ends that
-  raid sooner, on the first missile. Not read: the test, which sits somewhere between the
-  damage stage that builds the hits (`Control.dll:0x100113e0`–`0x10011900`) and the queue's
-  application (`0x10012ce0`).
+- [ ] **Which gun killed the hero in C02 M04's valley Light Tower.** *Narrowed 2026-10-01*
+  ([COMPLETED-QUESTIONS](COMPLETED-QUESTIONS.md#turrets-weapons-and-camera)). A blast is stopped by
+  nothing but distance, so one landing on a building reaches a hero in its pod room, as C03 M02's
+  raid shows; and the tower's own death is ruled out, since every node of a building names a kind-1
+  explosion, an effect alone. Which gun's blast it was at 21:53.5 of "Let's Play - Parkan: Iron
+  Strategy, Part 4" is still not established.
+- [ ] The blast's remainders: whether a round in the air hangs in the landscape's object grid, whose
+  class the blast's mask `0x61c` carries; what a unit's behaviour does when message `0x19` names
+  itself, which a firer inside its own blast is sent before the test that spares it; and a
+  non-round node's blast — node 1 of `o_tur_la_06`, `explode_rbr_bomb`, 20,000 in 43.4 m, which no
+  shipped design carries and the engine plays as an effect alone
+  ([26-damage](docs/26-damage.md#not-established)).
 
 ## AI, scripts, packages and economy
 
@@ -282,6 +264,20 @@ remainder a closed line names stays here as a line of its own.
   gorge wall, and it stands at 0 m/s for the rest of the mission — while from where the mission places
   it there is a 31-leg route over the bridge to the player's factory. What the game does with a patrol
   place off its own areal map, and what its walker does once stranded, are both unread.
+- [ ] **Why Enemy 1's first builds on C03 M02 are medium tracked.** Left 2026-10-01 by the design
+  store's line ([COMPLETED-QUESTIONS](COMPLETED-QUESTIONS.md#ai-scripts-packages-and-economy)). In
+  "Let's Play - Parkan: Iron Strategy, Part 6" Enemy 1's builds are named MTW-3, MTW-4, MTW-5, then
+  LTW-6, and in Part 6.5 its first is MTW-3 again. As read, `SELECT_BEST_COMBAT` with the easy
+  level's spread of 6 draws from seven designs — four large tracked, two large wheeled and one
+  medium tracked, `m_stopper.dat` — so three in a row is one design of seven drawn three times.
+  Later names are not explained either: MWW-21 to -23, where `23_m2`, the Medium Wheel, ranks eighth,
+  one past the spread, and LTW-34 and -35. Not read: whether the draw `(rand() + timeGetTime()) %
+  (n + 1)` is as free as it looks, and whether the level ratio reaches the object the store's fill
+  builds ([15-behaviour](docs/15-behaviour.md)).
+- [ ] Function 41, a clan's research order, in the engine: the design store's `+0x104` byte is
+  marked again each time function 41 orders a research (`ai.dll:0x10010f90`), and only `c4m2e2` and
+  `scream` call it. The engine leaves 41 unanswered, so a store is marked once, at load
+  ([15-behaviour](docs/15-behaviour.md), [16-research](docs/16-research.md)).
 
 ## Mission progression
 
@@ -372,16 +368,15 @@ remainder a closed line names stays here as a line of its own.
 
 **Left by the eleventh round** (2026-09-29)
 
-- [ ] [M12] The game menu's save page — its draw (`iron3d.dll:0x10066d50`), its six slots' records and what the level's `0x100a1590` writes under `/save/` — and the shell that *Load game* and *Quit game* hand the mission to (exit codes 1 and 3). The engine takes *Save game* and *Load game* and does nothing, and *Quit game* closes the window; Mission 03 disables the first two ([39-boarding](docs/39-boarding.md#the-game-menu--read)).
-- [ ] What the quick save and the quick load do: `CMD_QUICK_SAVE` on F7 and `CMD_QUICK_LOAD` on F8
-  (`ui_other.man`, `addition.man`). Raised 2026-09-30 from checking C03 M01 against a recording
-  ("Let's Play - Parkan: Iron Strategy, Part 5", PfAg6zSe-yM, 3:09): in play the message box shows
-  *"from: System / Game saved..."* (`iron3d.dll` string 6246, beside 6245 *"Quick Save"*) and play
-  goes on. Not read: where the save goes — one of the save page's six slots or a slot of its own, and
-  its file under `/save/` — and what F8 loads. The engine binds neither
-  ([14-controls](docs/14-controls.md), [17-saves](docs/17-saves.md)).
+- [ ] [M12] A save's own bytes, left when the save page and the quick save closed 2026-10-01
+  ([COMPLETED-QUESTIONS](COMPLETED-QUESTIONS.md#mission-03-the-field-base)): a quick save's file, since
+  no `slot7.sav` is installed to walk; what a save keeps of the interface — *seen*, one made in a
+  bunker's command view loads on foot in the bunker, and what a load does with a hero saved aboard
+  a bot is not; and what `Run` does when a slot's file is gone. The engine's quick save is the play
+  kept in memory, in no slot, and the game menu's save page is not built
+  ([17-saves](docs/17-saves.md#not-established), [14-controls](docs/14-controls.md)).
 - [ ] A *Tiny Tower*'s battery of capacity −1: `Power::load` drops a negative battery, so the engine's battery arc follows the tower's fitted 31,000, where the game's id 1 answers 1 whenever any capacity is negative (`Control.dll:0x1002b42b`). How the power tick spends a −1 battery on a unit is not read ([41-commander](docs/41-commander.md#the-box), [23-economy](docs/23-economy.md)).
-- [ ] What a building going up is still reached by: whether a blast's hit, which hurts every object whose bounds reach it and then each node by its sphere (`0x10010030`), passes a node hidden by action 1, which is not a destroyed node; and whether Behavior's hall-way searches pass over a building in the second between its showing at 40 s and its sphere's end at 41 s ([26-damage](docs/26-damage.md#not-established)).
+- [ ] What a building going up is still reached by: what interface `0x20` slot 3 answers for a node hidden by action 1, which is not a destroyed node — a blast takes each node by that sphere (`0x10010030`), and nothing else in its walk asks whether the node is shown (narrowed 2026-10-01); and whether Behavior's hall-way searches pass over a building in the second between its showing at 40 s and its sphere's end at 41 s ([26-damage](docs/26-damage.md#not-established)).
 - [ ] Whether the HQ camera's ride holds while an HQ patrols. Since a lone go leaves a patrol of 150, Mission 03's HQ ride test measures only while the go runs: once over, the patrolling HQ put the engine's camera 14 m behind the ride's figure, which nothing now checks ([40-command-mode](docs/40-command-mode.md#an-hqs-command-mode-mode-3--read-and-seen)).
 - [ ] What Alt+F toggles under `Iron_3D.ini`'s `DEBUG_KEYS_ON` (`0x10059d30`, `0x100717e3`), which the install does not set ([40-command-mode](docs/40-command-mode.md#not-established)).
 
