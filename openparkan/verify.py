@@ -3212,6 +3212,73 @@ def check_sky(check, game: Path) -> None:
           f"{sky.LIGHTNING_MARKER} (Terrain.dll:0x1006e3bb, 0x1006e5af); "
           f"{starts['snow']} snow starts need and name nothing")
 
+    # What falls (docs/10-sky.md, "The weather").  The snow and the rain each
+    # draw with the one sky.wea slot their start carries, 7 and 8, and the
+    # fourth float is the share of the particle pool's 1000 they keep.
+    snow_slot, rain_slot = sky.SLOT_ROLES.index("snow"), sky.SLOT_ROLES.index("rain")
+    in_slot: dict[int, Counter[str]] = {snow_slot: Counter(), rain_slot: Counter()}
+    falling: dict[str, Counter[str]] = {"snow": Counter(), "rain": Counter()}
+    strongest = 0.0
+    for path in files:
+        try:
+            atmosphere = sky.load(path)
+        except sky.SkyFormatError:
+            continue
+        kinds = atmosphere.weather()
+        for slot, kind in ((snow_slot, "snow"), (rain_slot, "rain")):
+            name = atmosphere.textures[slot] if slot < len(atmosphere.textures) else ""
+            in_slot[slot][name] += 1
+            if kind in kinds:
+                falling[kind][name] += 1
+        strongest = max([strongest] + [k.weather_intensity for k in atmosphere.keyframes])
+    dust, flake, drop = lib.get("DUST_ADD"), lib.get("SNOWFLAKE"), lib.get("RAIN_DROP")
+    check("sky.wea: the snow slot is a snowflake or the red dust, and the dust always falls",
+          dict(in_slot[snow_slot]) == {"SNOWFLAKE": 23, "DUST_ADD": 6}
+          and dict(falling["snow"]) == {"DUST_ADD": 6, "SNOWFLAKE": 1}
+          and dict(in_slot[rain_slot]) == {"RAIN_DROP": 29}
+          and dict(falling["rain"]) == {"RAIN_DROP": 8}
+          and strongest == 1.0
+          and dust is not None and dust.blend_mode == 2 and dust.cell == 0
+          and flake is not None and flake.blend_mode == 4
+          and drop is not None and drop.blend_mode == 4,
+          f"slot {snow_slot} holds {dict(in_slot[snow_slot])} and snows on "
+          f"{dict(falling['snow'])}; slot {rain_slot} holds {dict(in_slot[rain_slot])} and "
+          f"rains on {dict(falling['rain'])}; the fourth float is at most {strongest} on "
+          f"every keyframe, so the pool of 1000 (Terrain.dll:0x10072cad) is never asked for "
+          f"more; DUST_ADD is {dust.textures[0] if dust else '?'} cell "
+          f"{dust.cell if dust else '?'}, added, the other two blend on alpha")
+
+    # The lightning's effect: a sprite laid along the frame's third axis, a light
+    # the device takes with a constant term, and the thunder.
+    fx = effects.EffectLibrary(game / "effects.rlb")
+    bolt = fx.get(sky.LIGHTNING_MARKER)
+    kinds_ = [e.kind for e in bolt.emitters] if bolt else []
+    sprite = next((e for e in bolt.emitters if e.kind == 3), None) if bolt else None
+    lamp = next((e for e in bolt.emitters if e.kind == 1), None) if bolt else None
+    modes: Counter[int] = Counter()
+    for effect in fx:
+        for emitter in effect.emitters:
+            if emitter.kind == 3:
+                modes[struct.unpack_from("<I", emitter.body, 4)[0]] += 1
+    check("env_lightning: a bolt up its frame's third axis, a light with no falloff, thunder",
+          bolt is not None and kinds_ == [3, 1, 2]
+          and (bolt.mode, bolt.duration, bolt.flags) == (1, 0.75, 0x2001)
+          and sprite is not None
+          and struct.unpack_from("<I", sprite.body, 4)[0] == 1
+          and struct.unpack_from("<3f", sprite.body, 76) == (0.0, 0.0, 1.0)
+          and struct.unpack_from("<3f", sprite.body, 88) == (0.0, 0.0, 1.0)
+          and lamp is not None and lamp.light is not None
+          and lamp.light.colour[0][:3] == (7.0, 7.0, 10.0)
+          and lamp.light.range == (100.0, 0.0)
+          and lamp.light.attenuation == (0.0, 0.0, 1.0)
+          and bolt.sounds == ["atm_light1.wav"]
+          and dict(modes) == {0: 773, 1: 251, 2: 521},
+          f"blocks {kinds_} over {bolt.duration if bolt else '?'} s; the sprite's mode word "
+          f"(+4, Effect.dll:0x100103d2) is 1 and its direction (0, 0, 1); the light is "
+          f"(7, 7, 10) to a range of 100 with the triple (0, 0, 1), the square of what is "
+          f"left of the range (Ngi32.dll:0x1001669a); over all {sum(modes.values())} "
+          f"type-3 blocks the mode word is {dict(sorted(modes.items()))}")
+
     # The sub-image cell indexes the texture's own Page table -- on every
     # entry of every material, now that the entries can be walked.
     indexed = inside = biggest = 0

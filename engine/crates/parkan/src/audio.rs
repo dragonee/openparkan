@@ -32,6 +32,8 @@ pub struct Audio {
     onces: HashMap<(u64, usize), StaticSoundHandle>,
     /// The CD track playing.
     music: Option<StreamingSoundHandle<FromFileError>>,
+    /// The rain's background sound, by its name.
+    rain: Option<(String, StaticSoundHandle)>,
 }
 
 /// How loud a cue is heard `distance` away, as Direct3D Sound hears a buffer whose
@@ -68,6 +70,7 @@ impl Audio {
                 loops: HashMap::new(),
                 onces: HashMap::new(),
                 music: None,
+                rain: None,
             }),
             Err(e) => {
                 eprintln!("no sound: {e}");
@@ -164,6 +167,36 @@ impl Audio {
         let done = self.voice.as_ref().is_none_or(|h| h.state() == PlaybackState::Stopped);
         if done && let Some(next) = self.voices.pop_front() {
             self.voice = self.manager.play(next).ok();
+        }
+    }
+
+    /// The rain's background sound at `decibels`, or none: `CRain` makes it from `sounds.lib`
+    /// and plays it as it is made, sets its volume from the rain's intensity every takt, and
+    /// stops it as it goes (`Terrain.dll:0x10075e37`, `0x100765d0`, `0x100761a0`).
+    ///
+    /// STAND-IN: docs/10-sky.md#rain--read -- the flags the sound is made with, `0x102`, are
+    /// not read: it is played as a loop, heard alike from everywhere.
+    pub fn rain(&mut self, sound: Option<(String, f32)>) {
+        let Some((name, decibels)) = sound else {
+            if let Some((_, mut handle)) = self.rain.take() {
+                handle.stop(Default::default());
+            }
+            return;
+        };
+        let volume = Decibels(decibels.max(Decibels::SILENCE.0));
+        match self.rain.as_mut() {
+            Some((playing, handle)) if *playing == name => {
+                handle.set_volume(volume, Tween { duration: MOVE_TWEEN, ..Default::default() });
+            }
+            _ => {
+                if let Some((_, mut old)) = self.rain.take() {
+                    old.stop(Default::default());
+                }
+                let Some(data) = self.sound(&name) else { return };
+                if let Ok(handle) = self.manager.play(data.volume(volume).loop_region(..)) {
+                    self.rain = Some((name, handle));
+                }
+            }
         }
     }
 

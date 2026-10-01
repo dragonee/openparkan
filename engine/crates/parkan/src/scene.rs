@@ -242,6 +242,7 @@ pub fn play(game: &Path, loaded: &Loaded, args: &crate::Args) -> Result<Option<P
         if let Err(e) = p.load_progression(game, &loaded.dir, &loaded.mission) {
             eprintln!("no mission progression: {e:#}");
         }
+        p.load_weather(&loaded.dir);
     }
     Ok(play)
 }
@@ -693,6 +694,10 @@ fn point_lights(play: &Play) -> Vec<parkan_render::frame::PointLight> {
 
 /// Bring the drawing up to date with the battle: hide what died, place the rounds, and
 /// hand over this frame's effect sprites and point lights as seen from `eye`.
+///
+/// `weather` is the camera the rain and the snow are kept about and drawn through, where the
+/// frame is drawn through one the game's weather would draw in.
+#[allow(clippy::too_many_arguments)]
 pub fn sync(
     renderer: &mut parkan_render::Renderer,
     device: &wgpu::Device,
@@ -701,14 +706,16 @@ pub fn sync(
     objects: &Objects,
     view_proj: glam::Mat4,
     eye: Vec3,
+    weather: Option<&parkan_sim::weather::View>,
 ) {
     let quads: Vec<parkan_render::sprites::Quad> = play
         .sprites(eye)
         .into_iter()
         .flat_map(|(look, s)| {
             use parkan_render::sprites::{
-                EFFECTS_LAYER, PLAIN_TINT, Quad, billboard, dome, framed, lengthwise, turned,
+                EFFECTS_LAYER, PLAIN_TINT, Quad, UNFOGGED_TINT, billboard, dome, framed, lengthwise, turned,
             };
+            let tint = if s.unfogged { UNFOGGED_TINT } else { PLAIN_TINT };
             // A type-3, 4 or 9 sprite is drawn with its own matrix: a quad across its x and y,
             // or a type-9 block's hemisphere with its pole on its z (docs/11, "A sprite's mode").
             if let Some(m) = s.matrix {
@@ -726,7 +733,7 @@ pub fn sync(
                         uv: Some(uv),
                         depth: s.centre.distance(eye),
                         layer: EFFECTS_LAYER,
-                        tint: PLAIN_TINT,
+                        tint,
                     })
                     .collect::<Vec<_>>();
             }
@@ -742,7 +749,7 @@ pub fn sync(
                 uv: None,
                 depth: s.centre.distance(eye),
                 layer: EFFECTS_LAYER,
-                tint: PLAIN_TINT,
+                tint,
             }]
         })
         .collect();
@@ -764,6 +771,26 @@ pub fn sync(
                 depth: first.0.distance(eye),
                 layer: LIGHTS_LAYER,
                 tint: [r, g, b, 1.0],
+            });
+        }
+    }
+    // The rain and the snow over everything in the world, the depth test off: screen-space
+    // quads filed in group 1, layer 8, in the pass the world's draw ends with
+    // (`Terrain.dll:0x100754dc`, docs/10, "The weather"). Each corner is the world point drawn
+    // that many pixels from its particle.
+    if let Some(view) = weather {
+        use parkan_render::sprites::{Quad, WEATHER_LAYER};
+        for d in play.weather_specks(view) {
+            let [r, g, b, alpha] = d.colour;
+            quads.push(Quad {
+                look: d.look,
+                corners: std::array::from_fn(|i| view.nudged(d.speck.anchors[i], d.speck.offsets[i])),
+                alpha,
+                overlay: true,
+                uv: Some(d.speck.uv),
+                depth: 0.0,
+                layer: WEATHER_LAYER,
+                tint: [r, g, b, 2.0],
             });
         }
     }

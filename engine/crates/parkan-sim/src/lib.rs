@@ -33,4 +33,5 @@ pub mod sky;
 pub mod solid;
 pub mod targeting;
 pub mod turret;
+pub mod weather;
 pub mod wizard;

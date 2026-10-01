@@ -54,6 +54,8 @@ pub enum Owner {
     Lode(usize),
     /// One of the three instances of a target's shield effect a hit plays (`0x10025ca0`).
     Shield(usize, usize),
+    /// The lightning object's one instance of its effect (`Terrain.dll:0x10071a8d`).
+    Lightning,
 }
 
 /// A material's look for sprites: its texture, the cell of it the entry takes, and its blend
@@ -279,6 +281,19 @@ impl Fx {
                 self.looks.len() - 1
             }
         }
+    }
+
+    /// The look `material`'s first key draws with, for a draw that is no effect's: the rain's
+    /// and the snow's (docs/10, "The weather").
+    pub fn material_look(&mut self, store: &mut TextureStore, material: &str) -> Result<usize> {
+        let look = store.look(material)?;
+        let p = look.still;
+        Ok(self.look_index(Look {
+            texture: p.texture,
+            blend_mode: look.blend_mode,
+            ambient: p.ambient,
+            cell: p.cell,
+        }))
     }
 
     /// Resolve the looks of every loaded effect's materials through `store`, so their

@@ -40,15 +40,22 @@ pub struct Quad {
     pub layer: u8,
     /// Its colour against its look's: rgb times the look's ambient, or with w 1 the self-light
     /// of a device material, the scene colour plus rgb (docs/07, "How a material reaches the
-    /// device").
+    /// device"), or with w 2 rgb alone, a vertex colour of the quad's own that no fog reaches:
+    /// the rain's and the snow's (docs/10, "The weather"); w 3 is w 0 without the fog.
     pub tint: [f32; 4],
 }
 
-/// The layers of group 1 the drawn quads are filed in (docs/10, "The dome").
+/// The layers of group 1 the drawn quads are filed in (docs/10, "The dome"): the weather's
+/// goes last, over the effects, and a layer of that kind draws its items in the order they
+/// were filed.
 pub const LIGHTS_LAYER: u8 = 3;
 pub const EFFECTS_LAYER: u8 = 6;
+pub const WEATHER_LAYER: u8 = 8;
 /// A sprite's tint: its look's colour as it is.
 pub const PLAIN_TINT: [f32; 4] = [1.0, 1.0, 1.0, 0.0];
+/// The same, its fog factor held at 1: an effect whose header carries `0x2000` (docs/11, "How
+/// an effect sprite is coloured").
+pub const UNFOGGED_TINT: [f32; 4] = [1.0, 1.0, 1.0, 3.0];
 
 /// The order an effect's quads are drawn in: far to near across every look and blend mode.
 ///

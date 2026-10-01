@@ -67,7 +67,8 @@ fn fs_main(v: VertexOut) -> @location(0) vec4<f32> {
     // STAND-IN: docs/11-effects.md#how-an-effect-sprite-is-coloured--read-and-measured -- the
     // game puts a fog factor of its own in the specular alpha of every vertex, linear in the
     // *squared* distance between its near and far (`Terrain.dll:0x1004bf20`), and effect draw
-    // flag 4 forces it to 1. Here the renderer's own fog, linear in the distance itself.
+    // flag 4 forces it to 1. Here the renderer's own fog, linear in the distance itself, and
+    // none where that flag is set.
     let keep = clamp((camera.fog.y - d) / max(camera.fog.y - camera.fog.x, 0.001), 0.0, 1.0);
     let fog = display(mix(camera.fog_colour.rgb, look.toward.rgb, look.toward.w));
     // An effect sprite's quad carries one pre-lit colour on every vertex: the material's
@@ -82,7 +83,16 @@ fn fs_main(v: VertexOut) -> @location(0) vec4<f32> {
     // material, its ambient the light's colour over its length (`Terrain.dll:0x1002ae12`): its
     // self-light is the scene colour plus that, as a lit batch's emissive is, and the device
     // holds it at 1 (docs/11, "What a light does to a surface"). The tint's w says which.
+    //
+    // The rain's and the snow's quads are pre-transformed vertices with a colour of their own
+    // in the diffuse and a specular of 0xff000000, whose alpha is the fog factor: the texture
+    // times that colour, and no fog (docs/10, "The weather"). A tint's w of 2 says so.
     let device = clamp(camera.scene_colour.rgb + v.tint.rgb, vec3<f32>(0.0), vec3<f32>(1.0));
-    let lit = select(look.ambient.rgb * v.tint.rgb, device, v.tint.w > 0.5);
-    return vec4<f32>(mix(fog, display(texel.rgb) * lit, keep), texel.a * v.alpha);
+    // A tint's w of 3 is the sprite of an effect whose header holds the fog factor at 1 (effect
+    // draw flag 4): its look's colour, and no fog.
+    let own = v.tint.w > 1.5 && v.tint.w < 2.5;
+    let unfogged = v.tint.w > 1.5;
+    let plain = v.tint.w < 0.5 || v.tint.w > 2.5;
+    let lit = select(select(device, look.ambient.rgb * v.tint.rgb, plain), v.tint.rgb, own);
+    return vec4<f32>(mix(fog, display(texel.rgb) * lit, select(keep, 1.0, unfogged)), texel.a * v.alpha);
 }

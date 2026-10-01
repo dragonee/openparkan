@@ -890,7 +890,7 @@ count at `+0x198` (`0x100286ab`–`0x100286c9`).
 **The clouds** use the same cap with its origin 5000 below the camera
 (`0x1007a08e`), and carry their own fog, from 5000 to 11380.7 (`0x1007a5d4`).
 
-### The sky's first draw is a screen-wide quad, and it is usually skipped — *read*
+### The sky's first draw is a screen-wide quad — *read*
 
 The draw at `0x1007a37a` is built from the viewport rectangle the view hands
 back (`0x1007a1a6`): four corners at *z* = 1.0 written into the sky's own
@@ -911,12 +911,26 @@ So what it would put on the screen is the **scene colour** alone, which is
 what every material's emissive gets added
 ([below](#the-scene-colour-is-added-to-every-material)).
 
-**But the draw is gated** (`0x1007a325`): the sky asks the view (interface
-`0x12`) for its mode — slot 24, `0x10083010`, the field `+0x280` that slot 23
-sets and the view's constructor leaves 0 — and **skips the quad when the mode
-is 1**. Which views carry which mode is not read. The inference is that the
-mode that draws the world is 1: group 1 runs *after* group 0, so a screen-wide
-quad with the depth test off would paint over the finished scene.
+**The draw is gated** (`0x1007a325`): the sky asks the view (interface
+`0x12`, `ICamera2`) for its mode — slot 24, `0x10083010`, the field `+0x280`
+that slot 23 sets and the view's constructor leaves 0 — and **skips the quad
+when the mode is 1**.
+
+**The scene's own camera is mode 0, so there the quad is drawn.** An earlier
+round inferred the opposite, that the world's view is the mode-1 one, because
+group 1 runs after group 0 and a screen-wide quad with the depth test off
+would paint over the finished scene. Two things say otherwise. `CCamera::Render`
+runs the world's `0x800` pass, the sky's, **and ends that render** before it
+draws the world at all, and it does so "for a camera of mode 0"
+([03-terrain.md](03-terrain.md#when-it-draws--read)): the quad is the first
+thing of the frame, and the world is drawn over it. And the rain's and the
+snow's draws return at any mode but 0 ([The weather](#the-weather--read-and-seen)),
+while the dust is *seen* in the cockpit, in the briefing and in command mode.
+So the quad is what stands below the dome's rim where no ground covers it.
+What it paints there stands as derived above, the scene colour, and is not
+checked against a frame. Slot 23's caller, which gives the other cameras their
+1 and 2, is not found: of the 38 calls through `+0x5c` in the install's
+modules none hands a constant in `edx`.
 
 ### The three layers and their texture coordinates — *read*
 
@@ -1260,6 +1274,280 @@ Two controls, both from the same searches: `AniMesh.dll` does read this very
 page across a module boundary, and `iron3d.dll` does write three of its
 entries; the scan that finds nothing at index 0 finds both.
 
+## The weather — *read*, and *seen*
+
+The factory's three weather classes are `CRain` (0xc0 bytes, constructor
+`Terrain.dll:0x10075d00`), `CSnow` (0xb8, `0x10075560`) and `CLightning`
+(0xa0, `0x10071990`) — the "one more" of [the ten opcodes](#the-ten-opcodes).
+Each has the same six slots: its interfaces, its delete, a start time (slot 2),
+an update with the game time (slot 3), **a draw with a view (slot 4)** and its
+type; and behind interface 7 a setter that takes a parameter's index and value.
+
+**What the atmosphere hands them.** Every takt, for every object
+(`0x10070a20`): `CAtmData` lerps the type's parameters between the two keyframes
+round the clock (the switch at `0x1006cf64`), the setter takes each by its index,
+and slot 3 takes the time.
+
+| type | parameter 0 | parameter 1 |
+|---|---|---|
+| `RAIN` (`0x1006ce00`), `SNOW` (`0x1006cd81`) | the fourth float | slot 19 with each of R, G and B held at `0x50` or above and the alpha set to `0x96` (`0x1006ce63`–`0x1006ceb6`, `0x1006d120`) |
+| `LIGHTNING` (`0x1006cef8`) | the fourth float | — |
+
+So rain and snow are both drawn in **the sun light's colour, never darker than
+(80, 80, 80), at an alpha of 150**: grey while slot 19 is black, as at the start
+of `CAMPAIGN.03`'s day, and red once its sun is up.
+
+**When they draw.** `CAtmosphere`'s draw (`0x10070b90`) takes the pass flags the
+world hands it. With `0x800` it draws the objects of type 1, the sky; otherwise
+with `0x1000` those of types 2, 3 and 4. The scene camera runs the `0x800` pass
+before the world and the `0x1000` pass after it
+([03-terrain.md](03-terrain.md#when-it-draws--read)), so **the weather is drawn
+after the whole world**. The reflection camera hands the world `0x120` and gets
+neither.
+
+**In which views.** The rain's and the snow's draws begin alike (`0x100759b5`,
+`0x10076335`): they ask the view for interface `0x12`, `ICamera2`, and return
+if its slot 24, the mode
+[the sky's first draw](#the-skys-first-draw-is-a-screen-wide-quad--read) asks
+for, is not 0. Nothing else gates them: the two draws and the particle system
+under them call the view, the render device, the shader's colour filter, the
+material manager and the game clock, and **nothing of the landscape, of a
+building or of the player's unit**. So the weather falls in every view a mode-0
+camera draws, and it falls indoors.
+*Seen*: the dust is in every frame of `CAMPAIGN.03`'s briefings ("Let's Play -
+Parkan: Iron Strategy, Part 5", PfAg6zSe-yM, from 0:55; "Part 6", -yNnsqudMzw,
+0:55), of the cockpit, of command mode ("Part 6.5", 9SBZOCWv_vE, 7:05) and of a
+bunker's guns (9:47), and over the black field of a doorway as the hero walks
+into the Small Bunker (Part 6, 28:15).
+
+### One particle system, run two ways — *read*
+
+Rain and snow each own one `0x8e14`-byte system (`0x10072b40`), made with two
+flags: snow's are (1, 0), rain's (0, 1) (`0x1007563d`, `0x10075ddd`). The first
+gives the particles a flutter, the second draws them as streaks.
+
+**Where they live.** The particles are **points in the world** (the array at
+`+0`), and the box they are kept in is the camera's. Each draw builds it from
+the view (`0x100759dc`–`0x10075ab4`, and the same at `0x1007635c`):
+
+| | |
+|---|---|
+| depth | from **2** to **50** ahead of the camera |
+| across | ± 50 × tan(*f* ÷ 2), *f* the view's field of view |
+| up | ± 50 × tan(*f* × *h* ÷ *w* ÷ 2), *w* × *h* the viewport |
+
+It is a box and not a frustum: as wide at 2 as at 50, so about a third of it
+is in view.
+
+**How many.** `1000 × intensity × min(1, V ÷ V₀)`, rounded (`0x10075b3a`–
+`0x10075b8f`, `0x100764ba`–`0x1007650f`): *V* is the box's volume and *V₀* that
+of the box at a field of 1.3 across and 0.975 up (`0x100757c0`, `0x1009be14`,
+`0x1009be18`). So a thousand at full intensity in a 4:3 view 1.3 across or
+wider, 722 at 16:9, and 19 zoomed to a field of 0.2. The system's pools hold
+1000 screen positions (`0x10072cad`), and no shipped keyframe asks for more
+([below](#which-missions-fall-what--measured)).
+
+**Each draw** (`0x10073c10`):
+
+1. if the box is not the one the last draw kept at `+0x8de4`, every particle is
+   spawned again in the new one (`0x10073c92`);
+2. every particle moves by the system's velocity times the seconds since the
+   last draw, the clock being the game queue's (`World3D.dll!GetQueue`, slot 14);
+   with the flutter flag it moves again by (*r*, *r*, *r*) times those seconds,
+   *r* in 0..1 off the generator at `+0x5e78` — three steps of it, and the
+   value after the third on all three axes (`0x1007371a`–`0x100738bd`). The
+   generator is `Effect.dll`'s ([11-effects.md](11-effects.md#the-generator--read-and-measured)),
+   seeded from `NGI32.dll` ordinal 52;
+3. every particle is brought into the camera's frame, and one outside the box
+   is **wrapped**: moved a whole number of box extents along each axis
+   (`0x10073410`, by `floor`). A particle is never deleted and spawned for
+   leaving; it comes back in at the far side;
+4. the count is brought to the one asked: new particles are spawned anywhere
+   in the box, each coordinate `rand() ÷ 32767` of its extent (`0x10073200`;
+   the C runtime's `rand`, `0x1008e98c`), and a surplus is dropped from the end.
+
+So the fall follows the camera only by wrapping: turn, and the particles stay
+where they are in the world while the box turns under them.
+
+**What is drawn.** The particles are projected to the screen and each becomes a
+quad of **pre-transformed vertices**. A particle is left out unless its centre
+is inside the viewport less half a full-sized particle, rounded up, on every
+side; at most **600** quads are made (`0x258`, `0x100748d2`, `0x10075401`). The
+size is the caller's factor times the camera's slot 27, the viewport's width
+over the field of view — so a factor of *k* is a particle *k* ÷ *f* of the
+screen's width across at the near face — and it shrinks with depth by
+1 − (*d* − 2) ÷ 48.
+
+- **A snowflake** (`0x100748ea`) is centred on its particle, its half-size the
+  factor's half times the fade, the fade held at **0.1** or above
+  (`0x1009be28`). Its index turns it: the low two bits mirror it across and up
+  (`0x100a35f8`, `0x100a3608`) and turn its texture a quarter each
+  (`0x1009bde4`…), and bit 2 picks a square; without bit 2 it is a diamond,
+  the same square on its corner (× √2, `0x100a70a8`).
+- **A raindrop** (`0x1007416c`) is a quad from where the particle was drawn
+  before the last move to where it is now, its half-width the factor's half
+  times the fade, with no floor; both ends must be inside the viewport. A drop
+  that has just wrapped has no length.
+
+The quads go to the shader's slot 16 (`0x10028500`, called at `0x10075546`)
+with item flags `0xd`, the depth argument 3 — **`ZENABLE` and `ZWRITEENABLE`
+both off** — and **group 1, layer 8**: after the effects' layers 3 and 6 and a
+doorway's fade quad in layer 5, before the cockpit's layers 9 and 10
+([The dome](#the-dome)). One colour stands for every vertex (a stream of
+stride 0): parameter 1, put through the shader's colour filter while the
+camera's infrared is on (`0x10075b0b`), with a specular of `0xff000000`, whose
+alpha is the fog factor: **no fog**. The flags carry no `0x10`, so no device
+material is built and the material's own colours do not enter: the texture
+times that colour. The material is the `sky.wea` slot the start carries, asked
+for at time 0 every draw (`0x10075870`), so its first entry — `DUST_ADD`'s four
+entries, cells 0 to 3 of `DUST.0`, are not played, and the dust is cell 0, a
+puff 64 texels square.
+
+### Snow — *read*, and *seen*
+
+`CSnow::Draw` (`0x100759a0`): a size factor of **0.0195** (`0x1009be70`), a
+velocity of **(0.5, 0, −4)** world units a second (`0x10075b92`), the flutter on.
+A flake falls 4 a second and drifts 0.5 along x, and the flutter adds between
+0 and 1 a second along each axis, the same on all three. At a field of 1.3 the
+largest flake is 1.5% of the screen across and the smallest a tenth of that.
+
+*Seen* on `CAMPAIGN.03`, whose snow is `DUST_ADD`: soft squares and diamonds,
+two to fifteen pixels across on a 1400-pixel frame, some thirty-five in a
+500 × 320 region of sky, grey through the briefing and pink-red in play
+(Part 5, 1:55; Part 6, 0:55, 1:50, 2:00), and pink under the moon, whose slot 19
+is (244, 154, 183) to (255, 205, 224) (Part 6, 48:40). The engine's frames of
+the same mission match in count, size, shape and colour.
+
+**The colour is all that changes with the hour.** The material is the one slot
+the start carries, its first entry, and the size a constant, so the dust is the
+same puff by night as by day. The white many-pointed stars in the night frames
+of Part 6 (48:05, 48:40) are not it: they stand about the player's own muzzle
+flash and about the unit being shot twelve metres ahead, not in the sky, where
+the dust goes on falling pink. `DUST.0`'s star cells, pages 32 to 37, are worn
+by `splash5`, `plas_shoot` and `taser_shoot` — the sprites of the bullet-hit
+effects `exp_b_be`, `exp_b_cb` and `exp_b_hc`, of `exp_m_pls_b` and of
+`gunf_builder` (*measured*) — and by `SHIELD1`, which nothing names.
+
+### Rain — *read*
+
+`CRain::Draw` (`0x10076320`): a factor of **0.0065** (`0x1009beb8`), a velocity
+of **(0.5, 0, −60)** (`0x1007654b`), no flutter, streaks. At 60 frames a second
+a drop 26 ahead is a streak a fortieth of the screen's width long and a
+four-hundredth wide.
+
+**Its sound.** The constructor opens `sounds.lib`, finds the name the start
+carries — *"Unable to find sound"* if it is not there — makes a sound of it
+with flags `0x102`, sets its volume to 0 and plays it (`0x10075e37`–
+`0x10075fca`). Slot 3, every takt, sets the volume to
+`10000 × (intensity^(1/16) − 1)` hundredths of a decibel — four square roots
+(`0x100765e5`–`0x10076636`): silence at 0, −4.2 dB at 0.5, full at 1. The
+destructor stops and releases it (`0x100761a0`).
+
+No recording of rain is at hand. *Measured*: 8 missions rain, all with
+`RAIN_DROP`, cell 21 of `EFFECT6.0`, and `atm_rain1.wav`.
+
+### Lightning — *read*, *measured*, and *seen*
+
+`CLightning` draws nothing: its slot 4 is an empty routine (`0x100721a0`). It
+keeps **one instance of its effect** in the landscape's effect manager, made
+and switched off in its constructor (`0x10071a8d`–`0x10071af6`), and its
+update decides when to play it.
+
+**When** (`0x10071cb0`, three states):
+
+1. after a strike, nothing for **6000 ms** (`0x10071ce8`);
+2. then, the intensity above 0, the next strike's time is drawn
+   (`0x10071920`): now + `rand() ÷ 32767` × (1 − intensity) × **60000 ms**,
+   the intensity held at **0.95**;
+3. at that time, a strike.
+
+So a bolt every 6 to 9 seconds at full intensity, every 6 to 36 at 0.5, and
+at full intensity the first within three seconds of the object's start. *Measured* on the
+recording: over four minutes of Part 6.5 from a bunker's guns the ground
+lights up at 9:09.7, 9:17.5, 9:25.6, 9:32.1, 9:46.9, 9:54.9, 10:41.2, 10:48.0,
+10:54.5, 11:50.9, 11:57.0, 12:03.3, 12:10.9 and 12:25.2 — nine gaps between
+**6.1 and 8.1 s**, two of 14.3 and 14.8 with a strike unseen between, and the
+longer gaps where gunfire hides the count.
+
+**Where** (`0x100720b0`): a point drawn anywhere over the landscape's box —
+the corners its `IMesh2` hands out at start (`0x10071c9a`), x and y each
+`rand() ÷ 32767` of the box's extent. It is the whole map, not the camera's
+surroundings. `CLightning::Init`'s two panics, *"Root object is not a
+landscape"* and *"Landscape does not support IMesh2"*, are that request.
+
+**What a strike does** (`0x10071d70`): it asks the landscape for the ground at
+the point, puts the effect **300 above it** in a frame of the world's own axes,
+its second axis turned back one time in two (`0x10071f8a`), starts it in time
+mode 1, switches it on, and sizes it **(40, 40, 600)** (`0x10072058`). Those
+are its only calls: the height query and four slots of the effect manager.
+**A bolt hurts nothing.**
+
+**`env_lightning`** is three blocks over **0.75 s**, its time jittered by ±0.2
+(header flag 1, spread 0.4) and its sprites' fog factor held at 1 (flag
+`0x2000`, on this effect alone):
+
+| block | | |
+|---|---|---|
+| type 3, a sprite | material `env_lightning`: cell 23 of `EFFECT6.0`, a bolt drawn lying down, 192 × 32 texels, additive | fading 1 → 0; sprite mode **1**, direction (0, 0, 1) |
+| type 1, a light | kind 7: a point light, flags `0x20000000` | colour (7, 7, 10) → 0, range 100 → 0, falloff terms (0, 0, 1) |
+| type 2, a sound | `atm_light1.wav` | heard whole within 100, to 1500 |
+
+*The sprite.* The block's sprite mode is 1 and its direction (0, 0, 1), and a
+mode-1 sprite is a streak with the texture's u along its direction, turned
+about it to face the eye
+([11-effects.md](11-effects.md#a-sprites-mode--read-measured-and-seen)). So the
+bolt's picture runs **up the frame's third axis**: 600 tall and 40 across, from
+the ground up. *Seen* (Part 5, 1:55.0–1:55.6): a jagged white-pink bolt with a
+fainter branch, from the top of the frame down behind a hill.
+
+*The light.* It reaches the scene through **the shade's own lighter**, which
+[11-effects.md](11-effects.md#what-a-light-does-to-a-surface--read-and-measured)
+reads. An item that builds a device material takes one of two roads
+(`0x1002fe3d`–`0x1002ffa1`). With setting 29, `UseDXLighting`, on, the builder
+at `0x10030620` fills a `D3DLIGHT7` from each of the item's first eight light
+records and sets it on the device (`0x10030be6`); the setting's default is 0
+(`0x1005fcce`, and the [table](#the-render-settings) above), so **that road is
+not taken**. An earlier version of this section took it for the live one. With
+the setting off the item's light list goes to the shader's slot 8, whose point
+light (`Ngi32.dll:0x100165bb`–`0x100166ac`) leaves out a vertex past the range
+or facing away, and scales the rest by `a0 + a1 x + a2 x²` on
+*x* = (range − *d*) ÷ range, the three terms the block's own in its own order
+(`Effect.dll:0x1000fb9a` into `Terrain.dll:0x100800b0`, record `+0x38`,
+`+0x3c`, `+0x40`). `env_lightning`'s (0, 0, 1) is *x*², and its range starts at
+100 × the frame's 40 = 4000
+([11-effects.md](11-effects.md#type-1-is-a-light--read-and-measured) has the
+range's scale): at 1000 from the bolt the light is still 0.56 of (7, 7, 10),
+far past what a surface can show, and what is over 1 the lighter moves into
+the specular colour, which is added after the texture and whitens it. Its flag `0x20000000` only keeps it out of
+the landscape's emulated discs.
+
+*Seen*: for the bolt's half second **every lit surface within reach goes to
+its texture's own colours** — the ground, the hills and a unit's own cockpit
+pale and white-lilac, slopes facing away still dark, the sky, the dust and the
+HUD untouched, the gate's two towers dark (Part 5, 1:55.0–1:55.5; Part 6.5,
+9:46.9–9:47.3). A lightmapped batch takes no light at all
+([07-objects.md](07-objects.md#how-a-lightmapped-batch-is-drawn--read-and-measured)).
+Neither the sky nor the scene colour flashes. The flash is there whether or
+not the bolt is in view.
+
+### Which missions fall what — *measured*
+
+All 29 atmosphere files, through their `sky.wea`:
+
+| slot | material | files | of them falling |
+|---:|---|---:|---|
+| 7, snow | `SNOWFLAKE` (`EFFECT6.0` cell 20, blend 4) | 23 | 1: `CAMPAIGN.05/Mission.01`, three spells |
+| 7, snow | `DUST_ADD` (`DUST.0` cell 0, blend 2) | 6 | all 6, the whole day |
+| 8, rain | `RAIN_DROP` (`EFFECT6.0` cell 21, blend 4) | 29 | 8 |
+
+15 of the 29 start some weather: 7 snow, 8 rain, 8 lightning. The fourth float
+is at most 1.0 on all 656 keyframes. From a spell's start to its stop it is
+1.0 on 96 of snow's 104 keyframes, 0.7 on 2 and 0 on 6, the starts and stops
+of `CAMPAIGN.05/Mission.01`'s three; on rain's 57 it is 1.0 on 24, 0.8 on 10,
+0.5 to 0.7 on 5 and 0 on 18, its nine starts and nine stops, so **rain comes
+on and goes off by degrees**; on lightning's 96 it is 1.0 on 90 and 0.6 to
+0.8 on 6.
+
 ## What the viewer draws
 
 - The **nebula** on the dome, multiplied by a gradient from the keyframe's
@@ -1276,7 +1564,8 @@ entries; the scan that finds nothing at index 0 finds both.
   only while the keyframes' opcodes have it up.
 - **Rain** while a rain spell runs: the drops are its own `RAIN_DROP` sprite,
   cell 21 of `EFFECT6.0`, falling in a 900-unit box that rides with the
-  camera. Snow is marked in the payload and not drawn; lightning is neither.
+  camera — the viewer's own figures, not [the game's](#the-weather--read-and-seen).
+  Snow is marked in the payload and not drawn; lightning is neither.
 - The **lens flare**, as a 2D overlay drawn after the scene — it is in the
   lens, not the world, so it takes no depth test. The twelve elements and
   their tables are the engine's, and so is the second gate — full for the sun,
@@ -1354,14 +1643,29 @@ which is what the game does.
   the ambient alpha at `+0x20`, the two texture fields at `+0x48` and `+0x4c`
   (both 0) and a format id at `+0x5c`, so the only colour it can carry is the
   scene colour every emissive gets. And the draw is skipped whenever the view's
-  mode (slot 24, `0x10083010`) is 1 (`0x1007a325`). Which views carry which
-  mode is **not read**; the inference is that the world's view is 1, because
-  group 1 runs after group 0 and a screen-wide quad with the depth test off
-  would paint over the finished scene
-  ([The sky's first draw is a screen-wide quad](#the-skys-first-draw-is-a-screen-wide-quad-and-it-is-usually-skipped--read)).
-- **What lies below the dome's rim.** The rim is at eye height and the terrain
-  covers what is under it, but what the frame is cleared to before either is
-  drawn is still not read.
+  mode (slot 24, `0x10083010`) is 1 (`0x1007a325`).
+  ~~Which views carry which mode~~ — the scene's own camera is mode 0, where
+  the quad is drawn, first of all and before the world; the earlier inference
+  had it the other way round
+  ([The sky's first draw is a screen-wide quad](#the-skys-first-draw-is-a-screen-wide-quad--read)).
+- ~~**What lies below the dome's rim.**~~ The sky's screen-wide quad, drawn
+  before the dome and the world in every scene camera's frame. That it paints
+  the scene colour is derived and not checked against a frame; what the device
+  is cleared to under it is still not read.
+- ~~What the three weather objects draw~~ — rain and snow are one particle
+  system of up to a thousand points kept in the camera's box, 2 to 50 ahead,
+  and drawn as screen-space quads over the finished world with the depth test
+  off; lightning draws nothing and plays `env_lightning` at a point drawn over
+  the whole map every 6 s and up to 60 more
+  ([The weather](#the-weather--read-and-seen)).
+- **The flags the rain's sound is made with**, `0x102` (`0x10075f8c`): that it
+  loops is inferred from its being played once and never again.
+- **Which faces the lightning's ground query takes.** It is the landscape's
+  slot 8 with kind 2 and the default filter (`0x10071e19`); the filter's mask
+  at `0x100a6f54` is not read.
+- **Who gives a camera a mode other than 0.** `ICamera2`'s slot 23
+  (`0x10082fd0`) is the only writer of `+0x280` besides the constructor, and
+  its caller is not found.
 - **What flag bit 0 of a material's blend byte does.** It is set on `ENV_STARS`
   and on nothing else in the game, and it does not change the blend mode.
 - ~~Which field carries the opcode~~ — the word ahead of slot 0; the three

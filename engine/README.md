@@ -149,7 +149,25 @@ starts at the file's closing time and plays its sections in turn:
 - the lit colour, the scene colour and the material's ambient colour (its
   self-light) and diffuse under both lights, is formed in the files' display
   space, held to 1, and decoded; the texture's alpha is scaled by the ambient
-  alpha.
+  alpha;
+- the **weather** runs from its start keyframe to its stop. Snow and rain are a
+  thousand points at full intensity, kept in the camera's box from 2 to 50 ahead
+  and wrapped round it as it moves, drawn as quads over the finished scene with
+  the depth test off, in slot 19's colour held at 80 or above: a snowflake a
+  square or a diamond that shrinks with depth, falling at 4, a raindrop a streak
+  from where it was a frame ago, falling at 60, its sound as loud as the rain is
+  hard. On `CAMPAIGN.03` the snow is the red dust, in the briefing as in the
+  cockpit and under a roof (`--mission MISSIONS/CAMPAIGN/CAMPAIGN.03/Mission.02
+  --skip-briefing --ticks 3600`). The fifth slots draw with the scene here, so
+  the dust shows over a cockpit's own frame where the game draws that after it;
+- **lightning** strikes a point anywhere on the map every 6 s and up to 60 more
+  by its intensity: `env_lightning`'s bolt, a streak 600 tall by its block's
+  mode, seen through the fog, and its thunder (`--ticks 6 --look 335,689,60,902,788,300` on the same mission
+  looks at the first bolt, `--ticks 8` is inside its flash). The flash is the
+  effect's own light, (7, 7, 10) over a range of 4000, one of the frame's point
+  lights: it lights the ground and the objects by the square of what is left of
+  its range, to their textures' own colours and no paler, a lit colour being
+  held at 1 here.
 
 Sound plays each effect's sound emitters from `sounds.lib`, WAV and MS ADPCM
 through kira, as their effect time passes their trigger. A HUD showed a
@@ -1452,13 +1470,16 @@ a row here. A row leaves this table when research closes it.
 | milestone | what is unknown | stand-in | see |
 |---|---|---|---|
 | M1 | Whether the dome and its layers take the scene's fog, and what the game clears the frame to below the dome's rim | draw the dome at the camera, depth-tested without writing depth under a projection with no far plane, unfogged but for its rim; clear the frame to the fog colour | [10](../docs/10-sky.md#the-dome) |
-| M1 | Which views carry the mode that skips the sky's screen-wide quad (view slot 24 = 1, `0x1007a325`); the quad itself is read, and carries the scene colour | never drawn; the frame is cleared to the fog colour instead | [10](../docs/10-sky.md#the-skys-first-draw-is-a-screen-wide-quad-and-it-is-usually-skipped--read) |
+| M1 | What the sky's screen-wide quad paints: it is drawn first of all in every scene camera's frame (mode 0; only mode 1 skips it, `0x1007a325`), and that it carries the scene colour is derived, not checked against a frame | never drawn; the frame is cleared to the fog colour instead | [10](../docs/10-sky.md#the-skys-first-draw-is-a-screen-wide-quad--read) |
 | M1 | The files' colours in a renderer that decodes textures to linear | sky, fog and dome colours and texture tints decoded from sRGB to linear; the lit colour (scene colour, material ambient and diffuse, both lights) formed from the files' values, held to 1, then decoded, so blends match the game's display-space ones | [10](../docs/10-sky.md#the-dome-the-fog-and-the-scene-colour--read-and-measured) |
 | M4 | Whether a target the hero's AI set before the player took over survives | none: nothing sets it while the player drives, so the plasma bolt and the missile fly straight | [29](../docs/29-weapons.md#not-established) |
 | M4 | How a **building's** gun capacitor refills; a unit's runs the read power tick | a gun on a building, or on a unit with no battery, is served at a level of 1 | [23](../docs/23-economy.md#bots-spend-power-through-the-same-code-priced-by-part--read-and-measured) |
 | M4 | Poses of other units for the hit test | their rest poses: other units' animation is not played | [24](../docs/24-motion.md#playing-a-state--read-and-measured) |
 | M4 | When each of a burst's particles spawns | every particle of a type-7 or type-10 burst is as old as the emitter's progress through the window over +28, so they fly as one | [11](../docs/11-effects.md#a-channel-is-a-low-high-jitter-exponent-run--read-and-measured) |
-| M4 | How an effect sprite fogs: the game puts a factor linear in the *squared* distance in its specular alpha (`Terrain.dll:0x1004bf20`) | the renderer's own fog, linear in the distance itself, as every other pipeline takes it | [11](../docs/11-effects.md#how-an-effect-sprite-is-coloured--read-and-measured) |
+| M4 | How an effect sprite fogs: the game puts a factor linear in the *squared* distance in its specular alpha (`Terrain.dll:0x1004bf20`) | the renderer's own fog, linear in the distance itself, as every other pipeline takes it; none on an effect whose header carries `0x2000`, as read | [11](../docs/11-effects.md#how-an-effect-sprite-is-coloured--read-and-measured) |
+| M5 | The weather's random draws: where a particle spawns and when and where a bolt strikes come off `Terrain.dll`'s one C-runtime `rand` state, seeded 1 and shared with every other caller in the module, and the snow's flutter off a generator seeded from the clock | the weather keeps states of its own of the same two generators | [10](../docs/10-sky.md#the-weather--read-and-seen) |
+| M5 | Which faces the lightning's ground query takes (the landscape's slot 8, kind 2, the default filter) | the landscape's top face under the strike, and the map box's floor where there is none | [10](../docs/10-sky.md#lightning--read-measured-and-seen) |
+| M5 | The flags the rain's background sound is made with, `0x102` | a loop, heard alike from everywhere, its volume the read one | [10](../docs/10-sky.md#rain--read) |
 | M4 | The owner values of time modes 9–14, now that each is read: the spin over the top spin, and one minus the owner's life fraction (property `0x31`) | nothing sets either, so a mode-9-to-12 effect holds *t* at 0 and a mode-14 one reads its owner as undamaged; of the 923 only the 8 burning trees and wrecks are mode 14, and none is 9–13. A tree's load group makes its fire switched off (header flag `0x40`) for block entry 6, a machine's critical damage, to switch on, and entries 6 and 7 are not run (docs/13, "Critical damage"): nothing burns, and a shot tree never catches fire | [11](../docs/11-effects.md#how-an-effect-runs--read) |
 | M4 | How a sprite whose material says opaque blends | alpha-blended, so its fade shows | [07](../docs/07-objects.md#how-a-material-draws-is-in-the-archive-directory) |
 | M4 | Which lights an item is lit with: the game gathers a list for each object and each landscape cell, every light whose reach meets it, and its lighter walks all of it | one list a frame, the 64 lights whose reach comes nearest the eye, those that light everything first; each lights whatever stands inside its range. A unit's parts are agents with a light manager each and a round is one: an owner-only light on a unit's gun lights the whole unit, and one on a round nothing | [11](../docs/11-effects.md#what-a-light-does-to-a-surface--read-and-measured) |

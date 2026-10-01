@@ -70,6 +70,8 @@ pub const LIGHT_FLOAT: usize = 2;
 pub const EXTENT_ACROSS_FLOAT: usize = 0;
 /// The second float: its extent up (`CSun +0x98`).
 pub const EXTENT_UP_FLOAT: usize = 1;
+/// The fourth float: the running weather's intensity.
+pub const WEATHER_FLOAT: usize = 3;
 
 /// What each `sky.wea` slot is, fixed across all 29 missions (`docs/10-sky.md`, "The
 /// sibling `sky.wea` -- the slot index is the role").
@@ -390,6 +392,28 @@ pub fn bodies_aloft(atmosphere: &Atmosphere, elapsed: f64) -> Vec<(Body, f32)> {
         .collect()
 }
 
+/// The keyframe that started the `kind` of weather running `elapsed` real seconds after the
+/// mission loads, or `None` while none runs: the last of its events the clock has passed is
+/// a start. The clock's first takt fires every event stamped before its start
+/// (`0x10070330` leaves the last event position at *(0, 0)*), and from the second time
+/// round the cycle an event late in it has been passed too.
+pub fn running(atmosphere: &Atmosphere, elapsed: f64, kind: Kind) -> Option<&Keyframe> {
+    let cycle = cycle_seconds(atmosphere) as f64;
+    if cycle <= 0.0 {
+        return None;
+    }
+    let since = since_epoch(atmosphere, elapsed);
+    let (laps, into) = ((since / cycle).floor(), since.rem_euclid(cycle));
+    let of_kind: Vec<(f64, Event)> = events(atmosphere)
+        .into_iter()
+        .filter(|e| e.kind == kind)
+        .map(|e| (between(atmosphere, Position::default(), e.position), e))
+        .collect();
+    let last =
+        of_kind.iter().rev().find(|(at, _)| *at <= into).or(if laps >= 1.0 { of_kind.last() } else { None });
+    last.filter(|(_, e)| e.start).map(|(_, e)| e.keyframe)
+}
+
 /// What the sky holds at one moment. Colours are the files' own, 0..1; the lights may
 /// run past 1.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -425,6 +449,12 @@ pub struct Sky {
     /// body is never drawn taller than it is wide. Most are (1, 1) or (0.65, 0.65). They
     /// are a factor and not a length, the base being camera slot 27, which is not read.
     pub body_extent: [f32; 2],
+    /// What the weather runs at: the fourth float, which rain, snow and lightning each take
+    /// (`0x1006ce00`, `0x1006cd81`, `0x1006cef8`).
+    pub weather: f32,
+    /// Slot 19 as it is, before the third float scales it: what rain and snow are coloured
+    /// from (docs/10-sky.md, "The weather").
+    pub weather_colour: Rgb,
 }
 
 fn lerp(a: Rgb, b: Rgb, t: f32) -> Rgb {
@@ -483,6 +513,9 @@ pub fn at(atmosphere: &Atmosphere, now: Position) -> Option<Sky> {
         second_light: colour(k0, k1, SUN_SECOND_LIGHT_SLOT, t),
         body_extent: [EXTENT_ACROSS_FLOAT, EXTENT_UP_FLOAT]
             .map(|f| k0.intensity[f] + (k1.intensity[f] - k0.intensity[f]) * t),
+        weather: k0.intensity[WEATHER_FLOAT]
+            + (k1.intensity[WEATHER_FLOAT] - k0.intensity[WEATHER_FLOAT]) * t,
+        weather_colour: colour(k0, k1, SUN_LIGHT_SLOT, t),
     })
 }
 
@@ -674,6 +707,49 @@ mod tests {
 
     fn at_seconds(section: usize, seconds: f64) -> Position {
         Position { section, seconds }
+    }
+
+    #[test]
+    fn weather_runs_from_its_start_to_its_stop_and_takes_the_fourth_float() {
+        // Two 24-minute days, a minute of the clock a second: the first dry, the second
+        // raining from 04:00 to 09:00 and coming on by degrees; the clock starts at 01:00.
+        let mut start = keyframe(1, 4, 0, 3, "");
+        start.effects = vec!["atm_rain1.wav".to_owned()];
+        start.slots[SUN_LIGHT_SLOT] = [0, 0, 200, 255];
+        let mut hard = keyframe(1, 6, 0, 7, "");
+        hard.intensity[WEATHER_FLOAT] = 0.8;
+        hard.slots[SUN_LIGHT_SLOT] = [100, 0, 100, 255];
+        let a = atmosphere(
+            &[24, 24],
+            vec![keyframe(0, 0, 0, 7, ""), start, hard, keyframe(1, 9, 0, 4, "")],
+            ClockTime::of(1, 0),
+        );
+        // An hour of the clock is 60 s; the second day starts 1380 s after the clock does.
+        let begins = 1380.0 + 240.0;
+        assert!(running(&a, 0.0, Kind::Rain).is_none());
+        assert!(running(&a, begins - 1.0, Kind::Rain).is_none());
+        let started = running(&a, begins + 1.0, Kind::Rain).expect("raining");
+        assert_eq!(started.effects, ["atm_rain1.wav"]);
+        assert!(running(&a, begins + 1.0, Kind::Snow).is_none());
+        // Half way to the next keyframe the intensity and slot 19 are half way too.
+        let sky = at(&a, position(&a, begins + 60.0)).unwrap();
+        assert!((sky.weather - 0.4).abs() < 1e-4, "{}", sky.weather);
+        assert!((sky.weather_colour[0] - 150.0 / 255.0).abs() < 1e-4);
+        assert!((sky.weather_colour[2] - 50.0 / 255.0).abs() < 1e-4);
+        // It stops at 09:00, and rains again the second time round the two days.
+        assert!(running(&a, 1380.0 + 541.0, Kind::Rain).is_none());
+        assert!(running(&a, begins + 2880.0 + 1.0, Kind::Rain).is_some());
+    }
+
+    #[test]
+    fn weather_started_before_the_clocks_start_runs_from_the_first_takt() {
+        // Snow from 00:00 to 23:00 of a 24-minute day whose clock starts at 01:00.
+        let a =
+            atmosphere(&[24], vec![keyframe(0, 0, 0, 5, ""), keyframe(0, 23, 0, 6, "")], ClockTime::of(1, 0));
+        assert!(running(&a, 0.0, Kind::Snow).is_some());
+        // 23:00 is 1320 s after the clock's start; the next day's snow starts 60 s on.
+        assert!(running(&a, 1321.0, Kind::Snow).is_none());
+        assert!(running(&a, 1381.0, Kind::Snow).is_some());
     }
 
     #[test]

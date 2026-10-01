@@ -18,3 +18,4 @@ mod selection;
 mod squad;
 mod view;
 mod weapons;
+mod weather;

@@ -21,6 +21,9 @@ use parkan_formats::fxid::{
 
 /// Header flag 0x400: draw nothing while the tested point is hidden (`Effect.dll:0x10008016`).
 pub const FX_HIDE_OCCLUDED: u32 = 0x400;
+/// Header flag 0x2000: the sprites' fog factor is held at 1 (docs/11, "How an effect sprite is
+/// coloured"). `env_lightning` alone carries it, so a bolt shows across the map.
+pub const FX_NO_FOG: u32 = 0x2000;
 /// Header flag 0x1000: hand the emitters the manager's target point every manager tick
 /// (`Effect.dll:0x10006349`), which a bolt takes for its start (`0x10003070`).
 pub const FX_TARGET_POINT: u32 = 0x1000;
@@ -362,6 +365,9 @@ pub struct Sprite {
     /// two keys that bracket it. A fraction outside 0..1 becomes 0.5 there. See docs/11,
     /// "A phase is where its material's animation stands".
     pub phase: f32,
+    /// Its fog factor held at 1, whatever its distance: header flag [`FX_NO_FOG`], effect
+    /// draw flag 4 (`Effect.dll:0x1001088c`, `Terrain.dll:0x10028417`).
+    pub unfogged: bool,
     /// Drawn as a hemisphere through `matrix` instead of a quad: a type-9 emitter's shape.
     pub dome: Option<Dome>,
     /// The frame to turn the quad through, each axis as long as the sprite is that way:
@@ -1029,8 +1035,10 @@ impl Instance {
             // effect draws at all, never its depth state
             // ([11](../../../docs/11-effects.md#a-beacon-lights-glow--read-and-measured)).
             let overlay = in_view && e.word & EMITTER_FLAG != 0;
+            let unfogged = self.effect.header.flags & FX_NO_FOG != 0;
             for s in &mut out[first..] {
                 s.overlay = overlay;
+                s.unfogged = unfogged;
             }
             // A fade value of 0 draws nothing (`Terrain.dll:0x1002887e`).
             let mut k = first;
@@ -1082,6 +1090,7 @@ impl Instance {
             height: if stretched { width } else { size.z * self.scale * z.length() },
             alpha,
             overlay: false,
+            unfogged: false,
             lengthwise: false,
             age_ms,
             phase,
@@ -1237,6 +1246,7 @@ impl Instance {
                 height: (e.f(24) + (e.f(28) - e.f(24)) * p) * self.scale,
                 alpha,
                 overlay: false,
+                unfogged: false,
                 lengthwise: true,
                 age_ms,
                 phase,

@@ -42,6 +42,7 @@ use parkan_sim::path::Graph;
 use parkan_sim::progression::Notice;
 use parkan_sim::solid::{self, NO_CONTACT, Solid};
 use parkan_sim::targeting::{Contact, TargetList};
+use parkan_sim::weather::{BOLT_HEIGHT, BOLT_WIDTH, Fall};
 use parkan_sim::wizard::{GROUND_POINT, flight, flight_leg, path_walk, straight_walk, walk_speed};
 
 use crate::assembly::Assembly;
@@ -419,6 +420,8 @@ pub struct Play {
     /// 0), which the clan's next takt frees again (`ai.dll:0x10006580`, see
     /// [`Play::free_minds`]).
     pub reserved: HashMap<i64, usize>,
+    /// The mission's rain, snow and lightning, once loaded (docs/10, "The weather").
+    pub weather: Option<crate::weather::Weather>,
     /// The walker's search's random source (docs/24, "The global path").
     pub walk_seed: u32,
     /// The random source an animal's flight heights draw from (docs/24, "A flyer's walk
@@ -1166,6 +1169,7 @@ impl Play {
             places: Vec::new(),
             mindless: Vec::new(),
             reserved: HashMap::new(),
+            weather: None,
             walk_seed: 0x2545_f491,
             flight_seed: 0x9e37_79b9,
             grazing: std::cell::RefCell::default(),
@@ -1344,6 +1348,57 @@ impl Play {
         for g in &mut self.hero.guns {
             g.stroked.clear();
         }
+    }
+
+    /// Load the mission's weather from its directory's `sky.ske` and `sky.wea`, and the
+    /// effects its lightning plays, so their looks resolve with the rest
+    /// ([`Play::draw_rounds`]).
+    pub fn load_weather(&mut self, mission_dir: &Path) {
+        self.weather = crate::weather::Weather::load(mission_dir);
+        for effect in self.weather.as_ref().map(|w| w.bolt_effects()).unwrap_or_default() {
+            self.fx.template(&effect);
+        }
+    }
+
+    /// The lightning's update (`Terrain.dll:0x10071cb0`): a strike puts its effect at a point
+    /// drawn over the map's box, [`BOLT_HEIGHT`] ÷ 2 above the ground there, in a frame 40 ×
+    /// 40 × 600 that is mirrored across one time in two, started in time mode 1 and switched
+    /// on (`0x10071d70`). The object keeps one instance of the effect, so the last strike's
+    /// goes as this one's is made. It calls nothing else: a bolt hurts nothing. The flash is
+    /// the effect's own light, which the effects' lights carry like any other (docs/11, "What
+    /// a light does to a surface").
+    ///
+    /// STAND-IN: docs/10-sky.md#lightning--read-measured-and-seen -- which faces the
+    /// landscape's query for the ground under the strike takes is not read (slot 8, kind 2,
+    /// with the default filter): here the landscape's top face, and the map box's floor where
+    /// there is none.
+    fn lightning(&mut self, now_ms: f64) {
+        let (lo, hi) = self.ground.bounds();
+        let Some((strike, effect)) = self.weather.as_mut().and_then(|w| w.strike(now_ms, lo, hi)) else {
+            return;
+        };
+        let ground =
+            self.ground.landscape_top(strike.x, strike.y).unwrap_or_else(|| self.ground.world_box().0.z);
+        let across = if strike.mirrored { -Vec3::Y } else { Vec3::Y };
+        let frame = Frame {
+            origin: Vec3::new(strike.x, strike.y, ground + BOLT_HEIGHT * 0.5),
+            axes: [Vec3::X * BOLT_WIDTH, across * BOLT_WIDTH, Vec3::Z * BOLT_HEIGHT],
+            points: true,
+        };
+        self.fx.remove(Owner::Lightning);
+        self.fx.start(Owner::Lightning, &effect, frame, 1.0, now_ms, Some(parkan_formats::fxid::TIME_ONCE));
+    }
+
+    /// This frame's rain and snow through `view`, updated to now as the game's draw updates
+    /// them (docs/10, "The weather").
+    pub fn weather_specks(&mut self, view: &parkan_sim::weather::View) -> Vec<crate::weather::Drawn> {
+        let now = self.hero.time_ms;
+        self.weather.as_mut().map(|w| w.specks(now, view)).unwrap_or_default()
+    }
+
+    /// The rain's background sound and its volume in decibels, while it rains.
+    pub fn rain_sound(&self) -> Option<(String, f32)> {
+        self.weather.as_ref().and_then(|w| w.rain_sound(self.hero.time_ms))
     }
 
     /// Load the mission's progression from `mission_dir`: its player clan's script, its
@@ -1829,6 +1884,13 @@ impl Play {
     /// effects' looks in `store`.
     pub fn draw_rounds(&mut self, store: &mut TextureStore, objects: &mut Objects) -> Result<()> {
         self.fx.resolve_looks(store)?;
+        if let Some(weather) = self.weather.as_mut() {
+            for (i, fall) in [Fall::Snow, Fall::Rain].into_iter().enumerate() {
+                if let Some(material) = weather.material(fall).map(str::to_owned) {
+                    weather.looks[i] = self.fx.material_look(store, &material).ok();
+                }
+            }
+        }
         self.battle.draw_rounds(&mut self.assembly, store, objects)
     }
 
@@ -2071,6 +2133,7 @@ impl Play {
             _ => true,
         });
         self.lode_plumes(now);
+        self.lightning(now);
         let cues = self.fx.cues(now);
         self.cues.extend(cues);
         self.fx.tick(now);
@@ -4902,7 +4965,10 @@ impl Play {
                         | Owner::Shot(t, _)
                         | Owner::Shield(t, _) => Lit::Target(t),
                         Owner::Turret(_) | Owner::Chassis(_) => Lit::Hero,
-                        Owner::World | Owner::Round(..) | Owner::Lode(_) => return None,
+                        // The lightning's effect hangs in the landscape's own manager
+                        // (`Terrain.dll:0x10071a8d`); `env_lightning`'s light is kind 7, which
+                        // is not owner-only, so it lights everything above.
+                        Owner::World | Owner::Round(..) | Owner::Lode(_) | Owner::Lightning => return None,
                     }
                 };
                 Some(VertexLight { light, lit })

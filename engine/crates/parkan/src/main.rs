@@ -800,23 +800,24 @@ fn screenshot(loaded: &scene::Loaded, game: &Path, args: &Args, out: &Path) -> R
     };
     // Where the fog is measured from and the flare gate looks along: the camera drawn, and
     // the field of view a portal quad's fade is scaled by.
-    let (eye, forward, field, seconds) = match (&play, args.look) {
+    let (eye, forward, up, field, seconds) = match (&play, args.look) {
         (_, Some([x, y, z, tx, ty, tz])) => {
             let (eye, target) = (Vec3::new(x, y, z), Vec3::new(tx, ty, tz));
             (
                 eye,
                 (target - eye).normalize_or(Vec3::Y),
+                Vec3::Z,
                 camera::debug_field(aspect),
                 play.as_ref().map_or(0.0, |p| p.hero.time_ms / 1000.0),
             )
         }
         (Some(p), None) => {
             let e = briefing.as_ref().map_or_else(|| p.eye(), |b| b.eye());
-            (e.position, e.forward, e.fov_x, p.hero.time_ms / 1000.0)
+            (e.position, e.forward, e.up, e.fov_x, p.hero.time_ms / 1000.0)
         }
         (None, None) => {
             let c = start_camera(loaded);
-            (c.position, c.forward(), camera::debug_field(aspect), 0.0)
+            (c.position, c.forward(), Vec3::Z, camera::debug_field(aspect), 0.0)
         }
     };
     if let Some((lighting, colours)) = scene::lighting(&world, seconds, eye, forward, field) {
@@ -827,7 +828,15 @@ fn screenshot(loaded: &scene::Loaded, game: &Path, args: &Args, out: &Path) -> R
         renderer.set_flare(&gpu.device, scene::flare(&world, seconds));
     }
     if let Some(p) = play.as_mut() {
-        scene::sync(&mut renderer, &gpu.device, &gpu.queue, p, &world.objects, view_proj, eye);
+        // The weather as a frame drawn a tick before left it, so a raindrop has the length the
+        // window's frames give it.
+        let weather = parkan_sim::weather::View::new(eye, forward, up, field, (width as f32, height as f32));
+        let before = p.hero.time_ms - TICK_MS;
+        if let Some(w) = p.weather.as_mut() {
+            w.specks(before, &weather);
+        }
+        let weather = (!args.top_down).then_some(&weather);
+        scene::sync(&mut renderer, &gpu.device, &gpu.queue, p, &world.objects, view_proj, eye, weather);
         if let Some(v) = &view {
             let outside = briefing.is_some() || p.view_mode().shows_cursor() || p.outer_shows();
             scene::place_own_view(&mut renderer, &gpu.queue, v, p, outside);
@@ -1722,6 +1731,8 @@ impl App {
             for cue in std::mem::take(&mut play.cues) {
                 audio.play(&cue, eye.position, right);
             }
+            // The rain's background sound, as loud as the rain is hard (docs/10, "Rain").
+            audio.rain(play.rain_sound());
         }
         // What the game says: its text on screen, its voices queued, its sounds at once.
         if let Some(play) = self.play.as_mut() {
@@ -1825,6 +1836,13 @@ impl App {
                 if let Some(b) = briefing {
                     scene::draw_briefing(&mut r.renderer, &r.gpu.device, &r.gpu.queue, b, screen);
                 }
+                let weather = parkan_sim::weather::View::new(
+                    eye.position,
+                    eye.forward,
+                    eye.up,
+                    eye.fov_x,
+                    (r.config.width as f32, r.config.height as f32),
+                );
                 scene::sync(
                     &mut r.renderer,
                     &r.gpu.device,
@@ -1833,6 +1851,7 @@ impl App {
                     &self.world.objects,
                     view_proj,
                     eye.position,
+                    Some(&weather),
                 );
                 if let Some(v) = &self.view {
                     let outside = briefing.is_some() || play.view_mode().shows_cursor() || play.outer_shows();

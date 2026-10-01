@@ -602,11 +602,11 @@ impl Renderer {
         if let Some(text) = &self.text {
             text.resize(queue, (width, height));
         }
-        // STAND-IN: docs/10-sky.md#the-dome -- what the game clears the frame to below
-        // the dome's rim is not read; here it is the fog colour, so the horizon meets it.
-        // The sky's own screen-wide quad carries the scene colour, but the game skips it
-        // whenever the view's mode is 1, and the world's view is taken to be that one
-        // (docs/10-sky.md, "The sky's first draw is a screen-wide quad").
+        // STAND-IN: docs/10-sky.md#the-skys-first-draw-is-a-screen-wide-quad--read -- what
+        // stands below the dome's rim is the sky's own screen-wide quad, drawn first of all
+        // in a scene camera's frame; that it carries the scene colour is derived and not
+        // checked against a frame, so it is not drawn, and the frame is cleared to the fog
+        // colour, where the horizon meets it.
         let [fr, fg, fb] = self.lighting.fog_colour;
         let clear = if self.lighting.fog_end < f32::MAX {
             wgpu::Color { r: f64::from(fr), g: f64::from(fg), b: f64::from(fb), a: 1.0 }
