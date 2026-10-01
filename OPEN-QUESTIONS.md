@@ -240,17 +240,15 @@ remainder a closed line names stays here as a line of its own.
   in the engine's run it burst 17 m from the pod). One white flash, and the mission fails over
   the fallen hero's camera. So a blast at least that large reaches the room under a building.
   Still not read: the blast's own test against a hero indoors.
-- [ ] **What carries a winged SSM over the ground to a building.** Raised 2026-10-01 from checking
-  C03 M02 against a recording ("Let's Play - Parkan: Iron Strategy, Part 6", -yNnsqudMzw,
-  13:49.5–13:54.2). The raider is `32_m_w2`, with two `e_gun_ml_18`: `bm_m_04`, 60,000 a round, a
-  45 m blast, 45 m/s, turning 0.5 rad/s. It stands 345 to 292 m off the player's Small Bunker, and
-  its missile lands on the bunker. *Read*: the round leaves along its gun's facing at its top
-  speed and steers at its target's node-sphere centre, so a crest takes it
-  ([29-weapons](docs/29-weapons.md#guided-rounds-differ-in-how-hard-they-steer--read-and-measured)),
-  and the AI fires one only at a building. In the engine the same unit fires from 159 m, and the
-  missile meets the ground 13 m out; its blast kills the launcher. Not read: which way the gun
-  faces as a guided round leaves it (the turret's pitch, or a loft); where a bunker's node-sphere
-  centre stands against its ground; and whether a blast spares the round's owner.
+- [ ] **Whether a blast spares the object that fired it.** The remainder of the winged-SSM line
+  closed 2026-10-01 ([COMPLETED-QUESTIONS](COMPLETED-QUESTIONS.md#turrets-weapons-and-camera)).
+  [26-damage](docs/26-damage.md) reads that a hit does nothing if it is "the target's own", with no
+  address for the test, and the engine's blast reaches the round's owner as it does any object
+  whose bounds meet it. On C03 M02 that matters once the raider closes on the bunker: a winged SSM
+  it fires from about 25 m lands within its own 45 m blast and kills it. The recording ends that
+  raid sooner, on the first missile. Not read: the test, which sits somewhere between the
+  damage stage that builds the hits (`Control.dll:0x100113e0`–`0x10011900`) and the queue's
+  application (`0x10012ce0`).
 
 ## AI, scripts, packages and economy
 

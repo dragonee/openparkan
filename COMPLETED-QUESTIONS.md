@@ -1214,6 +1214,23 @@ tests, 1015 of 1015 checks, 509 engine tests and 201 install tests, `ruff` clean
   turret passes both bits in six of the 17 and is stopped one level further out: its page never opens,
   because `r_h` is not a chassis-page prefix at any factory grade. Zero cost is not the gate
   ([30-turrets](docs/30-turrets.md), [38-designs](docs/38-designs.md)).
+- [x] ~~What carries a winged SSM over the ground to a building~~ — raised and closed 2026-10-01: nothing
+  carries it. The engine read two rules short and fired from too close.
+  - The raider in "Let's Play - Parkan: Iron Strategy, Part 6" (-yNnsqudMzw, 13:49.5–13:54.2) stands
+    345 to 292 m off C03 M02's Small Bunker, and its winged SSM lands on the bunker.
+  - **An attack never nears a building** (*read*). The attack tick asks for the nearest contact only
+    while the flag at `+0x64` is set (`Behavior.dll:0x100272c9`), and a building target's move clears
+    it (`0x1002777d`), so the fire control holds the building from the first pick on. The engine let
+    the attacker near it until within 200 of its point, where the radar, which never lists a building,
+    gave it nothing to fire on.
+  - **A round of more than 10,000 is held for a building**
+    ([29-weapons](docs/29-weapons.md#how-the-ai-fires--read), read long since and not in the engine),
+    so the raider stopped spending its missiles on the hero it passed.
+  - With both, the gate opens at 500 m, the 7 s lock runs out short of 400, and the missile lands with
+    the raider 289 m off, as the recording has it. The flight itself, straight at the node-sphere
+    centre, needed nothing.
+  - The remainder, whether a blast spares the object that fired it, stays open
+    ([31-packages](docs/31-packages.md), [29-weapons](docs/29-weapons.md)).
 
 ## Damage, sensors and ownership
 

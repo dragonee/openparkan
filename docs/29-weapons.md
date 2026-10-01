@@ -979,6 +979,11 @@ units only, or weighted by the areal figure (`0x100240ae`).
     an object list by the same field, its flag `0x40` admitting class 3 and `0x20`
     class 4. So **the AI fires a winged SSM only at a building** (*derived*), which
     is what a 45–60 m blast at 700 m is for.
+    *Seen* on C03 M02 ("Let's Play - Parkan: Iron Strategy, Part 6",
+    -yNnsqudMzw, 13:44–13:54): the raider, `32_m_w2` with two `e_gun_ml_18`,
+    lands a winged SSM on the player's Small Bunker from 292 m. The engine,
+    before it held heavy rounds back, spent both on the hero it passed on the
+    way.
   - **The bar separates cleanly** (*measured*): 3 of the 62 `e_gun_*` records with
     a round do 10,000 or more — `e_gun_bl_17` (`bm_b_04`, 100,000) and
     `e_gun_bl_18` and `e_gun_ml_18` (`bm_m_04`, 60,000), the three winged SSM

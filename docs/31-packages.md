@@ -1364,7 +1364,14 @@ is only "walk to P at speed S".
    (0, 0, 0), it logs "Target .. is dead... mission accomplished" and ends.
 2. **Fire control:** while nearing it asks for {2, −1, 0.5}, the nearest
    hostile contact. Otherwise it asks for {1, `+0x60`, 0.5}, its own target
-   ([The fire control](#the-fire-control--read)).
+   ([The fire control](#the-fire-control--read)). Nearing is the flag at `+0x64`
+   (`0x100272c9`), which only a unit target's move sets: **a building target is
+   never neared**, since its move clears the flag (`0x1002777d`, below), so the
+   fire control holds the building from the first pick on, at any distance.
+   *Seen* on C03 M02 ("Let's Play - Parkan: Iron Strategy, Part 6",
+   -yNnsqudMzw, 13:49.5–13:54.2): the raider ordered onto the player's Small
+   Bunker lands a winged SSM on it while it still stands 292 m off. The
+   building, which the radar never lists, is out of reach of mode 2.
 3. **Unstuck:** this runs only while fighting and not following the target
    (`+0x5c` clear). It needs `+0x78`, the time fighting began, to be set, and
    two times more than 10 s past it: now, and a time the behaviour keeps at

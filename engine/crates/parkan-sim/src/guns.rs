@@ -27,6 +27,10 @@ const STROKE: u8 = 4;
 /// A round's frame `+116` for which the HUD draws a guided lock (`iron3d.dll:0x1009ce0d`):
 /// every round with a seeker, and no other (docs/35-hud.md, "The guided lock").
 pub const LOCK_DRAWN: i32 = 16;
+/// The damage above which the AI fires a round only at a building (`Behavior.dll:0x1005994c`,
+/// docs/29, "How the AI fires"): the winged SSMs' 60,000 and 100,000, where the next gun down
+/// does 3,000.
+pub const HEAVY_ROUND: f32 = 10_000.0;
 
 /// What a gun reports of its target gate (`+0x11c`): a shot may go, no target, the
 /// target out of range, the target off the barrel.
@@ -156,6 +160,10 @@ pub struct Gun {
     /// The word its round's frame keeps at `+116`, which the gun copies with the rest of
     /// the frame's block at link (`0x100297a4`); the HUD draws a lock for [`LOCK_DRAWN`].
     pub round_flags: i32,
+    /// The damage its round does, the hit explosion's (property 6, `+0x174`): the AI holds a
+    /// round of more than [`HEAVY_ROUND`] for a building, and the target panel calls a unit
+    /// carrying one dangerous.
+    pub round_damage: f32,
     /// The lock's share (`+0x17c`, property `0xf00`), which slot 10 keeps every frame.
     pub lock_share: f32,
     /// Its node has no life left (slot 2, `0x10021820`), which the owner keeps from the node:
@@ -212,6 +220,7 @@ impl Gun {
             lock: TargetGate::NONE.lock_s,
             report: GATE_NO_TARGET,
             round_flags: 0,
+            round_damage: 0.0,
             lock_share: 0.0,
             broken: false,
             stroked: Vec::new(),

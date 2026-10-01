@@ -494,7 +494,9 @@ fn aim_and_fire(
 ) {
     let now = robot.time_ms;
     let at = robot.walker.body.position;
-    let target = takt.target.and_then(|id| seen.iter().find(|(_, s, _)| s.id == id)).and_then(|(i, _, _)| *i);
+    let found = takt.target.and_then(|id| seen.iter().find(|(_, s, _)| s.id == id));
+    let target = found.and_then(|(i, _, _)| *i);
+    let building = found.is_some_and(|(_, s, _)| s.building);
     if target != robot.fire_target {
         robot.fire_target = target;
         for g in &mut robot.guns {
@@ -535,6 +537,11 @@ fn aim_and_fire(
             continue;
         }
         let gun = &robot.guns[g];
+        // Heavy rounds are held back: a gun whose round does more than 10,000 fires only at a
+        // building, an id of class 3 (`Behavior.dll:0x10024d02`–`0x10024d3e`), in free fire too.
+        if gun.round_damage > parkan_sim::guns::HEAVY_ROUND && !building {
+            continue;
+        }
         let score = if takt.fire_freely {
             0.5
         } else {

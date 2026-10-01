@@ -1599,8 +1599,16 @@ impl Behaviour {
                         victim.position - toward * short
                             + aside * ((self.random() * 2.0 - 1.0) * ATTACK_ASIDE)
                     };
-                    fighting = at.distance(point) < ATTACK_MAX_FIRE_DISTANCE;
-                    let speed = if fighting { ATTACK_SPEED.0 + self.random() * ATTACK_SPEED.1 } else { 1.0 };
+                    // A building is walked to at the unit's speed and never neared: the pick
+                    // clears the nearing flag (`+0x64`, `0x1002777d`), so the fire control holds
+                    // the building from the first pick on, at any distance. A unit is fought
+                    // within `Attack_MaxFireDistance` of the point and neared beyond it.
+                    fighting = victim.building || at.distance(point) < ATTACK_MAX_FIRE_DISTANCE;
+                    let speed = if fighting && !victim.building {
+                        ATTACK_SPEED.0 + self.random() * ATTACK_SPEED.1
+                    } else {
+                        1.0
+                    };
                     walk = Walk::To(point, speed);
                     next = self.timer(now, ATTACK_TIMER_MS);
                     self.fire = FireMode::Fixed(id);
@@ -1997,6 +2005,30 @@ mod tests {
             medusa.task()
         );
         assert_eq!((t.walk, t.target), (Walk::Keep, None));
+    }
+
+    /// An attack on a building never nears: the pick clears the nearing flag (`0x1002777d`), so
+    /// the fire control holds the building from 600 m off and the unit walks at its own speed.
+    /// A unit target is neared, the fire control on the nearest contact, until the point is
+    /// within 200. C03 M02's raider fires its winged SSM on the player's bunker from 300 m in
+    /// the let's play's Part 6 (13:52).
+    #[test]
+    fn an_attack_holds_its_building_from_afar_and_nears_a_unit() {
+        let bunker = Seen { building: true, hostile: true, radius: 50.0, ..unit(9, 600.0, 0.0) };
+        let mut b = Behaviour::new(3);
+        b.order(&Order { code: orders::ATTACK, parameter: 0, target: Target::LogicId(9) });
+        let t = b.takt(&senses(&[bunker], 0.0, Vec3::ZERO, true));
+        assert_eq!(t.target, Some(9), "the building is the fire control's at 600 m");
+        assert!(matches!(t.walk, Walk::To(_, speed) if speed == 1.0), "{:?}", t.walk);
+        let t = b.takt(&senses(&[bunker], 1000.0, Vec3::ZERO, false));
+        assert_eq!(t.target, Some(9), "and between picks");
+
+        let enemy = Seen { hostile: true, ..unit(7, 600.0, 0.0) };
+        let mut a = Behaviour::new(3);
+        a.order(&Order { code: orders::ATTACK, parameter: 0, target: Target::LogicId(7) });
+        a.takt(&senses(&[enemy], 0.0, Vec3::ZERO, true));
+        let t = a.takt(&senses(&[enemy], 1000.0, Vec3::ZERO, false));
+        assert_eq!(t.target, None, "a unit 600 m off is neared, and nothing hostile is within 500");
     }
 
     #[test]

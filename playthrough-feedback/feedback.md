@@ -198,10 +198,11 @@ replaces, route 0 completing objective 3, and the win once all three primaries a
 ## Mission 02 - The Convoy
 
 - Mechanics
-  - [ ] The raid's winged SSM never reaches the bunker from range
+  - [x] The raid's winged SSM never reaches the bunker from range
     - In the recording the MWW-4 Warrior, raid 1's unit 15, stands 345 to 292 m off the Small Bunker (13:49.5–13:53.5), and its missile's trail runs from it to the bunker, which it strikes at 13:54.2
     - In the engine the same unit fires from 159 m and its missile meets the ground 13 m ahead; with the player at the bunker's guns it drives in to about 20 m first and strikes the bunker. Either way its own 45 m blast kills it in that tick (585 s and 584 s, on the medium level)
     - docs/29 reads a winged SSM (`bm_m_04`, 45 m/s, turning 0.5 rad/s) flying straight at its target's node-sphere centre; what carries the recording's over 300 m of ground is not read (queued)
+    - Fixed 2026-10-01 from two reads the engine had short. An attack never nears a building (`Behavior.dll:0x1002777d` clears the nearing flag), so the fire control holds the bunker from the first pick on, where the engine waited until it was within 200 of its point. And a round of more than 10,000 is held for a building, so the raider no longer spends its missiles on the hero it passes. The first missile now leaves 363 m off and lands with the raider 289 m off
   - [x] The hero at a building's guns cannot be hurt
     - In the recording the player is at the Small Bunker's guns (its own panel reads "Small Bunker") when that missile strikes the bunker: one white flash, and *MISSION FAILED* over the fallen hero's camera (13:54.2–13:54.6). The player loads the quick save (14:00)
     - docs/27 reads mode 6 as clearing only the driven unit, with the hero left standing in the pod room. The engine sets `driving` for mode 6, so `hero_away()` holds and the hero's target leaves the world: the missile's blast, 17 m from it in the engine's run, leaves it whole

@@ -458,6 +458,64 @@ fn c03_m02s_raider_takes_up_the_attack_on_the_bunker_and_closes_on_it() {
     assert!((28..=42).contains(&clock), "the enemy clan's clock reads {clock} after 30 s");
 }
 
+/// C03 Mission 02's raider lands its winged SSM on the player's bunker from afar, as the let's
+/// play's Part 6 has it: the MWW-4 stands 345 to 292 m off and its missile strikes at 13:54. An
+/// attack on a building holds the building as its fire target from the first pick (docs/31,
+/// "Making a move"), so the guided gun's gate opens at 500 m and its 7 s lock runs out short of
+/// 400; and a round of more than 10,000 is held for a building (docs/29, "How the AI fires"), so
+/// the hero the raider passes on its way draws none.
+#[test]
+#[ignore = "needs the game install"]
+fn c03_m02s_raider_lands_its_winged_ssm_on_the_bunker_from_afar_and_spends_none_on_the_hero() {
+    use parkan_sim::combat::Event;
+    use parkan_sim::orders::{self, Order, Target};
+    use parkan_world::progress::ScriptOrder;
+
+    let mut play = campaign_play(gamedir::C03_MISSION_02);
+    let bunker_id = 0x8000_0001_u32 as i32;
+    let raider = play.units.iter().position(|u| u.logical_id == 15).expect("the medium raider");
+    let bunker = play.units.iter().position(|u| u.logical_id == bunker_id).expect("the player's bunker");
+    let order = Order { code: orders::ATTACK, parameter: 0, target: Target::LogicId(bunker_id) };
+    play.progression.as_mut().unwrap().orders.push(ScriptOrder {
+        id: 15,
+        order,
+        insert: orders::INSERT_REPLACE,
+    });
+    let ssm = play.battle.combat.kinds.iter().position(|k| k.name.eq_ignore_ascii_case("bm_m_04")).unwrap();
+    let bunker_at = play.battle.combat.targets[bunker].position;
+
+    let (mut fired, mut seen) = (Vec::new(), std::collections::BTreeSet::new());
+    let mut struck = None;
+    for _ in 0..(90 * 60) {
+        let events = play.tick(1000.0 / 60.0, [0.0; 2]);
+        let from = play.battle.combat.targets[raider].position.distance(bunker_at);
+        for r in play.battle.combat.rounds.iter().filter(|r| r.owner == Some(raider) && r.kind == ssm) {
+            if seen.insert(r.id) {
+                fired.push((r.target, from));
+            }
+        }
+        for e in events {
+            if let Event::Struck { round, target, .. } = e
+                && round.owner == Some(raider)
+                && round.kind == ssm
+                && struck.is_none()
+            {
+                struck = Some((target, from));
+            }
+        }
+        if struck.is_some() {
+            break;
+        }
+    }
+    assert!(!fired.is_empty(), "the raider fired a winged SSM");
+    assert!(fired.iter().all(|&(t, _)| t == Some(bunker)), "every one at the bunker: {fired:?}");
+    let (_, from) = fired[0];
+    assert!(from > 300.0, "the first leaves {from:.0} m off the bunker");
+    let (target, at) = struck.expect("and lands");
+    assert_eq!(target, Some(bunker), "on the bunker");
+    assert!(at > 250.0, "with the raider still {at:.0} m off");
+}
+
 /// C03 Mission 02's first objective, every generator captured, follows the player's count both
 /// ways: `c3m2p` completes it on `fn34(BUILDING_GENERATOR) == 3` and calls `OBJECTIVE_PROGRESS`
 /// when the count falls, which puts it back to open without a word (`iron3d.dll:0x10060e44`). The
