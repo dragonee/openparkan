@@ -1243,6 +1243,13 @@ the hero hurt or lost, the mission's end: `--mission MISSIONS/CAMPAIGN/CAMPAIGN.
 --skip-briefing --headless --log --level easy --pod sbunk02.dat --ticks 48000` plays the
 Convoy's first raid out with the hero in its bunker.
 
+Without a window `--hold`'s keys run the game's chords as the window's do — Enter's take and
+board, the weapon keys, the target picks — and `--tap TICK:SCAN,…` presses a key at a tick of
+`--ticks` and lets it go two ticks on: `--mission MISSIONS/CAMPAIGN/CAMPAIGN.03/Mission.02
+--skip-briefing --headless --log --face 32_l_pl.dat,12 --tap 60:SCAN_W_ENTER --hold SCAN_W
+--press 120 --ticks 600` takes the vacant warbot, boards it and drives it off. The scan names
+are `ui_other.man`'s and `addition.man`'s, Enter's being `SCAN_W_ENTER`.
+
 The engine never writes into the install, which need not be writable. What the game
 writes there — saved designs today, saved games and settings when they come — goes to the
 player's own folder, `openparkan` in `~/Library/Application Support` on macOS, in

@@ -5,7 +5,7 @@
 //! ```text
 //! parkan [--game DIR] [--mission MISSIONS/…] [--fly]
 //!        [--screenshot OUT.png] [--size WxH] [--top-down] [--look X,Y,Z,TX,TY,TZ]
-//!        [--headless] [--log] [--level easy|medium|hard] [--ticks N] [--hold SCAN_W,SCAN_A] [--press N] [--release N] [--mouse DX,DY] [--trace] [--sway]
+//!        [--headless] [--log] [--level easy|medium|hard] [--ticks N] [--hold SCAN_W,SCAN_A] [--press N] [--release N] [--tap TICK:SCAN,…] [--mouse DX,DY] [--trace] [--sway]
 //!        [--capture-idle] [--god-mode] [--stretch-hud] [--save-to-game] [--outcome won|lost] [--text "…"] [--face NAME,DISTANCE] [--at X,Y,YAW[,Z]] [--pod NAME] [--drive PATH] [--hq] [--take NAME] [--designer] [--design PART,…]
 //!        [--skip-briefing] [--briefing-at SECONDS] [--objectives] [--map] [--game-menu]
 //! ```
@@ -105,6 +105,9 @@ struct Args {
     sway: bool,
     /// `--capture-idle`: a captured bot is given no order, as the game's capture gives none.
     capture_idle: bool,
+    /// `--tap TICK:SCAN,…`: each key goes down at its tick of `--ticks` and up two ticks on,
+    /// run through the game's chords as a key of the window is: `--tap 120:SCAN_ENTER`.
+    tap: Vec<(u32, String)>,
     /// `--log`: with `--headless`, a line for each unit made, lost or captured, each task a
     /// robot takes up and each objective's change, in place of the line a second.
     log: bool,
@@ -198,6 +201,7 @@ fn args() -> Result<Args> {
         sway: false,
         capture_idle: false,
         fire_below: false,
+        tap: Vec::new(),
         log: false,
         god_mode: false,
         level: None,
@@ -247,6 +251,12 @@ fn args() -> Result<Args> {
             "--sway" => out.sway = true,
             "--capture-idle" => out.capture_idle = true,
             "--fire-below" => out.fire_below = true,
+            "--tap" => {
+                for tap in value()?.split(',') {
+                    let (tick, scan) = tap.split_once(':').context("--tap is TICK:SCAN,…")?;
+                    out.tap.push((tick.parse()?, scan.to_owned()));
+                }
+            }
             "--log" => out.log = true,
             "--god-mode" => out.god_mode = true,
             "--level" => {
@@ -350,6 +360,75 @@ fn top_down(terrain: &Terrain, aspect: f32) -> glam::Mat4 {
     proj * glam::Mat4::look_to_rh(centre, -Vec3::Z, Vec3::Y)
 }
 
+/// A key going down or up with no window: what the window's own handler does with it, less
+/// the screens only a window draws. Command mode's keys act both ways; a digit is the wingman
+/// selector's while it is open; the unit the player drives takes the key; and a press runs
+/// the command its chord binds (`ui_other.man`), Enter's take and board among them.
+fn feed(
+    play: &mut scene::Play,
+    bindings: &[parkan_formats::controls::Binding],
+    held: &mut HashSet<String>,
+    scan: &str,
+    pressed: bool,
+    aspect: f32,
+) {
+    use parkan_formats::controls::{self, command_for};
+    use parkan_world::play::Mode;
+
+    let bound = |held: &HashSet<String>| command_for(bindings, scan, |m| held.contains(m)).map(str::to_owned);
+    if play.view_mode().commands()
+        && let Some(command) = bound(held)
+        && play.command_key(&command, pressed)
+    {
+        if pressed {
+            held.insert(scan.to_owned());
+        } else {
+            held.remove(scan);
+        }
+        return;
+    }
+    let driving = matches!(play.mode(), Mode::OnFoot | Mode::Driving(_) | Mode::Manual(_));
+    let digit =
+        scan.strip_prefix("SCAN_W_").and_then(|d| d.parse::<usize>().ok()).filter(|d| (1..=9).contains(d));
+    match digit {
+        Some(n) if play.selector.state != parkan_sim::orders::State::Off => {
+            if pressed {
+                play.wingman_digit(n);
+            }
+        }
+        _ if driving => play.key(scan, pressed),
+        _ => {}
+    }
+    if !pressed {
+        held.remove(scan);
+        return;
+    }
+    held.insert(scan.to_owned());
+    let Some(command) = bound(held) else { return };
+    let eye = play.own_eye();
+    let view = parkan_world::play::View {
+        eye: eye.position,
+        look: eye.forward,
+        view_proj: camera::first_person(&eye, aspect),
+        shift: held.contains("SCAN_LSHIFT") || held.contains("SCAN_RSHIFT"),
+    };
+    match command.as_str() {
+        controls::CMD_GAME_MENU => {
+            play.game_menu();
+        }
+        // The pager, the objectives and the map are the window's own screens.
+        controls::CMD_PAGER
+        | controls::CMD_JAMES_MISSION_OBJ
+        | controls::CMD_JAMES_SATELLITE_MAP
+        | controls::CMD_INC_MAP_ALPHA
+        | controls::CMD_DEC_MAP_ALPHA => {}
+        _ if !driving => {}
+        _ => {
+            play.command(&command, &view);
+        }
+    }
+}
+
 /// Play the hero for `--ticks`, holding `--hold` and moving `--mouse`, from `--face`.
 fn rehearse(play: &mut scene::Play, loaded: &scene::Loaded, args: &Args) {
     if let Some((name, distance)) = &args.face {
@@ -450,15 +529,25 @@ fn rehearse(play: &mut scene::Play, loaded: &scene::Loaded, args: &Args) {
     }
     let mut kills = Vec::new();
     let mut chronicle = (args.headless && args.log).then(|| chronicle::Chronicle::open(play));
+    let bindings = scene::bindings(&play.assembly.game);
+    let aspect = args.size.0 as f32 / args.size.1.max(1) as f32;
+    let mut held: HashSet<String> = HashSet::new();
     for tick in 0..args.ticks {
         if tick == args.press {
             for key in &args.hold {
-                play.key(key, true);
+                feed(play, &bindings, &mut held, key, true, aspect);
             }
         }
         if args.release == Some(tick) {
             for key in &args.hold {
-                play.key(key, false);
+                feed(play, &bindings, &mut held, key, false, aspect);
+            }
+        }
+        for (at, key) in &args.tap {
+            if tick == *at {
+                feed(play, &bindings, &mut held, key, true, aspect);
+            } else if tick == at + 2 {
+                feed(play, &bindings, &mut held, key, false, aspect);
             }
         }
         // Nothing is rendered here, so this run's fixed tick stands in for the frame the
@@ -597,7 +686,21 @@ fn report(play: &scene::Play) {
             .count(),
         play.targets.current.map(|t| play.battle.objects[t]),
         play.progression.as_ref().map(|p| p.progress.objectives.iter().map(|o| o.state).collect::<Vec<_>>()),
-    );
+    ); // The unit the player drives, where it is not the hero on foot.
+    if let parkan_world::play::Mode::Driving(t) | parkan_world::play::Mode::Manual(t) = play.mode()
+        && let Some((_, robot)) = play.robots.iter().chain(&play.emplacements).find(|(rt, _)| *rt == t)
+    {
+        let b = &robot.walker.body;
+        println!(
+            "           driving object {} at ({:.2}, {:.2}, {:.2})  speed {:5.2} m/s  heading {:+.3}",
+            play.battle.objects[t],
+            b.position.x,
+            b.position.y,
+            b.position.z,
+            Vec3::from_array(b.velocity).length(),
+            b.heading(),
+        );
+    }
 }
 
 fn screenshot(loaded: &scene::Loaded, game: &Path, args: &Args, out: &Path) -> Result<()> {

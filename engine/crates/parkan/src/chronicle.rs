@@ -21,6 +21,8 @@ pub struct Chronicle {
     objectives: Vec<u8>,
     /// The hero's life in quarters, whether it has fallen, and the mission's outcome.
     hero: (u8, bool, Option<bool>),
+    /// The interface's mode, as it is said.
+    mode: String,
 }
 
 impl Chronicle {
@@ -34,6 +36,7 @@ impl Chronicle {
         }
         c.objectives = objectives(play);
         c.hero = hero(play);
+        c.mode = mode(play);
         c
     }
 
@@ -81,6 +84,25 @@ impl Chronicle {
             println!("t {at:7.1}  mission {}", if now.2 == Some(true) { "complete" } else { "failed" });
         }
         self.hero = now;
+        let now = mode(play);
+        if now != self.mode {
+            println!("t {at:7.1}  mode   {} -> {now}", self.mode);
+            self.mode = now;
+        }
+    }
+}
+
+/// The interface's mode in a word, with the unit or building it is on.
+fn mode(play: &Play) -> String {
+    use parkan_world::play::Mode;
+    let on = |t: usize| format!("#{t} {:?}", play.names.get(t).map_or("", String::as_str));
+    match play.mode() {
+        Mode::OnFoot => "on foot".to_owned(),
+        Mode::Driving(t) => format!("driving {}", on(t)),
+        Mode::Manual(t) => format!("at the guns of {}", on(t)),
+        Mode::Command(t) => format!("command mode at {}", on(t)),
+        Mode::HqCommand(t) => format!("command view of {}", on(t)),
+        other => format!("{other:?}").to_ascii_lowercase(),
     }
 }
 
