@@ -237,10 +237,10 @@ pub struct Walker {
     pub radius: f32,
     pub sphere_radius: f32,
     /// r₂: the **node** sphere's own radius, which bounds the ground search's up pass
-    /// (`0x1001a70a`). It is held to 7.5 only when it is under 20 and the object's flags
-    /// carry `0x1000000` (`0x1001a51b`-`0x1001a58a`); which objects carry that flag is not
-    /// read, and the hold is left out here. *Measured*: r₂ differs from r on all 148 units
-    /// the campaign places, r₂/r running 0.42 to 2.34.
+    /// (`0x1001a70a`), as the contact holds it: to 7.5 when it is under 20 and the unit's Type
+    /// carries `0x1000000`, a robot's (`0x1001a51b`-`0x1001a58a`; [`crate::ground::up_bound`],
+    /// which whoever sets the body sphere applies). *Measured*: r₂ differs from r on all 148
+    /// units the missions place, r₂/r running 0.42 to 2.34.
     pub node_radius: f32,
     /// How far the origin stands above the model's lowest point.
     pub base: f32,
@@ -744,7 +744,8 @@ impl Walker {
 
     /// The body sphere as the ground contact takes it: the centre in the model's frame
     /// (`0x1001a518`, the agent's node sphere's), and the radius (`0x1001a487`, the agent's
-    /// sphere's), held to 7.5 under 20 for the contact.
+    /// sphere's), held to 7.5 under 20 for the contact. `node_radius` is r₂ as the contact
+    /// holds it ([`crate::ground::up_bound`]).
     pub fn set_body_sphere(&mut self, centre: Vec3, radius: f32, node_radius: f32) {
         self.centre = centre;
         self.sphere_radius = radius;
@@ -778,12 +779,14 @@ impl Walker {
     /// dropped it ([`Walker::dropped`]). Read, the frame runs the move, the collision pass, the ground
     /// contact and then the push (message `0x1b`, `Control.dll:0x1000c9eb` taking a down push
     /// whole on a building), and where the frame is drawn among them is not read. Drawn after
-    /// the push, C02 M03's medium walker stands with its hull at the Small Warehouse's floor:
-    /// the ceiling, 6.3-7.5 m up, presses its 5.87 m agent sphere 2.85 m down every tick and
-    /// the contact lifts it back. The recording shows it upright on its legs in every frame
-    /// ("Let's Play - Parkan: Iron Strategy, Part 4", 1:43 and 15:13-15:15 at 60 fps), which
-    /// the push drawn before it lands gives, and which moves nothing the simulation holds:
-    /// units still go down a ramp into a building by that push.
+    /// the push, C02 M03's medium walker would dip under the Small Warehouse's ceiling: 6.3-7.5 m
+    /// up, it presses the walker's node sphere, 4.26 about a centre 0.67 under its origin, 0.28 m
+    /// down a tick, and the contact lifts it back. (Pushed out as its 5.87 m agent sphere, which
+    /// the pair does not hand on, it was pressed 2.85 m, its hull at the floor.) The recording
+    /// shows it upright on its legs in every frame ("Let's Play - Parkan: Iron Strategy, Part
+    /// 4", 1:43 and 15:13-15:15 at 60 fps), which the push drawn before it lands gives, and
+    /// which moves nothing the simulation holds: units still go down a ramp into a building by
+    /// that push.
     pub fn drawn(&self, t_ms: f64) -> (Vec3, f32) {
         let s = self.phase(t_ms);
         let position = self.from.0.lerp(self.body.position, s) - Vec3::Z * self.dropped;

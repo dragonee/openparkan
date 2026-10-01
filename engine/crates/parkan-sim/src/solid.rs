@@ -37,6 +37,20 @@ pub const SEE_THROUGH_FACE: u16 = 0x20;
 pub const PUSH_RADII: f32 = 4.0;
 /// A push below this squared length is no contact (`Control.dll:0x1001e05f`).
 pub const NO_CONTACT: f32 = 1e-6;
+/// The most a robot's sphere measures in the pair's push-out (`Control.dll:0x1001df8f`, the
+/// float at `0x1003c044`).
+pub const PAIR_RADIUS_HOLD: f32 = 7.5;
+
+/// The radius the pair hands the push-out for a mover whose sphere's is `radius`
+/// (`Control.dll:0x1001df7a`-`0x1001dfb2`): at most 7.5 when the mover's Type carries
+/// `0x1000000`, `CLASS_ROBOT` -- the word its behaviour answers through interface `0x10`
+/// slot 14 (`Behavior.dll:0x10008c50`, `MBehaviour` `+0xafc`). Unlike the ground contact's
+/// hold ([`crate::ground::up_bound`]) this one has no 20 from which the radius is kept:
+/// `51_alien`'s 41.47 is pushed out as 7.5 too. An animal's Type is `0x20000000`, so its
+/// sphere goes whole.
+pub fn pair_radius(radius: f32, robot: bool) -> f32 {
+    if robot { radius.min(PAIR_RADIUS_HOLD) } else { radius }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SolidFace {

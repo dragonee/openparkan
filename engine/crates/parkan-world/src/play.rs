@@ -797,10 +797,29 @@ pub fn struck_wear<'a>(part: &Part, wear: &'a [String], p0: Vec3, p1: Vec3) -> O
     wear.get(usize::from(batch.material & 0xFF)).map(String::as_str)
 }
 
-/// The push a unit takes this frame (docs/24, "Collision between objects"): its sphere, swept
-/// from `from` to `to`, against the level-0 faces of every placed object whose sphere it
-/// meets, its own solid `mover` excepted. Each obstacle sees the end the ones before it have
-/// already moved, as the pass reads B's end with its push so far.
+/// One of a mover's spheres over this frame's move: where its centre started, where the move
+/// left it, and its radius.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Sweep {
+    from: Vec3,
+    to: Vec3,
+    radius: f32,
+}
+
+/// The push a unit takes this frame (docs/24, "Collision between objects"), against the
+/// level-0 faces of every placed object whose sphere it meets, its own solid `mover` excepted.
+/// Each obstacle sees the end the ones before it have already moved, as the pass reads B's end
+/// with its push so far.
+///
+/// **A unit's collision object keeps two spheres, and they do different work.** The pass
+/// decides which pairs go on by the agent's sphere, `agent` -- the parts' header spheres
+/// joined, entry `+0x18` (`Control.dll:0x1001c1ff`-`0x1001c219`). The pair then moves and
+/// pushes out the object's second sphere, `pair` -- a unit's node sphere, the record at entry
+/// `+0x34` (`0x1001dc9d`-`0x1001dcb0`), its radius held to 7.5 on a robot (`0x1001df8f`): the
+/// segment the faces stop is that sphere's centre's, and it is that sphere the push-out is
+/// handed. A large walker's agent sphere, over its hull, turret and guns, is 12.8 to 14.3 in
+/// radius; its node sphere, held, is 7.5, which is what lets it through a Large Factory's
+/// 22 m door.
 ///
 /// A building's faces push every unit on it or near it, the one it stands on included,
 /// through the building's own pass (docs/24, "Walking into a building"), and an open door's
@@ -819,9 +838,8 @@ pub fn struck_wear<'a>(part: &Part, wear: &'a [String], p0: Vec3, p1: Vec3) -> O
 /// [`parkan_sim::machine::Machine::keeps_floors`]).
 fn collision_push(
     solids: &[Solid],
-    from: Vec3,
-    to: Vec3,
-    radius: f32,
+    agent: Sweep,
+    pair: Sweep,
     mover: Option<usize>,
     mover_mass: f32,
     keeps_floors: bool,
@@ -831,10 +849,9 @@ fn collision_push(
         if !obstacle.present || mover == Some(i) {
             continue;
         }
-        let end = to + total;
         if parkan_sim::hit::swept_spheres(
-            (from, end),
-            radius,
+            (agent.from, agent.to + total),
+            agent.radius,
             (obstacle.centre, obstacle.centre),
             obstacle.radius,
         )
@@ -842,7 +859,8 @@ fn collision_push(
         {
             continue;
         }
-        total += solid::push(from, end, radius, obstacle, keeps_floors) * share(obstacle.mass, mover_mass);
+        total += solid::push(pair.from, pair.to + total, pair.radius, obstacle, keeps_floors)
+            * share(obstacle.mass, mover_mass);
     }
     total
 }
@@ -1883,7 +1901,7 @@ impl Play {
             // While the player drives a unit or a building's guns, the mouse is theirs and the
             // hero stands with its keys let go (`enter_manual`, the takeover).
             let mouse = if self.driving.is_some() { [0.0; 2] } else { mouse };
-            let from = self.hero.collision_centre();
+            let from = (self.hero.collision_centre(), self.hero.pair_centre());
             let shots = self.hero.tick(dt_ms, mouse, &self.ground);
             let lives = std::mem::take(&mut self.hero.lives);
             self.hero.relimit(|p, n| node_share(lives.get(p).and_then(Option::as_ref), n));
@@ -4008,7 +4026,7 @@ impl Play {
             }
             let (t, robot) = &mut self.robots[r];
             let target = &mut self.battle.combat.targets[*t];
-            let from = robot.collision_centre();
+            let from = (robot.collision_centre(), robot.pair_centre());
             robot
                 .check_devices(|p, n| node_alive(target.parts.get(p).and_then(|part| part.life.as_ref()), n));
             let shots = match self.driving.as_mut().filter(|d| d.target == *t) {
@@ -4033,17 +4051,21 @@ impl Play {
                 .mass(|p, n| node_share(target.parts.get(p).and_then(|part| part.life.as_ref()), n));
             // STAND-IN: docs/24-motion.md#the-ground-inside-a-building--read-in-part-and-measured
             // -- a flyer's collision flags are read to carry 8, so a building's floors push it
-            // too, and taken whole since its states lack bit 4. With that, Mission 02's flyer,
-            // made at the Large Factory's creation vertex 5 m over the hall floor, is pushed 33 m
-            // up in its first frame, through the hall's roof; what keeps a flyer's sphere off a
-            // floor it is made on is not read -- its walk points' heights are (docs/24, "A
-            // flyer's walk points"), and they do not. No robot keeps the floors.
+            // too, and taken whole since its states lack bit 4. No robot keeps the floors here,
+            // and what that stands in for is a flyer's way down inside a building: with the
+            // floors kept, Mission 04's helicopter, sent to take the Large Factory, stops over
+            // the hall floor 14 m from the pod in the room under it, where without them it
+            // sinks through that floor onto the pod. Which way a flyer takes to a pod under a
+            // floor is not read. It is no longer the floor a flyer is made on: the pair pushes
+            // out the node sphere held to 7.5 and the ground contact rests the body on the
+            // agent sphere's radius, held the same, about the same centre, so the hall floor
+            // only touches Mission 02's L-2f, which its 12.26 m agent sphere sent 38 m up
+            // through the roof in its first frame.
             let keeps_floors = robot.walker.keeps_floors() && !robot.flyer;
             let push = collision_push(
                 &self.ground.solids,
-                from,
-                robot.collision_centre(),
-                robot.collision.1,
+                Sweep { from: from.0, to: robot.collision_centre(), radius: robot.collision.1 },
+                Sweep { from: from.1, to: robot.pair_centre(), radius: robot.pair.1 },
                 Some(*t),
                 mass,
                 keeps_floors,
@@ -4484,15 +4506,15 @@ impl Play {
     }
 
     /// The collision pass for the hero (docs/24, "Collision between objects"), after its
-    /// move and ground contact.
-    fn collide(&mut self, from: Vec3) {
+    /// move and ground contact; `from` is where its agent sphere's centre and its pair
+    /// sphere's stood before the move.
+    fn collide(&mut self, from: (Vec3, Vec3)) {
         let lives = &self.hero.lives;
         let mass = self.hero.heft.mass(|p, n| node_share(lives.get(p).and_then(Option::as_ref), n));
         let push = collision_push(
             &self.ground.solids,
-            from,
-            self.hero.collision_centre(),
-            self.hero.collision.1,
+            Sweep { from: from.0, to: self.hero.collision_centre(), radius: self.hero.collision.1 },
+            Sweep { from: from.1, to: self.hero.pair_centre(), radius: self.hero.pair.1 },
             None,
             mass,
             self.hero.walker.keeps_floors(),
@@ -4999,5 +5021,63 @@ mod tests {
         let held = share(3300.0, 25699.0);
         assert!((held - 0.0165).abs() < 5e-4, "and the flyer barely moves: {held}");
         assert!((shoved + held - 1.0).abs() < 1e-6, "the two shares are one push");
+    }
+
+    /// A wall across x = 0 facing +x, 30 high, with a doorway through it from y = -11.1 to
+    /// 11.1: the Large Factory's west door is 22.2 wide.
+    fn doorway() -> Solid {
+        use parkan_sim::solid::{SolidFace, SolidNode};
+
+        let face = |a, b, c| SolidFace {
+            a,
+            b,
+            c,
+            normal: Vec3::X,
+            triangle_flags: 0,
+            batch_flags: 0,
+            surface: None,
+            damage_rate: 0.0,
+        };
+        let mut faces = Vec::new();
+        for (lo, hi) in [(-40.0, -11.1), (11.1, 40.0)] {
+            let (a, b, c, d) = (
+                Vec3::new(0.0, lo, 0.0),
+                Vec3::new(0.0, hi, 0.0),
+                Vec3::new(0.0, hi, 30.0),
+                Vec3::new(0.0, lo, 30.0),
+            );
+            faces.extend([face(a, b, c), face(a, c, d)]);
+        }
+        let (centre, radius) = (Vec3::new(0.0, 0.0, 15.0), 45.0);
+        let nodes = vec![SolidNode { centre, radius, faces: 0..faces.len(), part: 0, node: 0, open: false }];
+        Solid { centre, radius, ground: true, present: true, mass: 0.0, faces, nodes }
+    }
+
+    /// `Control.dll:0x1001dc9d`, `0x1001df8f`: the pass finds its pairs by the agent's sphere
+    /// and the pair pushes out the node sphere, held to 7.5 on a robot. The LSW-3 Warrior the
+    /// AI builds on *The Convoy* (`AI_LS_10.dat`) has an agent sphere of 13.72 and a node sphere
+    /// of 9.59: standing in a doorway 22.2 wide, 6 m from the wall, its agent sphere reaches
+    /// both jambs, 12.6 off, and what the pair pushes out reaches neither.
+    #[test]
+    fn a_pair_pushes_out_the_node_sphere_held_to_seven_and_a_half_not_the_agents() {
+        let solids = [doorway()];
+        let at = Vec3::new(6.0, 0.0, 5.0);
+        let sweep = |radius| Sweep { from: at, to: at, radius };
+        let pushed = |pair: f32| collision_push(&solids, sweep(13.72), sweep(pair), None, 40_000.0, false);
+        assert_eq!(solid::pair_radius(9.59, true), 7.5);
+        assert_eq!(pushed(solid::pair_radius(9.59, true)), Vec3::ZERO, "the held node sphere passes");
+        let agent = pushed(13.72);
+        assert!(agent.x > 1.0 && agent.y.abs() < 1e-3, "the agent's would be pushed back in: {agent}");
+        // An animal's node sphere goes whole, and a robot's is held however large it is.
+        assert_eq!(solid::pair_radius(29.57, false), 29.57);
+        assert_eq!(solid::pair_radius(41.47, true), 7.5);
+        assert_eq!(solid::pair_radius(1.59, true), 1.59);
+        // The pass's own test is the agent's sphere: a mover whose agent sphere is clear of the
+        // obstacle's is never paired with it, whatever its other sphere would meet.
+        let far = Vec3::new(70.0, 0.0, 15.0);
+        let clear = Sweep { from: far, to: far, radius: 13.72 };
+        let inside = Sweep { from: Vec3::new(3.0, 20.0, 5.0), to: Vec3::new(3.0, 20.0, 5.0), radius: 7.5 };
+        assert_eq!(collision_push(&solids, clear, inside, None, 40_000.0, false), Vec3::ZERO);
+        assert!(collision_push(&solids, inside, inside, None, 40_000.0, false).x > 1.0);
     }
 }

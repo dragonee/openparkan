@@ -24,6 +24,16 @@ pub fn contact_radius(sphere_radius: f32) -> f32 {
     if sphere_radius < LARGE_BODY { sphere_radius.min(BODY_RADIUS_HOLD) } else { sphere_radius }
 }
 
+/// r₂, the node sphere's radius, as the ground contact bounds its up pass by it: held to 7.5
+/// when it is under 20 **and** the unit is a robot (`Control.dll:0x1001a51b`-`0x1001a58a`). The
+/// flag the hold asks for is the unit's Type, `MBehaviour` `+0xafc`, which the contact reads
+/// through the control's interface `0x10` slot 14 (`Behavior.dll:0x10008c50`), and its bit
+/// `0x1000000` is `CLASS_ROBOT`: every robot's Type carries it, an animal's (`0x20000000`) and
+/// a building's (`0x80000000`) do not (docs/24, "Finding the ground").
+pub fn up_bound(node_radius: f32, robot: bool) -> f32 {
+    if robot { contact_radius(node_radius) } else { node_radius }
+}
+
 /// A face found under a point: a landscape face, or a face of a building's solid.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Hit {
@@ -673,5 +683,18 @@ pub(crate) mod tests {
         assert_eq!(contact_radius(3.0), 3.0);
         assert_eq!(contact_radius(12.0), 7.5);
         assert_eq!(contact_radius(25.0), 25.0);
+    }
+
+    /// `Control.dll:0x1001a51b`-`0x1001a58a`: the node sphere's radius is held as the body
+    /// sphere's is, but only for a unit whose Type carries `0x1000000`, a robot. The L-2f's
+    /// 11.84 bounds its up pass at 7.5 and `42_mons`' 34.19 is kept; the large spider `l_arah`
+    /// at 29.57 is an animal, and an animal's is kept whatever it measures.
+    #[test]
+    fn a_robots_node_radius_is_held_like_its_body_and_an_animals_is_not() {
+        assert_eq!(up_bound(2.59, true), 2.59);
+        assert_eq!(up_bound(11.84, true), 7.5);
+        assert_eq!(up_bound(34.19, true), 34.19);
+        assert_eq!(up_bound(11.84, false), 11.84);
+        assert_eq!(up_bound(29.57, false), 29.57);
     }
 }

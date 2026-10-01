@@ -1804,10 +1804,15 @@ fn c02_m01s_wingmen_follow_the_hero_over_the_bridge_and_keep_out_of_the_canyon()
     let north = Vec3::new(433.0, 800.0, 0.0);
     let (mut hero, mut leg) = (south, 1);
     let mut lowest = f32::MAX;
-    // Where each follower stood a second ago, and the least it has gone in a second over the
-    // deck between y 620 and 700.
-    let mut second_ago: Vec<Vec3> = bots.iter().map(|&t| at(&play, t)).collect();
-    let mut slowest = vec![f32::MAX; bots.len()];
+    // When each follower came onto the deck at y 620 and when it left it at y 700. A follower
+    // is faster than the hero, 13 m/s to its 10, so it catches its place 20 m behind, stands a
+    // second or so and sets off again; where on the way that falls moves with every change to
+    // how the two are pushed about. Pushed out as their node spheres, 2.22, they are no longer
+    // held up at the bridge's foot, and one of the stops falls on the deck. What the deck must
+    // never do is hold a follower: 80 m of it at 13 m/s is six seconds, and twelve is a stop
+    // that was no arrival.
+    let mut on_deck: Vec<Option<usize>> = vec![None; bots.len()];
+    let mut off_deck: Vec<Option<usize>> = vec![None; bots.len()];
     for tick in 0..(120 * 60) {
         let to = if leg < way.len() { way[leg] } else { north };
         let off = (to - hero).truncate();
@@ -1821,20 +1826,22 @@ fn c02_m01s_wingmen_follow_the_hero_over_the_bridge_and_keep_out_of_the_canyon()
         play.stand_at(hero.x, hero.y, yaw);
         play.tick(1000.0 / 60.0, [0.0; 2]);
         lowest = bots.iter().map(|&t| at(&play, t).z).fold(lowest, f32::min);
-        if tick % 60 == 59 {
-            for (k, &t) in bots.iter().enumerate() {
-                let p = at(&play, t);
-                if (620.0..700.0).contains(&p.y) && (620.0..700.0).contains(&second_ago[k].y) && p.z > 55.0 {
-                    slowest[k] = slowest[k].min(p.truncate().distance(second_ago[k].truncate()));
-                }
-                second_ago[k] = p;
+        for (k, &t) in bots.iter().enumerate() {
+            let p = at(&play, t);
+            if p.y >= 620.0 && p.z > 55.0 {
+                on_deck[k].get_or_insert(tick);
+            }
+            if p.y >= 700.0 && on_deck[k].is_some() {
+                off_deck[k].get_or_insert(tick);
             }
         }
     }
-    assert!(
-        slowest.iter().all(|&m| m > 5.0 && m < f32::MAX),
-        "no stop on the deck: {slowest:?} m in a second"
-    );
+    let crossing: Vec<f32> = on_deck
+        .iter()
+        .zip(&off_deck)
+        .map(|(on, off)| on.zip(*off).map_or(f32::MAX, |(on, off)| (off - on) as f32 / 60.0))
+        .collect();
+    assert!(crossing.iter().all(|&s| s < 12.0), "the deck holds no follower: over it in {crossing:?} s");
     let hero = play.hero.walker.body.position;
     for &t in &bots {
         let p = at(&play, t);

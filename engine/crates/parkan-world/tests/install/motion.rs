@@ -332,7 +332,10 @@ fn mission_01s_buoys_hold_the_hero_off_their_cones() {
     use glam::Vec3;
     let (_, m) = mission_01_play();
     // The five `s_tree_29` buoys; each cone reaches 1.94 from its axis (docs/24, "What a
-    // buoy does to a walker").
+    // buoy does to a walker"). What the pair pushes out of it is the hero's node sphere, 1.59
+    // about a centre 0.17 behind its origin, not its 2.18 agent sphere (docs/24, "Collision
+    // between objects"): the hero comes within 2.7 to 2.9 of the axis, where the larger sphere
+    // kept it past 3.
     let buoys: Vec<usize> =
         (0..m.objects.len()).filter(|&i| m.objects[i].path.eq_ignore_ascii_case("s_tree_29")).collect();
     assert_eq!(buoys, vec![25, 26, 27, 29, 30]);
@@ -343,7 +346,7 @@ fn mission_01s_buoys_hold_the_hero_off_their_cones() {
         let path = walk(&mut play, b + Vec3::new(0.0, -25.0, 40.0), 0.0, 20);
         let closest = path.iter().map(|p| p.truncate().distance(b.truncate())).fold(f32::MAX, f32::min);
         let eye = play.hero.eye().position.truncate().distance(b.truncate());
-        assert!(closest > 3.0 && eye > 3.0, "buoy {buoy}: the hero came within {closest}, its eye {eye}");
+        assert!(closest > 2.6 && eye > 2.6, "buoy {buoy}: the hero came within {closest}, its eye {eye}");
     }
 }
 

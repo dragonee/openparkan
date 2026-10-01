@@ -195,11 +195,21 @@ fn mission_02s_factory_builds_a_free_warbot_which_leaves_by_the_front_door_and_c
     assert!(way.len() == 5 && ys[0] < 855.0 && ys[3] > 885.0, "out through the front door: {way:?}");
 
     // Walking it: the front door (node 3) opens for the bot as it nears it, no shot fired,
-    // and its shut faces hold the bot inside until it has (docs/24, "Walking into a
-    // building"). The doorway stands at about y 876.
+    // and its leaf holds the bot inside while it stands in its way (docs/24, "Walking into a
+    // building"). The doorway stands at about y 876. The leaf sinks into the floor, 15.4 m in
+    // 2.5 s, and pushes from wherever it has got to: the flyer's sphere, 7.5 about a centre 8 m
+    // over the floor, goes over it once its top is under that centre, a quarter of a second
+    // before the building counts the door open. Its 12.26 m agent sphere, which the pair once
+    // pushed out, reached the lintel and both jambs and was held until the faces went.
     const DOORWAY_Y: f32 = 876.0;
     let door = |play: &parkan_world::play::Play| {
         play.buildings.iter().find(|b| b.target == t).expect("the factory's doors").doors[0].phase
+    };
+    let leaf_top = |play: &parkan_world::play::Play| {
+        let node = play.buildings.iter().find(|b| b.target == t).unwrap().doors[0].nodes[0];
+        let solid = &play.ground.solids[t];
+        let leaf = solid.nodes.iter().find(|n| n.part == 0 && n.node == node).expect("the leaf's faces");
+        solid.faces[leaf.faces.clone()].iter().flat_map(|f| [f.a.z, f.b.z, f.c.z]).fold(f32::MIN, f32::max)
     };
     let mut opening_at = None;
     let mut opened_at = None;
@@ -215,8 +225,13 @@ fn mission_02s_factory_builds_a_free_warbot_which_leaves_by_the_front_door_and_c
         if phase == parkan_world::buildings::Phase::Open && opened_at.is_none() {
             opened_at = Some(tick as f32 / 60.0);
         }
-        if opened_at.is_none() {
-            assert!(at.y < DOORWAY_Y, "the shut door holds it in: {at} at tick {tick}");
+        if opened_at.is_none() && at.y >= DOORWAY_Y {
+            let (top, centre) = (leaf_top(&play), robot.pair_centre().z);
+            assert!(
+                phase == parkan_world::buildings::Phase::Opening && top < centre - 3.0,
+                "the leaf holds it in while it stands in its way: {at} at tick {tick}, its sphere's \
+                 centre at {centre} and the leaf's top at {top}"
+            );
         }
         if out_at.is_none() && at.y > DOORWAY_Y && robot.walker.ground.and_then(|h| h.solid).is_none() {
             out_at = Some(tick as f32 / 60.0);
@@ -248,6 +263,101 @@ fn mission_02s_factory_builds_a_free_warbot_which_leaves_by_the_front_door_and_c
     }
     let p = play.progression.as_ref().unwrap();
     assert_eq!(p.progress.objectives[1].state, 1, "{:?}", p.progress.objectives);
+}
+
+/// *The Convoy*'s Enemy 1 builds large walkers in its Large Factory at (1064, 670): on the easy
+/// level the first is an LSW-3 Warrior, `AI_LS_10.dat` on `R_B_01`, a minute in. Its agent sphere
+/// -- hull, turret and guns -- is 13.72 across a door 22.2 wide, and the pair that pushed that
+/// sphere out of the hall's walls held the walker at the door for the whole mission, its Leave
+/// given again every 10 to 20 s.
+///
+/// The pair pushes out the collision object's second sphere, a unit's node sphere, held to 7.5
+/// on a robot (`Control.dll:0x1001dc9d`, `0x1001df8f`; docs/24, "Collision between objects"):
+/// the walker's is 9.59 about a centre 0.3 over its origin, and at 7.5 it clears both jambs
+/// and the lintel 15.4 up.
+#[test]
+#[ignore = "needs the game install"]
+fn c03_m02s_large_walker_walks_out_of_the_large_factory_it_is_made_in() {
+    use parkan_world::buildings::Phase;
+    use parkan_world::factory::Project;
+
+    let mut play = campaign_play(gamedir::C03_MISSION_02);
+    let f = play
+        .factories
+        .iter()
+        .position(|f| {
+            let at = play.battle.combat.targets[f.target].position.truncate();
+            at.distance(glam::Vec2::new(1064.0, 670.0)) < 20.0
+        })
+        .expect("Enemy 1's Large Factory");
+    let plant = play.factories[f].target;
+    assert_eq!((play.units[plant].clan, play.factories[f].size), (Some(1), 4));
+
+    let path = "UNITS\\UNITS\\AI\\AI_LS_10.dat".to_owned();
+    let data = gamedir::resolve(&play.assembly.game, &path)
+        .and_then(|p| std::fs::read(p).ok())
+        .expect("AI_LS_10.dat");
+    let project = Project {
+        path,
+        name: "LSW-X Warrior".into(),
+        type_word: u32::from_le_bytes(data[4..8].try_into().unwrap()),
+        chassis_size: 4,
+        ore: 0.0,
+        power: 0.0,
+        lines: Vec::new(),
+        sphere: None,
+    };
+    play.factories[f].build = None;
+    assert!(play.factories[f].start_project(project, false, 1));
+    let centre = play.battle.combat.targets[plant].position.truncate();
+    let before = play.robots.len();
+    let mut bot = None;
+    for _ in 0..(70 * 60) {
+        play.tick(1000.0 / 60.0, [0.0; 2]);
+        bot = (before..play.robots.len()).find(|&r| {
+            let robot = &play.robots[r].1;
+            robot.size_class == 4 && robot.walker.body.position.truncate().distance(centre) < 120.0
+        });
+        if bot.is_some() {
+            break;
+        }
+    }
+    let bot = bot.expect("the factory makes the walker");
+    let robot = &play.robots[bot].1;
+    let made = robot.walker.body.position;
+    assert!((robot.collision.1 - 13.72).abs() < 0.01, "its agent sphere: {:?}", robot.collision);
+    assert!((robot.bound.1 - 9.59).abs() < 0.01, "its node sphere: {:?}", robot.bound);
+    assert_eq!(robot.pair, (robot.bound.0, 7.5), "what the pair pushes out");
+
+    let door = |play: &parkan_world::play::Play| {
+        play.buildings.iter().find(|b| b.target == plant).expect("the factory's doors").doors[0].phase
+    };
+    let (mut opened, mut out) = (None, None);
+    for tick in 0..(60 * 60) {
+        play.tick(1000.0 / 60.0, [0.0; 2]);
+        if opened.is_none() && door(&play) == Phase::Open {
+            opened = Some(tick as f32 / 60.0);
+        }
+        let robot = &play.robots[bot].1;
+        let at = robot.walker.body.position;
+        if tick == 0 {
+            let on = robot.walker.ground.and_then(|h| h.solid).map(|s| s.0);
+            assert_eq!(on, Some(plant), "made on the hall's floor");
+        }
+        if robot.walker.ground.is_some_and(|h| h.solid.is_none()) && at.distance(made) > 60.0 {
+            out = Some((tick as f32 / 60.0, at));
+            break;
+        }
+    }
+    let opened = opened.expect("the hall's door opens for it");
+    let at = play.robots[bot].1.walker.body.position;
+    let (seconds, at) = out.unwrap_or_else(|| {
+        panic!(
+            "it never left: a minute on it stands at {at}, {:.1} m from where it was made",
+            at.distance(made)
+        )
+    });
+    eprintln!("the door open {opened:.1} s in; on open ground at {at}, 60 m off, {seconds:.1} s in");
 }
 
 #[test]

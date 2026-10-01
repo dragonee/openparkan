@@ -15,15 +15,16 @@ use parkan_formats::control::{
 };
 use parkan_formats::cpt::{self, ControlPoint};
 use parkan_formats::mesh::NO_SLOT;
-use parkan_formats::mission::Mission;
+use parkan_formats::mission::{Mission, Value};
 use parkan_formats::pose::{Pose, multiply, rotate};
 use parkan_sim::behaviour::Behaviour;
 use parkan_sim::damage::GroundDamage;
 use parkan_sim::device::{Item, Motion};
-use parkan_sim::ground::Ground;
+use parkan_sim::ground::{Ground, up_bound};
 use parkan_sim::guns::{Gun, Shot, Sight, TargetGate};
 use parkan_sim::machine::Walker;
 use parkan_sim::motion::Limits;
+use parkan_sim::solid;
 use parkan_sim::targeting::Radar;
 use parkan_sim::turret::{ARM_FOLD, ARM_UNFOLD, Rig, view};
 use parkan_sim::wizard::{Wizard, yaw_along};
@@ -323,6 +324,14 @@ pub struct Robot {
     /// The node sphere in the unit's frame ([`node_sphere`]): the centre the ground contact
     /// holds the body about, and the radius getting out of a bot reaches by.
     pub bound: (Vec3, f32),
+    /// The sphere the collision pair moves and pushes out of an obstacle's faces, in the unit's
+    /// frame. A unit's collision object keeps two spheres: the agent's (`+0x38`, interface
+    /// `0x18` slot 9) and, in a record of its own at `+0x54`, the node sphere (interface `0x20`
+    /// slot 3 asked by the default request, `Control.dll:0x1001ff3a`-`0x1001ff9e`). The pass
+    /// tests the first and the pair takes its mover from the second where the object has one
+    /// (`0x1001dc9d`), its radius held to 7.5 on a robot ([`solid::pair_radius`]; docs/24,
+    /// "Collision between objects").
+    pub pair: (Vec3, f32),
     /// Where the guns' target stands, for their gates; the caller sets it each tick.
     pub target_point: Option<Vec3>,
     /// Whether the turret, and the eye in it, are held steady against the body's gait
@@ -679,9 +688,20 @@ impl Robot {
         let joined = agent_sphere(assembly, &parts);
         let collision = joined.unwrap_or((Vec3::ZERO, 0.0));
         let bound = node_sphere(assembly, &parts);
+        // Both holds on the node sphere's radius ask whether the unit's Type carries the
+        // robot's bit (`MBehaviour` `+0xafc` through interface `0x10` slot 14,
+        // `Control.dll:0x1001a55a`, `0x1001df88`).
+        let robot = placed.property("Type").is_some_and(|p| {
+            let word = match p.value {
+                Value::Int(v) => v as u32,
+                Value::Float(v) => v as u32,
+            };
+            word & TYPE_ROBOT != 0
+        });
         if joined.is_some() {
-            walker.set_body_sphere(bound.0, collision.1, bound.1);
+            walker.set_body_sphere(bound.0, collision.1, up_bound(bound.1, robot));
         }
+        let pair = (bound.0, solid::pair_radius(bound.1, robot));
         let power = (placed.kind == parkan_formats::mission::KIND_UNIT)
             .then(|| crate::power::Power::load(assembly, placed.kind, &placed.path))
             .flatten();
@@ -722,6 +742,7 @@ impl Robot {
             power,
             collision,
             bound,
+            pair,
             target_point: None,
             steady: false,
             velocity: Vec3::ZERO,
@@ -1195,6 +1216,11 @@ impl Robot {
     /// The collision sphere's centre in the world.
     pub fn collision_centre(&self) -> Vec3 {
         self.walker.body.position + self.walker.body.to_world(self.collision.0)
+    }
+
+    /// The centre of the sphere the collision pair moves ([`Robot::pair`]), in the world.
+    pub fn pair_centre(&self) -> Vec3 {
+        self.walker.body.position + self.walker.body.to_world(self.pair.0)
     }
 
     /// A chassis node in the world: where it is and its second axis.
