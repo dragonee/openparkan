@@ -757,28 +757,126 @@ fn a_start_flagged_building_keeps_its_mission_height_and_the_rest_stand_on_their
     assert!(flagged_off.iter().all(|&d| (0.2..5.2).contains(&d)), "{flagged_off:?}");
 }
 
-/// A building's insignia is its owner's: Part 6.5 of the let's play shows C03 M02's Enemy 1
-/// Medium Mine wearing cell 6 of `PG27`, a filled triangle over a bar, and the player's Small
-/// Bunker cell 0, the arrow. `B_LBL_01`'s eight tracks name cells 0, 6, 5, 4, 3, 2, 1 and 7, so
-/// the mine draws on track 1, its clan's index (docs/07, "Who picks an object mesh's material
-/// track").
+/// An object's emblem is its clan's: each game frame a building's record and a unit's write
+/// the clan's sign into the object's control system as its material track
+/// (`iron3d.dll:0x10033072`, `0x10075727`), and a single-player game gives clan *i* sign *i*
+/// (`0x100a2407`). `B_LBL_01` on a building and `R_LBL_01` on a robot name cells 0, 6, 5, 4,
+/// 3, 2, 1 and 7 of `PG27` on their eight tracks. *Seen* in Part 6.5 of the let's play: C03
+/// M02's Enemy 1 Medium Mine wears cell 6, a filled triangle over a bar, and the player's
+/// Small Bunker cell 0, the arrow (docs/07, "Who picks an object mesh's material track").
 #[test]
 #[ignore = "needs the game install"]
-fn c03_m02s_buildings_wear_their_owners_insignia() {
+fn c03_m02s_buildings_and_units_wear_their_clans_insignia() {
+    use parkan_formats::mission::{KIND_BUILDING, KIND_UNIT};
+
     let game = gamedir::find(None).expect("a Parkan install: set PARKAN_DIR");
     let mut store = TextureStore::open(&game).unwrap();
-    let cell =
-        |store: &mut TextureStore, track: usize| store.look_on_track("B_LBL_01", track).unwrap().still.cell;
     let grid = |c: usize| [(c % 4) as f32 * 0.25, (c / 4) as f32 * 0.25, 0.25, 0.25];
-    assert_eq!(cell(&mut store, 0), grid(0), "the arrow");
-    assert_eq!(cell(&mut store, 1), grid(6), "the triangle over a bar");
-    assert_eq!(store.look_on_track("B_LBL_01", 0).unwrap(), store.look("B_LBL_01").unwrap());
+    for material in ["B_LBL_01", "R_LBL_01"] {
+        let cells: Vec<[f32; 4]> =
+            (0..8).map(|track| store.look_on_track(material, track).unwrap().still.cell).collect();
+        assert_eq!(cells, [0, 6, 5, 4, 3, 2, 1, 7].map(grid), "{material}");
+        assert_eq!(store.look_on_track(material, 0).unwrap(), store.look(material).unwrap());
+        // A track the material has not got is track 0 (`World3D.dll:0x1000322f`).
+        assert_eq!(store.look_on_track(material, 8).unwrap(), store.look(material).unwrap());
+    }
+    // A one-track skin is the same on every clan's track.
+    assert_eq!(store.look_on_track("HLP_RAY_R", 1).unwrap(), store.look("HLP_RAY_R").unwrap());
 
     let play = campaign_play(gamedir::C03_MISSION_02);
     let unit = |id: u32| play.units.iter().position(|u| u.logical_id == id as i32).expect("a placed object");
     assert_eq!(play.insignia(unit(0x8000_0006)), 1, "Enemy 1's Medium Mine");
     assert_eq!(play.insignia(unit(0x8000_0001)), 0, "the player's Small Bunker");
-    assert_eq!(play.insignia(unit(15)), 0, "a unit keeps track 0");
+    // Raid 1's MWW-4 Warrior is Enemy 2's, clan 2, and wears its sign: track 2, cell 5.
+    assert_eq!(play.units[unit(15)].clan, Some(2));
+    assert_eq!(play.insignia(unit(15)), 2, "a unit wears its clan's sign too");
+    // Every unit and building wears its clan's index, and scenery, which has no record, 0.
+    let mut worn = std::collections::BTreeMap::<(u32, usize), usize>::new();
+    let mut whole = 0;
+    for (t, u) in play.units.iter().enumerate() {
+        let want = match u.kind {
+            KIND_UNIT | KIND_BUILDING => u.clan.map_or(0, |c| c as usize),
+            _ => 0,
+        };
+        assert_eq!(play.insignia(t), want, "target {t}");
+        if matches!(u.kind, KIND_UNIT | KIND_BUILDING) {
+            *worn.entry((u.kind, want)).or_default() += 1;
+            // Whatever carries a sign is drawn node by node, the drawing that takes the
+            // track: what is drawn whole, a bridge's half, wears none.
+            let signed = play.battle.meshes[t]
+                .iter()
+                .flat_map(|m| &m.wear.materials)
+                .any(|m| matches!(m.to_ascii_uppercase().as_str(), "B_LBL_01" | "R_LBL_01"));
+            assert!(play.drawn_by_node(t) || !signed, "target {t} of kind {} is drawn whole", u.kind);
+            whole += usize::from(!play.drawn_by_node(t));
+        }
+    }
+    eprintln!("C03 M02's units and buildings by sign: {worn:?}, {whole} drawn whole");
+    assert!(worn.keys().any(|&(kind, sign)| kind == KIND_UNIT && sign == 2), "Enemy 2 has units: {worn:?}");
+}
+
+/// A capture changes the emblem with the owner: the record's clan is what its step writes
+/// the track from, every game frame (docs/07, "Who picks an object mesh's material track";
+/// docs/27, "Capture"). Mission 01's neutral warbots, taken by Enter, and Mission 02's
+/// factory, taken at its pod, go to the player's sign and are handed to the drawing.
+#[test]
+#[ignore = "needs the game install"]
+fn a_captured_warbot_and_a_captured_factory_wear_the_takers_insignia() {
+    use parkan_world::models::{self, OnTrack};
+    use parkan_world::play::Mode;
+
+    let game = gamedir::find(None).expect("a Parkan install: set PARKAN_DIR");
+    let (before, _) = mission_01_play();
+    let (mut play, bots) = mission_01_captured(false);
+    let player = play.player_clan as usize;
+    let mut store = TextureStore::open(&game).unwrap();
+    for bot in [bots[0], bots[1]] {
+        let neutral = before.insignia(bot);
+        assert_ne!(neutral, player, "a neutral clan's sign is its own");
+        assert_eq!(play.insignia(bot), player);
+        assert!(play.reskinned.contains(&bot), "the drawing is told: {:?}", play.reskinned);
+    }
+    assert_eq!(play.insignia(bots[2]), before.insignia(bots[2]), "the hostile bot keeps its own");
+
+    // `tut1_mf1`'s emblem batches, built on the neutral clan's track and worn again on the
+    // player's, are what building them on the player's gives.
+    let bot = bots[0];
+    let neutral = before.insignia(bot);
+    let mut emblems = 0;
+    for loaded in &play.battle.meshes[bot] {
+        for node in 0..loaded.mesh.nodes.len() {
+            let on = |store: &mut TextureStore, track| {
+                models::build_node(loaded, node, 0, &mut OnTrack { skins: store, track }).unwrap()
+            };
+            let Some(mut model) = on(&mut store, neutral) else { continue };
+            let wears = model.groups.iter().any(|g| g.look.material == "R_LBL_01");
+            assert_eq!(model.wear_track(&mut store, player).unwrap(), wears, "node {node}");
+            assert_eq!(model.groups, on(&mut store, player).unwrap().groups);
+            emblems += usize::from(wears);
+        }
+    }
+    assert!(emblems > 0, "the warbot carries R_LBL_01");
+    play.reskinned.clear();
+
+    // Mission 02's factory, from its pod (docs/27's table: it fires 4.5 s in).
+    let (mut play, _) = mission_02_play();
+    let w = &mut play.hero.walker;
+    w.body.position = glam::Vec3::new(391.28, 740.08, 146.0);
+    w.follow_ground(&play.ground);
+    w.from = (w.body.position, w.body.yaw);
+    let factory = play.buildings.iter().position(|b| b.doors.len() == 3).unwrap();
+    let t = play.buildings[factory].target;
+    let enemy = play.insignia(t);
+    assert_ne!(enemy, play.player_clan as usize);
+    let mut tick = 0;
+    while play.mode() == Mode::OnFoot && tick < 600 {
+        play.hero.update_input();
+        play.tick(1000.0 / 60.0, [0.0; 2]);
+        tick += 1;
+    }
+    assert_eq!(play.mode(), Mode::Factory(t));
+    assert_eq!(play.insignia(t), play.player_clan as usize);
+    assert_eq!(play.reskinned, vec![t]);
 }
 
 /// An explosion's point light falls on the landscape as the shade's light template, `LIGHT1`

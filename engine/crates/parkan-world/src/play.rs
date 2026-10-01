@@ -387,6 +387,9 @@ pub struct Play {
     pub spawned: usize,
     /// Units made since the drawing last caught up, by target.
     pub added: Vec<usize>,
+    /// Targets whose clan changed since the drawing last caught up: each wears another
+    /// insignia now ([`Play::insignia`]).
+    pub reskinned: Vec<usize>,
     /// Every building's load-group effects, and the value each door-driven one last showed.
     pub building_effects: Vec<(BuildingEffects, Vec<f32>)>,
     /// The bot the player drives, while the hero is aboard it.
@@ -1149,6 +1152,7 @@ impl Play {
             level,
             spawned: 0,
             added: Vec::new(),
+            reskinned: Vec::new(),
             building_effects,
             driving: None,
             command: crate::command::Camera::default(),
@@ -1211,17 +1215,17 @@ impl Play {
         }
     }
 
-    /// The material track target `t`'s meshes draw on, which picks a cell of an insignia
-    /// sheet (`B_LBL_01`, docs/07, "Who picks an object mesh's material track").
+    /// The material track target `t`'s mesh draws on, which picks a cell of an insignia sheet:
+    /// `B_LBL_01` on a building, `R_LBL_01` on a robot's chassis and turret (docs/07, "Who
+    /// picks an object mesh's material track").
     ///
-    /// STAND-IN: docs/07-objects.md#who-picks-an-object-meshs-material-track--read -- what writes
-    /// the control system's `+0x554` (slot 16) is not found. Part 6.5 of the let's play shows C03
-    /// M02's Enemy 1 Medium Mine wearing track 1 and the player's Small Bunker track 0, so a
-    /// building draws on its owner clan's index, the sign a single-player game gives clan *i*.
-    /// A unit keeps track 0, its own not seen, and a capture changes nothing, which is not seen
-    /// either.
+    /// It is its clan's sign, which a single-player game makes the clan's index
+    /// (`iron3d.dll:0x100a2407`). Each game frame a building's record (`0x10033072`) and a
+    /// unit's (`0x10075727`) write it from the clan the record holds, so a capture changes it
+    /// with the owner. Scenery has no such record and keeps the control system's 0.
     pub fn insignia(&self, t: usize) -> usize {
-        let clan = self.units.get(t).filter(|u| u.kind == KIND_BUILDING).and_then(|u| u.clan);
+        let clan =
+            self.units.get(t).filter(|u| matches!(u.kind, KIND_UNIT | KIND_BUILDING)).and_then(|u| u.clan);
         clan.and_then(|c| usize::try_from(c).ok()).unwrap_or(0)
     }
 
@@ -1795,6 +1799,7 @@ impl Play {
             return false;
         }
         self.units[t].clan = Some(self.player_clan);
+        self.reskinned.push(t);
         self.mindless.push(t);
         if let Some(p) = self.progression.as_mut() {
             p.progress.captured(u.logical_id, self.player_clan);
@@ -3160,6 +3165,7 @@ impl Play {
         let owner = self.units[t].clan;
         if owner != Some(taker) {
             self.units[t].clan = Some(taker);
+            self.reskinned.push(t);
             // A plant stops what it was making for its old owner, who gets the mind its start
             // reserved back; the new owner's panel opens on its recent projects (*seen*, docs/36,
             // "For an engine"; how the capture ends order 12 is not read).

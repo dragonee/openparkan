@@ -194,8 +194,8 @@ impl Skins for TextureStore {
 }
 
 /// Skins that draw every material on one track: the track an object's control system names,
-/// which picks a cell of an insignia sheet (docs/07, "Who picks an object mesh's material
-/// track").
+/// its clan's sign, which picks a cell of an insignia sheet (docs/07, "Who picks an object
+/// mesh's material track").
 pub struct OnTrack<'a, S: Skins> {
     pub skins: &'a mut S,
     pub track: usize,
@@ -227,6 +227,22 @@ impl Model {
     /// The lowest z of the model's own frame, where it meets the ground.
     pub fn lowest(&self) -> f32 {
         self.vertices.iter().map(|v| v.position[2]).fold(f32::MAX, f32::min)
+    }
+
+    /// Draw every batch on another material track, as a captured object does: the next game
+    /// frame its record writes its new clan's sign into its control system, and the draw
+    /// asks for each batch's material on that track (docs/07, "Who picks an object mesh's
+    /// material track"). Whether any batch's look changed.
+    pub fn wear_track(&mut self, skins: &mut impl Skins, track: usize) -> Result<bool> {
+        let mut changed = false;
+        for group in &mut self.groups {
+            let look = skins.look_on_track(&group.look.material, track)?;
+            if look != group.look {
+                group.look = look;
+                changed = true;
+            }
+        }
+        Ok(changed)
     }
 
     /// Append a slot's batches, each in its wear's material, placing every vertex it
@@ -570,6 +586,49 @@ mod tests {
         let xs: Vec<f32> = cockpit.vertices.iter().map(|v| v.position[0]).collect();
         assert_eq!(xs, vec![2.0, 0.0, 2.0]);
         assert!(cockpit.vertices.iter().all(|v| v.position[2] == 0.0));
+    }
+
+    /// One eight-cell emblem sheet, `LABEL`, a cell a track; every other material plain on
+    /// every track, as a material with one track is.
+    struct Emblems;
+
+    impl Skins for Emblems {
+        fn look(&mut self, name: &str) -> Result<Look> {
+            self.look_on_track(name, 0)
+        }
+
+        fn lightmap(&mut self, _page: &str) -> Result<Option<usize>> {
+            Ok(None)
+        }
+
+        fn look_on_track(&mut self, name: &str, track: usize) -> Result<Look> {
+            let cell = if name == "LABEL" && track < 8 { track as f32 * 0.125 } else { 0.0 };
+            let still = Phase { cell: [cell, 0.0, 0.125, 1.0], ..Phase::PLAIN };
+            Ok(Look { material: name.to_owned(), blend_mode: 0, still, animation: None })
+        }
+    }
+
+    #[test]
+    fn a_model_wears_another_track_batch_by_batch_and_says_whether_anything_changed() {
+        let mut loaded = cockpit_mesh();
+        loaded.wear.materials[0] = "LABEL".to_owned();
+        let cell = |m: &Model| m.groups[0].look.still.cell[0];
+        // Built for clan 1, then captured by clan 0 and by clan 3.
+        let mut model =
+            build_node(&loaded, 0, 0, &mut OnTrack { skins: &mut Emblems, track: 1 }).unwrap().unwrap();
+        assert_eq!(cell(&model), 0.125);
+        assert!(model.wear_track(&mut Emblems, 0).unwrap());
+        assert_eq!(cell(&model), 0.0);
+        assert!(model.wear_track(&mut Emblems, 3).unwrap());
+        assert_eq!(cell(&model), 0.375);
+        let built =
+            build_node(&loaded, 0, 0, &mut OnTrack { skins: &mut Emblems, track: 3 }).unwrap().unwrap();
+        assert_eq!(model.groups, built.groups, "worn is as built");
+        assert!(!model.wear_track(&mut Emblems, 3).unwrap(), "the same track changes nothing");
+        // A model with no emblem looks the same on every track.
+        loaded.wear.materials[0] = "HULL".to_owned();
+        let mut hull = build_node(&loaded, 0, 0, &mut Emblems).unwrap().unwrap();
+        assert!(!hull.wear_track(&mut Emblems, 5).unwrap());
     }
 
     #[test]

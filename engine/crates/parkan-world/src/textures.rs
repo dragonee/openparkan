@@ -336,7 +336,9 @@ impl TextureStore {
     /// How a material draws on an object whose control system names `track` (`ILifeSystem`
     /// slot 15, docs/07, "Who picks an object mesh's material track"): track 0 is [`Self::look`],
     /// and another track the material has shows its first key's entry, still. A material with
-    /// no such track draws as on track 0.
+    /// no such track draws on track 0: both of the manager's fetches turn a track outside the
+    /// material's count into 0 (`World3D.dll:0x1000322f`, `0x10003709`), which is how a clan's
+    /// sign leaves every one-track skin alone.
     pub fn look_on_track(&mut self, material: &str, track: usize) -> Result<Look> {
         let base = self.look(material)?;
         if track == 0 {

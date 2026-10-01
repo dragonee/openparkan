@@ -833,10 +833,14 @@ pub fn own_view(objects: &mut Objects, store: &mut TextureStore, play: &Play) ->
             objects.instances.remove(i);
         }
     }
+    // The hero's record writes its clan's sign as every unit's does (docs/07, "Who picks an
+    // object mesh's material track"). No hero mesh carries a material with a second track.
+    let hero_track = usize::try_from(play.player_clan).unwrap_or(0);
     let mut nodes = Vec::new();
     for (mount, loaded) in [(Mount::Chassis, &play.hero.chassis), (Mount::Turret, &play.hero.turret)] {
         for node in 0..loaded.mesh.nodes.len() {
-            let Some(model) = models::build_view_node(loaded, node, 0, &mut *store)? else {
+            let skins = &mut models::OnTrack { skins: &mut *store, track: hero_track };
+            let Some(model) = models::build_view_node(loaded, node, 0, skins)? else {
                 continue;
             };
             objects.models.push(model);
@@ -860,7 +864,8 @@ pub fn own_view(objects: &mut Objects, store: &mut TextureStore, play: &Play) ->
         for node in 0..loaded.mesh.nodes.len() {
             let stages = life.and_then(|l| l.nodes.get(node)).map_or(1, |l| l.stages);
             for variant in 0..usize::from(stages) {
-                let Some(model) = models::build_node(loaded, node, variant, &mut *store)? else {
+                let skins = &mut models::OnTrack { skins: &mut *store, track: hero_track };
+                let Some(model) = models::build_node(loaded, node, variant, skins)? else {
                     continue;
                 };
                 objects.models.push(model);
@@ -910,7 +915,8 @@ pub fn own_view(objects: &mut Objects, store: &mut TextureStore, play: &Play) ->
 }
 
 /// Units the play has made since the last call, drawn node by node as `own_view` draws a
-/// target: whether any was added, and the world must be uploaded again.
+/// target, and the insignia of what changed owner: whether any was added or wears another
+/// emblem, and the world must be uploaded again.
 pub fn add_targets(
     objects: &mut Objects,
     store: &mut TextureStore,
@@ -925,7 +931,8 @@ pub fn add_targets(
     {
         for (p, part) in robot.parts.iter().enumerate() {
             for node in 0..part.mesh.mesh.nodes.len() {
-                let Some(model) = models::build_view_node(&part.mesh, node, 0, store)? else { continue };
+                let skins = &mut models::OnTrack { skins: &mut *store, track: play.insignia(t) };
+                let Some(model) = models::build_view_node(&part.mesh, node, 0, skins)? else { continue };
                 objects.models.push(model);
                 objects.instances.push(models::Instance {
                     model: objects.models.len() - 1,
@@ -944,6 +951,18 @@ pub fn add_targets(
         }
     }
     let added: Vec<usize> = added;
+    // A captured target's nodes draw on its new clan's track from the next frame (docs/07, "Who
+    // picks an object mesh's material track"), its own view's among them.
+    let mut reskinned = false;
+    for t in std::mem::take(&mut play.reskinned) {
+        let track = play.insignia(t);
+        let nodes = view.targets.iter().filter(|e| e.1 == t).map(|e| e.0);
+        let cockpit = view.cockpits.iter().filter(|c| c.1 == t).map(|c| c.0);
+        for instance in nodes.chain(cockpit) {
+            let model = objects.instances[instance].model;
+            reskinned |= objects.models[model].wear_track(&mut *store, track)?;
+        }
+    }
     for &t in added.iter().filter(|&&t| t != usize::MAX) {
         let target = &play.battle.combat.targets[t];
         for (p, part) in target.parts.iter().enumerate() {
@@ -970,7 +989,7 @@ pub fn add_targets(
             }
         }
     }
-    Ok(!added.is_empty())
+    Ok(!added.is_empty() || reskinned)
 }
 
 /// Put each node of the hero's own view where the hero's pose has it this frame: the
