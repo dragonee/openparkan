@@ -104,7 +104,10 @@ and its animation, when seen from outside.
 - Each frame a round's segment is tested against the ground, the map box and
   every live object's level-0 triangles.
 - A hit does the round's `.exp` damage to the node struck, or blasts every
-  node in reach, less armour. A dead node takes its children with it, and
+  node in reach, less armour — but no node of the unit that fired the round,
+  whose shield still pays for its own blast, and nothing at all once the unit
+  that fired it has been deleted (docs/26, "Whose hit it is, and whom it
+  spares"). A dead node takes its children with it, and
   node 0 takes the object; a building stays, a shell that can still be shot
   apart.
 - On Mission 01 the laser kills a target in two hits of 250.

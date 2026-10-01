@@ -268,6 +268,10 @@ pub struct Combat {
     /// (`AniMesh.dll:0x10010dc0`, docs/26, "What a hidden node is left out of"); the
     /// command-mode pick, which asks for its sphere alone, still meets it.
     pub absent: std::collections::HashSet<usize>,
+    /// Targets whose object is deleted, `World3D.dll!KillGameObject` once a dead unit's time is
+    /// up: no object answers their id, so a round one of them fired is worth nothing where it
+    /// goes off (`Control.dll:0x10011783`, docs/26, "Whose hit it is, and whom it spares").
+    pub gone: std::collections::HashSet<usize>,
 }
 
 /// Part `p`'s socket, as the walk from node 0 treats the node standing in for the part's node 0
@@ -726,6 +730,15 @@ impl Combat {
     /// blast over every node in reach, each for `ratio × (hit points + damage)`, and kind 4
     /// on shields alone. A shield first stops what it can: all that is left of a round
     /// stopped by a bubble is spent, and what is left of a blast goes on to the nodes.
+    ///
+    /// The hit carries the id of the object that fired the round, the whole robot or building
+    /// its gun is on (`+0x18`, property `0x7f`, `0x10011766`). **Its nodes take nothing of
+    /// it**: the object whose id that is leaves after the shield step and before its first
+    /// node (`0x1000ed4e`, and `0x1000ee0c` for the node a direct hit names), so a blast spares
+    /// the unit that fired it, every node of it, while its shield pays for it as anyone's does
+    /// and it is told of the hit like the rest. No clan is asked: a blast hurts the firer's own
+    /// side. And a hit whose firer answers no id any more is worth 0 (`0x10011783`), which the
+    /// queue passes over whole (`0x10012f0b`): nothing is hurt and nobody is told.
     fn explode(
         &mut self,
         e: &Explosion,
@@ -735,6 +748,10 @@ impl Combat {
         struck: Struck,
         events: &mut Vec<Event>,
     ) {
+        if round.owner.is_some_and(|o| self.gone.contains(&o)) {
+            return;
+        }
+        let firer = round.owner.unwrap_or(self.hero_index());
         let damage = round_hit(round.ratio, kind.hit_points, e.damage);
         let carried = |t: usize| match struck {
             Struck::Bubble(b, s) if b == t => Some(s),
@@ -745,7 +762,9 @@ impl Combat {
             HIT_DIRECT => match struck {
                 Struck::Node(t, p, n) => {
                     events.push(hurt(t));
-                    self.damage(t, p, n, damage, events);
+                    if t != firer {
+                        self.damage(t, p, n, damage, events);
+                    }
                 }
                 Struck::Bubble(t, s) => {
                     events.push(hurt(t));
@@ -772,7 +791,7 @@ impl Combat {
                     let parts = target.parts.len();
                     events.push(hurt(t));
                     let damage = self.shield_step(t, point, e.radius, carried(t), damage, events);
-                    if damage <= 0.0 {
+                    if damage <= 0.0 || t == firer {
                         continue;
                     }
                     for p in 0..parts {
@@ -1163,6 +1182,7 @@ mod tests {
             hero: None,
             targets: vec![post(Vec3::new(20.0, 30.0, 0.0), 500.0)],
             absent: Default::default(),
+            gone: Default::default(),
         };
         let muzzle = Vec3::new(20.0, 5.0, 1.0);
         for shot in 0..2 {
@@ -1278,6 +1298,7 @@ mod tests {
             hero: None,
             targets: vec![post(Vec3::new(20.0, 16.0, 0.0), 5000.0), post(Vec3::new(20.0, 12.0, 0.0), 5000.0)],
             absent: Default::default(),
+            gone: Default::default(),
         };
         // Fired by the nearer post, from inside it: it passes its owner and flies on.
         c.fire(0, Some(1), Vec3::new(20.0, 11.0, 1.0), Vec3::Y, Vec3::ZERO, 1.0, None);
@@ -1288,7 +1309,8 @@ mod tests {
         let struck: Vec<_> = events.iter().filter(|e| matches!(e, Event::Struck { .. })).collect();
         assert_eq!(struck.len(), 1, "{events:?}");
         assert!(matches!(struck[0], Event::Struck { target: Some(0), .. }));
-        // The hit blast reaches both posts' spheres: 370 wholly on the first.
+        // The hit blast reaches both posts' spheres: 370 wholly on the first, and nothing on
+        // the post that fired it, 4 m off in a blast of 7, which is told of the hit all the same.
         let on = |t: usize| {
             events.iter().filter_map(move |e| match e {
                 Event::Damaged { target, damage, .. } if *target == t => Some(*damage),
@@ -1296,7 +1318,99 @@ mod tests {
             })
         };
         assert_eq!(on(0).collect::<Vec<_>>(), vec![370.0]);
-        assert_eq!(on(1).count(), 1);
+        assert_eq!(on(1).count(), 0, "the firer's nodes take nothing: {events:?}");
+        assert!(events.contains(&Event::Hurt { target: 1, owner: Some(1) }));
+    }
+
+    /// The firer test is one id against another (`Control.dll:0x1000ed4e`): the object that
+    /// fired is spared, and the post beside it, whoever's it is, is not. The shield step comes
+    /// before the test, so the firer's own sector pays for its blast.
+    #[test]
+    fn a_blast_spares_the_nodes_of_the_object_that_fired_it_and_of_no_other_and_its_shield_pays() {
+        let g = floor();
+        // A round whose range ends 5 m short of the post's centre, in a blast of 10.
+        let shell = RoundKind {
+            name: "shell".into(),
+            top_speed: 1200.0,
+            range: 20.0,
+            radius: 0.1,
+            hit_points: 0.0,
+            hit: None,
+            range_end: Some(explosion(HIT_AREA, 1000.0, 10.0)),
+            ..RoundKind::default()
+        };
+        let far = post(Vec3::new(200.0, 200.0, 0.0), 500.0);
+        let muzzle = Vec3::new(20.0, 5.0, 1.0);
+        let back = crate::shield::BACK;
+
+        // Fired by the far post: the shielded one's sector stops what it holds and the rest
+        // reaches its node.
+        let mut c = Combat {
+            kinds: vec![shell.clone()],
+            targets: vec![shielded_post(), far.clone()],
+            ..Default::default()
+        };
+        let held = c.targets[0].shield.as_ref().unwrap().strength(back);
+        c.fire(0, Some(1), muzzle, Vec3::Y, Vec3::ZERO, 1.0, None);
+        let events = c.tick(1.0 / 60.0, &g);
+        let damage = damage_of(&events);
+        assert_eq!(damage.len(), 1, "{events:?}");
+        assert!((damage[0] - (1000.0 - held)).abs() < 0.05, "{damage:?} past {held}");
+
+        // Fired by the shielded post itself: the sector is spent just the same, and no node
+        // of the post is touched.
+        let mut c = Combat { kinds: vec![shell], targets: vec![shielded_post(), far], ..Default::default() };
+        c.fire(0, Some(0), muzzle, Vec3::Y, Vec3::ZERO, 1.0, None);
+        let events = c.tick(1.0 / 60.0, &g);
+        assert!(damage_of(&events).is_empty(), "{events:?}");
+        assert!(events.iter().any(|e| matches!(e, Event::ShieldHit { target: 0, .. })));
+        assert_eq!(c.targets[0].shield.as_ref().unwrap().fills[back], 0.0, "its own sector paid");
+        assert!(events.contains(&Event::Hurt { target: 0, owner: Some(0) }), "and it is told");
+        let whole = c.targets[0].parts[0].life.as_ref().unwrap();
+        assert_eq!(whole.nodes[0].life, whole.nodes[0].max);
+    }
+
+    /// A hit is worth `ratio × .exp damage + lost life` only while the object that fired it
+    /// answers its id (`Control.dll:0x10011783`); otherwise 0, and the queue passes a hit of 0
+    /// over before it hurts or tells anyone (`0x10012f0b`). The explosion is still seen.
+    #[test]
+    fn a_round_whose_firer_is_deleted_goes_off_for_nothing() {
+        let g = floor();
+        let missile = RoundKind {
+            name: "bm_h_01".into(),
+            top_speed: 70.0,
+            range: 100.0,
+            radius: 0.4,
+            hit_points: 200.0,
+            hit: Some(explosion(HIT_AREA, 170.0, 7.0)),
+            range_end: Some(explosion(HIT_AREA, 200.0, 10.0)),
+            ..RoundKind::default()
+        };
+        let posts =
+            vec![post(Vec3::new(20.0, 16.0, 0.0), 5000.0), post(Vec3::new(200.0, 200.0, 0.0), 5000.0)];
+        let run = |gone: bool| {
+            let mut c = Combat { kinds: vec![missile.clone()], targets: posts.clone(), ..Default::default() };
+            c.fire(0, Some(1), Vec3::new(20.0, 11.0, 1.0), Vec3::Y, Vec3::ZERO, 1.0, None);
+            if gone {
+                // Dead and, its time up, deleted, with its round in the air.
+                c.targets[1].alive = false;
+                c.gone.insert(1);
+            }
+            let mut events = Vec::new();
+            for _ in 0..20 {
+                events.extend(c.tick(1.0 / 60.0, &g));
+            }
+            events
+        };
+        let live = run(false);
+        assert_eq!(damage_of(&live), vec![370.0]);
+        assert!(live.contains(&Event::Hurt { target: 0, owner: Some(1) }));
+
+        let dud = run(true);
+        assert!(dud.iter().any(|e| matches!(e, Event::Struck { target: Some(0), .. })), "{dud:?}");
+        assert!(dud.iter().any(|e| matches!(e, Event::Exploded { at_range: false, .. })));
+        assert!(damage_of(&dud).is_empty(), "{dud:?}");
+        assert!(!dud.iter().any(|e| matches!(e, Event::Hurt { .. })), "nobody is told");
     }
 
     #[test]

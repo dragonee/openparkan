@@ -1954,6 +1954,8 @@ impl Play {
         self.deaths = waiting;
         for (target, _) in due {
             self.deleted[target] = true;
+            // A round it fired that is still in the air is worth nothing from here on.
+            self.battle.combat.gone.insert(target);
             self.flights.retain(|f| f.target != target);
             // A tree's or a stone's load group goes with it, as a building's does
             // (`remove_building`).

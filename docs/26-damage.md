@@ -457,8 +457,10 @@ The hit is queued on the object that exploded and applied on its tick
 - **Before anything, the hit tells its object who fired** (message `0x19`,
   `0x1000ebdf`), whatever it goes on to do
   ([31-packages.md](31-packages.md#a-hit-pulls-a-unit-in--read)).
-- A hit does nothing if the object that fired it no longer exists, if it is
-  the target's own, or if the target is **invulnerable** (property 162, `+0x5b0`
+- A hit does nothing if the object that fired it no longer exists, nothing to
+  the nodes of **the object that fired it**
+  ([Whose hit it is, and whom it spares](#whose-hit-it-is-and-whom-it-spares--read-and-measured)),
+  and nothing to the nodes of a target that is **invulnerable** (property 162, `+0x5b0`
   — the `[CS] INVULNERABILITY` debug key sets it on the hero, `0x1005e487`,
   and a unit is invulnerable from its arrival at a building it upgrades until
   the new level stands, `0x1003356f`, [32-builder.md](32-builder.md#upgrading-a-building--read)).
@@ -471,6 +473,128 @@ sphere has radius *r* and centre at distance *d* from a blast of radius *R*:
 | `d ≥ R + r`, or a node sphere of radius 0 | 0 |
 | one sphere strictly inside the other, `d < R − r` or `d < r − R` | the whole blast |
 | otherwise | `damage × ((R + r − d) / 2R)³` |
+
+### Whose hit it is, and whom it spares — *read*, and *measured*
+
+**A hit names one object as its firer**, an id at the hit's `+0x18`. The damage
+stage fills it (`0x10011766`–`0x1001177b`) with the exploding object's `+0x54c`
+when that is not 0, and with the exploding object's own id otherwise.
+
+`+0x54c` is **property `0x7f`**. The constructor leaves it 0 (`0x100070c1`); the
+property's setter writes it (`0x1000e9d2`, `ILifeSystem` slot 6 through the
+thunk at `0x10008000`) and then calls the collision object's slot 6 (`+0x34`);
+and one place sets the property — the gun, on the round it has just created,
+with the id of the object its own control system belongs to
+(`0x1002a398`–`0x1002a3ed`). *Measured*, as a search: `push 0x7f` stands at 12
+sites over the 21 modules of the install, and `0x1002a3e8` is the only one in
+front of a property call; the rest are three plain arguments of direct calls
+in `iron3d.dll` and eight `push`/`pop` pairs of the C runtime, four in
+`iron3d.dll` and four in `services.dll`. The scan is by the immediate, so a set
+whose id sat in a register would not show; the one it does find is the one the
+gun was already known to make.
+
+| what explodes | the firer its hit names |
+|---|---|
+| a round | the object whose gun fired it: the whole robot, whose parts share one control system ([29-weapons.md](29-weapons.md#the-rounds-start)), or the building |
+| anything else — a node of a unit, of a building, of a tree | the object itself |
+
+**A hit whose firer is gone is worth nothing.** The stage looks the id up — the
+queue's slot 11, `GetIGObject` by its own panic string
+(`World3D.dll:0x10007860`, called at `Control.dll:0x10011783`) — and asks the
+object slot 21 (`0x1001178d`), which answers the agent's `+0x6f0`, the byte
+control message 7 sets for an object that is not simulated here
+(`AniMesh.dll:0x10002fe0`, `0x10001492`,
+[13-control.md](13-control.md#control-message-7-says-who-simulates-the-object--read)).
+With no object, or a mirror, the damage is 0 (`0x100117b8`) in place of
+`ratio × .exp damage + lost life`. The queue walk passes over a hit that is not
+above 0 before it looks at its kind (`0x10012f0b`–`0x10012f19`), so such a hit
+goes through neither the falloff nor slot 8: no node takes it, on this object or
+on another, and nobody is told of it. Its effect is started all the same
+(`0x100117d0`–`0x10011897`). A dead unit is deleted the
+controller's `+92` ms after it dies
+([above](#what-a-damaged-node-a-destroyed-part-and-a-dead-unit-draw--read-and-measured)),
+through `KillGameObject` (`World3D.dll:0x100088a0`), so **a round still in the
+air when the unit that fired it is deleted goes off for nothing**. A building
+is not deleted, and its rounds keep their worth after it is a shell.
+
+**The target's side, in order** (`ILifeSystem` slot 8, `0x1000ebc0`). A kind-3
+or kind-4 hit runs:
+
+1. message `0x19` to the target's object, with the firer's id (`0x1000ebdf`);
+2. on a building, the door a struck node opens (`0x1000ebf7`–`0x1000ec7e`,
+   [24-motion.md](24-motion.md#a-shot-opens-a-door--read-and-seen));
+3. **the shield step**, on a copy of the hit (`0x1000ed26` → `0x1000ff00`),
+   which takes what the sector stops off the copy's damage;
+4. nothing left of it, and the hit ends (`0x1000ed2b`–`0x1000ed3a`);
+5. the target invulnerable, and it ends (`0x1000ed40`–`0x1000ed48`);
+6. **the target's id equal to the hit's firer, and it ends**
+   (`0x1000ed4e`–`0x1000ed59`). The id is the one the world keeps the object
+   under: the system's `IGameObject` at `+0x1c`, slot 9, the agent's `+0x120`
+   (`AniMesh.dll:0x10017d60`), which a building passes on to its agent
+   (`Terrain.dll:0x100573f0`);
+7. every node through the falloff (`0x1000ed5f`–`0x1000ed81`), and then the
+   push each destroyed node is given (`0x1000ed83`–`0x1000edb8`, slot 25,
+   `0x100102a0`).
+
+A kind-2 hit that names a node runs 1, 2, 5 and 6 and then that one node
+(`0x1000edfe`, `0x1000ee0c`–`0x1000ee17`, `0x1000ee29`); one that carries a
+bubble's sector runs 1 and the shield step alone (`0x1000ee97`–`0x1000ef3c`).
+
+What follows from the order:
+
+- **It is one id against another, and no clan is asked.** Neither slot 8, the
+  queue walk, the shield step nor the falloff reads the owner word (`+0x550`). A
+  round is given its gun's at its start (`0x1002a3cb`–`0x1002a3dc`, slot 10),
+  and nothing on a hit's way looks at it. A blast hurts the firer's own side as
+  it does any other, and so does a direct hit.
+- **It spares every node of the firer.** The test stands before the first node,
+  on the object, and the object is the whole unit.
+- **The firer's shield still pays.** The shield step comes first, so a blast
+  that crosses the firer's own bubble from outside is stopped by its sector for
+  what the sector holds, and the firer is told of the hit, naming itself.
+- **It applies to a direct hit as well**, where it has nothing left to do: the
+  collision pass has already given the round no contact with its shooter
+  ([The hit test](#the-hit-test--read-and-measured)).
+- **The hero is an object like the rest.** Its guns are on its own control
+  system, so a rocket at its feet costs it a shield sector and no node. At a
+  tower's guns it is not the tower: the tower's rounds carry the tower's id,
+  and the hero standing in the pod room is struck by them as anyone is.
+- **The exploding object's own nodes are not on this path at all.** The queue
+  walk hits them itself, before it turns to the others, through the falloff
+  alone: no shield step, no invulnerability test, no firer test
+  (`0x10012f3b`–`0x10012f59`). The falloff passes over the node that exploded
+  (`0x10010066`–`0x1001006e`), a destroyed node and a node whose parent is
+  destroyed (`0x10010052`, `0x10010074`–`0x1001008d`). The object is then
+  passed over in the list of the others by its id (`0x10012f63`–`0x10012f85`).
+  So a unit whose node explodes as a blast takes it on its other nodes, and is
+  its own firer to everything else in reach: the firer test never matches there.
+
+**What the data holds** (*measured*):
+
+- **Rounds.** 35 of the 66 readable `BULL` rounds explode as a blast at node 0
+  (the 67th, `bm_b_02`, names a `.ndp` and a `.ctl` that `weapon.rlb` does not
+  hold), with radii of 2 to 60 m, and 34 of the 62 guns that name a round fire
+  one. Four guns' blast is 15 m or more: `e_gun_bl_17` (`bm_b_04`, 60 m and
+  100,000), `e_gun_bl_18` and `e_gun_ml_18` (`bm_m_04`, the winged SSM, 45 m and
+  60,000) and `e_gun_fl_09` (`fm_h_01`, 15 m and 3,000). Nothing in the data
+  keeps a firer clear of them. A gun's target gate has a far limit and none
+  near ([29-weapons.md](29-weapons.md#firing-from-button-to-round--read-and-measured)),
+  and the nearest thing to a minimum range is the AI's distance score
+  ([29-weapons.md](29-weapons.md#how-the-ai-fires--read)): 22 of the 35 carry
+  frame flag `0x10` or 8 and score the same wherever the target stands, and
+  the other 13 lose their score only over the last 5 m, where 4 of them blast
+  wider than that (`ba_a_02` and `ba_a_04` 10 m, `ba_a_05` 15 m, `br_b_03`
+  6 m). So the firer test is what stands between such a round and the unit
+  that fires it at a target close by.
+- **Everything else.** The `objects.rlb` records name 504 distinct `.ndp`
+  members, 12 of which their archives do not hold. The 427 that belong to no
+  round hold 1,828 nodes: 1,699 name a kind-1 `.exp`, the effect and nothing
+  more, 128 name none, and **one names a blast** — node 1 of `o_tur_la_06`, the
+  table the turrets `e_tur_lb_06` and `e_tur_lt_06` share, 80 hit points and
+  `explode_rbr_bomb`: 20,000 in 75 of the node's radii, which is 43.4 m on its
+  0.579 sphere. **0 of the 458 shipped designs carries either turret.** So no
+  placed unit's and no building's death is a blast: a tower that dies under a
+  unit standing in it plays an effect and hurts nothing.
 
 ### What nothing reads in an `.exp` — *read*, as a search
 
@@ -595,15 +719,16 @@ on the hero's cannon shell and laser bolt (*measured*).
 - **A round against an object** (`0x1001d630`):
   - **its own shooter is skipped** — a unit whose id is the round's owner gives
     no contact at all (`0x1001d6af`). The owner is the whole robot that fired
-    it, not the gun (`0x1002a3dc`,
+    it, not the gun (`0x1002a3ed`,
     [29-weapons.md](29-weapons.md#the-rounds-start)), so a turret's round never
     strikes its own robot;
   - a unit's **bubble**, its bounding sphere, gives a contact, kept in order of
     distance;
   - then the round's segment is run through the object's mesh.
 
-  No clan is consulted here; a hit on one's own side is dropped later, in the
-  hit queue ([above](#a-hit-from-the-round-to-the-node--read)).
+  No clan is consulted here, and none later: the one object a hit spares is the
+  object that fired it, by its id
+  ([above](#whose-hit-it-is-and-whom-it-spares--read-and-measured)).
 
 **The mesh test** (`AniMesh.dll:0x10013ef0`) takes every node once, and for
 each node the triangles of **level 0 of its current variant**, in the node's
@@ -1339,6 +1464,16 @@ shield, battery and ammunition (`Behavior.dll:0x10018100`, `0x10019372`,
   `AniMesh.dll` routine that tests node flag 1 is on that way, and whether the
   life system's own walk passes a node hidden by action 1, which is not a
   destroyed node, was not traced.
+- ~~Where the test stands that makes a hit do nothing to "the target's own",
+  and what it compares.~~ Answered: `Control.dll:0x1000ed4e` for a blast and
+  `0x1000ee0c` for a direct hit, the target's object id against the id the hit
+  carries at `+0x18`, the round's property `0x7f` or the exploding object's own
+  id; after the shield step, before the first node, and with no clan in it
+  ([Whose hit it is, and whom it spares](#whose-hit-it-is-and-whom-it-spares--read-and-measured)).
+- What a unit does when message `0x19` names itself, as it does when its own
+  blast reaches it: the handler is
+  [31-packages.md](31-packages.md#a-hit-pulls-a-unit-in--read)'s, and its test
+  of the firer's clan is what would let it pass.
 - How a knocked-off part flies: the push and spin it is given (`0x100102a0`,
   its subtree's box and mass from `0x10010760`),
   how its update integrates them, and what the world query at `0x100134c1`

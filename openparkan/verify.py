@@ -4755,6 +4755,113 @@ def check_damage(check, game: Path) -> None:
           f"pieces gone: fewer triangles on {shrinks}/{compared}")
 
 
+#: The two turret records whose table carries the one blast outside the rounds.
+BOMB_TURRETS = ("e_tur_lb_06", "e_tur_lt_06")
+#: A round's frame flags (``.ctl`` +116) that score the same at any distance to the AI
+#: (``Behavior.dll:0x1001b9f0``, docs/29, "How the AI fires").
+ANY_DISTANCE_FLAGS = 0x18
+
+
+def check_blasts(check, game: Path) -> None:
+    """Which explosions are blasts, and what the data puts between one and its firer.
+
+    docs/26-damage.md, "Whose hit it is, and whom it spares": a hit spares the nodes of
+    the object that fired it (``Control.dll:0x1000ed4e``), and a non-round's own
+    explosion names the object itself.
+    """
+    arm = weapons.Armoury(game)
+    library = arm.library
+
+    rounds: dict[str, tuple[weapons.Round, int]] = {}
+    unreadable = []
+    for record in library.by_tag("BULL"):
+        try:
+            shot = arm.round(record.name)
+            frame = control.parse(arm.read(record.slot_with_suffix("ctl")))
+        except KeyError:
+            unreadable.append(record.name.lower())
+            continue
+        if shot is not None:
+            rounds[record.name.lower()] = (shot, frame.flags)
+    blasts = {n: v for n, v in rounds.items() if v[0].kind == effects.HIT_AREA}
+    guns = []
+    for name in library.records:
+        if name.startswith("e_gun"):
+            gun = arm.gun(name)
+            if gun is not None and gun.round is not None:
+                guns.append(gun)
+    firing = [g for g in guns if g.round.kind == effects.HIT_AREA]
+    wide = sorted(g.part for g in firing if g.round.blast >= 15.0)
+    radii = sorted(s.blast for s, _ in blasts.values())
+    anywhere = [n for n, (_, flags) in blasts.items() if flags & ANY_DISTANCE_FLAGS]
+    wider = sorted(n for n, (s, flags) in blasts.items()
+                   if not flags & ANY_DISTANCE_FLAGS and s.blast > weapons.AI_TOO_CLOSE)
+    check("weapon.rlb: half the rounds are blasts, and no near limit clears their firer",
+          len(rounds) == 66 and unreadable == ["bm_b_02"] and len(blasts) == 35
+          and len(guns) == 62 and len(firing) == 34
+          and wide == ["e_gun_bl_17", "e_gun_bl_18", "e_gun_fl_09", "e_gun_ml_18"]
+          and len(anywhere) == 22
+          and wider == ["ba_a_02", "ba_a_04", "ba_a_05", "br_b_03"],
+          f"{len(blasts)} of the {len(rounds)} readable BULL rounds explode as a blast at "
+          f"node 0 ({unreadable} names members weapon.rlb does not hold), radii "
+          f"{radii[0]:g} to {radii[-1]:g} m, and {len(firing)} of the {len(guns)} guns with "
+          f"a round fire one; {wide} blast 15 m or more.  {len(anywhere)} carry frame "
+          f"flag 0x10 or 8 and score the same to the AI at any distance; of the other "
+          f"{len(blasts) - len(anywhere)}, whose score falls only inside "
+          f"{weapons.AI_TOO_CLOSE:g} m, {wider} blast wider than that")
+
+    tables: dict[tuple[str, str], set[bool]] = {}
+    for record in library.records.values():
+        if record.damage is not None:
+            key = (record.damage.library.lower(), record.damage.member.lower())
+            tables.setdefault(key, set()).add(record.tag == "BULL")
+    missing = read_tables = 0
+    kinds: Counter[int | None] = Counter()
+    found = []
+    for (archive, member), of_round in sorted(tables.items()):
+        try:
+            rows = objects.parse_damage(arm.read(objects.ResourceRef(archive, member)), member)
+        except KeyError:
+            missing += 1
+            continue
+        if of_round == {True}:
+            continue
+        read_tables += 1
+        for i, row in enumerate(rows):
+            if not row.explosion:
+                kinds[None] += 1
+                continue
+            blast = effects.parse_explosion(arm.read(row.explosion), row.explosion.member)
+            kinds[blast.kind] += 1
+            if blast.kind == effects.HIT_AREA:
+                found.append((member, i, row.durability, row.explosion.member.lower(),
+                              blast.damage, blast.radius))
+    sharing = sorted(r.name.lower() for r in library.records.values()
+                     if r.damage is not None and found
+                     and r.damage.member.lower() == found[0][0])
+    reach = 0.0
+    if found and sharing:
+        model = objmesh.parse(arm.read(library.get(sharing[0]).mesh))
+        slot = model.nodes[found[0][1]].slot_index[0]
+        reach = found[0][5] * model.slots[slot].sphere[3]
+    designs = sorted(game.glob("UNITS/**/*.dat"))
+    carrying = [p.name for p in designs
+                if any(c.ref.member.lower() in BOMB_TURRETS
+                       for c in objects.load_unit(p).components)]
+    check("objects.rlb: one node outside the rounds explodes as a blast, on no design",
+          len(tables) == 504 and missing == 12 and read_tables == 427
+          and kinds == {effects.HIT_NONE: 1699, effects.HIT_AREA: 1, None: 128}
+          and found == [("o_tur_la_06.ndp", 1, 80.0, "explode_rbr_bomb.exp", 20000.0, 75.0)]
+          and sharing == list(BOMB_TURRETS) and abs(reach - 43.44) < 0.01
+          and len(designs) == 458 and not carrying,
+          f"the records name {len(tables)} distinct .ndp members, {missing} not in "
+          f"their archives; the {read_tables} that are no round's hold "
+          f"{sum(kinds.values())} nodes: {kinds[effects.HIT_NONE]} name a kind-1 .exp, "
+          f"{kinds[None]} none and {kinds[effects.HIT_AREA]} a blast -- {found}, the "
+          f"table {sharing} share, {reach:.1f} m on the node's sphere -- and "
+          f"{len(carrying)} of the {len(designs)} shipped designs carries either turret")
+
+
 #: A mesh node flag the life loader turns into "never hidden" (``Control.dll:0x1000f9bd``).
 NODE_NEVER_HIDDEN = 0x100
 #: A mesh node flag the life loader turns into "vital" (``Control.dll:0x1000f9aa``).
@@ -26069,7 +26176,7 @@ def run(game: Path) -> int:
         check_sky,
         check_render_state, check_blend_depth, check_minimap_agreement, check_arealmap,
         check_grid, check_missions, check_scale, check_objects, check_poses, check_lod,
-        check_damage, check_node_stages, check_scenery_life,
+        check_damage, check_blasts, check_node_stages, check_scenery_life,
         check_effects, check_effect_timing, check_sounds, check_music, check_actions,
         check_footprints,
         check_rsli,

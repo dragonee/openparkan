@@ -554,6 +554,57 @@ fn c03_m02s_raider_lands_its_winged_ssm_on_the_bunker_from_afar_and_spends_none_
     assert!(at > 250.0, "with the raider still {at:.0} m off");
 }
 
+/// C03 Mission 02's raider outlives its own winged SSM. A hit names the object that fired it and
+/// that object's nodes take nothing of it (`Control.dll:0x1000ed4e`, docs/26, "Whose hit it is,
+/// and whom it spares"), so the 45 m, 60,000 blast of a `bm_m_04` the MWW-4 lands 25 m from
+/// itself leaves every node of it whole; the same round out of another's gun, landed on the same
+/// spot, destroys it. The test is one id against another, so who else stands in the blast is hurt
+/// either way.
+#[test]
+#[ignore = "needs the game install"]
+fn c03_m02s_raider_outlives_its_own_winged_ssm_at_25_m_and_not_anothers() {
+    use parkan_sim::combat::Event;
+
+    let land = |own: bool| {
+        let mut play = campaign_play(gamedir::C03_MISSION_02);
+        let raider = play.units.iter().position(|u| u.logical_id == 15).expect("the medium raider");
+        let bunker =
+            play.units.iter().position(|u| u.logical_id == 0x8000_0001_u32 as i32).expect("the bunker");
+        let ssm = play.battle.combat.kinds.iter().position(|k| k.name.eq_ignore_ascii_case("bm_m_04"));
+        let ssm = ssm.expect("the winged SSM is loaded with the raider's guns");
+        let life = |play: &parkan_world::play::Play| -> f32 {
+            let parts = &play.battle.combat.targets[raider].parts;
+            parts.iter().filter_map(|p| p.life.as_ref()).map(|l| l.total()).sum()
+        };
+        let whole = life(&play);
+        let at = play.battle.combat.targets[raider].position;
+        let muzzle = glam::Vec3::new(at.x + 25.0, at.y, at.z + 40.0);
+        let owner = if own { raider } else { bunker };
+        play.battle.combat.fire(ssm, Some(owner), muzzle, -glam::Vec3::Z, glam::Vec3::ZERO, 1.0, None);
+        let mut burst = None;
+        for _ in 0..(3 * 60) {
+            for e in play.tick(1000.0 / 60.0, [0.0; 2]) {
+                if let Event::Struck { round, point, .. } = e
+                    && round.kind == ssm
+                {
+                    burst = Some(point.distance(play.battle.combat.targets[raider].position));
+                }
+            }
+        }
+        (burst.expect("the missile lands"), play.battle.combat.targets[raider].alive, whole, life(&play))
+    };
+
+    let (from, alive, whole, left) = land(true);
+    eprintln!("its own missile bursts {from:.1} m off: {left:.0} of {whole:.0} left");
+    assert!((15.0..40.0).contains(&from), "inside its own 45 m blast, {from:.1} m off");
+    assert!(alive && left >= whole, "no node of the firer is touched: {left} of {whole}");
+
+    let (from, alive, whole, left) = land(false);
+    eprintln!("another's bursts {from:.1} m off: {left:.0} of {whole:.0} left");
+    assert!((15.0..40.0).contains(&from));
+    assert!(!alive, "the same blast from another's gun destroys it: {left} of {whole}");
+}
+
 /// C03 Mission 02's raider is *"Dangerous!"* on the target panel, as the let's play's Part 6 shows
 /// it at 13:44: its winged SSM launchers' round does 60,000, at least the 10,000 the panel asks
 /// for (docs/35, "Name and status"). The enemy's tracked warbots carry nothing so heavy.

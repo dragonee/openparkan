@@ -419,11 +419,14 @@ The round is created facing its direction with z up (`CreateObject` 9,
 `0x1002a387`) and set up before it joins the game (`AddObjectToGame`,
 `0x1002a58f`):
 
-- **Owner** (property `0x7f`, `0x1002a3dc`): the id of the object whose control
+- **Owner** (property `0x7f`, `0x1002a3ed`): the id of the object whose control
   system holds the gun. That is **the whole robot**, since a unit's parts
   share one control system
   ([28-chassis.md](28-chassis.md#a-fitted-part-takes-over-its-slot--read-and-measured)).
-  The hit test skips that id.
+  The hit test skips that id, and the round's hit spares that object's nodes
+  ([26-damage.md](26-damage.md#whose-hit-it-is-and-whom-it-spares--read-and-measured)).
+  The call before it gives the round its gun's owner word, the clan
+  (`ILifeSystem` slot 10, `0x1002a3dc`).
 - **Level ratio:** property `0xb4`, the gun's `+0x180`.
 - **Velocity:** its top speed along its own y, plus the shooter's world
   velocity (`+0x200`, which the body adds to its position each step,

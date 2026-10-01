@@ -789,6 +789,7 @@ impl Play {
         if let Some(d) = self.deleted.get_mut(b) {
             *d = true;
         }
+        self.battle.combat.gone.insert(b);
         if let Some(&object) = self.battle.objects.get(b) {
             self.killed.push(object);
         }
