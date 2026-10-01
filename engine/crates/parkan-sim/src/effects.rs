@@ -115,6 +115,95 @@ impl Frame {
     }
 }
 
+/// A type-1 block's fields (docs/11, "Type 1 is a light"): its kind, and the start and end of
+/// its position, colour (RGBA) and range, each lerped by the progress through its window.
+pub const LIGHT_KIND_AT: usize = 4;
+pub const LIGHT_POSITION_AT: (usize, usize) = (16, 28);
+pub const LIGHT_DIRECTION_AT: (usize, usize) = (40, 52);
+pub const LIGHT_COLOUR_AT: (usize, usize) = (64, 80);
+pub const LIGHT_RANGE_AT: (usize, usize) = (112, 116);
+/// What a light record says of a light the light manager keeps: a point light, its flags.
+/// `0x80000000` lights only its owner; `0x20000000` is passed over by the shade's emulation.
+pub const LIGHT_OWNER_ONLY: u32 = 0x8000_0000;
+pub const LIGHT_NOT_EMULATED: u32 = 0x2000_0000;
+
+/// A type-1 block's kind as the light it asks the manager for (`Effect.dll:0x1000f649`): a
+/// point light's flags, or `None` for the directional (3) and parallel-point (4) kinds.
+pub fn point_light_flags(kind: u32) -> Option<u32> {
+    match kind {
+        1 => Some(LIGHT_OWNER_ONLY),
+        2 | 5 => Some(0),
+        6 => Some(LIGHT_OWNER_ONLY | LIGHT_NOT_EMULATED),
+        7 => Some(LIGHT_NOT_EMULATED),
+        _ => None,
+    }
+}
+
+/// A point light an effect drives this frame, where it stands in the world.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PointLight {
+    pub position: Vec3,
+    pub colour: Vec3,
+    pub range: f32,
+    pub flags: u32,
+}
+
+/// The shade's light template drawn over a lit triangle (`Terrain.dll:0x1002a130`, docs/11,
+/// "What a light does to a surface"): the square of half-side sqrt(range² − d²) about the
+/// light's foot on the triangle's plane, its first axis the outward normal of the edge from
+/// the first vertex to the second, clipped to the triangle by its three edge planes, each
+/// corner with its (u, v) on the template's texture. Empty when the light is past the range
+/// from the plane or from any edge's side plane; a light behind the face counts.
+pub fn light_disc(tri: [Vec3; 3], light: Vec3, range: f32) -> Vec<(Vec3, [f32; 2])> {
+    let n = (tri[1] - tri[0]).cross(tri[2] - tri[0]).normalize_or_zero();
+    if n == Vec3::ZERO {
+        return Vec::new();
+    }
+    let d = n.dot(light - tri[0]);
+    if d.abs() > range {
+        return Vec::new();
+    }
+    let edges: [(Vec3, f32); 3] = std::array::from_fn(|k| {
+        let m = (tri[(k + 1) % 3] - tri[k]).cross(n).normalize_or_zero();
+        (m, -m.dot(tri[k]))
+    });
+    if edges.iter().any(|&(m, w)| m.dot(light) + w > range) {
+        return Vec::new();
+    }
+    let r = (range * range - d * d).max(0.0).sqrt();
+    let centre = light - n * d;
+    let (u, v) = (edges[0].0 * r, edges[0].0.cross(n) * r);
+    // The corners' (u, v) run 0 to 0.99 (`0x1002aacf`–`0x1002ab1f`).
+    let mut polygon = vec![
+        (centre + u + v, [0.0, 0.0]),
+        (centre - u + v, [0.99, 0.0]),
+        (centre - u - v, [0.99, 0.99]),
+        (centre + u - v, [0.0, 0.99]),
+    ];
+    // Sutherland–Hodgman against each edge plane, keeping its inside (`0x100504a0`).
+    for &(m, w) in &edges {
+        let side = |p: Vec3| m.dot(p) + w;
+        let mut kept = Vec::with_capacity(polygon.len() + 1);
+        for i in 0..polygon.len() {
+            let (a, b) = (polygon[i], polygon[(i + 1) % polygon.len()]);
+            let (sa, sb) = (side(a.0), side(b.0));
+            if sa <= 0.0 {
+                kept.push(a);
+            }
+            if (sa <= 0.0) != (sb <= 0.0) {
+                let f = sa / (sa - sb);
+                let uv = [a.1[0] + (b.1[0] - a.1[0]) * f, a.1[1] + (b.1[1] - a.1[1]) * f];
+                kept.push((a.0 + (b.0 - a.0) * f, uv));
+            }
+        }
+        polygon = kept;
+        if polygon.is_empty() {
+            break;
+        }
+    }
+    polygon
+}
+
 /// A type-4 block's distance its sprite reaches its full size at, in the frame's units:
 /// 500 on every glow the buildings carry.
 pub const FLARE_REACH_AT: usize = 200;
@@ -679,6 +768,42 @@ impl Instance {
         self.sprites_from(now_ms, None, in_view, out);
     }
 
+    /// The point lights this instance's type-1 emitters drive at `now_ms`: each inside its
+    /// window, its position, colour and range lerped by the progress through it, the position
+    /// in the effect's frame and the range times the instance's scale (docs/11, "Type 1 is a
+    /// light").
+    ///
+    /// The range is multiplied by the length of the light's own direction (+40 → +52) put
+    /// through the instance's matrix, its 3 × 3 part (`Effect.dll:0x1000f884`, `0x1000f891`,
+    /// `0x1000fb13`): the frame stretched by the instance's size times the header's scale
+    /// (slot 0x20, `0x100047d0`), so an explosion's light grows with the explosion.
+    ///
+    /// STAND-IN: docs/11-effects.md#type-1-is-a-light--read-and-measured -- the colour's and the
+    /// range's jitter (+96, +120) are left out, 0 on 511 and 560 of the 618 blocks.
+    pub fn lights(&self, now_ms: f64, out: &mut Vec<PointLight>) {
+        if !self.on {
+            return;
+        }
+        let t = self.t(now_ms);
+        for e in self.effect.emitters.iter().filter(|e| e.kind == EMITTER_LIGHT) {
+            let Some(p) = progress(e, t) else { continue };
+            let kind =
+                u32::from_le_bytes(e.body[LIGHT_KIND_AT..LIGHT_KIND_AT + 4].try_into().unwrap_or([0; 4]));
+            let Some(flags) = point_light_flags(kind) else { continue };
+            let lerp = |a: f32, b: f32| a + (b - a) * p;
+            let local = Vec3::from_array(e.triple(LIGHT_POSITION_AT.0))
+                .lerp(Vec3::from_array(e.triple(LIGHT_POSITION_AT.1)), p);
+            let colour = Vec3::from_array(e.triple(LIGHT_COLOUR_AT.0))
+                .lerp(Vec3::from_array(e.triple(LIGHT_COLOUR_AT.1)), p);
+            let direction = Vec3::from_array(e.triple(LIGHT_DIRECTION_AT.0))
+                .lerp(Vec3::from_array(e.triple(LIGHT_DIRECTION_AT.1)), p);
+            let [x, y, z] = self.frame.axes;
+            let factor = (x * direction.x + y * direction.y + z * direction.z).length() * self.scale;
+            let range = lerp(e.f(LIGHT_RANGE_AT.0), e.f(LIGHT_RANGE_AT.1)).max(0.01) * factor;
+            out.push(PointLight { position: self.frame.point(local * self.scale), colour, range, flags });
+        }
+    }
+
     /// [`Self::sprites`] seen from `eye`, which a type-4 sprite sizes itself by.
     pub fn sprites_from(&self, now_ms: f64, eye: Option<Vec3>, in_view: bool, out: &mut Vec<Sprite>) {
         if !self.on || (self.effect.header.flags & FX_HIDE_OCCLUDED != 0 && !in_view) {
@@ -1101,6 +1226,79 @@ mod tests {
         assert_eq!(out[0].frame, None);
         assert_eq!(out[0].along, Vec3::ZERO);
         assert!((out[0].centre - point.0).length() < 1e-6);
+    }
+
+    /// A light 3 over a big floor triangle draws the template's square, half-side
+    /// sqrt(5² − 3²) = 4, about its foot, (u, v) 0.495 at the foot; near an edge the square is
+    /// cut to the triangle, and past the range from the plane or an edge it draws nothing.
+    #[test]
+    fn a_point_light_draws_its_square_on_a_triangle_clipped_to_it() {
+        let floor =
+            [Vec3::new(-100.0, -100.0, 0.0), Vec3::new(100.0, -100.0, 0.0), Vec3::new(0.0, 100.0, 0.0)];
+        let disc = light_disc(floor, Vec3::new(0.0, 0.0, 3.0), 5.0);
+        assert_eq!(disc.len(), 4, "{disc:?}");
+        for (p, _) in &disc {
+            assert!(
+                (p.z).abs() < 1e-5 && (p.x.abs() - 4.0).abs() < 1e-4 && (p.y.abs() - 4.0).abs() < 1e-4,
+                "{p:?}"
+            );
+        }
+        // The first edge runs along y = −100, its outward normal −y: the first corner is on
+        // that side, and (u, v) are 0 there.
+        assert!(disc[0].0.y < 0.0 && disc[0].1 == [0.0, 0.0]);
+        // From below the plane it lights the same.
+        assert_eq!(light_disc(floor, Vec3::new(0.0, 0.0, -3.0), 5.0).len(), 4);
+        assert!(light_disc(floor, Vec3::new(0.0, 0.0, 6.0), 5.0).is_empty(), "past the range from the plane");
+        assert!(
+            light_disc(floor, Vec3::new(0.0, -106.0, 1.0), 5.0).is_empty(),
+            "past the range from an edge"
+        );
+        // Over the first edge the square is cut there: every corner within the triangle, and
+        // the cut corners' v interpolated.
+        let cut = light_disc(floor, Vec3::new(0.0, -101.0, 3.0), 5.0);
+        assert!(!cut.is_empty() && cut.iter().all(|(p, _)| p.y >= -100.0 - 1e-4), "{cut:?}");
+        assert!(cut.iter().any(|(_, uv)| uv[0] > 0.0 && uv[0] < 0.99));
+    }
+
+    /// `hero_cannon`'s light: kind 5, a point light the shade emulates, its range lerped 30 → 3
+    /// and its colour (3, 2, 0.05) → (0.5, 0.3, 0.01) over the window; a kind-7 light is kept
+    /// with the flag that keeps the shade from drawing it.
+    #[test]
+    fn an_effects_light_is_where_its_window_puts_it() {
+        let words = |kind: u32, pairs: &[(usize, f32)]| {
+            let mut e = block(1, 224, &[(8, 0.0), (12, 1.0)], "");
+            e.body[4..8].copy_from_slice(&kind.to_le_bytes());
+            pairs.iter().fold(e, |e, &(at, v)| with_word(e, at, v.to_bits()))
+        };
+        let flash = words(
+            5,
+            &[
+                (64, 3.0),
+                (68, 2.0),
+                (72, 0.05),
+                (80, 0.5),
+                (84, 0.3),
+                (88, 0.01),
+                (112, 30.0),
+                (116, 3.0),
+                (16, 1.0),
+                (28, 1.0),
+                (40, 1.0),
+                (52, 1.0),
+            ],
+        );
+        let lamp = words(7, &[(112, 7.0), (116, 7.0), (40, 1.0), (52, 1.0)]);
+        let mut whole = effect(TIME_MANUAL, 0.0, 0, vec![flash, lamp]);
+        Rc::get_mut(&mut whole).unwrap().header.scale = [1.0; 3];
+        let mut fx =
+            Instance::new(whole, Frame::along(Vec3::new(10.0, 0.0, 0.0), Vec3::X, 1.0), 1.0, 0.0, None, 1);
+        fx.value = 0.5;
+        let mut out = Vec::new();
+        fx.lights(0.0, &mut out);
+        assert_eq!(out.len(), 2);
+        assert!((out[0].range - 16.5).abs() < 1e-4 && (out[0].colour.x - 1.75).abs() < 1e-5);
+        assert!((out[0].position - Vec3::new(11.0, 0.0, 0.0)).length() < 1e-5, "{:?}", out[0].position);
+        assert_eq!((out[0].flags, out[1].flags), (0, LIGHT_NOT_EMULATED));
     }
 
     /// A building's light glows (`glow_y` and its kin) grow 0.2 → 9 over their window, and a

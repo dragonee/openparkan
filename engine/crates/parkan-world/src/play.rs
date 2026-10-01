@@ -474,6 +474,36 @@ pub struct Launch {
 /// targets), what it is, and its clan.
 type Sighting = (Option<usize>, Seen, Option<i64>);
 
+/// A landscape face's field-0 bit that takes the effects' lights: the shade's cell draw emulates
+/// them on a face whose record carries it (`Terrain.dll:0x100444cb`–`0x10044507`), and field 0
+/// carries it, over its constant `0x600`, on every face (docs/03, "The face record").
+pub const LANDSCAPE_LIT: u16 = 0x200;
+
+/// The light template drawn over a face: its corners and their (u, v), the look it draws with,
+/// the light's colour over its length and its alpha.
+#[derive(Clone, Debug, PartialEq)]
+pub struct LightDisc {
+    pub look: usize,
+    pub polygon: Vec<(Vec3, [f32; 2])>,
+    pub tint: [f32; 3],
+    pub alpha: f32,
+}
+
+/// The pass a light's item is filed in, group 1's layer 3: its near and far planes and its
+/// depth range (docs/10, "A pass carries its own near plane, far plane and depth range").
+pub const LIGHT_PASS: (f32, f32, f32, f32) = (0.5, 700.0, 0.1, 0.99);
+
+/// A light item's corner moved along the eye ray so its depth in the item's pass falls by
+/// 8/65535 of the buffer (`Terrain.dll:0x1002ec90`): toward `eye` by s = K₁ ÷ (K₁ + K₂ z), where
+/// K₁ = 65535 n f (z₁ − z₀), K₂ = 8 (f − n) and z is the corner's depth from the eye, `w`.
+pub fn light_nudge(eye: Vec3, corner: Vec3, w: f32) -> Vec3 {
+    let (n, f, z0, z1) = LIGHT_PASS;
+    let k1 = 65535.0 * n * f * (z1 - z0);
+    let k2 = 8.0 * (f - n);
+    let s = k1 / (k1 + k2 * w.max(0.0));
+    eye + (corner - eye) * s
+}
+
 /// The fire control's target, which is target `t`'s `robot`'s takt handed, reaches every gun:
 /// an AI turret traces a point, so its unguided guns take it too (docs/29). Each gun fires
 /// once its AI timer runs out and its score passes the bar its unit's Type `type_word` and
@@ -4663,6 +4693,58 @@ impl Play {
         let y = parkan_formats::pose::rotate(node.rotation, [0.0, 1.0, 0.0]);
         let axis = Vec3::new(y[0] as f32, y[1] as f32, y[2] as f32);
         self.fx.explode(exp, None, Frame::along(centre, axis, 1.0), exp.radius * r * scale, now);
+    }
+
+    /// The effects' point lights drawn on the landscape this frame (`Terrain.dll:0x1002a130`,
+    /// docs/11, "What a light does to a surface"): for each light the shade emulates -- a point
+    /// light, not owner-only, not flagged `0x20000000`, its range above 0 -- the light template
+    /// over every drawn landscape face within its range, clipped to the face. Each comes with the
+    /// template's look, the light's colour over its own length, and a quarter of that length,
+    /// held at 2, as its alpha (`0x1002adb4`–`0x1002ae41`). `view` places a corner's depth, the
+    /// vertex nudge taking it toward `eye` ([`light_nudge`]).
+    ///
+    /// STAND-IN: docs/11-effects.md#what-a-light-does-to-a-surface--read-and-measured -- no
+    /// writer of the mesh batch word's `0x800` is found and no shipped batch carries it, so
+    /// objects take no light here; the landscape's gate is `0x200` on a record its face source
+    /// answers, taken to be face field 0, which carries it on every face. A face whose centre is
+    /// cut away under a building is passed over.
+    pub fn light_discs(&self, eye: Vec3, view: Mat4) -> Vec<LightDisc> {
+        use parkan_formats::landmesh::FLAGS_LIQUID_BED_BIT;
+        use parkan_sim::effects::{LIGHT_NOT_EMULATED, LIGHT_OWNER_ONLY, light_disc};
+        let Some(look) = self.fx.light_look else { return Vec::new() };
+        let land = &self.ground.land;
+        let mut out = Vec::new();
+        for light in self.fx.lights(self.hero.time_ms) {
+            if light.flags & (LIGHT_NOT_EMULATED | LIGHT_OWNER_ONLY) != 0 || light.range <= 0.0 {
+                continue;
+            }
+            let length = light.colour.length();
+            if length <= 0.0 {
+                continue;
+            }
+            let tint = (light.colour / length).to_array();
+            let alpha = 0.25 * length.min(2.0);
+            let (p, r) = (light.position, light.range);
+            for f in self.ground.faces_in([p.x - r, p.y - r], [p.x + r, p.y + r]) {
+                let face = &land.faces[f];
+                if face.flags & LANDSCAPE_LIT == 0 || face.flags & FLAGS_LIQUID_BED_BIT != 0 {
+                    continue;
+                }
+                let tri = face.vertices.map(|v| Vec3::from_array(land.positions[usize::from(v)]));
+                let centre = (tri[0] + tri[1] + tri[2]) / 3.0;
+                if self.ground.cut(centre.x, centre.y) {
+                    continue;
+                }
+                let polygon: Vec<(Vec3, [f32; 2])> = light_disc(tri, p, r)
+                    .into_iter()
+                    .map(|(q, uv)| (light_nudge(eye, q, (view * q.extend(1.0)).w), uv))
+                    .collect();
+                if polygon.len() >= 3 {
+                    out.push(LightDisc { look, polygon, tint, alpha });
+                }
+            }
+        }
+        out
     }
 
     /// Every effect sprite at the current time, as seen from `eye`: an instance that tests

@@ -780,3 +780,55 @@ fn c03_m02s_buildings_wear_their_owners_insignia() {
     assert_eq!(play.insignia(unit(0x8000_0001)), 0, "the player's Small Bunker");
     assert_eq!(play.insignia(unit(15)), 0, "a unit keeps track 0");
 }
+
+/// An explosion's point light falls on the landscape as the shade's light template, `LIGHT1`
+/// out of `system.rlb`'s `shade.wea` (docs/11, "What a light does to a surface"): a winged SSM
+/// bursting on C03 M02's ground lights the faces about it, each piece inside its light's range,
+/// at a quarter of its colour's length, held at 2, as its alpha. The buildings' lamps, flagged
+/// `0x20000000`, light nothing.
+#[test]
+#[ignore = "needs the game install"]
+fn c03_m02s_blast_lights_the_ground_and_the_lamps_do_not() {
+    use parkan_sim::effects::LIGHT_NOT_EMULATED;
+
+    let game = gamedir::find(None).expect("a Parkan install: set PARKAN_DIR");
+    let mut store = TextureStore::open(&game).unwrap();
+    let mut play = campaign_play(gamedir::C03_MISSION_02);
+    assert_eq!(play.fx.light_template.as_deref(), Some("LIGHT1"));
+    play_for(&mut play, 0.5, |_| {});
+    play.fx.resolve_looks(&mut store).unwrap();
+    let eye = play.eye();
+    let view = glam::Mat4::perspective_infinite_reverse_rh(1.0, 4.0 / 3.0, 0.5)
+        * glam::Mat4::look_to_rh(eye.position, eye.forward, eye.up);
+    let lamps = play.fx.lights(play.hero.time_ms);
+    assert!(lamps.iter().all(|l| l.flags & LIGHT_NOT_EMULATED != 0), "only the buildings' lamps so far");
+    assert!(play.light_discs(eye.position, view).is_empty(), "and they light nothing");
+
+    let kind = play.battle.combat.kinds.iter().position(|k| k.name.eq_ignore_ascii_case("bm_m_04")).unwrap();
+    let at = play.hero.walker.body.position + glam::Vec3::new(40.0, 0.0, 0.0);
+    play.battle.combat.fire(
+        kind,
+        None,
+        at + glam::Vec3::new(0.0, 0.0, 30.0),
+        -glam::Vec3::Z,
+        glam::Vec3::ZERO,
+        1.0,
+        None,
+    );
+    play_for(&mut play, 1.0, |_| {});
+    play.fx.resolve_looks(&mut store).unwrap();
+    let lights: Vec<_> = play.fx.lights(play.hero.time_ms).into_iter().filter(|l| l.flags == 0).collect();
+    assert!(!lights.is_empty(), "the burst drives a point light the shade draws");
+    let discs = play.light_discs(eye.position, view);
+    assert!(!discs.is_empty(), "which falls on the ground about it");
+    let reach = lights.iter().map(|l| (l.position, l.range)).collect::<Vec<_>>();
+    for d in &discs {
+        assert_eq!(Some(d.look), play.fx.light_look);
+        assert!(d.alpha > 0.0 && d.alpha <= 0.5, "a quarter of the colour's length, held at 2: {}", d.alpha);
+        assert!(d.polygon.iter().all(|&(p, uv)| {
+            (0.0..=0.99).contains(&uv[0])
+                && (0.0..=0.99).contains(&uv[1])
+                && reach.iter().any(|&(c, r)| p.distance(c) <= r * 1.5 + 1.0)
+        }));
+    }
+}

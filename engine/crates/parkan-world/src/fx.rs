@@ -11,7 +11,7 @@ use parkan_formats::exp::Explosion;
 use parkan_formats::fxid::{self, Effect};
 use parkan_formats::gamedir;
 use parkan_formats::nres::Archive;
-use parkan_sim::effects::{Cue, Frame, Instance, Rng, Sprite};
+use parkan_sim::effects::{Cue, Frame, Instance, PointLight, Rng, Sprite};
 
 use crate::textures::{Animation, Phase, TextureStore};
 
@@ -80,7 +80,15 @@ pub struct Fx {
     stops: Vec<Cue>,
     look_of: HashMap<String, MaterialLooks>,
     pub looks: Vec<Look>,
+    /// The shade's light template: material 0 of `system.rlb`'s `shade.wea` (`Terrain.dll:
+    /// 0x100420c9`, `0x1004690b`), and its look once resolved.
+    pub light_template: Option<String>,
+    pub light_look: Option<usize>,
 }
+
+/// The wear the shade's light template is material 0 of (`Terrain.dll:0x100420c9`).
+pub const SHADE_ARCHIVE: &str = "system.rlb";
+pub const SHADE_WEAR: &str = "shade.wea";
 
 /// A material's looks for sprites: one per key of its track 0, in the track's own order, and
 /// the track itself, which says which of them a sprite of a given age draws with. A material
@@ -88,6 +96,15 @@ pub struct Fx {
 struct MaterialLooks {
     keys: Vec<usize>,
     animation: Option<Animation>,
+}
+
+/// The name of `shade.wea`'s first material, where the install has one.
+fn light_template(game: &Path) -> Option<String> {
+    let path = gamedir::resolve(game, SHADE_ARCHIVE)?;
+    let archive = Archive::open(&path).ok()?;
+    let entry = archive.entries.iter().find(|e| e.name.eq_ignore_ascii_case(SHADE_WEAR))?;
+    let wear = parkan_formats::wea::parse(archive.read(entry).ok()?);
+    wear.materials.first().cloned()
 }
 
 fn key(name: &str) -> String {
@@ -107,7 +124,18 @@ impl Fx {
             stops: Vec::new(),
             look_of: HashMap::new(),
             looks: Vec::new(),
+            light_template: light_template(game),
+            light_look: None,
         })
+    }
+
+    /// The point lights every instance drives at `now_ms`.
+    pub fn lights(&self, now_ms: f64) -> Vec<PointLight> {
+        let mut out = Vec::new();
+        for (_, instance) in &self.instances {
+            instance.lights(now_ms, &mut out);
+        }
+        out
     }
 
     /// An effect by name, loaded once.
@@ -246,6 +274,18 @@ impl Fx {
     /// textures upload with the world's. A material's track 0 gives one look per key, which
     /// [`Self::sprites`] picks between by the sprite's own age.
     pub fn resolve_looks(&mut self, store: &mut TextureStore) -> Result<()> {
+        if self.light_look.is_none()
+            && let Some(name) = self.light_template.clone()
+        {
+            let look = store.look(&name)?;
+            let p = look.still;
+            self.light_look = Some(self.look_index(Look {
+                texture: p.texture,
+                blend_mode: look.blend_mode,
+                ambient: p.ambient,
+                cell: p.cell,
+            }));
+        }
         let materials: Vec<String> = self
             .templates
             .values()

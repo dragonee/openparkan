@@ -17,6 +17,7 @@ struct GpuVertex {
     position: [f32; 3],
     uv: [f32; 2],
     alpha: f32,
+    tint: [f32; 4],
 }
 
 /// A quad ready to draw: which look, its four corners, and its alpha.
@@ -34,7 +35,20 @@ pub struct Quad {
     /// How far its sprite stands from the eye: the key the effects' layer files it by, one
     /// for every piece of a larger shape.
     pub depth: f32,
+    /// The group-1 layer it is filed in: [`EFFECTS_LAYER`] for an effect's sprite,
+    /// [`LIGHTS_LAYER`] for a light drawn on a surface, which goes first.
+    pub layer: u8,
+    /// Its colour against its look's: rgb times the look's ambient, or with w 1 the self-light
+    /// of a device material, the scene colour plus rgb (docs/07, "How a material reaches the
+    /// device").
+    pub tint: [f32; 4],
 }
+
+/// The layers of group 1 the drawn quads are filed in (docs/10, "The dome").
+pub const LIGHTS_LAYER: u8 = 3;
+pub const EFFECTS_LAYER: u8 = 6;
+/// A sprite's tint: its look's colour as it is.
+pub const PLAIN_TINT: [f32; 4] = [1.0, 1.0, 1.0, 0.0];
 
 /// The order an effect's quads are drawn in: far to near across every look and blend mode.
 ///
@@ -44,9 +58,12 @@ pub struct Quad {
 /// down, and whose render (`0x1003e1d0`) walks it from the top. So a far sprite is drawn
 /// before a near one whatever either blends with; an item whose fade is 0 is not filed. The
 /// sort is stable, so the pieces of one shape keep their own order.
+///
+/// The layers draw in their order (`0x1003e1d0`'s caller walks them one by one), so a light's
+/// item, filed in layer 3, goes before every sprite.
 pub fn draw_order(quads: &[Quad]) -> Vec<&Quad> {
     let mut sorted: Vec<&Quad> = quads.iter().filter(|q| q.alpha != 0.0).collect();
-    sorted.sort_by(|a, b| b.depth.total_cmp(&a.depth));
+    sorted.sort_by(|a, b| a.layer.cmp(&b.layer).then(b.depth.total_cmp(&a.depth)));
     sorted
 }
 
@@ -259,7 +276,7 @@ impl SpriteRenderer {
                         buffers: &[Some(wgpu::VertexBufferLayout {
                             array_stride: std::mem::size_of::<GpuVertex>() as u64,
                             step_mode: wgpu::VertexStepMode::Vertex,
-                            attributes: &wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x2, 2 => Float32],
+                            attributes: &wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x2, 2 => Float32, 3 => Float32x4],
                         })],
                     },
                     primitive: wgpu::PrimitiveState {
@@ -352,7 +369,12 @@ impl SpriteRenderer {
             let uv =
                 q.uv.unwrap_or([[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]])
                     .map(|[u, v]| [u0 + u * du, v0 + v * dv]);
-            let v = |i: usize| GpuVertex { position: q.corners[i].to_array(), uv: uv[i], alpha: q.alpha };
+            let v = |i: usize| GpuVertex {
+                position: q.corners[i].to_array(),
+                uv: uv[i],
+                alpha: q.alpha,
+                tint: q.tint,
+            };
             let start = vertices.len() as u32;
             vertices.extend([v(0), v(1), v(2), v(0), v(2), v(3)]);
             let pipeline = usize::from(self.looks[q.look].0) * 2 + usize::from(q.overlay);
@@ -408,6 +430,8 @@ mod tests {
             overlay: false,
             uv: None,
             depth,
+            layer: EFFECTS_LAYER,
+            tint: PLAIN_TINT,
         };
         let quads = [
             quad(0, 50.0, 1.0),  // the lode's plume, additive, near

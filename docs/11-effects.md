@@ -748,7 +748,7 @@ through the window** (`0x1000f6e0`):
 | +40 → +52 | direction | `(1, 0, 0)` at +52 on 542 |
 | +64 → +80 | colour, RGBA | overbright starts: (3, 2, 0) on 140, (2, 1, 0) on 110 |
 | +96 | colour jitter, ± half of each | 0 on 511 |
-| +112 → +116 | range, clamped to at least 0.01, × a factor taken from the instance's frame (its scale is a *guess*) | 30 → 3 on the hero's cannon |
+| +112 → +116 | range, × the length of the light's own direction through the instance's matrix (`0x1000f884`, `0x1000f891`, `0x1000fb13`) — the frame stretched by the instance's size times the header's scale, so an explosion's light grows with the explosion — then clamped to at least 0.01 (`0x1000fb7b`) | 30 → 3 on the hero's cannon |
 | +120 | range jitter (the read map missed it) | 0 on 560 |
 | +124..+132 | the three attenuation terms, handed on unchanged | (0, 1, 0) on 447, (0, 1, 1) on 170, (0, 0, 1) on 1 — never a constant term |
 
@@ -766,21 +766,60 @@ direction +0x24, nor the manager's 1 / range at +0x54. The control is in the sam
 it does find +0x30 and +8, which the routine plainly uses.
 
 **The range is a hard cut, twice.** A triangle is dropped when the light's distance to its
-plane is past the range (`0x1002a59c`), and again when no vertex of it is within the range
-of the light itself (`0x1002a7d1`).
+plane is past the range (`0x1002a59c`, the absolute distance: a light behind the face counts),
+and again when the light stands past the range outside any of its three edges' side planes
+(`0x1002a7d1`): each edge's outward normal m = normalise(edge × n), with the face's
+n = normalise((v₁ − v₀) × (v₂ − v₀)) (`0x1002a37f`, `0x1002a6be`–`0x1002a77d`). An earlier
+reading here had the second test as "no vertex within range".
 
 What stands in for a falloff is **an extra additive pass**. The light is projected onto the
-triangle's plane, and a **disc of radius sqrt(range² − d²)** (`0x1002a804`–`0x1002a817`) is
-spanned by two in-plane axes of that length (`0x1002a994`), clipped to the triangle, and
-queued as its own draw item. That item's material is the shade's light template —
-`shade+0xc18`, copied to the item's `+0x70` at `0x1002ae5e` — with the light's colour
-**divided by its own length** in the block's ambient rgb (`shade+0xc2c`, `0x1002ae12`) and
-**that length × 0.25, held at 2**, in its ambient alpha (`shade+0xc38`, `0x1002ae35`). So
-the shape of the falloff is a texture across the disc, the overbright is the colour's
-length rather than its components, and 1 / (a₀ + a₁·d + a₂·d²) never happens.
+triangle's plane, its foot C = P − d n, and a **square of half-side r = sqrt(range² − d²)**
+(`0x1002a804`–`0x1002a907`) is spanned by U = r m₀, the outward normal of the edge from the
+first vertex to the second, and V = r (m₀ × n) (`0x1002a946`, `0x1002a994`, `0x1002aa2d`):
+corners C + U + V, C − U + V, C − U − V, C + U − V with (u, v) (0, 0), (0.99, 0),
+(0.99, 0.99), (0, 0.99) (`0x1002aacf`–`0x1002ac1b`). It is clipped to the triangle by the
+three edge planes, a Sutherland–Hodgman clip that lerps the (u, v) (`0x100504a0`,
+`0x10050420`), and fanned from its first corner (`0x1002afc3`). The pieces of one light over
+one batch are one draw item, its frame the batch's (`0x10029960`), depth tested and not written
+(`0x1002ad1f`), each corner moved along the eye ray so its depth in the item's pass falls by
+8/65535 (`0x1002ec90`: s = K₁ ÷ (K₁ + K₂ z), K₁ = 65535 n f (z₁ − z₀), K₂ = 8 (f − n)), and
+filed in **group 1, layer 3** (`0x1002b438`) — after the opaque scene, before the
+see-through surfaces and the effects' sprites. The vertices stay in the batch's frame and the
+light is brought into it (`0x1002a410`); the range is not scaled there.
+
+The item's material is the shade's light template — `shade+0xc18`, copied to the item's
+`+0x70` at `0x1002ae5e` — which is **material 0 of `system.rlb`'s `shade.wea`**, loaded through
+the shade's own manager at `+0xc14` (`0x100420c9`, `0x1004690b`): **`LIGHT1`**, flags 8 (mode
+2, additive), its texture `LIGHT1.0` 128 × 128 ARGB4444, white, its alpha 255 at the centre
+falling to 0 at the rim. The light's colour **divided by its own length** goes into the
+template's ambient rgb (`shade+0xc2c`, `0x1002ae12`) and **0.25 × min(length, 2)** into its
+ambient alpha (`shade+0xc38`; the clamp at `0x1002adb4`–`0x1002adc1` comes before the × 0.25
+at `0x1002ae35`, so the alpha is at most 0.5 — an earlier reading had min(0.25 × length, 2)).
+The item's flags are `0x14`, so it builds a device material: its self-light is the scene colour
+plus that ambient (*derived*, as [07-objects.md](07-objects.md#how-a-material-reaches-the-device--read-and-measured)
+has a lit batch's). So the shape of the falloff is a texture across the square, the overbright
+is the colour's length rather than its components, and 1 / (a₀ + a₁·d + a₂·d²) never happens.
+
+**Which lights reach it.** The shade gathers one list per draw (`0x10045e60`): for a mesh
+(`0x100478c0`) every registered manager's active lights, an owner-only light (`0x80000000`)
+only on its owner, a point light only when its range is above 0 and its sphere meets the
+object's; for a landscape cell (`0x10047bb0`) the same but owner-only lights dropped outright
+(`0x10047c96`) and a point light kept when its range box meets the cell's. Of the 618 shipped
+light blocks only kinds 2 and 5 — **417**, the explosions, the guns' flashes, the burning trees
+and the construction sphere — make a point light the landscape takes; kind 1's 12 are the
+engines' owner-only glows, and kinds 6 and 7, every building lamp, the generators' ball and
+`mineglow` among them, carry `0x20000000` and light nothing.
 
 **What switches it on.** A mesh batch takes emulated lights only when its batch word
-carries `0x800` and the shade's `+0xcc4` is set (`0x10045d38`, `0x10045d47`). `+0xcc4` is
+carries `0x800` and the shade's `+0xcc4` is set (`0x10045d38`, `0x10045d47`). *Measured*:
+**0 of the 15153 shipped batches carry `0x800`**, and no store of `0x800` into memory is found in
+`AniMesh.dll`, `World3D.dll` or `Terrain.dll` (a search, not a proof), so as far as is read no
+object takes them. The landscape's cell draw calls the routine instead under `0x200` on the word
+`+0x3c` of the record its face source (`shade+0xcac`, slot 4) answers for a face
+(`0x10043ac7`, `0x100440bc`, `0x10044355`, `0x10044d95`, gated at `0x100444cb`–`0x10044507`);
+that the record's word is the face's field 0, which carries `0x200` over its constant `0x600`
+on every face, is *derived*. *Seen* on C03 M02 ("Let's Play - Parkan: Iron Strategy, Part 6",
+-yNnsqudMzw, 11:14): an orange pool of light on the ground about a warbot as it is hit. `+0xcc4` is
 settings id 3, **`EmulatePointLight`** (`0x10046c7a`, the page's values at `0x100a6cac`),
 which `Terrain.dll` registers with a default of 1 (`0x1005ec5a`); its neighbours are
 `LightingOn` (1), `SpecularsOn` (1), `ForceSWFog` (0) and, at id 29, `UseDXLighting`

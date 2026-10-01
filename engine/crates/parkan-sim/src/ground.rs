@@ -281,6 +281,23 @@ impl Ground {
     /// The ground faces whose triangle holds `(x, y)`, in the file's order, which is the
     /// landscape's cell order, each with its barycentric height there.
     /// Whether a building has cut the landscape away at (x, y).
+    /// The landscape faces, water left out, indexed in a cell the box `lo`..`hi` across the
+    /// ground reaches, each once: what a light within that box may fall on.
+    pub fn faces_in(&self, lo: [f32; 2], hi: [f32; 2]) -> Vec<usize> {
+        let cell = |p: f32, a: usize| {
+            (((p - self.lo[a]) / self.cell[a]).floor().max(0.0) as usize).min(self.size[a] - 1)
+        };
+        let mut faces: Vec<usize> = Vec::new();
+        for y in cell(lo[1], 1)..=cell(hi[1], 1) {
+            for x in cell(lo[0], 0)..=cell(hi[0], 0) {
+                faces.extend(self.cells[y * self.size[0] + x].iter().map(|&f| f as usize));
+            }
+        }
+        faces.sort_unstable();
+        faces.dedup();
+        faces
+    }
+
     pub fn cut(&self, x: f32, y: f32) -> bool {
         self.cuts.iter().any(|c| c.holds(x, y))
     }

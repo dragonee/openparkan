@@ -34,6 +34,7 @@ struct VertexIn {
     @location(0) position: vec3<f32>,
     @location(1) uv: vec2<f32>,
     @location(2) alpha: f32,
+    @location(3) tint: vec4<f32>,
 };
 
 struct VertexOut {
@@ -41,6 +42,7 @@ struct VertexOut {
     @location(0) uv: vec2<f32>,
     @location(1) alpha: f32,
     @location(2) world: vec3<f32>,
+    @location(3) tint: vec4<f32>,
 };
 
 @vertex
@@ -50,6 +52,7 @@ fn vs_main(v: VertexIn) -> VertexOut {
     out.uv = v.uv;
     out.alpha = v.alpha;
     out.world = v.position;
+    out.tint = v.tint;
     return out;
 }
 
@@ -74,6 +77,12 @@ fn fs_main(v: VertexOut) -> @location(0) vec4<f32> {
     // build a device material at all (`0x1002fe3d`). A component above 1 is kneed to
     // c/6 + 5/6 and held at 2, which no shipped effect material reaches -- all 1598 entries
     // of the 243 they draw carry a byte ambient (docs/11, "How an effect sprite is coloured").
-    let lit = look.ambient.rgb;
+    //
+    // A light drawn on a surface is an item of its own whose flags 0x14 do build a device
+    // material, its ambient the light's colour over its length (`Terrain.dll:0x1002ae12`): its
+    // self-light is the scene colour plus that, as a lit batch's emissive is, and the device
+    // holds it at 1 (docs/11, "What a light does to a surface"). The tint's w says which.
+    let device = clamp(camera.scene_colour.rgb + v.tint.rgb, vec3<f32>(0.0), vec3<f32>(1.0));
+    let lit = select(look.ambient.rgb * v.tint.rgb, device, v.tint.w > 0.5);
     return vec4<f32>(mix(fog, display(texel.rgb) * lit, keep), texel.a * v.alpha);
 }

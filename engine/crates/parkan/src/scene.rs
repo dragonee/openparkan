@@ -676,7 +676,9 @@ pub fn sync(
         .sprites(eye)
         .into_iter()
         .flat_map(|(look, s)| {
-            use parkan_render::sprites::{Quad, billboard, dome, framed, lengthwise};
+            use parkan_render::sprites::{
+                EFFECTS_LAYER, PLAIN_TINT, Quad, billboard, dome, framed, lengthwise,
+            };
             if let Some(d) = s.dome {
                 return dome(s.centre, d.axes, d.segments, d.rings)
                     .into_iter()
@@ -687,6 +689,8 @@ pub fn sync(
                         overlay: s.overlay,
                         uv: Some(uv),
                         depth: s.centre.distance(eye),
+                        layer: EFFECTS_LAYER,
+                        tint: PLAIN_TINT,
                     })
                     .collect::<Vec<_>>();
             }
@@ -701,9 +705,32 @@ pub fn sync(
                 overlay: s.overlay,
                 uv: None,
                 depth: s.centre.distance(eye),
+                layer: EFFECTS_LAYER,
+                tint: PLAIN_TINT,
             }]
         })
         .collect();
+    let mut quads = quads;
+    // The effects' point lights on the landscape, each disc a fan from its first corner
+    // (`Terrain.dll:0x1002afc3`), filed before the sprites.
+    for disc in play.light_discs(eye, view_proj) {
+        use parkan_render::sprites::{LIGHTS_LAYER, Quad};
+        let [r, g, b] = disc.tint;
+        let first = disc.polygon[0];
+        for pair in disc.polygon[1..].windows(2) {
+            let (b1, c1) = (pair[0], pair[1]);
+            quads.push(Quad {
+                look: disc.look,
+                corners: [first.0, b1.0, c1.0, c1.0],
+                alpha: disc.alpha,
+                overlay: false,
+                uv: Some([first.1, b1.1, c1.1, c1.1]),
+                depth: first.0.distance(eye),
+                layer: LIGHTS_LAYER,
+                tint: [r, g, b, 1.0],
+            });
+        }
+    }
     renderer.set_sprites(device, queue, view_proj, &quads);
     // A dead unit is deleted its controller's +92 ms after it dies (docs/26); a building is
     // never killed. An object drawn node by node has hidden its nodes before.
