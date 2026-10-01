@@ -1415,6 +1415,32 @@ tests, 1015 of 1015 checks, 509 engine tests and 201 install tests, `ruff` clean
   the gun's sight ray. So a hero in a pod room is reached through the building's own children. The
   tower's own death is ruled out as the killer, every node of a building naming a kind-1 explosion.
   Which gun's blast it was stays queued ([26-damage](docs/26-damage.md#what-a-blast-reaches)).
+- [x] ~~How the camera applies the colour it is handed in mode 2~~ — closed 2026-10-01 but for one
+  figure, **read**, **measured** and **seen**. Raised by two frames of "Let's Play - Parkan: Iron
+  Strategy, Part 6.5" (8:13.0, 8:15.5) in which a building's placement ghost is one flat colour, red
+  (253, 23, 42) then green (129, 253, 42): the ghost's colour over (129, 23, 42), C03 M02's scene
+  colour at that hour.
+  - **Mode 2 makes the camera's colour every batch's self-light and takes its texture away.**
+    `CShade`'s mesh draw (`Terrain.dll:0x10044ea0`) asks the camera its mode per draw item
+    (`0x1004570f`); on 2 it writes the colour over the item's material ambient
+    (`0x1004574c`–`0x1004576e`) and sets both textures to none.
+  - **The scene colour is a floor, not an addend.** The shade's lighter calls `g_FastProc` `+0x50`
+    (`0x1004f225`–`0x1004f23d`) with the vertex's light sum, the material ambient and the scene
+    colour, and all four builds add the first two and keep the larger of that and the third, channel
+    by channel (`Ngi32.dll:0x100248a0`, `0x1001ffc0`, `0x1001bdd0`, `0x1001d980`: `addps`, `maxps`).
+    [11-effects](docs/11-effects.md) and the engine's world path had the three summed.
+  - **A panel's view is lit by the shown unit's own two lights and nothing else.** Draw flag `0x200`
+    gives the shade's gather flags 1 and 4 (`Terrain.dll:0x100478c0`): the object's own light manager
+    alone, and only lights flagged `0x4000000`. A mesh makes two such at set-up
+    (`AniMesh.dll:0x100070c9`–`0x1000723b`): (−1, 1, −1) in grey 0.25 and (1, −1, 1) at 0.35 of it.
+    **The ghost is flat because its `0x5f0` lacks `0x200`.**
+  - *Measured*: an unlit patch of the hero's own figure at 1:52.5 of Part 6 reads (151, 127, 57)
+    under a scene colour of (156, 40, 59) — green is the node's 0.5 alone, where an addend would give
+    167. Docs/35's old (39, 162, 41) on C00 M01 is (0, 128, 0) over that mission's (40, 40, 40).
+  - The engine drew both lifted toward white with no scene colour; the same patch is now (154, 127,
+    58) and the dummy (40, 163, 40) ([35-hud](docs/35-hud.md), [32-builder](docs/32-builder.md)).
+    Queued: what lights a unit of more than one part, which the recordings show about twice as
+    bright as one pair gives.
 
 ## Damage, sensors and ownership
 

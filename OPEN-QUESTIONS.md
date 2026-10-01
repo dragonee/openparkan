@@ -194,6 +194,20 @@ remainder a closed line names stays here as a line of its own.
 [28-chassis](docs/28-chassis.md#not-established), [25-sensors](docs/25-sensors.md#not-established)
 
 - [ ] [M5] How the HUD draws the aim point, the guns and the player's target; what plays `TARGET_READY` and `TARGET_ZOOM`; and the unit record's `+0x98`. ~~Its `+0x94`~~ — **read**, noticed 2026-09-22 by the coordinator: docs/39 had it all along as the radius the sphere interface `0x20` slot 3 answers as the record is bound, the unit's node sphere (`0x1007e5f2`–`0x1007e60e`), 11.84 on the L-2f, which leaving and the game frame read. The right button's pick still takes it as 0, filed under the README's "Read since" ([25-sensors](docs/25-sensors.md#not-established)).
+- [ ] **What lights a unit of more than one part in a panel's view.** Left 2026-10-01 by the mode-2
+  read ([COMPLETED-QUESTIONS](COMPLETED-QUESTIONS.md#turrets-weapons-and-camera)). A mesh of agent
+  kind 2, 3 or 4 makes two directional lights at its set-up (`AniMesh.dll:0x100070c9`–`0x1000723b`),
+  and a panel's view is lit by the shown unit's own lights alone. The one-part dummy matches that in
+  the recordings; the hero, a chassis and a turret, is 2.06, 1.98 and 2.03 times as far over its
+  floor, and Mission 01's spider and a driven warbot look the same. What makes the second pair was
+  not found. The engine takes two pairs for a unit of more than one part, a stand-in. Also not read:
+  that the sky's light manager is of kind 7, which is what keeps the sun off the placement ghost
+  (*inferred* from the recordings), and what the phase at the shade's `+0x1928` sets
+  ([35-hud](docs/35-hud.md)).
+- [ ] Whether the designer's two preview lights are turned twice: the mesh gather turns every
+  light's stored direction through its manager's owner's placement (`Terrain.dll:0x100802f0` with
+  space 2), and the designer already sets its two lights in space 2 each draw. Noticed 2026-10-01,
+  not followed up ([37-designer](docs/37-designer.md)).
 - [ ] Which objects answer world class 2, the one class the outer camera's line drops. *Narrowed
   2026-09-20* with three controls, all negative. A class is slot 11 of the object interface and the
   query's first word is anded with `[class*4 + 0x1009a5f0]`, sixteen dwords whose entry *k* is `1 << k`,
@@ -433,7 +447,7 @@ remainder a closed line names stays here as a line of its own.
 - [ ] [M14] The places besides a dock's and a main teleport's (loading places) do not tick by the place rule yet; the place timer's random source; whether a destroyed generator stays in `World3D.dll`'s queue 3.
 - [ ] [M14] What the game drives a dock's `f_recharge_*` glow with, whose own time mode is 0, a value set from outside.
 - [ ] [M14] The AI's camouflage in play. Its repair decision and its trip to a dock are in (the engine: ~~`diff_strong`'s 0.8 and 0.9 for `Decision_RepairOn` and `_Off`, since the profile a unit holds is not read~~ — **read** 2026-09-22: no unit holds a profile, and every behaviour keeps the block's compiled 0.5 and 1 ([26-damage](docs/26-damage.md#the-difficulty-block-every-behaviour-holds--read-and-measured)); the nearest dock its size class fits, since the pick `0x10023b60` is not read, and never a building's own repair system).
-- [ ] Why the hero's panel dims in the pod room, and why the chamber's glow reads greyer than the recording's (the dawn scene colour is the guess).
+- [ ] Why the chamber's glow reads greyer than the recording's. ~~Why the hero's panel dims in the pod room~~ — **narrowed** 2026-10-01: a panel's figure is its node colour held up to the scene colour ([35-hud](docs/35-hud.md#what-mode-2-does-with-the-colour--read-measured-and-seen)), so it changes with the clock, not the room; Mission 03's sky takes the scene colour from (104, 57, 65) at 02:40 to (40, 40, 40) at 03:40, about 80 s into play, and whether Mission 04's is the same was not checked. The glow's half waits on the world's lit colour taking the scene colour as a floor, where the engine adds it.
 - [ ] Message 16, the helicopter in route 2, has no test.
 
 **Movement**
