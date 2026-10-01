@@ -157,8 +157,7 @@ its narrowed radar cone; and the win on the Research Center's capture already ma
 A colour quoted here from a frame grabbed before 2026-10-01 is off: the tool wrote its JPEGs in
 the video's own BT.709 values, which a JPEG's reader takes as BT.601, so greens read about a
 tenth too bright, a sky of (107, 172, 25) as (111, 189, 28). Shapes and times are not touched.
-The colours of 2026-10-01's haze, ground, HUD and ghost items were sampled after the fix or
-from the video directly.
+The colours of 2026-10-01's haze, ground and cloud items were sampled after the fix.
 
 Mission 02 checked against "Let's Play - Parkan: Iron Strategy, Part 6" (-yNnsqudMzw), played on
 the easy level, and its bonus "Part 6.5" (9SBZOCWv_vE), which plays it again from the campaign
