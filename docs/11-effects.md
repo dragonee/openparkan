@@ -679,8 +679,9 @@ end: read as type 3 they would stand at size 9 for good.
 
 **A frame of one point named three times is scaled by that point's direction.** The handler's
 branch for three equal directions (`Control.dll:0x10002c42`) takes the direction's length,
-builds an orientation from the unit direction (`0x10003600`) and scales it alike on all three
-axes by that length (`0x10002c7b`–`0x10002cfd`). C03 M02's generator ball hangs on
+builds an orientation from the unit direction (`0x10003ef0`) and scales it alike on all three
+axes by that length (`0x10002c7b`–`0x10002cfd`, `0x10003ea0`). Which row of the orientation
+the direction lands in is not read. C03 M02's generator ball hangs on
 `Sign_Type1`, whose direction is 8.98 long, so its glow's size 9 × the effect's 0.75 scale
 would be 60.6 m wide. *Seen* in "Let's Play - Parkan: Iron Strategy, Part 6" (-yNnsqudMzw,
 64:50) and Part 6.5 (9SBZOCWv_vE, briefing time 8.5 s): a small yellow ball between the

@@ -50,8 +50,21 @@ impl Frame {
     /// centroid, and their vectors as the axes. The handler builds the identity and writes
     /// each direction into a row of it, the centroid into the fourth, and hands that matrix
     /// to the effect -- so the frame *is* a matrix, and the axes' own lengths are in it.
+    ///
+    /// Three equal directions -- every one of the 690 load-group records that names one point
+    /// three times, each sign, lamp and screen -- go down the handler's other branch
+    /// (`0x10002c42`): an orientation built from the unit direction (`0x10003ef0`), scaled alike
+    /// on all three axes by the direction's length (`0x10002c7b`–`0x10002cfd`, `0x10003ea0`).
+    ///
+    /// STAND-IN: docs/11-effects.md#type-4-is-a-glow-sized-by-the-eyes-distance--read-and-seen
+    /// -- which row of that orientation the direction lands in is not read: here the first,
+    /// the axis a dome's pole ends on ([`Instance::dome`]).
     pub fn from_points(points: [(Vec3, Vec3); 3]) -> Self {
         let origin = (points[0].0 + points[1].0 + points[2].0) / 3.0;
+        let d = points[0].1;
+        if points.iter().all(|p| p.1 == d) && d.length() > 0.0 {
+            return Self::along(origin, d, d.length());
+        }
         Self { origin, axes: [points[0].1, points[1].1, points[2].1], points: true }
     }
 
@@ -1074,6 +1087,12 @@ mod tests {
         let point = (Vec3::new(1.0, 2.0, 3.0), Vec3::new(0.0, -0.349, -0.937));
         let frame = Frame::from_points([point; 3]);
         assert_eq!(frame.basis(), None);
+        // An orientation from the direction, scaled alike by its length (`0x10002c7b`).
+        let [x, y, z] = frame.axes;
+        let length = point.1.length();
+        assert!((x - point.1).length() < 1e-5, "{x:?}");
+        assert!([y, z].iter().all(|a| (a.length() - length).abs() < 1e-5 && a.dot(x).abs() < 1e-4));
+        assert!(y.dot(z).abs() < 1e-4);
         let mut whole = effect(TIME_MANUAL, 0.0, 0, vec![glow]);
         Rc::get_mut(&mut whole).unwrap().header.scale = [1.0; 3];
         let fx = Instance::new(whole, frame, 1.0, 0.0, None, 1);
