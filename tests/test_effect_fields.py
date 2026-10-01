@@ -114,3 +114,25 @@ def test_the_time_modes_name_the_owner_properties_they_read():
     assert effects.TIME_MOTION == 15
     fx = effects.parse_effect(header())
     assert fx.mode == effects.TIME_POINT
+
+
+def test_a_sprites_mode_and_direction_and_a_type_nines_dome():
+    # `f_gener_ball`'s halves: mode 2, opposite directions, shape 0 laid over as a whole.
+    down = block(9, o4=2, o76=(-1.0, 0.0, 0.0), o88=(-1.0, 0.0, 0.0), o200=0, o204=0)
+    up = block(9, o4=2, o76=(1.0, 0.0, 0.0), o88=(1.0, 0.0, 0.0), o200=0, o204=0)
+    # `B_Sphere_Main`'s: shape 1, every facet the whole texture; and a shape nothing draws.
+    tiled = block(9, o4=2, o200=1, o204=1)
+    odd = block(9, o4=0, o200=3)
+    streak = block(3, o4=1, o76=(0.0, 0.0, 1.0), o88=(0.0, 0.0, 1.0))
+    fx = effects.parse_effect(header(count=5) + down + up + tiled + odd + streak)
+    a, b, c, d, e = fx.emitters
+    assert (a.sprite_mode, b.sprite_mode) == (effects.SPRITE_TURNED, effects.SPRITE_TURNED)
+    assert a.sprite_direction[0] == (-1.0, 0.0, 0.0) and b.sprite_direction[1] == (1.0, 0.0, 0.0)
+    assert a.dome == (8, 3, True) and c.dome == (16, 6, False)
+    assert d.sprite_mode == effects.SPRITE_FACING and d.dome is None
+    assert e.sprite_mode == effects.SPRITE_AXIAL and e.dome is None
+    assert e.sprite_direction == ((0.0, 0.0, 1.0), (0.0, 0.0, 1.0))
+    assert [row[0] for row in effects.DOME_DETAIL] == [(8, 3), (16, 6), (24, 9)]
+    # A light and a sound have neither.
+    light = effects.parse_effect(header(count=1) + block(1, o4=6)).emitters[0]
+    assert light.sprite_mode is None and light.sprite_direction is None and light.dome is None

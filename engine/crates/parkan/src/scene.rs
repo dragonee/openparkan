@@ -707,10 +707,16 @@ pub fn sync(
         .into_iter()
         .flat_map(|(look, s)| {
             use parkan_render::sprites::{
-                EFFECTS_LAYER, PLAIN_TINT, Quad, billboard, dome, framed, lengthwise,
+                EFFECTS_LAYER, PLAIN_TINT, Quad, billboard, dome, framed, lengthwise, turned,
             };
-            if let Some(d) = s.dome {
-                return dome(s.centre, d.axes, d.segments, d.rings)
+            // A type-3, 4 or 9 sprite is drawn with its own matrix: a quad across its x and y,
+            // or a type-9 block's hemisphere with its pole on its z (docs/11, "A sprite's mode").
+            if let Some(m) = s.matrix {
+                let pieces = match s.dome {
+                    Some(d) => dome(s.centre, m, d.segments, d.rings, d.projected),
+                    None => vec![turned(s.centre, m)],
+                };
+                return pieces
                     .into_iter()
                     .map(|(corners, uv)| Quad {
                         look,

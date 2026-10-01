@@ -67,25 +67,68 @@ pub fn draw_order(quads: &[Quad]) -> Vec<&Quad> {
     sorted
 }
 
-/// The quads a hemisphere is cut into: about `centre`, its rim spanning `axes[0]` and
-/// `axes[1]` and its pole at `axes[2]`, `segments` around and `rings` from the rim up. Each
-/// comes with its corners' (u, v), u around and v from the rim to the pole.
-pub fn dome(centre: Vec3, axes: [Vec3; 3], segments: u8, rings: u8) -> Vec<([Vec3; 4], [[f32; 2]; 4])> {
+/// The corners of a sprite drawn with its own matrix, and their (u, v): the shade's unit quad
+/// (`Terrain.dll:0x10027a30`–`0x10027b88`), (−½, ½), (−½, −½), (½, −½), (½, ½) in the sprite's
+/// xy plane with (0, 0.99), (0, 0), (0.99, 0), (0.99, 0.99), carried out by `matrix`, where the
+/// sprite's own x, y and z end up about `centre`. So u runs with the sprite's x and v with its
+/// y, and a mode-1 streak, whose x is its direction, takes u along its length.
+pub fn turned(centre: Vec3, matrix: [Vec3; 3]) -> ([Vec3; 4], [[f32; 2]; 4]) {
+    let at = |x: f32, y: f32| centre + matrix[0] * x + matrix[1] * y;
+    (
+        [at(-0.5, 0.5), at(-0.5, -0.5), at(0.5, -0.5), at(0.5, 0.5)],
+        [[0.0, 0.99], [0.0, 0.0], [0.99, 0.0], [0.99, 0.99]],
+    )
+}
+
+/// The pieces a type-9 sprite's hemisphere is drawn as, each a quad with its corners' (u, v),
+/// carried into the world by the sprite's `matrix` about `centre`.
+///
+/// The shade builds the mesh once, in the sprite's own space (`Terrain.dll:0x10027a20`): a
+/// vertex at polar angle θ from the pole and φ around is (sin θ sin φ, sin θ cos φ, cos θ),
+/// θ running 0 to **π/2** in `rings` steps and φ the whole turn in `segments` -- a half sphere
+/// of radius 1, its pole at (0, 0, 1) and its rim the unit circle of the xy plane, and nothing
+/// below it. Each segment is a triangle from the pole to the first ring (`0x100273b0`) and a
+/// quad for each ring after it (`0x100276a0`); a triangle is given here as a quad with its
+/// last corner repeated.
+///
+/// `projected` lays the texture over the dome as seen down its pole, (u, v) = ((x + 1) / 2,
+/// (y + 1) / 2) (`0x100275ff`, `0x10027959`); otherwise every piece takes the whole texture --
+/// a quad's own (u, v) on a quad, (0.5, 0.99), (0, 0), (0.99, 0) on a triangle
+/// (`0x10028bbe`, `0x10028ce2`, the streams set at `0x10027af6`, `0x10027d4d`).
+pub fn dome(
+    centre: Vec3,
+    matrix: [Vec3; 3],
+    segments: u8,
+    rings: u8,
+    projected: bool,
+) -> Vec<([Vec3; 4], [[f32; 2]; 4])> {
     let (segments, rings) = (usize::from(segments.max(3)), usize::from(rings.max(1)));
-    let point = |s: usize, r: usize| {
-        let around = s as f32 / segments as f32 * std::f32::consts::TAU;
-        let up = r as f32 / rings as f32 * std::f32::consts::FRAC_PI_2;
-        let at = centre
-            + axes[0] * (around.cos() * up.cos())
-            + axes[1] * (around.sin() * up.cos())
-            + axes[2] * up.sin();
-        (at, [s as f32 / segments as f32, 1.0 - r as f32 / rings as f32])
+    let own = |ring: usize, segment: usize| {
+        let polar = ring as f32 / rings as f32 * std::f32::consts::FRAC_PI_2;
+        let around = segment as f32 / segments as f32 * std::f32::consts::TAU;
+        Vec3::new(polar.sin() * around.sin(), polar.sin() * around.cos(), polar.cos())
     };
+    let world = |v: Vec3| centre + matrix[0] * v.x + matrix[1] * v.y + matrix[2] * v.z;
+    let over = |v: Vec3| [(v.x + 1.0) * 0.5, (v.y + 1.0) * 0.5];
     let mut out = Vec::with_capacity(segments * rings);
-    for r in 0..rings {
-        for s in 0..segments {
-            let corners = [point(s, r), point(s + 1, r), point(s + 1, r + 1), point(s, r + 1)];
-            out.push((corners.map(|c| c.0), corners.map(|c| c.1)));
+    for segment in 0..segments {
+        let cap = [own(0, segment), own(1, segment + 1), own(1, segment)];
+        let uv = if projected { cap.map(over) } else { [[0.5, 0.99], [0.0, 0.0], [0.99, 0.0]] };
+        let cap = cap.map(world);
+        out.push(([cap[0], cap[1], cap[2], cap[2]], [uv[0], uv[1], uv[2], uv[2]]));
+        for ring in 1..rings {
+            let piece = [
+                own(ring, segment + 1),
+                own(ring + 1, segment + 1),
+                own(ring + 1, segment),
+                own(ring, segment),
+            ];
+            let uv = if projected {
+                piece.map(over)
+            } else {
+                [[0.0, 0.99], [0.0, 0.0], [0.99, 0.0], [0.99, 0.99]]
+            };
+            out.push((piece.map(world), uv));
         }
     }
     out
@@ -122,8 +165,9 @@ pub fn billboard(centre: Vec3, along: Vec3, width: f32, height: f32, eye: Vec3) 
 /// it, scaled per axis by the emitter's size channel (`Effect.dll:0x1000d0c0`), with the basis
 /// mode 0 builds from the eye (`0x100093f4`). The eye reaches the draw already in the frame's
 /// own space, as the sprite's position does, so the square faces the camera there and comes
-/// out stretched by the frame: `fr_e_brige`'s rays, on a frame 150 m along the span and 1.93
-/// across, are a 150 m streak seen from the bank and a 1.93 m flicker seen down the deck.
+/// out stretched by the frame. A burst's and a stream's particles are drawn so, where their
+/// frame is three control points'; a type-3, 4 or 9 sprite brings its own matrix, worked by
+/// its mode ([`turned`], docs/11, "A sprite's mode").
 ///
 /// Up is the frame's third axis, as it is the model's z in the draw (`0x1000948d` builds the
 /// side vector as (−d.y, d.x, 0) of the local view).
@@ -445,6 +489,58 @@ mod tests {
         let pieces: Vec<*const Quad> =
             draw_order(&quads).into_iter().filter(|q| q.look == 2).map(|q| q as *const Quad).collect();
         assert_eq!(pieces, [&quads[2] as *const Quad, &quads[3] as *const Quad]);
+    }
+
+    /// The shade's hemisphere (`Terrain.dll:0x10027a20`): radius 1, its pole on the sprite's
+    /// z and its rim the unit circle of its xy plane, a triangle and `rings − 1` quads to a
+    /// segment.
+    #[test]
+    fn a_dome_is_a_unit_half_sphere_with_its_pole_on_the_sprites_z() {
+        let own = [Vec3::X, Vec3::Y, Vec3::Z];
+        let pieces = dome(Vec3::ZERO, own, 8, 3, true);
+        assert_eq!(pieces.len(), 8 * 3);
+        let corners: Vec<Vec3> = pieces.iter().flat_map(|(c, _)| *c).collect();
+        assert!(corners.iter().all(|c| (c.length() - 1.0).abs() < 1e-5), "every vertex a unit out");
+        assert!(corners.iter().all(|c| c.z > -1e-6), "nothing below the rim: a half, not a whole");
+        assert!(corners.iter().any(|c| (*c - Vec3::Z).length() < 1e-6), "the pole");
+        assert!(corners.iter().any(|c| c.z.abs() < 1e-6), "the rim");
+        // Each segment opens with its triangle from the pole, its last corner repeated.
+        let (cap, uv) = pieces[0];
+        assert!((cap[0] - Vec3::Z).length() < 1e-6 && cap[2] == cap[3]);
+        // Laid over the dome as seen down the pole: the pole at the texture's middle, the rim
+        // on its inscribed circle.
+        assert!((uv[0][0] - 0.5).abs() < 1e-6 && (uv[0][1] - 0.5).abs() < 1e-6);
+        for (c, uv) in &pieces {
+            for (v, t) in c.iter().zip(uv) {
+                assert!((t[0] - (v.x + 1.0) * 0.5).abs() < 1e-6 && (t[1] - (v.y + 1.0) * 0.5).abs() < 1e-6);
+            }
+        }
+        // Otherwise every facet takes the whole texture.
+        let tiled = dome(Vec3::ZERO, own, 16, 6, false);
+        assert_eq!(tiled.len(), 16 * 6);
+        assert_eq!(tiled[0].1[..3], [[0.5, 0.99], [0.0, 0.0], [0.99, 0.0]]);
+        assert_eq!(tiled[1].1, [[0.0, 0.99], [0.0, 0.0], [0.99, 0.0], [0.99, 0.99]]);
+        // The sprite's matrix carries it: a pole 2 down and a rim 3 by 4 about a centre.
+        let centre = Vec3::new(5.0, 6.0, 7.0);
+        let hung = dome(centre, [Vec3::X * 3.0, Vec3::Y * 4.0, Vec3::NEG_Z * 2.0], 8, 3, true);
+        let lowest = hung.iter().flat_map(|(c, _)| *c).map(|c| c.z).fold(f32::MAX, f32::min);
+        let highest = hung.iter().flat_map(|(c, _)| *c).map(|c| c.z).fold(f32::MIN, f32::max);
+        assert!((lowest - 5.0).abs() < 1e-5 && (highest - 7.0).abs() < 1e-5, "{lowest}..{highest}");
+        let widest = hung.iter().flat_map(|(c, _)| *c).map(|c| (c.x - 5.0).abs()).fold(0.0, f32::max);
+        assert!((widest - 3.0).abs() < 1e-5);
+    }
+
+    /// A sprite's quad is the unit square of its own xy plane, u with x and v with y.
+    #[test]
+    fn a_sprites_quad_is_the_unit_square_of_its_own_xy_plane() {
+        let (c, uv) = turned(Vec3::new(1.0, 1.0, 1.0), [Vec3::Y * 8.0, Vec3::Z * 2.0, Vec3::X]);
+        assert_eq!(c[0], Vec3::new(1.0, -3.0, 2.0));
+        assert_eq!(c[2], Vec3::new(1.0, 5.0, 0.0));
+        // u runs along the sprite's x, here world y, and v along its y, here world z.
+        assert_eq!((uv[1], uv[2], uv[0]), ([0.0, 0.0], [0.99, 0.0], [0.0, 0.99]));
+        assert!(
+            (c[2] - c[1] - Vec3::Y * 8.0).length() < 1e-6 && (c[0] - c[1] - Vec3::Z * 2.0).length() < 1e-6
+        );
     }
 
     #[test]

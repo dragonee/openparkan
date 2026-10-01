@@ -67,8 +67,11 @@ distance** at +64 and +68.  **Type 1 is a light** in its owner's light manager
 (``LIGHT_*``, ``Emitter.light``).  A **type-5 bolt** runs from a start point to
 where the effect is now, in segments of +36 (``Emitter.bolt_segments``); a
 **type-8 stream** emits a particle every +24..+28 seconds; a particle's and a
-sprite's **fade** is a (start, end, power) triple.  What the rest mean is not
-established; see ``docs/11-effects.md``.
+sprite's **fade** is a (start, end, power) triple; a sprite's +4 is the **mode**
+that turns it (``SPRITE_*``), by its direction channel in modes 1 and 2, and a
+type-9 block draws a **hemisphere** with its pole on that direction
+(``Emitter.dome``).  What the rest mean is not established; see
+``docs/11-effects.md``.
 
 Nothing here draws: an explosion is transient and a static scene has no place
 to put one.  What it gives you is the graph, from a mesh node's ``.ndp``
@@ -248,6 +251,39 @@ PHASE_AT = {3: (8, 12, 16), 4: (8, 12, 16), 9: (8, 12, 16), 5: (40, 44, None)}
 #: it left when the rate is negative (``0x10012165``, ``0x10011d84``).
 ANIMATION_RATE_AT = 32
 ANIMATION_RATE_TYPES = (7, 8, 10)
+
+#: A type 3, 4 or 9 block's **sprite mode** at +4.  The load copies it to the
+#: particle's ``+0xc`` (``Effect.dll:0x100103d2``) and the particle's draw switches
+#: on it (``0x100093ed``): 0 faces the eye in the instance's own space, 1 lies along
+#: the block's direction channel and turns about it to the eye, 2 is square to that
+#: channel whatever the eye.  3 is a burst particle's, and no sprite block carries
+#: it.  See ``docs/11-effects.md``, "A sprite's mode".
+SPRITE_MODE_AT = 4
+SPRITE_FACING = 0
+SPRITE_AXIAL = 1
+SPRITE_TURNED = 2
+SPRITE_TYPES = (3, 4, 9)
+
+#: The sprite types' **direction channel**: a (low, high) pair of ``float32[3]``
+#: lerped straight by the progress through the window (``0x1001077e``), which
+#: modes 1 and 2 turn the sprite by.
+SPRITE_DIRECTION_AT = (76, 88)
+
+#: A type-9 block draws one of the shade's three **hemispheres** in place of a
+#: quad: +200 of 0, 1 or 2 becomes shape code 3, 5 or 6 (``0x100138c8``; any other
+#: value draws nothing), and the detail is ``(segments, rings)`` by the instance's
+#: level 0..3 (``Terrain.dll:0x1009a750``, ``0x1009a780``; the mesh at
+#: ``0x10027a20`` is a unit half sphere, pole on the sprite's own z).  +204 of 0
+#: lays the texture over the whole dome as seen down its pole; anything else
+#: gives every facet the whole texture (``Effect.dll:0x1001390e``,
+#: ``Terrain.dll:0x10028b02``).
+DOME_SHAPE_AT = 200
+DOME_TILED_AT = 204
+DOME_DETAIL = (
+    ((8, 3), (6, 3), (5, 2), (4, 1)),
+    ((16, 6), (12, 5), (10, 4), (8, 3)),
+    ((24, 9), (20, 8), (16, 6), (10, 4)),
+)
 
 #: Emitter type -> where the ``(low, high)`` span of effect time it is active
 #: in sits.  Outside it the emitter does nothing.  Type 2, the sound, is a
@@ -595,6 +631,33 @@ class Emitter:
             for at in READ_OFFSETS.get(self.kind, ())
             if at + 4 <= len(self.body)
         }
+
+    @property
+    def sprite_mode(self) -> int | None:
+        """``SPRITE_*``: how a type 3, 4 or 9 sprite is turned, or None for the rest."""
+        if self.kind not in SPRITE_TYPES or len(self.body) < SPRITE_MODE_AT + 4:
+            return None
+        return struct.unpack_from("<I", self.body, SPRITE_MODE_AT)[0]
+
+    @property
+    def sprite_direction(self) -> tuple[tuple[float, ...], tuple[float, ...]] | None:
+        """The ``(low, high)`` ends of a sprite's direction channel, in its frame."""
+        if self.kind not in SPRITE_TYPES or len(self.body) < SPRITE_DIRECTION_AT[1] + 12:
+            return None
+        return tuple(struct.unpack_from("<3f", self.body, at) for at in SPRITE_DIRECTION_AT)
+
+    @property
+    def dome(self) -> tuple[int, int, bool] | None:
+        """A type-9 block's hemisphere at the finest level: ``(segments, rings, projected)``.
+
+        None for the other types, and for a shape the update does not draw.
+        """
+        if self.kind != 9 or len(self.body) < DOME_TILED_AT + 4:
+            return None
+        shape, tiled = struct.unpack_from("<2I", self.body, DOME_SHAPE_AT)
+        if shape >= len(DOME_DETAIL):
+            return None
+        return (*DOME_DETAIL[shape][0], tiled == 0)
 
     @property
     def window(self) -> tuple[float, float] | None:

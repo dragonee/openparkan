@@ -1054,6 +1054,21 @@ out of the ground.
   channel asks for; the bridge's ray, on a frame 150 m along the span and 1.93 across, is a
   150 m streak from the bank and a 1.93 m flicker down the deck. It had been the flicker from
   everywhere.
+- **A sprite's mode turns it, and a type-9 block is a half sphere** (docs/11, "A sprite's
+  mode", "Type 9 is a half sphere"; docs/13, "A frame about one direction"). A type-3, 4 or 9
+  block's `+4` is the mode its draw switches on: 0 faces the eye in the frame's space, 1 lies
+  along the block's direction channel and turns about it, its texture running along its
+  length, and 2 is square to that direction whatever the eye — and the size is laid along
+  the frame's axes whichever way the sprite is turned. A type-9 block draws the shade's unit
+  half sphere through the same matrix, its pole on the sprite's z, from both sides, its
+  texture laid on down the pole or whole on every facet by its `+204`. A frame about one
+  direction — a control point named three times, an explosion's — is the direction, its
+  level perpendicular or the x or y axis where it has no x or no y, and their cross. So the
+  generator's ball is a ball, its two halves hung and standing; a building's lamp is a dome
+  on a flat face; the construction sphere is tiled, and its sign's and ray's rings lie level;
+  a cannon's flash is a flame along the barrel; `mineglow`'s caps no longer stand over the
+  mine's platform. The engine had guessed a streak from unequal sizes, faced everything else
+  to the camera, and stood every dome on its frame's first axis.
 
 **M18.** The enemy plans: it builds warbots and sends them to take the buildings you hold.
 
@@ -1550,7 +1565,7 @@ a row here. A row leaves this table when research closes it.
 | M14 | The AI's camouflage switch, which the device manager's sibling sends as it sends the repair system's (`Behavior.dll:0x10019a10`) | a unit the player does not drive keeps its camouflage off | [26](../docs/26-damage.md#repair-a-units-own-repair-unit-switched-on-and-off--read-and-measured) |
 | M14 | A unit's parts share one life system in the game, the engine keeps a life per part: how a part hanging on a knocked-off socket flies with it | a part whose socket is destroyed, or steps up a stage, has its node 0 destroyed where it stands, so its nodes explode and go there rather than in the air | [26](../docs/26-damage.md#what-a-damaged-node-a-destroyed-part-and-a-dead-unit-draw--read-and-measured) |
 | M14 | That a shield flash rides on node 0 | it keeps its direction and follows the bubble's centre | [26](../docs/26-damage.md#what-a-shield-hit-draws--read-and-measured) |
-| M14 | Which of the effect frame's axes a type-9 dome's pole ends on, and how its texture runs over it | the first, so a shield flash bulges out of the bubble toward the hit, the round glow a recording shows; u around, v from rim to pole | [11](../docs/11-effects.md#not-resolved) |
+| M14 | What gives an effect instance the level that picks a type-9 half sphere's detail, and drops it at 4 and over (`Effect.dll:0x10007e6d`) | every dome is drawn at level 0, its finest: 8 × 3, 16 × 6 or 24 × 9 | [11](../docs/11-effects.md#type-9-is-a-half-sphere--read-measured-and-seen) |
 | M14 | How a turret component on a chassis's own controller poses its nodes against the chassis's frames, and how an animal's gun aims, its pitch channel having no point | the turret's channels pose the mesh as a turret part's would; an AI gun with no sight fires straight at the point its fire control traces | [34](../docs/34-progression.md#the-medusas--read-and-measured) |
 | M14 | The call for help to the clan's warriors within 400, and the random source of the clan takt's 0–999 ms jitter | the call is not modelled: a hit pulls in its victim alone. The attitude a hit lowers **is** modelled, on the read figures; the jitter uses a 32-bit xorshift | [31](../docs/31-packages.md#a-hit-pulls-a-unit-in--read), [25](../docs/25-sensors.md#clan-relations-the-files-words-straight-through--read-and-measured) |
 | M14 | The behaviour's radar module: its two timers, and the hostile and friendly lists it keeps from its machine's radar | the machine's own radar scan stands in for the module, read afresh each takt; the fire control and the engagement pick from it alone, so a unit with no radar picks no target of its own, while a search still looks over the clan's areal map, which the engine keeps whole | [25](../docs/25-sensors.md#what-the-ai-does-with-it--read) |

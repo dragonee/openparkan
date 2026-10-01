@@ -8065,6 +8065,203 @@ def _planted_steps(c: control.Controller, m, points, order: list[int]) -> tuple[
     return steps, nearest
 
 
+def check_sprite_modes(check, game: Path) -> None:
+    """A sprite's mode, the hemisphere a type-9 block draws, and a frame about one direction."""
+    library = effects.EffectLibrary(game / "effects.rlb")
+    modes: dict[int, Counter[int]] = {k: Counter() for k in effects.SPRITE_TYPES}
+    moving = off_axis = 0
+    axes = {(1.0, 0.0, 0.0), (-1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, -1.0, 0.0),
+            (0.0, 0.0, 1.0), (0.0, 0.0, -1.0)}
+    for fx in library:
+        for e in fx.emitters:
+            if e.sprite_mode is None:
+                continue
+            modes[e.kind][e.sprite_mode] += 1
+            low, high = e.sprite_direction
+            moving += low != high
+            off_axis += low not in axes
+    check("FXID: a sprite block's +4 is its mode, and its direction lies on an axis",
+          {k: dict(v) for k, v in modes.items()}
+          == {3: {0: 773, 1: 251, 2: 521}, 4: {0: 202}, 9: {0: 8, 2: 258}}
+          and moving == 2 and off_axis == 1,
+          f"type 3 {dict(sorted(modes[3].items()))}, type 4 {dict(modes[4])}, type 9 "
+          f"{dict(sorted(modes[9].items()))} -- 0 faces the eye, 1 lies along the direction "
+          f"channel, 2 is square to it, and no block carries the burst's 3; the direction "
+          f"(+76 -> +88) moves over the window on {moving} blocks and is off the six axis "
+          f"directions on {off_axis}, a type-4 block's zero, which mode 0 does not read")
+
+    nine = [(fx, e) for fx in library for e in fx.emitters if e.kind == 9]
+    shapes = Counter(struct.unpack_from("<I", e.body, effects.DOME_SHAPE_AT)[0] for _, e in nine)
+    tiled = Counter(fx.name for fx, e in nine if not e.dome[2])
+    directions = Counter(e.sprite_direction[0] for _, e in nine)
+    twinned: set[str] = set()
+    twins = 0
+    for fx in library:
+        own = [e for e in fx.emitters if e.kind == 9]
+        for e in own:
+            against = tuple(-c for c in e.sprite_direction[0])
+            if any(o is not e and o.sprite_direction[0] == against and o.window == e.window
+                   and o.resource.member.lower() == e.resource.member.lower() for o in own):
+                twins += 1
+                twinned.add(fx.name)
+    ball = library.get("f_gener_ball")
+    halves = [e for e in ball.emitters if e.kind == 9] if ball else []
+    differ = ([i for i in range(len(halves[0].body)) if halves[0].body[i] != halves[1].body[i]]
+              if len(halves) == 2 else None)
+    check("FXID: a type-9 block is a half sphere, and 122 of the 266 pair up into balls",
+          len(nine) == 266 and len({fx.name for fx, _ in nine}) == 126
+          and dict(shapes) == {0: 177, 1: 88, 2: 1} and sum(tiled.values()) == 12
+          and directions[(1.0, 0.0, 0.0)] == 130 and directions[(-1.0, 0.0, 0.0)] == 77
+          and directions[(0.0, 0.0, 1.0)] == 25 and directions[(0.0, 0.0, -1.0)] == 24
+          and twins == 122 and len(twinned) == 42 and differ == [79, 91]
+          and [e.sprite_direction[0][0] for e in halves] == [-1.0, 1.0],
+          f"{len(nine)} blocks over {len({fx.name for fx, _ in nine})} effects, shapes "
+          f"{dict(sorted(shapes.items()))} (8 x 3, 16 x 6 and 24 x 9 at the finest level), "
+          f"{sum(tiled.values())} with +204 set so that every facet takes the whole texture "
+          f"({dict(tiled)}); {twins} have a twin of the same material and window whose "
+          f"direction is the opposite, in {len(twinned)} effects -- the *_balllight_* lamps, "
+          f"B_Sphere_Main, deflector -- and f_gener_ball's two halves differ in bytes "
+          f"{differ} alone, the sign of the direction's x at +76 and +88")
+
+    # The code, where the claims above come from.
+    paths = [game / name for name in ("Effect.dll", "Terrain.dll", "Control.dll")]
+    if not all(path.exists() for path in paths):
+        return
+    e_at, t_at, c_at = (_image_at(path.read_bytes()) for path in paths)
+
+    def words(at, va: int, n: int) -> list[int]:
+        return list(struct.unpack(f"<{n}I", at(va, 4 * n)))
+
+    detail = [words(t_at, 0x1009A750 + 16 * i, 4) for i in range(3)]
+    rings = [words(t_at, 0x1009A780 + 16 * i, 4) for i in range(3)]
+    quarter, turn = (struct.unpack("<f", t_at(va, 4))[0] for va in (0x1009A7E8, 0x1009A218))
+    check("Effect.dll: the sprite load keeps +4 as the mode the draw switches four ways on",
+          # mov edx, [ecx+4]; lea ecx, [edi+0x18]; mov [esi+0x3c], edx -- the sprite's
+          # particle sits at +0x30, so +0x3c is its +0xc.
+          e_at(0x100103D2, 9).hex() == "8b51048d4f1889563c"
+          # mov eax, [ebp+0xc]; mov [ebp+4], bl; cmp eax, 3; ja; jmp [eax*4 + table]
+          and e_at(0x100093DE, 21).hex() == "8b450c885d0483f8030f8784040000ff2485189900"
+          and words(e_at, 0x10009918, 4) == [0x100093F4, 0x10009739, 0x1000985E, 0x10009575]
+          # The two fixed sides: (1, 0, 0) and (0, 1, 0).
+          and e_at(0x1000D060, 30).hex() == ("c705c84702100000803fc705cc47021000000000"
+                                               "c705d047021000000000")
+          and e_at(0x1000D080, 30).hex() == ("c705d847021000000000c705dc4702100000803f"
+                                               "c705e047021000000000"),
+          "Effect.dll:0x100103d2 copies the block's +4 to the sprite's +0x3c, its "
+          "particle's +0xc; the particle's draw (0x100093d0) bounds it at 3 and jumps "
+          "through 0x10009918 to modes 0, 1, 2 and 3 at 0x100093f4, 0x10009739, 0x1000985e "
+          "and 0x10009575; the sides it falls back on where a vector has no x or no y are "
+          "(1, 0, 0) and (0, 1, 0), written at 0x1000d060 and 0x1000d080")
+    check("Terrain.dll: a type-9 sprite's shape is a unit half sphere in three details",
+          detail == [[8, 6, 5, 4], [16, 12, 10, 8], [24, 20, 16, 10]]
+          and rings == [[3, 3, 2, 1], [6, 5, 4, 3], [9, 8, 6, 4]]
+          and detail == [[d[0] for d in row] for row in effects.DOME_DETAIL]
+          and rings == [[d[1] for d in row] for row in effects.DOME_DETAIL]
+          and abs(quarter - math.pi / 2) < 1e-6 and abs(turn - 2 * math.pi) < 1e-6
+          # +200 of 0, 1, 2 -> shape code 3, 5, 6; anything else leaves without drawing.
+          and e_at(0x100138C1, 43).hex() == ("8bb1fc000000578b86c800000083e800741448740a48754c"
+                                               "b806000000eb0cb805000000eb05b803000000")
+          # +204 of 0 sets code bit 0x8000000.
+          and e_at(0x1001390E, 18).hex() == "8bbecc00000085ff75050d00000008894138"
+          # The item's draw flags are 4: no culling.
+          and t_at(0x100282A0, 13).hex() == "8b4df4c7812801000004000000",
+          f"segments {detail} and rings {rings} by shape and level (Terrain.dll:0x1009a750, "
+          f"0x1009a780), the polar angle running to {quarter:.6f} = pi/2 and the turn to "
+          f"{turn:.6f} (0x1009a7e8, 0x1009a218): a half sphere, pole on the sprite's z; "
+          f"Effect.dll:0x100138c1 maps +200 of 0, 1, 2 to shape codes 3, 5, 6 and 0x1001390e "
+          f"sets code bit 0x8000000 where +204 is 0; the item is built with draw flags 4 "
+          f"(Terrain.dll:0x100282a3), which turns culling off")
+
+    # A frame about one direction (Control.dll:0x10003ef0), and the load-group records that
+    # get one: action 4 naming one control point three times.
+    rows = []
+    named: Counter[int] = Counter()
+    turned: Counter[int] = Counter()
+    for name in ("static.rlb", "intsys.rlb", "turrets.rlb", "guns.rlb", "parts.rlb",
+                 "weapon.rlb", "animals.rlb", "bases.rlb", "fortif.rlb", "system.rlb",
+                 "objects.rlb"):
+        try:
+            ar = NResArchive.open(game / name)
+        except (OSError, NotAnNResArchive):
+            continue
+        members = {e.name.lower(): e for e in ar}
+        for key, e in members.items():
+            if not key.endswith(".ctl") or key[:-4] + ".cpt" not in members:
+                continue
+            try:
+                ctrl = control.parse(ar.read(e))
+                pts = objmesh.parse_control_points(
+                    ar.read(members[key[:-4] + ".cpt"]), key[:-4] + ".cpt")
+            except (ValueError, struct.error):
+                continue
+            for r in control.run_group(ctrl.group(control.ENTRY_LOAD),
+                                       [False] * control.CONDITIONS):
+                idx = r.args[:3]
+                if (r.action != control.ACT_EFFECT_POINTS or len(set(idx)) != 1
+                        or not 0 <= idx[0] < len(pts)):
+                    continue
+                rows.append((name, key, r.resource.member, pts[idx[0]]))
+        for key, e in members.items():
+            if not key.endswith(".ctl"):
+                continue
+            try:
+                ctrl = control.parse(ar.read(e))
+            except (ValueError, struct.error):
+                continue
+            for r in ctrl.references:
+                if r.action not in (3, control.ACT_EFFECT_POINTS, control.ACT_EFFECT_SPHERE):
+                    continue
+                t = library.get(r.resource.member) if r.resource.member else None
+                named[r.action] += 1
+                turned[r.action] += bool(t and any(x.sprite_mode is not None for x in t.emitters))
+    lengths = Counter(round(math.dist((0, 0, 0), p.direction), 3) for *_, p in rows)
+    long = [(key, fx, p.name) for _, key, fx, p in rows
+            if abs(math.dist((0, 0, 0), p.direction) - 1.0) > 1e-3]
+    lie = Counter()
+    for *_, p in rows:
+        length = math.dist((0, 0, 0), p.direction)
+        x, y, z = struct.unpack("<3f", struct.pack("<3f", *(c / length for c in p.direction)))
+        lie["up" if (x, y, z) == (0.0, 0.0, 1.0) else "down" if (x, y, z) == (0.0, 0.0, -1.0)
+            else "no x" if x == 0.0 else "no y" if y == 0.0 else "level" if z == 0.0
+            else "general"] += 1
+    domed = sum(1 for _, _, fx, _ in rows
+                if (t := library.get(fx)) and any(e.kind == 9 for e in t.emitters))
+    by_archive = Counter(name for name, *_ in rows)
+    objects = len({(name, key) for name, key, *_ in rows})
+    check("CTL: a point named three times gives a frame about its direction, a unit long on 689",
+          len(rows) == 690 and objects == 101 and lengths[1.0] == 689 and len(long) == 1
+          and long[0] == ("fr_l_gener.ctl", "f_gener_ball", "Sign_Type1")
+          and lie == {"up": 119, "down": 12, "no x": 246, "no y": 74, "level": 17,
+                      "general": 222}
+          and domed == 251
+          # The frame's columns: fld [esi]; fstp [esp+0x20] -- the direction first.
+          and c_at(0x1000400B, 6).hex() == "d906d95c2420"
+          and c_at(0x10003E40, 30).hex() == ("c705801d04100000803fc705841d041000000000"
+                                               "c705881d041000000000")
+          and c_at(0x10003E60, 30).hex() == ("c705901d041000000000c705941d04100000803f"
+                                               "c705981d041000000000")
+          # The handler's call, and the explosion's.
+          and c_at(0x10002CCD, 5).hex() == "e81e120000"
+          and struct.unpack("<i", c_at(0x1001181B, 4))[0] + 0x1001181F == 0x10003EF0,
+          f"{len(rows)} action-4 load-group records on {objects} objects name one control "
+          f"point three times ({dict(by_archive)}); the direction is a unit long on "
+          f"{lengths[1.0]} and {max(lengths)} on the one other, {long}; as the model has "
+          f"them {dict(lie)} -- straight up, straight down, no x otherwise, no y, level, "
+          f"and the rest -- and {domed} of them carry an effect with a type-9 block. "
+          f"Control.dll:0x10003ef0 writes the matrix's columns as the direction, its side "
+          f"and direction x side (0x1000400b); the fixed sides (1, 0, 0) and (0, 1, 0) are "
+          f"set at 0x10003e40 and 0x10003e60; the handler calls it at 0x10002ccd and an "
+          f"explosion's placing at 0x1001181a")
+    check("CTL: no effect on a node draws a sprite, so only a point or sphere frame turns one",
+          dict(named) == {3: 217, 4: 1203, 5: 72} and dict(turned) == {3: 0, 4: 855, 5: 72},
+          f"of the records that name an effect, {turned[3]} of action 3's {named[3]}, on a "
+          f"node, name one with a type 3, 4 or 9 block -- they are sounds, lights, bursts and "
+          f"streams -- against {turned[4]} of action 4's {named[4]} and all {turned[5]} of "
+          f"action 5's {named[5]}, the control: so the frames a sprite's mode is worked in "
+          f"are the control points' and the construction sphere's, and a round's and an "
+          f"explosion's")
+
+
 def check_music(check, game: Path) -> None:
     """The CD tracks the install ships as Ogg files, and what picks and sets them."""
     music = game / "MUSIC"
@@ -26773,7 +26970,8 @@ def run(game: Path) -> int:
         check_render_state, check_blend_depth, check_minimap_agreement, check_arealmap,
         check_grid, check_missions, check_scale, check_objects, check_poses, check_lod,
         check_damage, check_blasts, check_node_stages, check_scenery_life,
-        check_effects, check_effect_timing, check_sounds, check_music, check_actions,
+        check_effects, check_effect_timing, check_sprite_modes, check_sounds, check_music,
+        check_actions,
         check_footprints,
         check_rsli,
         check_control, check_efficiency, check_building_batteries, check_no_logical_id_0,

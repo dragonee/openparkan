@@ -36,12 +36,36 @@ pub struct Frame {
     pub points: bool,
 }
 
+/// The side the game squares one direction with, wherever it builds a frame or a sprite's
+/// basis about a single vector (`Control.dll:0x10003ef0`, `Effect.dll:0x100038d0`,
+/// `0x1000d110`, and the sprite draw's own at `0x10009453`): the vector's horizontal
+/// perpendicular (−y, x, 0), normalised where the vector has a z and left as it is where it
+/// has none -- and **on the axes a fixed one**: the x axis where the vector's x is exactly 0,
+/// the y axis where its y is and its x is not (the triples at `Control.dll:0x10041d80` and
+/// `0x10041d90`, `Effect.dll:0x100247c8` and `0x100247d8`). So a vector straight up or down
+/// never degenerates, and the vectors along +y and −x get the opposite of the side their
+/// perpendicular would have been.
+pub fn side_of(d: Vec3) -> Vec3 {
+    if d.x != 0.0 && d.y != 0.0 {
+        let side = Vec3::new(-d.y, d.x, 0.0);
+        if d.z != 0.0 { side.normalize_or(Vec3::X) } else { side }
+    } else if d.x != 0.0 {
+        Vec3::Y
+    } else {
+        Vec3::X
+    }
+}
+
 impl Frame {
-    /// A frame at `origin` whose first axis is `x`, the others square to it, all `size` long.
+    /// A frame at `origin` built about the one direction `x`, all three axes `size` long: the
+    /// direction is the **first** axis, [`side_of`] it the second and their cross product,
+    /// direction × side, the third. That is the matrix `Control.dll:0x10003ef0` writes -- its
+    /// columns the direction, the side, the cross and the origin (`0x1000400b`–`0x1000405b`)
+    /// -- which an explosion's effect is placed with (`0x1001181a`) and a load group's effect
+    /// on one control point named three times ([`Frame::from_points`]).
     pub fn along(origin: Vec3, x: Vec3, size: f32) -> Self {
         let x = x.normalize_or(Vec3::X);
-        let helper = if x.z.abs() < 0.9 { Vec3::Z } else { Vec3::Y };
-        let y = helper.cross(x).normalize();
+        let y = side_of(x);
         let z = x.cross(y);
         Self { origin, axes: [x * size, y * size, z * size], points: false }
     }
@@ -53,12 +77,11 @@ impl Frame {
     ///
     /// Three equal directions -- every one of the 690 load-group records that names one point
     /// three times, each sign, lamp and screen -- go down the handler's other branch
-    /// (`0x10002c42`): an orientation built from the unit direction (`0x10003ef0`), scaled alike
-    /// on all three axes by the direction's length (`0x10002c7b`–`0x10002cfd`, `0x10003ea0`).
-    ///
-    /// STAND-IN: docs/11-effects.md#type-4-is-a-glow-sized-by-the-eyes-distance--read-and-seen
-    /// -- which row of that orientation the direction lands in is not read: here the first,
-    /// the axis a dome's pole ends on ([`Instance::dome`]).
+    /// (`0x10002c42`): an orientation built about the unit direction (`0x10003ef0`,
+    /// [`Frame::along`]), scaled alike on all three axes by the direction's length
+    /// (`0x10002c7b`–`0x10002cfd`, `0x10003ea0`). The direction lands where a triple's first
+    /// point does, on the first axis; the second is its side and the third their cross
+    /// (docs/13, "A frame about one direction").
     pub fn from_points(points: [(Vec3, Vec3); 3]) -> Self {
         let origin = (points[0].0 + points[1].0 + points[2].0) / 3.0;
         let d = points[0].1;
@@ -71,10 +94,8 @@ impl Frame {
     /// The frame as a basis a sprite is drawn through, where it is one: three control-point
     /// directions that are not all in a plane.
     ///
-    /// Where they are -- which is every frame the handler's other three branches build, and
-    /// every one of the 690 load-group records that names the same point three times -- the
-    /// matrix cannot be inverted and the draw's camera-facing basis stands alone
-    /// ([`Frame::from_points`] keeps the repeated direction in all three axes there).
+    /// A frame built about one direction is an orientation scaled alike, and is not one of
+    /// these: a burst's or a stream's particle on it faces the camera in the world.
     /// *Measured*: 189 records name three distinct points and exactly one of those, the
     /// hero chassis's `aim_fire_S`, has its directions in a plane.
     pub fn basis(&self) -> Option<[Vec3; 3]> {
@@ -87,19 +108,34 @@ impl Frame {
         self.origin + self.axes[0] * local.x + self.axes[1] * local.y + self.axes[2] * local.z
     }
 
-    /// How far `eye` stands from the frame's origin in the frame's own units: the eye as an
-    /// emitter's update is handed it, in the instance's space (docs/11, "A sprite is drawn
-    /// through its frame"). A frame of three points that make a basis is inverted; any other
-    /// is an orientation scaled alike on its three axes -- the handler's one-direction branch
-    /// scales a turned frame by that direction's length (`Control.dll:0x10002c7b`–`0x10002cfd`)
-    /// -- so the distance is divided by the first axis's length.
-    pub fn local_distance(&self, eye: Vec3) -> f32 {
-        let to = eye - self.origin;
-        if let Some([x, y, z]) = self.basis() {
-            return (glam::Mat3::from_cols(x, y, z).inverse() * to).length();
+    /// A point of the world in the frame's own space, its axes `scale` times as long, as the
+    /// manager's emitter loop puts the eye there before it hands it to the emitters
+    /// (`Effect.dll:0x100080da`, `g_FastProc` slot `0x68`, `Ngi32.dll:0x100248f0`): the point
+    /// less the origin, projected on each axis and divided by that axis's squared length. That
+    /// is the inverse of a matrix whose axes are square to one another, whatever their lengths;
+    /// `None` where an axis has no length.
+    pub fn local(&self, scale: f32, world: Vec3) -> Option<Vec3> {
+        let to = world - self.origin;
+        let mut out = Vec3::ZERO;
+        for (i, axis) in self.axes.iter().enumerate() {
+            let axis = *axis * scale;
+            let squared = axis.length_squared();
+            if squared <= 0.0 || !squared.is_finite() {
+                return None;
+            }
+            out[i] = axis.dot(to) / squared;
         }
-        let unit = self.axes[0].length();
-        if unit > 0.0 { to.length() / unit } else { to.length() }
+        Some(out)
+    }
+
+    /// How far `eye` stands from the frame's origin in the units of the frame `scale` times
+    /// as large: the length of the eye as an emitter's update is handed it, in the instance's
+    /// space ([`Frame::local`]). The instance's matrix carries its scale -- the placement's
+    /// columns times the size asked for times the header's (`Effect.dll:0x10007c90`), under
+    /// the owner's node (`0x10008469`) -- so the scale divides the distance as an axis's
+    /// length does. A frame with an axis of no length gives the distance in the world.
+    pub fn local_distance(&self, scale: f32, eye: Vec3) -> f32 {
+        self.local(scale, eye).map_or((eye - self.origin).length(), Vec3::length)
     }
 
     /// The same frame with its axes a unit long: it turns what it places without sizing it.
@@ -326,31 +362,73 @@ pub struct Sprite {
     /// two keys that bracket it. A fraction outside 0..1 becomes 0.5 there. See docs/11,
     /// "A phase is where its material's animation stands".
     pub phase: f32,
-    /// Drawn as a hemisphere about `centre` instead of a quad: a type-9 emitter's shape.
+    /// Drawn as a hemisphere through `matrix` instead of a quad: a type-9 emitter's shape.
     pub dome: Option<Dome>,
     /// The frame to turn the quad through, each axis as long as the sprite is that way:
     /// a camera-facing unit square in this basis rather than on the screen, so a frame
     /// whose axes differ draws a long streak along its first when seen across it and a small
-    /// one end-on ([`Frame::basis`], docs/11, "A sprite is drawn through its frame").
+    /// one end-on ([`Frame::basis`], docs/11, "A sprite is drawn through its frame"). A burst's
+    /// and a stream's particles carry it; a type-3, 4 or 9 sprite carries its `matrix`.
     pub frame: Option<[Vec3; 3]>,
+    /// The sprite's own matrix, the one its mode makes in its frame's space carried out through
+    /// the frame and the size (the particle's `+0x14`, [`Instance::through`]): where the unit
+    /// vectors of the sprite's own x, y and z end up in the world, about `centre`. A quad is
+    /// the unit square across the first two, its (u, v) running with them; a dome's rim spans
+    /// them and its pole ends on the third. `None` where the mode needs an eye and none was
+    /// given, and the quad is then the camera-facing one the fields above describe.
+    pub matrix: Option<[Vec3; 3]>,
 }
 
-/// A type-9 emitter's hemisphere (`Terrain.dll:0x100273b0`): a unit dome with its pole on the
-/// mesh's own z, carried by `axes` (each as long as the emitter's size along it), cut into
-/// `segments` around and `rings` from the rim to the pole.
-#[derive(Clone, Copy, Debug, PartialEq)]
+/// A type-9 emitter's hemisphere, one of the shade's three (`Terrain.dll:0x10027a20`,
+/// `0x100273b0`, `0x100276a0`): a **unit-radius** half sphere in the sprite's own space, its
+/// pole at (0, 0, 1) and its rim the unit circle of the xy plane, cut into `segments` around and
+/// `rings` from the pole to the rim; the sprite's matrix carries it into the world. It is drawn
+/// from both sides -- the item's draw flags are 4, which turns culling off
+/// (`Terrain.dll:0x100282a3`, `Ngi32.dll:0x10007662`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Dome {
-    pub axes: [Vec3; 3],
     pub segments: u8,
     pub rings: u8,
+    /// The texture is laid over the whole dome as seen down its pole, (u, v) = ((x + 1) / 2,
+    /// (y + 1) / 2) of each vertex (`0x100275ff`, `0x10027959`); otherwise every facet takes
+    /// the whole texture, as a quad does (`0x10028bbe`).
+    pub projected: bool,
 }
 
-/// A type-9 block's shape (`+200`), and the detail each gives its dome at the finest level
-/// (tables `Terrain.dll:0x1009a750` and `0x1009a780`): around, and from rim to pole.
+/// A type-9 block's shape (`+200`), which the sprite's update turns into the shade's shape
+/// code 3, 5 or 6 (`Effect.dll:0x100138c8`; any other value draws nothing), and the detail
+/// each gives its dome at the finest of the four levels the code's top two bits pick (tables
+/// `Terrain.dll:0x1009a750` and `0x1009a780`): around, and from pole to rim.
 pub const DOME_SHAPE_AT: usize = 200;
 pub const DOME_DETAIL: [(u8, u8); 3] = [(8, 3), (16, 6), (24, 9)];
-/// Where an emitter is placed (`+4`): 2 in the effect's own frame.
-pub const PLACEMENT_AT: usize = 4;
+/// A type-9 block's `+204`: 0 lays the texture over the whole dome (code bit `0x8000000`,
+/// `Effect.dll:0x1001390e`), anything else gives every facet the whole of it.
+pub const DOME_TILED_AT: usize = 204;
+/// A type-3, 4 or 9 block's **sprite mode** (`+4`), which the load copies to the particle's
+/// `+0xc` (`Effect.dll:0x100103d2`) and the draw switches on (`0x100093ed`).
+pub const SPRITE_MODE_AT: usize = 4;
+/// Mode 0: the sprite faces the eye, in its frame's space.
+pub const SPRITE_FACING: u32 = 0;
+/// Mode 1: it lies along its direction channel and turns about that to face the eye.
+pub const SPRITE_AXIAL: u32 = 1;
+/// Mode 2: it is square to its direction channel, whatever the eye.
+pub const SPRITE_TURNED: u32 = 2;
+/// A type-3, 4 or 9 block's direction channel, lerped by the progress through the window with
+/// no exponent (`Effect.dll:0x1001077e`, the particle's slot 4).
+pub const SPRITE_DIRECTION_AT: (usize, usize) = (76, 88);
+
+/// What a sprite's mode makes of it this frame.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Through {
+    /// Its own matrix in the world.
+    Matrix([Vec3; 3]),
+    /// The draw gives up: the eye is on the sprite, or a mode-1 sprite is seen straight down
+    /// its direction (`Effect.dll:0x1000943e`, `0x100097a6`).
+    Hidden,
+    /// Not worked out: no eye was given to a mode that needs one, the frame has an axis of no
+    /// length, or the mode is one no sprite block carries.
+    Unturned,
+}
 
 /// A particle a stream left: when, from where, and how long it lives, in seconds.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -939,8 +1017,8 @@ impl Instance {
             let first = out.len();
             let age_ms = seconds * 1000.0;
             match e.kind {
-                3 | 9 => self.sprite(e, p, age_ms, seconds, out),
-                4 => self.sprite(e, self.flare(e, p, eye), age_ms, seconds, out),
+                3 | 9 => self.sprite(e, p, eye, age_ms, seconds, out),
+                4 => self.sprite(e, self.flare(e, p, eye), eye, age_ms, seconds, out),
                 5 => self.bolt(e, p, age_ms, seconds, out),
                 7 | 10 => self.burst(e, i as u32, p, age_ms, out),
                 8 => self.stream(i, e, seconds * self.stream_pace, out),
@@ -968,7 +1046,9 @@ impl Instance {
 
     /// A quad at `local` in `frame`, `size` along its axes, both times the instance's
     /// scale: stretched along the frame's first axis when the first two sizes differ, and
-    /// otherwise a rectangle facing the camera.
+    /// otherwise a rectangle facing the camera. A burst's and a stream's particles are drawn
+    /// so; a type-3, 4 or 9 sprite is drawn with its own matrix instead
+    /// ([`Instance::through`]), and falls back on this only where that cannot be worked.
     ///
     /// **The frame's three axes are depth, width and height, in that order**, so a sprite
     /// spans the second and the third and never the first. The size channel's x lies along
@@ -1007,6 +1087,21 @@ impl Instance {
             phase,
             dome: None,
             frame: frame.basis().map(|a| std::array::from_fn(|i| a[i] * size.to_array()[i] * self.scale)),
+            matrix: None,
+        }
+    }
+
+    /// A type-4 sprite's progress (`Effect.dll:0x100109b0`): the window's, times the eye's
+    /// distance in the instance's own units over the block's `+200` (the constructor keeps its
+    /// inverse, `0x100108d9`), and held at 1. Everything the sprite draws then runs on it --
+    /// its place, size and fade, and its phase where `+8` is not negative -- so up close it
+    /// stays near its low end and grows with the distance: the light glows keep their size on
+    /// the screen. With no eye the window's progress stands.
+    fn flare(&self, e: &Emitter, p: f32, eye: Option<Vec3>) -> f32 {
+        let reach = e.f(FLARE_REACH_AT);
+        match eye {
+            Some(eye) if reach > 0.0 => (p * self.frame.local_distance(self.scale, eye) / reach).min(1.0),
+            _ => p,
         }
     }
 
@@ -1016,47 +1111,102 @@ impl Instance {
     /// axes, each axis by progress through the window raised to that axis's exponent —
     /// +64..+72 for the position, +124..+132 for the size (`0x100106f6`, `0x10010784`;
     /// docs/11, "A channel is a (low, high, jitter, exponent) run"). Its **phase**, from
-    /// +8, +12 and +16, is where its material's animation stands ([`phase_fraction`]).
-    /// A type-4 sprite's progress (`Effect.dll:0x100109b0`): the window's, times the eye's
-    /// distance in the frame's own units over the block's `+200` (the constructor keeps its
-    /// inverse, `0x100108d9`), and held at 1. Everything the sprite draws then runs on it --
-    /// its place, size and fade, and its phase where `+8` is not negative -- so up close it
-    /// stays near its low end and grows with the distance: the light glows keep their size on
-    /// the screen. With no eye the window's progress stands.
-    fn flare(&self, e: &Emitter, p: f32, eye: Option<Vec3>) -> f32 {
-        let reach = e.f(FLARE_REACH_AT);
-        match eye {
-            Some(eye) if reach > 0.0 => (p * self.frame.local_distance(eye) / reach).min(1.0),
-            _ => p,
-        }
-    }
-
-    fn sprite(&self, e: &Emitter, p: f32, age_ms: f32, seconds: f32, out: &mut Vec<Sprite>) {
+    /// +8, +12 and +16, is where its material's animation stands ([`phase_fraction`]), and its
+    /// direction, lerp(+76, +88) straight by the progress, is what its mode turns it by
+    /// ([`Instance::through`]). A type-9 block draws a dome through the same matrix.
+    fn sprite(
+        &self,
+        e: &Emitter,
+        p: f32,
+        eye: Option<Vec3>,
+        age_ms: f32,
+        seconds: f32,
+        out: &mut Vec<Sprite>,
+    ) {
         let local = lerp3_axis(e.triple(40), e.triple(52), shaped(p, e.triple(64)));
         let size = lerp3_axis(e.triple(100), e.triple(112), shaped(p, e.triple(124)));
+        let direction = Vec3::from_array(e.triple(SPRITE_DIRECTION_AT.0))
+            .lerp(Vec3::from_array(e.triple(SPRITE_DIRECTION_AT.1)), p);
         let phase = phase_fraction(e.f(8), e.f(12), e.f(16), p, seconds);
         let mut sprite =
             self.quad(e, &self.frame, local, size, fade(e.f(20), e.f(24), e.f(28), p), age_ms, phase);
+        match self.through(word(e, SPRITE_MODE_AT), local, size, direction, eye) {
+            Through::Matrix(m) => sprite.matrix = Some(m),
+            Through::Hidden => return,
+            Through::Unturned => {}
+        }
         if e.kind == 9 {
-            sprite.dome = self.dome(e, size);
+            // A shape past the three the update knows draws nothing (`0x100138d7`).
+            //
+            // STAND-IN: docs/11-effects.md#type-9-is-a-half-sphere--read-measured-and-seen --
+            // what gives an instance its level, which picks the dome's detail and drops it at
+            // 4 and over, is not read: every dome is drawn at level 0, its finest.
+            let Some(&(segments, rings)) = DOME_DETAIL.get(word(e, DOME_SHAPE_AT) as usize) else { return };
+            sprite.dome = Some(Dome { segments, rings, projected: word(e, DOME_TILED_AT) == 0 });
         }
         out.push(sprite);
     }
 
-    /// A type-9 emitter's dome in the effect's frame, sized along each of its axes.
+    /// The matrix a type-3, 4 or 9 sprite is drawn with (`Effect.dll:0x100093d0`, the
+    /// particle's draw): the basis its **mode** makes in the instance's own space, carried
+    /// out through the instance's matrix with each of that matrix's axes scaled by the size
+    /// channel (`0x1000d0c0` on the copy at `0x100098a9`; the product at `0x100098db`,
+    /// `g_FastProc` slot `0x5c`, the instance's matrix on the left). So the size is laid along
+    /// the **frame's** axes, x, y and z, whichever way the mode turns the sprite in it, and
+    /// the sprite's place is the position channel put through the unscaled matrix
+    /// (`0x1000989a`, `0x100098ea`).
     ///
-    /// STAND-IN: docs/11-effects.md#not-resolved -- which of the frame's axes the dome's pole
-    /// ends on is not established (the read of `Effect.dll:0x1000d110` would put it on the
-    /// second axis): here it is the first, so a shield's flash bulges out of the bubble toward
-    /// the hit, the round glow a recording shows. Its texture's u runs around the dome and v
-    /// from the rim to the pole, which is not read.
-    fn dome(&self, e: &Emitter, size: Vec3) -> Option<Dome> {
-        let shape = e.body.get(DOME_SHAPE_AT..DOME_SHAPE_AT + 4)?;
-        let shape = u32::from_le_bytes(shape.try_into().ok()?) as usize;
-        let (segments, rings) = DOME_DETAIL.get(shape).copied().unwrap_or(DOME_DETAIL[0]);
-        let [x, y, z] = self.frame.axes;
-        let s = size * self.scale;
-        Some(Dome { axes: [y * s.y, z * s.z, x * s.x], segments, rings })
+    /// The basis's columns are where the sprite's own x, y and z go; a quad is the unit square
+    /// of its xy plane, u with x and v with y (`Terrain.dll:0x10027a30`–`0x10027b88`), and a
+    /// dome's pole is its z:
+    ///
+    /// | mode | x | y | z | |
+    /// |---|---|---|---|---|
+    /// | 0 | side of *v* | *v* × side | *v* | *v* the unit vector from the sprite to the eye (`0x100093f4`–`0x1000956b`) |
+    /// | 1 | *d* | *w* | *d* × *w* | *w* the unit *v* × *d*, *v* not normalised; the frame about *d* where that is zero (`0x10009739`–`0x10009835`, `0x100038d0`) |
+    /// | 2 | side of *d* | *d* × side | *d* | (`0x1000d110`) |
+    ///
+    /// with *d* the direction channel as it stands, not normalised, and the side [`side_of`].
+    /// The eye is the camera in the instance's space ([`Frame::local`]), so a mode-0 sprite
+    /// faces the camera **there** and comes back out stretched by the frame, and a mode-1
+    /// sprite is a streak along its direction that turns about it. Mode 3 is a burst's, and
+    /// no sprite block carries it (*measured*: 0 of the 2013).
+    pub fn through(&self, mode: u32, local: Vec3, size: Vec3, direction: Vec3, eye: Option<Vec3>) -> Through {
+        let axes = self.frame.axes.map(|a| a * self.scale);
+        let view = || eye.and_then(|eye| self.frame.local(self.scale, eye)).map(|eye| eye - local);
+        let d = direction;
+        let basis = match mode {
+            SPRITE_FACING => {
+                let Some(v) = view() else { return Through::Unturned };
+                let Some(v) = v.try_normalize() else { return Through::Hidden };
+                let side = side_of(v);
+                [side, v.cross(side), v]
+            }
+            SPRITE_AXIAL => {
+                let Some(v) = view() else { return Through::Unturned };
+                if v.dot(d).abs() == 1.0 {
+                    return Through::Hidden;
+                }
+                match v.cross(d).try_normalize() {
+                    Some(w) => [d, w, d.cross(w)],
+                    None => {
+                        let side = side_of(d);
+                        [d, side, d.cross(side)]
+                    }
+                }
+            }
+            SPRITE_TURNED => {
+                let side = side_of(d);
+                [side, d.cross(side), d]
+            }
+            _ => return Through::Unturned,
+        };
+        if axes.iter().any(|a| a.length_squared() <= 0.0) {
+            return Through::Unturned;
+        }
+        Through::Matrix(
+            basis.map(|b| axes[0] * (size.x * b.x) + axes[1] * (size.y * b.y) + axes[2] * (size.z * b.z)),
+        )
     }
 
     /// A type-5 bolt: floor(length / +36) sprites, at least 1 and at most +20, along the
@@ -1092,6 +1242,7 @@ impl Instance {
                 phase,
                 dome: None,
                 frame: None,
+                matrix: None,
             });
         }
     }
@@ -1329,12 +1480,14 @@ mod tests {
         let point = (Vec3::new(1.0, 2.0, 3.0), Vec3::new(0.0, -0.349, -0.937));
         let frame = Frame::from_points([point; 3]);
         assert_eq!(frame.basis(), None);
-        // An orientation from the direction, scaled alike by its length (`0x10002c7b`).
+        // An orientation about the direction, scaled alike by its length (`0x10002c7b`): the
+        // direction first, its side second, and direction × side third. This one has no x, so
+        // its side is the x axis.
         let [x, y, z] = frame.axes;
         let length = point.1.length();
         assert!((x - point.1).length() < 1e-5, "{x:?}");
-        assert!([y, z].iter().all(|a| (a.length() - length).abs() < 1e-5 && a.dot(x).abs() < 1e-4));
-        assert!(y.dot(z).abs() < 1e-4);
+        assert!((y - Vec3::X * length).length() < 1e-5, "{y:?}");
+        assert!((z - point.1.cross(Vec3::X)).length() < 1e-5, "{z:?}");
         let mut whole = effect(TIME_MANUAL, 0.0, 0, vec![glow]);
         Rc::get_mut(&mut whole).unwrap().header.scale = [1.0; 3];
         let fx = Instance::new(whole, frame, 1.0, 0.0, None, 1);
@@ -1343,6 +1496,181 @@ mod tests {
         assert_eq!(out[0].frame, None);
         assert_eq!(out[0].along, Vec3::ZERO);
         assert!((out[0].centre - point.0).length() < 1e-6);
+    }
+
+    /// `Control.dll:0x10003ef0` and its twins square a direction with its horizontal
+    /// perpendicular, and with a fixed axis where the direction has no x or no y.
+    #[test]
+    fn a_direction_is_squared_with_its_horizontal_perpendicular_and_with_an_axis_on_the_axes() {
+        // The general case, normalised where the direction has a z.
+        let d = Vec3::new(0.6, 0.0, 0.8).normalize();
+        assert_eq!(side_of(d), Vec3::Y, "no y: the y axis");
+        let d = Vec3::new(0.48, 0.64, 0.6);
+        assert!((side_of(d) - Vec3::new(-0.8, 0.6, 0.0)).length() < 1e-6);
+        // With no z the perpendicular is taken as it is: a unit direction's is unit already.
+        assert_eq!(side_of(Vec3::new(0.6, 0.8, 0.0)), Vec3::new(-0.8, 0.6, 0.0));
+        assert_eq!(side_of(Vec3::new(3.0, 4.0, 0.0)), Vec3::new(-4.0, 3.0, 0.0), "not normalised");
+        // On the axes the sign the perpendicular would have carried is dropped.
+        for d in [Vec3::Z, Vec3::NEG_Z, Vec3::Y, Vec3::NEG_Y, Vec3::new(0.0, 0.6, 0.8)] {
+            assert_eq!(side_of(d), Vec3::X, "{d}: no x, the x axis");
+        }
+        for d in [Vec3::X, Vec3::NEG_X, Vec3::new(-0.6, 0.0, 0.8)] {
+            assert_eq!(side_of(d), Vec3::Y, "{d}: no y, the y axis");
+        }
+        // So a frame about a direction is the direction, its side, and direction × side.
+        let up = Frame::along(Vec3::ZERO, Vec3::Z, 2.0);
+        assert_eq!(up.axes, [Vec3::Z * 2.0, Vec3::X * 2.0, Vec3::Y * 2.0]);
+        let down = Frame::along(Vec3::ZERO, Vec3::NEG_Z, 1.0);
+        assert_eq!(down.axes, [Vec3::NEG_Z, Vec3::X, Vec3::NEG_Y]);
+        let back = Frame::along(Vec3::ZERO, Vec3::NEG_X, 1.0);
+        assert_eq!(back.axes, [Vec3::NEG_X, Vec3::Y, Vec3::NEG_Z]);
+    }
+
+    /// A point of the world in an instance's space is projected on each axis and divided by
+    /// that axis's squared length (`Ngi32.dll:0x100248f0`), and the instance's scale is in
+    /// its matrix (`Effect.dll:0x10007c90`).
+    #[test]
+    fn the_eye_in_an_instances_space_is_projected_on_its_axes_over_their_squared_lengths() {
+        let frame = Frame {
+            origin: Vec3::new(10.0, 0.0, 0.0),
+            axes: [Vec3::Z * 4.0, Vec3::X * 2.0, Vec3::Y],
+            points: true,
+        };
+        let local = frame.local(1.0, Vec3::new(16.0, 3.0, 8.0)).unwrap();
+        assert!((local - Vec3::new(2.0, 3.0, 3.0)).length() < 1e-6, "{local}");
+        // Twice the scale, half the coordinates.
+        let half = frame.local(2.0, Vec3::new(16.0, 3.0, 8.0)).unwrap();
+        assert!((half - local / 2.0).length() < 1e-6);
+        assert!((frame.local_distance(2.0, Vec3::new(16.0, 3.0, 8.0)) - local.length() / 2.0).abs() < 1e-6);
+        let flat = Frame { axes: [Vec3::X, Vec3::Y, Vec3::ZERO], ..frame };
+        assert_eq!(flat.local(1.0, Vec3::ONE), None, "an axis of no length");
+    }
+
+    /// A type-3 block with its mode at `+4`, its direction channel and its size, opaque all
+    /// through its window, at the frame's origin.
+    fn moded(kind: u8, mode: u32, direction: Vec3, size: Vec3) -> Emitter {
+        let e = block(kind, 208, &[(32, 0.0), (36, 1.0), (20, 1.0), (24, 1.0), (28, 1.0)], "M");
+        let e = with_word(e, SPRITE_MODE_AT, mode);
+        [(76, direction), (88, direction), (100, size), (112, size)]
+            .into_iter()
+            .fold(e, |e, (at, v)| (0..3).fold(e, |e, i| with_word(e, at + 4 * i, v[i].to_bits())))
+    }
+
+    fn drawn(blocks: Vec<Emitter>, frame: Frame, eye: Option<Vec3>) -> Vec<Sprite> {
+        let mut whole = effect(TIME_MANUAL, 0.0, 0, blocks);
+        Rc::get_mut(&mut whole).unwrap().header.scale = [1.0; 3];
+        let mut fx = Instance::new(whole, frame, 1.0, 0.0, None, 1);
+        fx.value = 0.5;
+        let mut out = Vec::new();
+        fx.sprites_from(0.0, eye, true, &mut out);
+        out
+    }
+
+    /// Mode 2 (`Effect.dll:0x1000d110`): the sprite's z is its direction channel, whatever the
+    /// eye, and its size is laid along the frame's axes.
+    #[test]
+    fn a_mode_2_sprite_is_square_to_its_direction_and_sized_along_its_frames_axes() {
+        // A frame about straight up, 10 long: depth z, then x, then y.
+        let frame = Frame::along(Vec3::new(0.0, 0.0, 5.0), Vec3::Z, 10.0);
+        let size = Vec3::new(1.0, 2.0, 3.0);
+        let out = drawn(vec![moded(3, SPRITE_TURNED, Vec3::X, size)], frame, None);
+        let m = out[0].matrix.expect("mode 2 needs no eye");
+        // Its direction is the frame's depth, world z: the quad lies flat, 20 by 30.
+        assert!((m[0] - Vec3::X * 20.0).length() < 1e-4, "{:?}", m[0]);
+        assert!((m[1] - Vec3::Y * 30.0).length() < 1e-4, "{:?}", m[1]);
+        assert!((m[2] - Vec3::Z * 10.0).length() < 1e-4, "{:?}", m[2]);
+        // Turned to the frame's third axis it stands up, and keeps the frame's sizes.
+        let out = drawn(vec![moded(3, SPRITE_TURNED, Vec3::Z, size)], frame, Some(Vec3::new(50.0, 0.0, 5.0)));
+        let m = out[0].matrix.unwrap();
+        assert!((m[2] - Vec3::Y * 30.0).length() < 1e-4, "its z is the frame's third axis: {:?}", m[2]);
+        assert!((m[0] - Vec3::Z * 10.0).length() < 1e-4 && (m[1] - Vec3::X * 20.0).length() < 1e-4);
+    }
+
+    /// Mode 1 (`0x10009739`): the sprite's x is its direction, its y the unit view × direction.
+    #[test]
+    fn a_mode_1_sprite_lies_along_its_direction_and_turns_about_it_to_the_eye() {
+        let frame = Frame::along(Vec3::ZERO, Vec3::X, 1.0);
+        let streak = moded(3, SPRITE_AXIAL, Vec3::X, Vec3::new(8.0, 2.0, 2.0));
+        // Seen from above: 8 along the frame's depth, 2 across, flat on the ground.
+        let above = drawn(vec![streak.clone()], frame, Some(Vec3::new(0.0, 0.0, 30.0)));
+        let m = above[0].matrix.unwrap();
+        assert!((m[0] - Vec3::X * 8.0).length() < 1e-5, "{:?}", m[0]);
+        assert!((m[1].length() - 2.0).abs() < 1e-5 && m[1].z.abs() < 1e-5, "{:?}", m[1]);
+        // Seen from the side it stands on edge: its width runs up.
+        let side = drawn(vec![streak.clone()], frame, Some(Vec3::new(0.0, -30.0, 0.0)));
+        let m = side[0].matrix.unwrap();
+        assert!((m[0] - Vec3::X * 8.0).length() < 1e-5 && (m[1].z.abs() - 2.0).abs() < 1e-5, "{m:?}");
+        // A direction along the frame's third axis lays the streak there.
+        let up = moded(3, SPRITE_AXIAL, Vec3::Z, Vec3::new(1.0, 1.0, 9.0));
+        let m = drawn(vec![up], frame, Some(Vec3::new(0.0, -30.0, 0.0)))[0].matrix.unwrap();
+        assert!((m[0] - frame.axes[2] * 9.0).length() < 1e-5, "{:?}", m[0]);
+        // With no eye the mode cannot be worked, and the old quad stands.
+        assert_eq!(drawn(vec![streak], frame, None)[0].matrix, None);
+    }
+
+    /// Mode 0 (`0x100093f4`): the sprite's z is the unit vector to the eye **in the frame's
+    /// space**, so a frame with unequal axes stretches the square.
+    #[test]
+    fn a_mode_0_sprite_faces_the_eye_in_its_frames_space() {
+        let even = Frame::along(Vec3::ZERO, Vec3::X, 2.0);
+        let glow = moded(3, SPRITE_FACING, Vec3::X, Vec3::splat(3.0));
+        let eye = Vec3::new(40.0, 30.0, 0.0);
+        let m = drawn(vec![glow.clone()], even, Some(eye))[0].matrix.unwrap();
+        assert!((m[2].normalize() - eye.normalize()).length() < 1e-5, "it faces the eye: {:?}", m[2]);
+        assert!(m.iter().all(|a| (a.length() - 6.0).abs() < 1e-4), "a 6 m square: {m:?}");
+        assert!(m[0].dot(m[1]).abs() < 1e-4 && m[0].dot(m[2]).abs() < 1e-4);
+        // The energy bridge's frame, seen across the span: 150 m long and 0.414 high.
+        let at = Vec3::ZERO;
+        let bridge = Frame::from_points([
+            (at, Vec3::new(0.0, 150.0, 0.0)),
+            (at, Vec3::new(1.932, 0.0, 0.0)),
+            (at, Vec3::new(0.0, 0.0, -0.414)),
+        ]);
+        let unit = moded(3, SPRITE_FACING, Vec3::X, Vec3::ONE);
+        let m = drawn(vec![unit.clone()], bridge, Some(Vec3::new(60.0, 0.0, 0.0)))[0].matrix.unwrap();
+        let (a, b) = (m[0].length(), m[1].length());
+        assert!((a.max(b) - 150.0).abs() < 1e-3 && (a.min(b) - 0.414).abs() < 1e-3, "{a} by {b}");
+        // The eye on the sprite: the draw gives up.
+        assert!(drawn(vec![unit], bridge, Some(at)).is_empty());
+    }
+
+    /// `f_gener_ball` on `fr_l_gener`'s `Sign_Type1`, whose direction is (0, 0, 8.98): two
+    /// type-9 blocks alike but for their direction channels, (−1, 0, 0) and (1, 0, 0), sized
+    /// (0.3, 0.4, 0.4) under a header scale of 0.75. Each is a half sphere with its pole on its
+    /// direction, so the pair is a whole ball, 2.02 m from centre to pole and 2.69 to its rim.
+    #[test]
+    fn two_type_9_blocks_with_opposite_directions_make_a_ball() {
+        let point = (Vec3::new(0.0, 0.0, 30.8), Vec3::new(0.0, 0.0, 8.984_529));
+        let size = Vec3::new(0.3, 0.4, 0.4);
+        let halves = vec![moded(9, SPRITE_TURNED, Vec3::NEG_X, size), moded(9, SPRITE_TURNED, Vec3::X, size)];
+        let mut whole = effect(TIME_MANUAL, 0.0, 0, halves);
+        Rc::get_mut(&mut whole).unwrap().header.scale = [0.75; 3];
+        let mut fx = Instance::new(whole, Frame::from_points([point; 3]), 1.0, 0.0, None, 1);
+        fx.value = 0.5;
+        let mut out = Vec::new();
+        fx.sprites(0.0, true, &mut out);
+        assert_eq!(out.len(), 2);
+        let (down, up) = (out[0].matrix.unwrap(), out[1].matrix.unwrap());
+        let pole = 0.3 * 8.984_529 * 0.75;
+        assert!((down[2] - Vec3::NEG_Z * pole).length() < 1e-4, "the first half hangs: {:?}", down[2]);
+        assert!((up[2] - Vec3::Z * pole).length() < 1e-4, "the second stands: {:?}", up[2]);
+        let rim = 0.4 * 8.984_529 * 0.75;
+        for m in [down, up] {
+            assert!((m[0].length() - rim).abs() < 1e-4 && (m[1].length() - rim).abs() < 1e-4, "{m:?}");
+            assert!(m[0].z.abs() < 1e-5 && m[1].z.abs() < 1e-5, "the rims share the level plane");
+        }
+        for s in &out {
+            assert_eq!(s.dome, Some(Dome { segments: 8, rings: 3, projected: true }));
+            assert!((s.centre - point.0).length() < 1e-4);
+        }
+        // A shape past the three the update knows draws nothing; `+204` set gives every facet
+        // the whole texture.
+        let odd = with_word(moded(9, SPRITE_TURNED, Vec3::X, size), DOME_SHAPE_AT, 3);
+        let tiled =
+            with_word(with_word(moded(9, SPRITE_TURNED, Vec3::X, size), DOME_SHAPE_AT, 1), DOME_TILED_AT, 1);
+        let out = drawn(vec![odd, tiled], Frame::from_points([point; 3]), None);
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].dome, Some(Dome { segments: 16, rings: 6, projected: false }));
     }
 
     /// A light 3 over a big floor triangle draws the template's square, half-side
@@ -1552,6 +1880,13 @@ mod tests {
         let mut out = Vec::new();
         fx.sprites(0.0, true, &mut out);
         assert!((out[0].width - 18.0).abs() < 1e-3, "with no eye the window's progress stands");
+        // The instance's scale is in its matrix, so it divides the distance as the frame's
+        // length does: asked for at half the size, the eye is twice as far in its units.
+        fx.scale = 0.5;
+        let mut out = Vec::new();
+        fx.sprites_from(0.0, Some(Vec3::new(100.0, 0.0, 30.0)), true, &mut out);
+        let size = 0.2 + 8.8 * (100.0 / 500.0);
+        assert!((out[0].width - size * 2.0 * 0.5).abs() < 1e-3, "{}", out[0].width);
     }
 
     #[test]

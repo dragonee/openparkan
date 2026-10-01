@@ -756,6 +756,58 @@ fn c03_m02s_hero_at_the_bunkers_guns_is_lost_to_a_winged_ssm_on_the_roof() {
 /// (docs/25, "Clan relations"), so `Plr`'s hostility toward `Enm` climbs from 0.16665 to 0.2833
 /// and never reaches the 1/3 edge. Only a hit moves a word, and only downwards: 42 hits inside
 /// one 7-8 s takt take the player's clan's neutral word for `Trgt` to hostile, both ways.
+/// C03 M02's three generators each carry `f_gener_ball` on `Sign_Type1`, the one control
+/// point of the 690 named three times whose direction is not a unit long: (0, 0, 8.98), 30.8 m
+/// over the building. Its two type-9 `laser_y_hit` blocks differ in their direction channels
+/// alone, (−1, 0, 0) and (1, 0, 0), and a mode-2 sprite's pole is its direction: on a frame
+/// whose first axis is the point's direction, straight up, one half hangs and the other
+/// stands, a ball 2.02 m from its centre to each pole and 2.69 m to its rim
+/// (docs/11, "A sprite's mode"; docs/13, "A frame about one direction").
+#[test]
+#[ignore = "needs the game install"]
+fn c03_m02s_generator_ball_is_two_half_spheres_one_hung_and_one_standing() {
+    use parkan_formats::mission;
+
+    let game = gamedir::find(None).expect("a Parkan install: set PARKAN_DIR");
+    let dir = gamedir::resolve(&game, gamedir::C03_MISSION_02).unwrap();
+    let m = mission::parse(&std::fs::read(dir.join("data.tma")).unwrap(), "Mission.02").unwrap();
+    let generators =
+        m.objects.iter().filter(|o| o.path.to_ascii_lowercase().ends_with("gener01.dat")).count();
+    assert_eq!(generators, 3);
+
+    let mut play = campaign_play(gamedir::C03_MISSION_02);
+    play_for(&mut play, 2.0, |_| {});
+    let mut drawn = Vec::new();
+    for (_, instance) in &play.fx.instances {
+        instance.sprites(play.hero.time_ms, true, &mut drawn);
+    }
+    // The ball's halves among the lamps' own `laser_y_hit` domes, which are 0.15 m to the pole.
+    let halves: Vec<_> = drawn
+        .iter()
+        .filter(|s| s.material.eq_ignore_ascii_case("laser_y_hit") && s.dome.is_some())
+        .filter_map(|s| s.matrix.map(|m| (s.centre, m, s.dome.unwrap())))
+        .filter(|(_, m, _)| m[2].length() > 1.0)
+        .collect();
+    assert_eq!(halves.len(), 2 * generators, "two halves a generator");
+    let (pole, rim) = (0.3 * 8.984_529 * 0.75, 0.4 * 8.984_529 * 0.75);
+    for (_, m, dome) in &halves {
+        assert_eq!((dome.segments, dome.rings, dome.projected), (8, 3, true));
+        assert!((m[2].length() - pole).abs() < 1e-3, "pole {}", m[2].length());
+        assert!((m[2].z.abs() - pole).abs() < 1e-3, "the pole is upright: {:?}", m[2]);
+        assert!((m[0].length() - rim).abs() < 1e-3 && (m[1].length() - rim).abs() < 1e-3, "rim {m:?}");
+        assert!(m[0].z.abs() < 1e-3 && m[1].z.abs() < 1e-3, "the rim is level: {m:?}");
+    }
+    // At each generator one pole is down and the other up, about one centre.
+    for (centre, m, _) in &halves {
+        let twin = halves
+            .iter()
+            .find(|(c, n, _)| c.distance(*centre) < 1e-3 && (n[2] + m[2]).length() < 1e-3)
+            .unwrap_or_else(|| panic!("no opposite half at {centre}"));
+        assert!(twin.0.distance(*centre) < 1e-3);
+    }
+    assert_eq!(halves.iter().filter(|(_, m, _)| m[2].z > 0.0).count(), generators);
+}
+
 #[test]
 #[ignore = "needs the game install"]
 fn mission_01s_relations_drift_within_their_bands_and_only_a_hit_moves_one() {

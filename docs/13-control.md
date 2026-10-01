@@ -574,7 +574,7 @@ The actions (*read*; counts *measured* across the 2925 records):
 | 0 | 202 | **stop the body**: its command, velocity, spin and step velocity go to zero (`0x10014400`); first in every round group |
 | 1, 2 | 80, 30 | **hide / show the object**: `IAnimation` (`+0x20`) slot 8 with node 0, mode `0x200` / `0x201` and flag 1, which sets / clears node flag 1 down the whole node tree, and the draw passes over a flagged node ([32-builder.md](32-builder.md#actions-1-and-2-hide-and-show-the-building--read)) |
 | 3 | 217 | **an effect** by name on **node** v4, id v7 (`0x10002972`): v4 is rebased by the part's first node through `AniMesh` slot 14, as action 14's is (`0x100029bb`) |
-| 4 | 1203 | **an effect** by name on three control points v4..v6, at their centroid, id v7 (`0x10002a8d`); the three directions become the rows of the matrix the effect hangs on ([11-effects.md](11-effects.md#a-sprite-is-drawn-through-its-frame--read)) |
+| 4 | 1203 | **an effect** by name on three control points v4..v6, at their centroid, id v7 (`0x10002a8d`); the three directions become the axes of the matrix the effect hangs on ([11-effects.md](11-effects.md#a-sprite-is-drawn-through-its-frame--read)), and one point named three times gives a frame about its direction ([below](#a-frame-about-one-direction--read-and-measured)) |
 | 5 | 72 | **an effect** by name in the world at the sphere `+0x38` gives — a building's construction sphere — scaled by its radius, id v7 (`0x10002e0e`); `fortif.rlb` only |
 | 7 | 0 | node v4 takes its whole life as damage (`0x10003087`) |
 | 8 | 22 | delete effect v4 (`0x10002fd4`) |
@@ -915,6 +915,85 @@ the building's nodes and control points, each placed through the building's
 placement and node pose, and actions 10 and 11 by id. Leave action 5 to
 construction.
 
+### A frame about one direction — *read*, and *measured*
+
+Action 4 takes three control points, and a record may name the same one three times.
+The handler compares the three directions it has fetched, each already carried into the
+world through its node and scaled by the object (`0x1001b4f0`), component by component
+for exact equality (`0x10002c09`–`0x10002c75`). Three distinct directions go to the
+matrix of [11-effects.md](11-effects.md#a-sprite-is-drawn-through-its-frame--read). Three
+equal ones go here (`0x10002c7b`):
+
+1. the direction's length, the square root of its own dot product (`0x10003650`,
+   `0x10002c84`), and the direction over it, a unit vector (`0x10002c8b`–`0x10002cb5`);
+2. **a frame about that unit vector** at the points' centroid (`0x10003ef0`, called at
+   `0x10002ccd`);
+3. all three of its axes scaled by the length (`0x10003ea0` with the length three times
+   over, `0x10002cd2`–`0x10002cfd`).
+
+**The direction is the frame's first axis.** `0x10003ef0` writes sixteen floats whose
+axis *n* is floats *n*, *n* + 4 and *n* + 8 — the layout action 4's own matrix has, its
+translation at 3, 7 and 11 — and fills them, in order, with the direction, its **side**,
+the cross product direction × side, and the place it was handed
+(`0x1000400b`–`0x1000405b`); the last row is (0, 0, 0, 1). So a point named three times
+puts its direction where a triple's first point, the depth, goes
+([11-effects.md](11-effects.md#a-control-point-frames-axes-are-depth-width-and-height--measured)).
+
+**The side is the direction's level perpendicular, or an axis.** For a direction
+(x, y, z) it is (−y, x, 0), normalised where z is not zero and left as it is where it
+is, a unit direction with no z making that vector unit already
+(`0x10003f18`–`0x10003f63`). **Where x is exactly zero it is the world's x axis**
+instead, and where y is and x is not, **the y axis** (`0x10003f65`–`0x10003fa8`; the
+triples at `0x10041d80` and `0x10041d90`, written (1, 0, 0) and (0, 1, 0) by the static
+initialisers at `0x10003e40` and `0x10003e60`). So the routine never fails: a direction
+straight up or down, which is parallel to the z the perpendicular is taken about, has
+no x and takes the x axis. What the axes cost is a sign: a direction along +y takes
++x where its perpendicular would be −x, and one along −x takes +y where its
+perpendicular would be −y, so those frames are rolled half a turn about their first
+axis against their neighbours'.
+
+| direction | first axis | second | third |
+|---|---|---|---|
+| (0, 0, 1), up | +z | +x | +y |
+| (0, 0, −1), down | −z | +x | −y |
+| (0, ±1, 0) | ±y | +x | ∓z |
+| (±1, 0, 0) | ±x | +y | ±z |
+| (0.6, 0.8, 0) | itself | (−0.8, 0.6, 0) | +z |
+
+The routine is not this handler's alone: an explosion's effect is placed with it
+(`0x1001181a`, [26-damage.md](26-damage.md#a-hit-from-the-round-to-the-node--read)),
+the camera falls back on it where its look and its up are parallel
+([30-turrets.md](30-turrets.md#aiming-and-the-camera--read-and-measured)), and
+`Effect.dll` carries its own copy (`0x100038d0`) and the same side rule in its sprite
+modes ([11-effects.md](11-effects.md#a-sprites-mode--read-measured-and-seen)).
+
+*Measured* over the install's load groups: **690** action-4 records name one control
+point three times, on **101** objects — 495 on 28 of `fortif.rlb`'s buildings, 105 on
+55 of `turrets.rlb`'s turrets, 85 on 17 of `bases.rlb`'s chassis and 5 on one
+`weapon.rlb` gun — against 189 that name three distinct points, and none that names
+two. **The direction is a unit long on 689 of them**, so the frame is a plain
+orientation and the effect draws at its own size; the one other is `fr_l_gener`'s
+`Sign_Type1`, (0, 0, 8.98), which carries the generator's ball, `f_gener_ball`, and
+sizes it ([11-effects.md](11-effects.md#type-9-is-a-half-sphere--read-measured-and-seen)).
+As the models have them, 119 of the directions point straight up and 12 straight down,
+246 more have no x and 74 no y, 17 more are level and 222 have all three components;
+a placed object's yaw turns every one that is not vertical, so which of the routine's
+branches a given lamp takes in the world is the mission's doing. **251** of the 690
+carry an effect with a type-9 half sphere in it — the lamps of the buildings and the
+warbots — which is what makes the frame's first axis show: the lamp's dome bulges
+along the point's direction, off the surface it is fixed to.
+
+**An effect on a node has no sprite to turn** (*measured*). Of the 217 action-3 records
+not one names an effect with a type 3, 4 or 9 block — they are sounds, lights, bursts
+and streams — against 855 of action 4's 1203 and all 72 of action 5's, the control. So
+the frames a sprite's mode is worked in are a control-point frame, the construction
+sphere's, and the ones a gun's round and an explosion are given.
+
+**For an engine:** build the frame about the unit direction with the side rule above,
+the direction first, and scale all three axes by the direction's length. The second
+and third axes matter only to what is not round about the first; a lamp's dome and
+the generator's ball are.
+
 ### Critical damage: block entries 6 and 7 — *read*, and *measured*
 
 After a node takes damage the node update (`0x10012a40`) decides whether the
@@ -990,6 +1069,13 @@ is wired to a message.
   `0x35`) is.~~ — **read**: the damage of the last round the gun made, so the
   two ids answer the unit's **damage a second**
   ([14-controls.md](14-controls.md#the-join-with-the-controller--read)).
+- ~~Which axis of the frame action 4 builds about one direction, a point named three
+  times, takes the direction, and how the other two are made.~~ — **read**, and
+  **measured**: the first; the second is the direction's level perpendicular
+  (−y, x, 0), or the x axis where the direction has no x and the y axis where it has
+  no y, so a vertical direction never fails; the third is direction × second. 690
+  records on 101 objects get such a frame, a unit long on all but the generator's
+  ball's ([A frame about one direction](#a-frame-about-one-direction--read-and-measured)).
 - The height a live contact record holds at `+0x14` when the loader compares
   each state's last pose with it: the record is filled from the point's
   position at load (`0x1001a017`, copied in by `0x1001b6a0`), and which pose the

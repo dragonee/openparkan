@@ -458,20 +458,21 @@ channel numbers instead, the seven name a channel on that node twice.
 |---:|---|---|---|---|
 | 1 | 0xf0, vtable `0x1001e78c` | +8..+12 | creates a light in the owner's light manager, interface `0xe` (`0x1000f4b0`), switches it on inside the window and off outside, and hands it a position, direction, colour, range and attenuation every update (`0x1000f6e0`) | a **light** — [below](#type-1-is-a-light--read-and-measured) |
 | 2 | 0xa0, `0x1001f048` | trigger +8, window +8..+12 | +4 of 0: plays as *t* crosses +8 going up; +4 of 2 or 3: plays while *t* is inside the window (`0x10012eb0`) | the **sound**; near/far at +64/+68 — [below](#type-2-is-a-sound--read-and-measured) |
-| 3 | 0xfc, `0x1001e770` | +32..+36 | a phase *a* + (*b* − *a*)·*x*^*g* from +8/+12/+16, *x* the progress through the window or seconds when +8 < 0 (`0x100105f0`); its position +40 → +52 shaped by the powers at +64 and its size +100 → +112 by those at +124; a 0..1 value +20..+24 to the power +28 and the phase's fractional part go to the draw (`0x100106c0`) | a **sprite** that moves (+40/+52) and grows (+100/+112) over its window — muzzle flashes, glows, bullets |
+| 3 | 0xfc, `0x1001e770` | +32..+36 | a phase *a* + (*b* − *a*)·*x*^*g* from +8/+12/+16, *x* the progress through the window or seconds when +8 < 0 (`0x100105f0`); its position +40 → +52 shaped by the powers at +64 and its size +100 → +112 by those at +124; a 0..1 value +20..+24 to the power +28 and the phase's fractional part go to the draw (`0x100106c0`); **+4 is the mode** that turns it and +76 → +88 the direction it is turned by (`0x100103d2`, `0x1001077e`) | a **sprite** that moves (+40/+52) and grows (+100/+112) over its window — muzzle flashes, glows, bullets — facing the eye, lying along its direction or square to it, by its mode ([below](#a-sprites-mode--read-measured-and-seen)) |
 | 4 | 0x104, `0x1001e754` | +32..+36 | type 3's phase (`0x100108f0`); its update scales the window's progress by the eye's distance in the frame over +200 (`0x100109b0`) | a **glow** that keeps its size on the screen — [below](#type-4-is-a-glow-sized-by-the-eyes-distance--read-and-seen) |
 | 5 | 0x54, `0x1001e360` | +12..+16 | a phase from +40, seconds when negative (`0x10002a20`); a start point, and sprites along the line from it to where the effect is now, each lerp(+24, +28) wide by the progress (`0x10002be0`) | a **bolt**: laser and shock tails, `hero_laser_bullet` — [below](#bolts-streams-and-fades--read-and-measured) |
 | 6 | 0x1c, `0x1001e738` | — | — | never shipped |
 | 7 | 0x48, `0x1001e228` | +20..+24 | +0x24 × +0x28 particles, each running +44 → +56 in place and +92 → +104 in size over its life, both jittered at the high end and shaped by the powers at +80 and +128 (`0x10001720`, `0x10001300`); its age = (phase − its spawn) / +0x1c, one-shot flag, drag, and a fade value from +8/+12/+16 | a **particle burst** — smoke, fire, splashes |
 | 8 | 0xac, `0x1001e71c` | +16..+20 | windowed on *t* unless +0x8c; one particle every +24..+28 seconds into a ring of +36 (`0x100115c0`), each running +88 → +100 in place and +136 → +148 in size, shaped by the powers at +124 and +172 | a **particle stream** — dust, missile smoke |
-| 9 | 0x100, `0x1001e700` | +32..+36 | type 3 with its own draw | sprite |
+| 9 | 0x100, `0x1001e700` | +32..+36 | type 3 with its own update (slot 3, `0x100138c0`), which hands the draw a shape code from +200 in place of the quad's, a level and +204's bit | a **half sphere** in place of the quad, its pole on the sprite's own z — [below](#type-9-is-a-half-sphere--read-measured-and-seen) |
 | 10 | 0x48, `0x1001e24c` | +20..+24 | type 7 with its own start | particles (`NE_Gibs_Stn` debris) |
 
 *Measured*: the window is an ordered span inside 0..1 on **4736 of 4737**
 emitters; read four bytes early or late, 705.
 
 A type-7 block with +4 = 1 draws its particles in sprite mode 3, any other
-value in mode 0 (`0x100019d0`); that mode 0 faces the camera is a *guess*.
+value in mode 0 (`0x100019d0`), which faces the eye
+([below](#a-sprites-mode--read-measured-and-seen)).
 
 ### A channel is a (low, high, jitter, exponent) run — *read*, and *measured*
 
@@ -488,8 +489,8 @@ a setter that takes one lerp parameter (slots 2, 4, 6: `0x1000d4b0`, `0x1000d510
 The draw names them. The first channel's value is the particle's **position** — the
 billboard is turned by the camera less it (`0x100093fc`) — the third is a **per-axis
 scale** on its matrix (`0x1000d0c0`, called at `0x100098c0`), and the second is a
-direction, used only where a sprite mode orients rather than faces (`0x1000d110` at
-`0x1000986c`). **So the per-axis exponents shape position and size**, which this page had
+**direction**, which sprite modes 1 and 2 turn the sprite by (`0x10009739`; `0x1000d110`
+at `0x1000986c`; [below](#a-sprites-mode--read-measured-and-seen)). **So the per-axis exponents shape position and size**, which this page had
 as a guess.
 
 A channel's floats are four consecutive triples — **low, high, jitter, exponents** — and
@@ -550,10 +551,12 @@ quad, because a sprite is drawn **through** the frame
 ([below](#a-sprite-is-drawn-through-its-frame--read)).
 
 `fr_e_brige`, the *Enh Bridge BS-52/30*, is the clearest case: its five `f_brige_ray`
-sprites sit on triples of (0, 150, 0), (1.932, 0, 0) and (0, 0, −0.414), so a ray is
-1.93 across and 0.41 high seen down the deck and a 150 m streak seen across it —
-three of them along the span and one up each tower. Sized by the first axis in every
-direction instead they come out 150 m square, and two of them fill half the sky.
+sprites sit on triples of (0, 150, 0), (1.932, 0, 0) and (0, 0, −0.414), and the block
+is a mode-1 streak along the frame's depth, a unit in size
+([below](#a-sprites-mode--read-measured-and-seen)), so a ray is 150 m long, 1.93 wide
+seen from above and 0.41 seen level from the side — three of them along the span and
+one up each tower. Sized by the first axis in every direction instead they come out
+150 m square, and two of them fill half the sky.
 
 ### A sprite is drawn through its frame — *read*
 
@@ -561,13 +564,20 @@ The frame is not three numbers the draw picks a size from: **it is a matrix**, a
 quad is a camera-facing unit square in its space rather than on the screen.
 
 **Action 4 builds it as a matrix.** The handler (`Control.dll:0x10002d8d`) copies the
-identity out of `0x10041cd0` and writes each of the three points' directions into a
-row of it, `0x10003780` taking the row index in `edx` — 0, 1, 2 — and then the
-centroid into row 3. That matrix goes to the effect (slot 0xa, `0x10002e06`), and the
-instance keeps it at `+0xa4`. The three other branches of that handler are for
-degenerate triples: the same direction on all three points (`0x10002c42`), on two of
-them, or two directions parallel (`0x10003620`), each of which builds an orientation
-from the one direction it has (`0x10004070`) instead, since the matrix would not
+identity out of `0x10041cd0` and writes each of the three points' directions into an
+axis of it, `0x10003780` taking the axis in `edx` — 0, 1, 2 — and then the centroid
+into the fourth, 3. An axis *n* is floats *n*, *n* + 4 and *n* + 8 of the sixteen
+(`0x10003787`), so the translation sits at 3, 7 and 11 and a point goes through the
+matrix as each row's first three floats times it, plus the fourth
+(`Ngi32.dll:0x1001f6b0`). That matrix goes to the effect (slot 0xa, `0x10002e06`); the
+instance keeps it scaled, each axis by the size asked for times the header's scale
+(`Effect.dll:0x10007c90`), and under its owner's node at `+0xa4` (`0x10008469`). The
+three other branches of that handler are for
+degenerate triples: the same direction on all three points (`0x10002c42`), which
+builds a frame about that direction, the direction on its first axis
+([13-control.md](13-control.md#a-frame-about-one-direction--read-and-measured)); and
+the same on two of them, or two directions parallel (`0x10003620`), which build one
+from the two directions they have (`0x10004070`), since the matrix would not
 invert. *Measured* over the install's action-4 records: **189** name three distinct
 points, and of those exactly **one** has its directions in a plane — `r_h_01`'s
 `aim_fire_S`, whose `Smoke_X` and `Smoke_Z` are both (1, 0, 0). **690** name the same
@@ -583,20 +593,231 @@ type-3 sprite's update (`0x10010805`) hands those two to the particle's draw
 first.
 
 **And the draw multiplies both together.** The draw switches on the particle's sprite
-mode at `+0xc` — 0 faces the camera, 1 is a bolt's, 2 orients by the direction channel,
-3 is a burst's (`0x100093ed`, four cases). Mode 0 makes a basis from the eye: the view
-`eye − position` normalised, a side vector `(−d.y, d.x, 0)` square to it, and their
-cross for up (`0x100093f4`–`0x1000950e`). Then, whichever mode ran, the tail
-(`0x10009871`) takes the **instance matrix**, sets its translation to the particle's
-position, scales its three columns by the size channel (`0x1000d0c0`) and combines it
-with the mode's basis into the particle's own `+0x14`.
+mode at `+0xc` (`0x100093ed`, four cases) and each case builds a **basis** in the
+instance's own space ([below](#a-sprites-mode--read-measured-and-seen)). Then,
+whichever mode ran, the tail (`0x10009871`) puts the particle's position through the
+instance matrix (`g_FastProc` slot `0x18`, `0x1000989a`), copies that matrix and scales
+the copy's three axes by the size channel — axis 0 by the size's x, 1 by its y, 2 by
+its z (`0x1000d0c0`, on the copy for modes 0 to 2 and on the basis for a burst's mode
+3, `0x100098ab`) — multiplies it by the basis, the instance's matrix on the left
+(slot `0x5c`, `Ngi32.dll:0x1001fbe0`, at `0x100098db`), and writes the position it put
+through over the product's translation (`0x100098ea`). That is the particle's own
+matrix, `+0x14`, which the shade draws its unit quad with.
+
+**So the size is laid along the frame's axes, not the sprite's.** Whichever way the
+mode turns a sprite inside its frame, its size's x stretches what lies along the
+frame's first axis, y the second and z the third; and the sprite's place is the
+position channel put through the frame alone, unscaled by the size.
 
 So a mode-0 sprite faces the camera **in the frame's own space** — the position channel
 is in that space, and so is the eye the context carries — and comes back out stretched
 by the frame. A frame whose axes are all one length draws the square the size channel
-asks for, whichever way it is seen, which is every light and screen in the game. A
-frame 150 m along one axis and 1.93 across another draws a 150 m streak from the side
-and a 1.93 m flicker end-on, which is the energy bridge's ray.
+asks for, whichever way it is seen, which is every glow on a frame about one point.
+
+**The eye is put there by projection** (*read*). The emitter loop hands
+`g_FastProc` slot `0x68` the instance's matrix and the camera's place
+(`Effect.dll:0x100080da`), and that slot (`Ngi32.dll:0x100248f0`; `0x1001bfc0` is its
+3DNow! twin) takes the translation off the point and then, for each of the matrix's
+three axes, the dot product with the axis **divided by the axis's squared length**.
+That is the inverse of a matrix whose axes are square to one another whatever their
+lengths, which every frame about one direction is and 45 of the 47 `_d`/`_w`/`_h`
+triples are; a skewed frame gets the projection, not its inverse. The instance's scale
+is in that matrix, so it divides the eye's coordinates as an axis's length does.
+
+### A sprite's mode — *read*, *measured* and *seen*
+
+**A type-3, 4 or 9 block's `+4` is its sprite mode.** The sprite's load copies it to
+the `+0xc` of the particle it embeds (`Effect.dll:0x100103d2`: the particle sits at the
+sprite's `+0x30`, and the store is to `+0x3c`), and the particle's draw (`0x100093d0`)
+bounds it at 3 and jumps four ways on it (`0x100093ed`, table `0x10009918`). This page
+had that word as never written; it is written once, as the block loads.
+
+Each case makes a basis in the instance's own space: where the sprite's own x, y and z
+go. The shade's quad is the unit square of the sprite's **xy** plane, u running with x
+and v with y — corners (−½, ½), (−½, −½), (½, −½), (½, ½) carrying (0, 0.99), (0, 0),
+(0.99, 0), (0.99, 0.99) (`Terrain.dll:0x10027a30`–`0x10027b88`) — so the basis says
+which way the quad lies and which way its texture runs:
+
+| mode | sprite's x | y | z | where |
+|---:|---|---|---|---|
+| 0 | the side of *v* | *v* × side | *v*, the unit vector from the sprite to the eye | `0x100093f4`–`0x1000956b`; nothing drawn where *v* has no length (`0x1000943e`) |
+| 1 | *d* | *w*, the unit *v* × *d* | *d* × *w* | `0x10009739`–`0x10009835`, *v* here not normalised; nothing drawn where *v* · *d* is exactly ±1 (`0x100097a6`), and the frame about *d* where *w* has no length (`0x10009850`, `0x100038d0`) |
+| 2 | the side of *d* | *d* × side | *d* | `0x1000985e`, `0x1000d110` |
+| 3 | a burst particle's | | | `0x10009575`; scales the basis, not the frame |
+
+*d* is the block's **direction channel**, +76 → +88, lerped straight by the progress
+through the window (the particle's slot 4, called at `0x1001077e`) and used as it
+stands, not normalised. The **side** of a vector is its horizontal perpendicular
+(−y, x, 0), normalised where the vector has a z; where the vector's x is exactly 0 it
+is the x axis instead, and where its y is and its x is not, the y axis (`0x1000d119`–
+`0x1000d1c8`; the two triples at `0x100247c8` and `0x100247d8`, written (1, 0, 0) and
+(0, 1, 0) at `0x1000d060` and `0x1000d080`). It is the rule `Control.dll` builds a
+frame about one direction with
+([13-control.md](13-control.md#a-frame-about-one-direction--read-and-measured)).
+
+So:
+
+- **Mode 0 faces the eye**, in the frame's space, and comes out stretched by the frame
+  ([above](#a-sprite-is-drawn-through-its-frame--read)).
+- **Mode 1 is a streak along its direction** that turns about it toward the eye, its
+  texture's u running along its length. A bolt's sprites are in it too, the load
+  setting it outright (`0x10002932`).
+- **Mode 2 is square to its direction**, whatever the eye: a disc, a ring or a lamp's
+  face lying flat on what it is fixed to, and edge-on from the side.
+
+*Measured* over the **2013** sprite blocks: type 3 carries mode 0 on **773**, 1 on
+**251** and 2 on **521**; all **202** type-4 glows are mode 0; type 9 is mode 2 on
+**258** and 0 on **8**; none carries 3. The direction is one of the six axis
+directions on all but one block, a type-4 glow's zero, and (1, 0, 0), the frame's
+depth, on **1689**; it moves over the window on two.
+
+What the modes are for shows in how the effects are put together:
+
+- **A muzzle flash** is all three. `hero_cannon`: a mode-0 glow at the muzzle and a
+  mode-1 flame `NE_Gun01`, sized (5, 3, 3) → (20, 4, 4) and running from 2 to 10 out
+  along the barrel, under a header scale of 0.1. `hero_redlaser`: two mode-0 glows, two
+  mode-2 discs `NE_Laz_*` square to the barrel, and two mode-1 jets `NE_PFire_*` along
+  it.
+- **A building's lamp** (`f_smalllight_*`, `f_signlight_*`, `f_blinklight_*`) is a
+  mode-2 `lamp` face 0.01 off its surface, a mode-2 `ball_*` 0.02 off, a type-9 half
+  sphere bulging off it ([below](#type-9-is-a-half-sphere--read-measured-and-seen)) and
+  a mode-0 type-4 glow 0.3 off — on a control point whose direction is the surface's
+  normal.
+- **`mineglow`** is a mode-1 `shook_b` streak filling its frame's depth and a mode-2
+  `shook_bc` disc at each end of it.
+- **The construction sign and ray** (`B_Sphere_Sign`, `B_Sphere_Start`) are stacks of
+  mode-2 `NE_Plzm01_B` rings square to the sphere's first axis, which stands up
+  ([32-builder.md](32-builder.md#what-the-buildings-controller-does-with-the-codes--read-and-measured)):
+  level rings falling down the ray.
+- **A shock wave** (`env_wave*`, 208 of its 216 blocks) is a mode-2 ring, square to
+  its effect's first axis on most.
+
+*Seen*, with the engine drawing the modes as read:
+
+- **The cannon's flash is a flame, not a ball.** "training mission 1 line of fire"
+  (9wNogdbFvec), 2:14.6–2:14.8: an orange tongue from the lower right, widest and
+  brightest at its base and pointed at its far end. Drawn facing the eye with its
+  texture across it, it was a round blob with its bright end away from the gun.
+- **The sign's and the ray's rings lie level.** "training mission 3 The field base"
+  (DW8XuX10y0U), 230.5–231 s: thin level streaks over the site, rings seen from near
+  the ground. Drawn facing the eye they were pale discs standing over it — the
+  "faint shell" a round of comparing took for the dome.
+- **The lamps show from the side.** "Let's Play - Parkan: Iron Strategy, Part 6.5"
+  (9SBZOCWv_vE), 34.9 s, the briefing's 8.5 s: yellow lamps round the Medium Mine's
+  landing pad and the generator's recharge pads, and red ones on the generator's
+  horns.
+
+### Type 9 is a half sphere — *read*, *measured* and *seen*
+
+A type-9 block is type 3 with one more step in its update (vtable `0x1001e700`, slot 3
+`Effect.dll:0x100138c0`): before it tails into type 3's, it writes the particle's
+**shape code** (`+8`, which a sprite's constructor leaves at 1):
+
+- the block's **+200** of 0, 1 or 2 gives shape 3, 5 or 6 (`0x100138c8`–`0x100138e7`);
+  any other value leaves without drawing;
+- the instance's **level**, the context's `+0x60`, goes into the code's top two bits
+  (`0x100138ec`–`0x10013909`); a level over 3 leaves without drawing, where a plain
+  sprite draws up to 7 (`0x100106e2`);
+- the block's **+204** of 0 sets bit `0x8000000` (`0x1001390e`).
+
+`CShade::RenderEffect` takes the code apart (`Terrain.dll:0x100288b7`): shape 1 is the
+unit quad, 4 a triangle, and **3, 5 and 6 are three hemispheres** the shade builds once,
+in its constructor (`0x10027a20`), at four levels of detail each:
+
+| +200 | shape | segments by level | rings by level |
+|---:|---:|---|---|
+| 0 | 3 | 8, 6, 5, 4 | 3, 3, 2, 1 |
+| 1 | 5 | 16, 12, 10, 8 | 6, 5, 4, 3 |
+| 2 | 6 | 24, 20, 16, 10 | 9, 8, 6, 4 |
+
+(tables `0x1009a750` and `0x1009a780`). **The mesh is a half sphere of radius 1 in the
+sprite's own space, its pole at (0, 0, 1) and its rim the unit circle of the xy plane.**
+A vertex at polar angle θ and φ around is (sin θ sin φ, sin θ cos φ, cos θ), φ running
+the whole turn in `segments` steps and θ from 0 to **π/2** in `rings` (`0x1009a7e8`
+holds π/2 and `0x1009a218` 2π): each segment is a triangle from the pole to the first
+ring (`0x100273b0`) and a quad for every ring after it (`0x100276a0`). Nothing is made
+below the rim — it is a true half, not a whole sphere half drawn. Every piece goes to
+the layer as its own item with the sprite's one matrix (`0x10028c64`, `0x10028d88`),
+and the item's draw flags are 4 (`0x100282a3`), which turns culling off
+([07-objects.md](07-objects.md#how-a-material-reaches-the-device--read-and-measured)):
+**it is drawn from both sides**.
+
+**Its texture is laid on one of two ways.** With bit `0x8000000` — a block whose +204
+is 0 — each vertex takes (u, v) = ((x + 1) / 2, (y + 1) / 2) (`0x100275ff`,
+`0x10027959`): the texture is the dome **seen down its pole**, its middle on the pole
+and its inscribed circle on the rim. Without it every piece takes the whole texture, a
+quad's own (u, v) on each quad and (0.5, 0.99), (0, 0), (0.99, 0) on each triangle
+(`0x10028bbe`, `0x10028ce2`).
+
+**So the pole is the sprite's z, which its mode sets**
+([above](#a-sprites-mode--read-measured-and-seen)): the direction channel in mode 2,
+and the line to the eye in mode 0, where the dome bulges toward whoever looks at it.
+The size channel is laid along the frame's axes as a quad's is, but **as radii**: a
+quad of size *s* is *s* across and a dome 2*s*.
+
+*Measured*: **266** type-9 blocks in **126** effects. **258** are mode 2 and **8** mode
+0 (two each in `B_Sphere_Start`, `B_Sphere_Start_BT`, `exp_m_build_pizdec` and
+`exp_m_wing_pizdec`). +200 is 0 on **177**, 1 on **88** and 2 on **1**; +204 is 0 on
+**254** and set on the **12** construction domes (`B_Sphere_Main`'s four,
+`f_build_sph`, `ws_al_build_sph` and `ws_hm_build_sph`'s two each and one in each
+`B_Sphere_Start`). The directions are (1, 0, 0) on 130, (−1, 0, 0) on 77, (0, 0, ±1) on
+49 and (0, ±1, 0) on 10. And **122 of the 266 have a twin** in their own effect — the
+same material and window, the opposite direction — in **42** effects: two half spheres
+back to back, a **ball**, which is what the artists called them (`*_balllight_*`,
+`f_gener_ball`), and the construction sphere and the teleports' fields
+(`f_teleport_on`, `IMTP_field`) among them.
+
+Where they hang (*measured* over every controller's records): **47** of the 126 effects
+are named by a controller — on 275 action-4 records that name one point three times, 53
+that name three distinct points, and the 72 action-5 records of the construction sphere
+— and the other **79** by none: the eight shield flashes, which a generator's record
+names; the hits of the alien lasers and the monsters' plasma on each surface
+(`exp_al_las_*`, `exp_an_las_*`, `exp_mn*_pls`), which an `.exp` places on a frame about
+one direction; and lamps and ball lights no shipped object carries.
+
+**The generator's ball.** `f_gener_ball`'s two `laser_y_hit` blocks differ in two bytes,
+the sign of the direction's x at +76 and +88: (−1, 0, 0) and (1, 0, 0). Both are mode 2,
+shape 0, sized (0.3, 0.4, 0.4) under a header scale of 0.75. The effect hangs on
+`fr_l_gener`'s `Sign_Type1`, a point named three times whose direction is (0, 0, 8.98),
+so its frame's first axis stands up, 8.98 long
+([13-control.md](13-control.md#a-frame-about-one-direction--read-and-measured)): the
+first block's pole hangs **down** 0.3 × 8.98 × 0.75 = 2.02 m and the second's stands
+**up** 2.02 m, and their shared rim is level, 0.4 × 8.98 × 0.75 = 2.69 m out. A ball
+5.4 m across and 4.0 m high, 30.8 m over the generator, its `laser_y_hit` star laid on
+each half down the pole, so it is brightest at its top and bottom.
+
+**The construction sphere.** `B_Sphere_Main`'s four blocks are two such pairs of
+`NE_Shield3`, shape 1 (16 × 6), mode 2, on directions (1, 0, 0) and (−1, 0, 0) of a
+frame whose first axis is the world's z and whose axes are the sphere's radius long
+([32-builder.md](32-builder.md#what-the-buildings-controller-does-with-the-codes--read-and-measured)):
+a whole sphere about the site's centre, the upper half standing over the ground as a
+dome and the lower half under it. The first pair runs the window 0.333–0.833 of the
+effect's 6 s, shrinking from 1.5 to 1 radii and fading in as its progress to the power
+10; the second holds 1 radius at full strength from 0.833 to the end. `NE_Shield3` is a
+16-key track over the 64 × 64 textures `2FIELD00.0`–`2FIELD15.0`, blended
+`SRCALPHA`/`INVSRCALPHA` at an ambient alpha of 1, and the blocks' phase (−1, 1, 1) is
+clocked in seconds: the track plays through once a second. Their +204 is set, so
+**every one of the 96 facets of each half carries the whole texture**: a facet at
+the rim is 0.39 of the sphere's radius wide and 0.26 high, so the texture's own cells
+show a few metres across.
+
+*Seen*:
+
+- **The ball is round.** "Let's Play - Parkan: Iron Strategy, Part 6" (-yNnsqudMzw),
+  64:50: a gold ball between the generator's horn tips, a little wider than high,
+  faceted, bright along its top and bottom and darker round its middle, with a small
+  bright spot at its centre (the type-4 glow). Part 5 (PfAg6zSe-yM), briefing time
+  15 s, and Part 6.5 (9SBZOCWv_vE), 8.5 s, show the same on two other generators.
+  The engine drew the top half alone, both blocks on it.
+- **The construction dome is tiled.** Part 6, 33:32 and 32:00, and "training mission 3
+  The field base" (DW8XuX10y0U), 235.5 s: an opaque blue dome whose facets each show
+  the whole cell texture, cyan veins round dark blue cells. The engine had one copy of
+  the texture wrapped round the whole dome, a smooth swirl.
+
+Not read: what gives an instance its level. The manager's draw takes it from its
+`+8`'s `+0x14` object, slot `0x4c`, handed the camera and the instance's sphere
+(`Effect.dll:0x10007e6d`), and draws nothing at 8 or over; that object is outside this
+module. openparkan draws every dome at level 0.
 
 ### The generator — *read*, and *measured*
 
@@ -679,13 +900,17 @@ end: read as type 3 they would stand at size 9 for good.
 
 **A frame of one point named three times is scaled by that point's direction.** The handler's
 branch for three equal directions (`Control.dll:0x10002c42`) takes the direction's length,
-builds an orientation from the unit direction (`0x10003ef0`) and scales it alike on all three
-axes by that length (`0x10002c7b`–`0x10002cfd`, `0x10003ea0`). Which row of the orientation
-the direction lands in is not read. C03 M02's generator ball hangs on
-`Sign_Type1`, whose direction is 8.98 long, so its glow's size 9 × the effect's 0.75 scale
-would be 60.6 m wide. *Seen* in "Let's Play - Parkan: Iron Strategy, Part 6" (-yNnsqudMzw,
-64:50) and Part 6.5 (9SBZOCWv_vE, briefing time 8.5 s): a small yellow ball between the
-generator's horns; from 80 m the read gives 2.4 m.
+builds a frame about the unit direction (`0x10003ef0`) and scales it alike on all three
+axes by that length (`0x10002c7b`–`0x10002cfd`, `0x10003ea0`); the direction is its first
+axis ([13-control.md](13-control.md#a-frame-about-one-direction--read-and-measured)). C03
+M02's generator ball hangs on `Sign_Type1`, whose direction is 8.98 long, so its glow's size
+9 × the effect's 0.75 scale would be 60.6 m wide. **The effect's scale is in the instance's
+matrix** (`Effect.dll:0x10007c90`), so it divides the eye's distance as the direction's
+length does: from 80 m the eye is 80 ÷ (8.98 × 0.75) = 11.9 units off and the glow 0.41 of
+them, 2.8 m. *Seen* in "Let's Play - Parkan: Iron Strategy, Part 6" (-yNnsqudMzw, 64:50) and
+Part 6.5 (9SBZOCWv_vE, briefing time 8.5 s): a small bright spot at the middle of the gold
+ball between the generator's horns
+([above](#type-9-is-a-half-sphere--read-measured-and-seen)).
 
 ### A phase is where its material's animation stands — *read*, and *measured*
 
@@ -1415,9 +1640,10 @@ is all that decides which lies over which.
 (`env_mineral`, additive `smoke_r2_add`) between the camera and the Large
 Factory, the engine drew the chimneys' black `fire_smoke` crisp through the
 nearer plume, because it drew every additive sprite first. Drawn far to near,
-the plume lies over the smoke. The engine files a construction dome's pieces
-under the dome's one distance and keeps them in their own order; how the game
-draws a dome inside its item is not read here.
+the plume lies over the smoke. A type-9 dome's pieces are each an item of their own,
+made with the dome's one matrix (`Terrain.dll:0x10028c64`, `0x10028d88`); the engine
+files them under the dome's one distance and keeps them in their own order, and what
+distance each piece's item answers with is not read here.
 
 ## Which effects run: the settings switch — *read*, and *measured*
 
@@ -1799,19 +2025,35 @@ Read one slot either way, none of the seven name witnesses agrees.
   ([How a sound is heard](#how-a-sound-is-heard--read-and-measured)).
 - **What silences the hero's breath** in its own view.
 - **How Direct3D Sound pans** a sound about the listener.
-- **What the eye the sprite draw is handed has been transformed by.** The emitter
+- ~~**What the eye the sprite draw is handed has been transformed by.** The emitter
   loop's context carries the instance's matrix at `+8` and a point at `+0x48`
   (`0x10008050`, `0x100080aa`), and the draw takes that point for the eye
   (`0x100093fc`). A sprite's position channel is in the frame's own space, so the
   eye must be too, and `[0x1001e0bc]` slot `0x68` — called with the matrix in `ecx`
   and the point in `edx` just before (`0x100080da`) — is where it would be put
-  there; that slot is in the maths interface, outside this module, and is not read.
-- **Which of the four sprite modes anything but 0, 1 and 3 uses.** Mode 2, which
+  there; that slot is in the maths interface, outside this module, and is not read.~~
+  Answered: slot `0x68` is `Ngi32.dll:0x100248f0`, which takes the matrix's
+  translation off the point and projects it on each axis over that axis's squared
+  length — the inverse of a frame whose axes are square to one another, scale and
+  all ([A sprite is drawn through its frame](#a-sprite-is-drawn-through-its-frame--read)).
+- ~~**Which of the four sprite modes anything but 0, 1 and 3 uses.** Mode 2, which
   orients a sprite by its direction channel (`0x1000d110` at `0x1000986c`), is
   reached by nothing found: a bolt's sprites take mode 1 (`0x10002932`), a type-7
   burst takes 3 when its block's `+4` is 1 and 0 otherwise (`0x100019d0`), and a
   type-3, 4 or 9 sprite's own `+0xc` is never written, so it keeps whatever the
-  particle was constructed with.
+  particle was constructed with.~~ Answered: it **is** written — the sprite's load
+  copies the block's `+4` there (`0x100103d2`) — and of the 2013 sprite blocks 983
+  are mode 0, 251 mode 1 and 779 mode 2
+  ([A sprite's mode](#a-sprites-mode--read-measured-and-seen)).
+- ~~**Which of the frame's axes a type-9 dome's pole ends on**, how its texture runs
+  over it, and whether it is a half or a whole.~~ Answered: a unit half sphere whose
+  pole is the sprite's own z — the block's direction channel in mode 2, the line to
+  the eye in mode 0 — drawn from both sides, its texture laid on down the pole or
+  whole on every facet by the block's +204; 122 of the 266 blocks pair up, opposite
+  directions, into balls, the generator's among them
+  ([Type 9 is a half sphere](#type-9-is-a-half-sphere--read-measured-and-seen)).
+  Still open: what gives an instance the level that picks a dome's detail and drops
+  it at 4 and over.
 
 - **The rest of each emitter's floats.** The window, the phase, the sprite's
   moving and growing triples, the light, the bolt's segments, the stream's
