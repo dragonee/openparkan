@@ -91,6 +91,21 @@ completed"*, *"Game saved..."*, the information assistant's lines (match them to
 `resources --text`), *"Vacant vehicle detected..."*, *"Risk area! Landing
 impossible."*. The wingman menu's rows show through the same box; ignore them.
 
+The same command over the target panel's name bar, the strip under the left dial, lists
+every unit the player targeted, and so what each clan built: a name is a size letter, a
+chassis letter and a role letter with the clan's running count. Read a digit at the
+video's own resolution before trusting it: the game font's 0 is slashed and reads as an 8
+when shrunk.
+
+**The recording's clock is not the mission's.** Before setting a time against the engine:
+
+- find the level it is played on (the engine takes `--level easy|medium|hard`);
+- count the quick loads. F8 shows as about ten frames of *"Exiting..."* and the loading
+  screen with no shell screen between, and the play since the last *"Game saved..."* is
+  gone: a clan's clock is restored with the save. `burst` any jump in the picture at 30 fps;
+- remember the sky's clock runs through the briefing, so a recording that watched it is a
+  briefing's length ahead of an engine run with `--skip-briefing`.
+
 Tie each line to the script trigger that raised it, and each screen change to what
 the hero did. `pt burst VIDEO <t0> <t1> --fps 4` shows a moment frame by frame: a
 capture and the screen it opens, a death, a cut.
@@ -103,7 +118,11 @@ Reproduce each event headless and compare. The engine's switches are in
 the objectives' states and every `says:` line), `--god-mode`, `--at X,Y,YAW,Z`,
 `--pod <building>.dat`, `--hq`, `--take <unit>.dat`, `--drive <path>`,
 `--face <name>,<distance>`, `--look X,Y,Z,TX,TY,TZ`, `--objectives`, `--map`,
-`--screenshot`. For each: does the trigger fire, does the objective complete, does
+`--screenshot`, `--level easy|medium|hard`, `--log` (with `--headless`: a line for each
+unit made, lost or captured, each task a robot takes up and each objective's change, in
+place of the line a second) and `--tap TICK:SCAN,…` (a key pressed at a tick, through the
+game's own chords: `--tap 60:SCAN_W_ENTER` takes and boards; F7 and F8 save and load).
+For each: does the trigger fire, does the objective complete, does
 the message play, does the screen open with what the video shows in it?
 
 Two checks before calling anything a difference:
