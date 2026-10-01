@@ -308,7 +308,8 @@ fn c03_m02s_large_walker_walks_out_of_the_large_factory_it_is_made_in() {
         sphere: None,
     };
     play.factories[f].build = None;
-    assert!(play.factories[f].start_project(project, false, 1));
+    // The clan's tree has not researched a walker; the test asks only what the door lets out.
+    assert!(play.factories[f].start_project(project, false, 1, true));
     let centre = play.battle.combat.targets[plant].position.truncate();
     let before = play.robots.len();
     let mut bot = None;
