@@ -40,6 +40,7 @@ impl Entry {
 }
 
 /// An archive held in memory.
+#[derive(Clone)]
 pub struct Archive {
     pub data: Vec<u8>,
     pub source: String,

@@ -87,6 +87,7 @@ fn effect_commands(records: &[&control::Reference]) -> Vec<EffectCommand> {
         .collect()
 }
 
+#[derive(Clone)]
 pub struct Battle {
     pub combat: Combat,
     /// The mission object each target is.

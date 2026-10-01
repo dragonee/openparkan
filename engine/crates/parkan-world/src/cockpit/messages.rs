@@ -27,6 +27,7 @@ pub const LINE_COLOUR: u32 = 0xffdc_dcdc;
 pub const CORNER: f32 = 8.0;
 pub const EDGE: f32 = 5.0;
 
+#[derive(Clone)]
 struct Shown {
     sender: Sender,
     text: String,
@@ -34,7 +35,7 @@ struct Shown {
 }
 
 /// The one box, if any, and whether it is shown.
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct MessageBox {
     shown: Option<Shown>,
     hidden: bool,

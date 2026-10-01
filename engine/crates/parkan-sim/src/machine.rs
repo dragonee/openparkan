@@ -217,6 +217,7 @@ impl Feet {
 }
 
 /// A machine on the ground: its controller, its body and its state clock.
+#[derive(Clone)]
 pub struct Walker {
     pub controller: Controller,
     /// The transition costs as the loader scales them (`0x10001790`).

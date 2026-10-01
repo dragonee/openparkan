@@ -425,6 +425,7 @@ pub struct Preview {
 }
 
 /// The designer open for one factory.
+#[derive(Clone)]
 pub struct Session {
     pub factory: usize,
     pub designer: Designer,
@@ -488,7 +489,7 @@ pub enum Outcome {
 }
 
 /// The designer screen: a session while it is open.
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct Screen {
     pub session: Option<Session>,
     /// How many designs have been accepted, for their paths.

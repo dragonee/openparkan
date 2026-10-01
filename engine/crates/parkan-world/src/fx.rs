@@ -68,6 +68,7 @@ pub struct Look {
     pub cell: [f32; 4],
 }
 
+#[derive(Clone)]
 pub struct Fx {
     archive: Archive,
     templates: HashMap<String, Option<Rc<Effect>>>,
@@ -93,6 +94,7 @@ pub const SHADE_WEAR: &str = "shade.wea";
 /// A material's looks for sprites: one per key of its track 0, in the track's own order, and
 /// the track itself, which says which of them a sprite of a given age draws with. A material
 /// with no track has the one look its first entry gives.
+#[derive(Clone)]
 struct MaterialLooks {
     keys: Vec<usize>,
     animation: Option<Animation>,

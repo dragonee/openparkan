@@ -754,6 +754,7 @@ enum Mount {
 
 /// The player's unit as its own view draws it: an instance for each node with a fifth
 /// slot, following that node's pose.
+#[derive(Clone)]
 pub struct OwnView {
     nodes: Vec<(usize, Mount, usize)>,
     /// The hero from outside, for its own panel: an instance for each level-0 slot of each
@@ -1082,6 +1083,8 @@ pub fn scan_name(code: winit::keyboard::KeyCode) -> Option<&'static str> {
         K::F1 => "SCAN_F1",
         K::F2 => "SCAN_F2",
         K::F3 => "SCAN_F3",
+        K::F7 => "SCAN_F7",
+        K::F8 => "SCAN_F8",
         K::F12 => "SCAN_F12",
         K::BracketLeft => "SCAN_LBRACKET",
         K::BracketRight => "SCAN_RBRACKET",

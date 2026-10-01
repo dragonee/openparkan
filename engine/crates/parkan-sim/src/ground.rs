@@ -101,6 +101,7 @@ impl Cut {
     }
 }
 
+#[derive(Clone)]
 pub struct Ground {
     pub land: LandMesh,
     /// Placed objects' faces, by the caller's numbering; a building's are ground.

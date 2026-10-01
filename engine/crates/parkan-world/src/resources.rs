@@ -68,6 +68,7 @@ fn descriptors_in(path: Option<PathBuf>) -> Result<Vec<Descriptor>> {
 
 /// The names a mission can play a sound by: its own `mission.cfg`'s descriptors, then
 /// the game's `ui/game_resources.cfg`.
+#[derive(Clone)]
 pub struct Sounds {
     pub game: PathBuf,
     pub descriptors: Vec<Descriptor>,

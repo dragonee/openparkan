@@ -34,6 +34,7 @@ pub fn mouse_sensitivity(game: &Path) -> f32 {
         .unwrap_or(DEFAULT_MOUSE_SENS)
 }
 
+#[derive(Clone)]
 pub struct Hero {
     pub robot: Robot,
     pub pilot: Pilot,

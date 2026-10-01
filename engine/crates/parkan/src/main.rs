@@ -86,6 +86,10 @@ use winit::window::{CursorGrabMode, Window, WindowId};
 
 /// The simulation runs at a fixed 60 ticks a second.
 const TICK_MS: f64 = 1000.0 / 60.0;
+/// `iron3d.dll`'s string 6246, "Game saved...", which a quick save posts from the system
+/// (`0x100a512c`).
+const GAME_SAVED: u32 = 6246;
+const GAME_SAVED_TEXT: &str = "Game saved...";
 
 #[derive(Clone)]
 struct Args {
@@ -361,13 +365,15 @@ fn top_down(terrain: &Terrain, aspect: f32) -> glam::Mat4 {
 }
 
 /// A key going down or up with no window: what the window's own handler does with it, less
-/// the screens only a window draws. Command mode's keys act both ways; a digit is the wingman
+/// the screens only a window draws. F7 keeps the play in `quick` and F8 puts it back; what a
+/// screenshot draws is not put back with it, so a unit made since the save stays drawn. Command mode's keys act both ways; a digit is the wingman
 /// selector's while it is open; the unit the player drives takes the key; and a press runs
 /// the command its chord binds (`ui_other.man`), Enter's take and board among them.
 fn feed(
     play: &mut scene::Play,
     bindings: &[parkan_formats::controls::Binding],
     held: &mut HashSet<String>,
+    quick: &mut Option<scene::Play>,
     scan: &str,
     pressed: bool,
     aspect: f32,
@@ -376,6 +382,25 @@ fn feed(
     use parkan_world::play::Mode;
 
     let bound = |held: &HashSet<String>| command_for(bindings, scan, |m| held.contains(m)).map(str::to_owned);
+    // The quick save and load ask neither the mode nor the game menu.
+    if pressed {
+        match bound(held).as_deref() {
+            Some(controls::CMD_QUICK_SAVE) => {
+                if let Some(save) = play.quick_save(GAME_SAVED_TEXT) {
+                    *quick = Some(save);
+                }
+                return;
+            }
+            Some(controls::CMD_QUICK_LOAD) => {
+                if let Some(loaded) = quick.as_ref().and_then(scene::Play::quick_load) {
+                    *play = loaded;
+                    held.clear();
+                }
+                return;
+            }
+            _ => {}
+        }
+    }
     if play.view_mode().commands()
         && let Some(command) = bound(held)
         && play.command_key(&command, pressed)
@@ -532,22 +557,23 @@ fn rehearse(play: &mut scene::Play, loaded: &scene::Loaded, args: &Args) {
     let bindings = scene::bindings(&play.assembly.game);
     let aspect = args.size.0 as f32 / args.size.1.max(1) as f32;
     let mut held: HashSet<String> = HashSet::new();
+    let mut quick = None;
     for tick in 0..args.ticks {
         if tick == args.press {
             for key in &args.hold {
-                feed(play, &bindings, &mut held, key, true, aspect);
+                feed(play, &bindings, &mut held, &mut quick, key, true, aspect);
             }
         }
         if args.release == Some(tick) {
             for key in &args.hold {
-                feed(play, &bindings, &mut held, key, false, aspect);
+                feed(play, &bindings, &mut held, &mut quick, key, false, aspect);
             }
         }
         for (at, key) in &args.tap {
             if tick == *at {
-                feed(play, &bindings, &mut held, key, true, aspect);
+                feed(play, &bindings, &mut held, &mut quick, key, true, aspect);
             } else if tick == at + 2 {
-                feed(play, &bindings, &mut held, key, false, aspect);
+                feed(play, &bindings, &mut held, &mut quick, key, false, aspect);
             }
         }
         // Nothing is rendered here, so this run's fixed tick stands in for the frame the
@@ -981,9 +1007,20 @@ struct App {
     /// system's cursor is hidden for the software one.
     left_down: Option<(Instant, [f32; 2])>,
     cursor_hidden: bool,
+    /// The quick save, once F7 has made one.
+    quick: Option<QuickSave>,
     /// The mode stack's front at the last frame: a move into a command view drops the press
     /// held down (the transitions' clearing of `0x1010bf7c`–`0x1010bf80`, docs/40).
     last_mode: Option<parkan_world::play::Mode>,
+}
+
+/// A quick save (docs/14, "Quick save and quick load"): the play and what draws it, as they
+/// stood when F7 was pressed ([`parkan_world::play::Play::quick_save`]).
+struct QuickSave {
+    play: scene::Play,
+    objects: parkan_world::models::Objects,
+    view: Option<scene::OwnView>,
+    cockpit: Option<parkan_world::cockpit::Cockpit>,
 }
 
 /// The mission's briefing, unless `--skip-briefing` or `--fly`; a play has its world paused
@@ -1153,6 +1190,52 @@ impl App {
         Ok(())
     }
 
+    /// F7 (docs/14, "Quick save and quick load"): the play is kept with what draws it, and the
+    /// message box says string 6246, "Game saved...".
+    fn quick_save(&mut self) {
+        let Some(play) = self.play.as_mut() else { return };
+        let cockpit = self.hud.as_ref().map(|h| h.cockpit.clone());
+        let saved = self.hud.as_ref().and_then(|h| h.cockpit.strings.get(&GAME_SAVED).cloned());
+        if let Some(play) = play.quick_save(saved.as_deref().unwrap_or(GAME_SAVED_TEXT)) {
+            self.quick = Some(QuickSave {
+                play,
+                objects: self.world.objects.clone(),
+                view: self.view.clone(),
+                cockpit,
+            });
+        }
+    }
+
+    /// F8: the quick save is put back with what draws it, and with none nothing happens.
+    fn quick_load(&mut self) {
+        let Some(save) = self.quick.as_ref() else { return };
+        let Some(play) = scene::Play::quick_load(&save.play) else { return };
+        self.world.objects = save.objects.clone();
+        self.view = save.view.clone();
+        if let (Some(hud), Some(cockpit)) = (self.hud.as_mut(), save.cockpit.as_ref()) {
+            hud.cockpit = cockpit.clone();
+        }
+        if let Some(r) = self.running.as_mut() {
+            let (d, q) = (&r.gpu.device, &r.gpu.queue);
+            r.renderer.set_world(
+                d,
+                q,
+                &self.world.store.textures,
+                Some(&self.world.terrain),
+                Some(&self.world.objects),
+            );
+            r.renderer.set_sprite_looks(d, &scene::sprite_looks(&play));
+        }
+        // Every sound of the play left behind stops, and the theme starts again.
+        self.audio = audio::Audio::open(&self.game);
+        theme(&mut self.audio, &self.game, &self.loaded);
+        self.play = Some(play);
+        self.scans.clear();
+        self.held.clear();
+        self.last_mode = None;
+        self.owed = 0.0;
+    }
+
     /// A key the system repeats while it is held. The game takes a repeat as the key going down
     /// again: nothing on a key-down's way from the window to the command handler asks the key's
     /// previous state (`iron3d.dll:0x100a0e30`, `0x10071c10`, `World3D.dll:0x10011330`), so a
@@ -1178,6 +1261,16 @@ impl App {
         // plays is not read beyond Esc: none reaches the hero or the game's commands.
         if self.briefing.is_some() {
             return;
+        }
+        // The quick save and load ask neither the mode nor the game menu (`0x1007267f`,
+        // `0x100726a6`).
+        if pressed {
+            use parkan_formats::controls::{CMD_QUICK_LOAD, CMD_QUICK_SAVE, command_for};
+            match command_for(&self.bindings, scan, |m| self.scans.contains(m)) {
+                Some(CMD_QUICK_SAVE) => return self.quick_save(),
+                Some(CMD_QUICK_LOAD) => return self.quick_load(),
+                _ => {}
+            }
         }
         let Some(play) = self.play.as_mut() else { return };
         // A building's screen has the hero handed away: its table takes no key
@@ -2263,6 +2356,7 @@ fn main() -> Result<()> {
         started,
         game: game.clone(),
         bindings: scene::bindings(&game),
+        quick: None,
         scans: HashSet::new(),
         hud: None,
         args: args.clone(),

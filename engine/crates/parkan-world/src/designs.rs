@@ -295,6 +295,7 @@ impl Catalogue {
 }
 
 /// The record a part id names, and what it hangs as.
+#[derive(Clone)]
 struct PartData {
     record: Option<Record>,
     controller: Option<Controller>,
@@ -302,6 +303,7 @@ struct PartData {
 }
 
 /// Designs out of one installation, offered from one catalogue.
+#[derive(Clone)]
 pub struct Designer {
     pub catalogue: Catalogue,
     /// The factory's size class the chassis page is graded by.
@@ -313,7 +315,7 @@ pub struct Designer {
 }
 
 /// Puts units together as the engine loads them, their parts' records read once.
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct Weigher {
     parts: HashMap<String, PartData>,
 }

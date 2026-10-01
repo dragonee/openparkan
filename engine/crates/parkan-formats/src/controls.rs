@@ -216,6 +216,10 @@ pub const CMD_INC_MAP_ALPHA: &str = "CMD_INC_MAP_ALPHA";
 pub const CMD_DEC_MAP_ALPHA: &str = "CMD_DEC_MAP_ALPHA";
 /// The game menu, F3 (748, docs/39, "The game menu").
 pub const CMD_GAME_MENU: &str = "CMD_GAME_MENU";
+/// 753 and 754, the last two rows of the command table (`iron3d.dll:0x100726f8`): F7 and F8 in
+/// `ui_other.man` (docs/14, "Quick save and quick load").
+pub const CMD_QUICK_SAVE: &str = "CMD_QUICK_SAVE";
+pub const CMD_QUICK_LOAD: &str = "CMD_QUICK_LOAD";
 /// Command mode's camera moves and its zoom (docs/40, "Keys set velocities").
 pub const CMD_JAMES_HQ_MOVE_LEFT: &str = "CMD_JAMES_HQ_MOVE_LEFT";
 pub const CMD_JAMES_HQ_MOVE_RIGHT: &str = "CMD_JAMES_HQ_MOVE_RIGHT";

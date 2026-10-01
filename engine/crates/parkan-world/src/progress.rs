@@ -132,6 +132,7 @@ pub use parkan_sim::planner::HANDLER_PROBLEMS;
 /// Another clan's script: its SuperAI runs `Init` once, as every clan's does, and its takt
 /// walks its planner, but it never runs `Mission`, which the game frame runs for the local
 /// player's clan alone (docs/34, "When the Mission handler runs").
+#[derive(Clone)]
 pub struct ClanScript {
     pub clan: i64,
     pub base: [f32; 2],
@@ -149,6 +150,7 @@ enum Which {
     Other(usize),
 }
 
+#[derive(Clone)]
 pub struct Progression {
     /// The player clan's script, when it has one that loads, and its handler names.
     pub script: Option<Interpreter>,

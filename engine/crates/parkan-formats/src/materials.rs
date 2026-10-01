@@ -141,6 +141,7 @@ pub fn parse(name: &str, data: &[u8], blend: u32) -> Result<Material, FormatErro
 }
 
 /// `Material.lib`, keyed by upper-case name.
+#[derive(Clone)]
 pub struct Library {
     pub materials: Vec<Material>,
     by_name: HashMap<String, usize>,

@@ -311,6 +311,7 @@ pub struct Instance {
     pub hidden: bool,
 }
 
+#[derive(Clone)]
 pub struct Objects {
     pub models: Vec<Model>,
     pub instances: Vec<Instance>,

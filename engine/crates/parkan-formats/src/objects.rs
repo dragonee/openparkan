@@ -57,6 +57,7 @@ impl Record {
 }
 
 /// `objects.rlb`, keyed by lower-case name.
+#[derive(Clone)]
 pub struct Library {
     records: HashMap<String, Record>,
 }

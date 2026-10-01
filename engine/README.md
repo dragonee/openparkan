@@ -1246,6 +1246,10 @@ the hero hurt or lost, the mission's end: `--mission MISSIONS/CAMPAIGN/CAMPAIGN.
 --skip-briefing --headless --log --level easy --pod sbunk02.dat --ticks 48000` plays the
 Convoy's first raid out with the hero in its bunker.
 
+F7 saves the game where it stands and the message box says *"Game saved..."*; F8 loads that
+save, over the *MISSION FAILED* panel too, and comes back on foot. The training campaign takes
+neither, as the game's does not. The save is kept in memory: it is gone when the window closes.
+
 Without a window `--hold`'s keys run the game's chords as the window's do — Enter's take and
 board, the weapon keys, the target picks — and `--tap TICK:SCAN,…` presses a key at a tick of
 `--ticks` and lets it go two ticks on: `--mission MISSIONS/CAMPAIGN/CAMPAIGN.03/Mission.02
@@ -1466,7 +1470,9 @@ a row here. A row leaves this table when research closes it.
 | M14 | The builder's invulnerability (property 162) while it works, but against its building's kill | the builder is hurt as it always is; the sphere's kill passes it over | [32](../docs/32-builder.md#upgrading-a-building--read) |
 | M14 | How the point beside a building an upgrade walks to is drawn (`0x100338a0`) | a random one on the ring 20 out past the building's sphere, on walkable ground, as the attack draws its own | [32](../docs/32-builder.md#upgrading-a-building--read) |
 | M12 | A builder's beam's life, which the Build rows need intact | a live builder can build | [32](../docs/32-builder.md#building-a-building--read) |
-| M12 | The game menu's save page, the quick save and the quick load on F7 and F8, and the shell its *Load game* and *Quit game* hand the mission to | *Save game* and *Load game*, enabled outside the training campaign, are taken and do nothing; F7 and F8 do nothing, and nothing says *Game saved...*; *Quit game* closes the window | [39](../docs/39-boarding.md#the-game-menu--read), [14](../docs/14-controls.md#quick-save-and-quick-load--read-and-seen), [17](../docs/17-saves.md#saveslotscfg-and-the-seven-slots--read-and-measured) |
+| M12 | The game menu's save page and the shell its *Load game* and *Quit game* hand the mission to | *Save game* and *Load game*, enabled outside the training campaign, are taken and do nothing; *Quit game* closes the window | [39](../docs/39-boarding.md#the-game-menu--read), [17](../docs/17-saves.md#saveslotscfg-and-the-seven-slots--read-and-measured) |
+| M12 | A save's own bytes: the quick save is the save index's seventh slot, a file as any save's, most of whose chunks are not read | F7 keeps the play itself, in memory, and says *Game saved...*; F8 puts it back. It is in no slot and goes with the window, where the game's is a file F8 runs the game again from | [14](../docs/14-controls.md#quick-save-and-quick-load--read-and-seen), [17](../docs/17-saves.md#saveslotscfg-and-the-seven-slots--read-and-measured) |
+| M12 | What a load does with a hero saved aboard a bot: the save does not hold the interface's mode stack, *seen* for a save made in a bunker's command view, which loads on foot in the bunker | the quick load rolls the stack back a mode at a time, so a hero saved aboard a bot is put down beside it | [14](../docs/14-controls.md#quick-save-and-quick-load--read-and-seen) |
 | M12 | Whether `getTimer`, which times *Explode!*'s 0.6 s, runs on a clock or on `timeGetTime` | game time | [41](../docs/41-commander.md#explode--read) |
 | M12 | The system's cursor, each state's `HARDWARE_CURSOR` `.ani`, which the display's slot 12 picks when `Iron_3D.ini`'s `FORCE_SOFTWARE_CURSOR` is 0 on a device that renders in a window (the install's file sets 1) | the software cursor's four phases from `new_ui1` are drawn whatever the setting, and the system's hidden | [40](../docs/40-command-mode.md#the-displays-slot-12-the-system-cursor--read-and-measured) |
 | M6 | What a node naming a variable, operand, formula or handler that does not exist reads | the node does nothing; a switch to no handler ends the run; a run stops after a million nodes | [15](../docs/15-behaviour.md#how-a-handler-runs) |

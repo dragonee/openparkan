@@ -35,6 +35,7 @@ pub struct LoadedMesh {
     pub wear: wea::Wear,
 }
 
+#[derive(Clone)]
 pub struct Assembly {
     pub game: PathBuf,
     pub library: objects::Library,

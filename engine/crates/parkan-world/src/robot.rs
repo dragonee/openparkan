@@ -261,6 +261,7 @@ impl Heft {
     }
 }
 
+#[derive(Clone)]
 pub struct Robot {
     /// The mission object the robot is.
     pub object: usize,

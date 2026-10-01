@@ -25,7 +25,7 @@ pub const INK: u32 = 0xff00_0000;
 pub const TEXT_AT: [f32; 2] = [5.0, 4.0];
 
 /// The manager: the text handed this frame, and where and when the cursor last came to rest.
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct Tip {
     handed: Cell<Option<u32>>,
     rested: ([f32; 2], f64),

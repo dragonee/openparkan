@@ -183,6 +183,7 @@ impl Mode {
 }
 
 /// The bot the player has boarded, and the pilot its own input table drives it with.
+#[derive(Clone)]
 pub struct Driving {
     pub target: usize,
     pub pilot: parkan_sim::input::Pilot,
@@ -284,6 +285,7 @@ pub struct NodeEffect {
     pub id: i32,
 }
 
+#[derive(Clone)]
 pub struct Play {
     pub hero: Hero,
     pub ground: Ground,
@@ -2282,6 +2284,46 @@ impl Play {
         }
         self.modes.pop();
         true
+    }
+
+    /// F7, `CMD_QUICK_SAVE` (`iron3d.dll:0x1007267f`, `0x100a5030`, docs/14, "Quick save and
+    /// quick load"): the play as it stands, to be kept, and the message box told `saved`,
+    /// string 6246, from the system. Refused in the training campaign (`+0xe6`) and unless the
+    /// mission is being played, the state word at 4; neither the game menu nor a command view
+    /// refuses it.
+    ///
+    /// STAND-IN: docs/17-saves.md#saveslotscfg-and-the-seven-slots--read-and-measured -- the
+    /// game writes the save index's seventh slot, a file as any save's. Most of that file's
+    /// chunks are not read, so the engine cannot write one the game would load: the save is the
+    /// play itself, kept by whoever asked, and goes with the process.
+    pub fn quick_save(&mut self, saved: &str) -> Option<Play> {
+        let over = self.progression.as_ref().is_some_and(|p| p.progress.outcome.is_some());
+        if self.training || over {
+            return None;
+        }
+        let save = self.clone();
+        self.says.push(Say::Text(crate::progress::Sender::System, saved.to_owned()));
+        Some(save)
+    }
+
+    /// F8, `CMD_QUICK_LOAD` (`0x100726a6`, `0x100a51e0`): the play a quick save kept, to be
+    /// played on from. Refused in the training campaign; it does not ask the state word, so it
+    /// loads over the outcome's panel. The game exits with code 4 and its executable runs it
+    /// again from the slot's file, through the loading screen.
+    ///
+    /// STAND-IN: docs/14-controls.md#quick-save-and-quick-load--read-and-seen -- the save
+    /// does not hold the interface's mode stack: *seen*, a save made in a bunker's command
+    /// view loads with the hero on foot in the bunker. Here the stack is rolled back a mode at
+    /// a time, which also puts a hero saved aboard a bot down beside it; what the game's load
+    /// does with one is not seen.
+    pub fn quick_load(save: &Play) -> Option<Play> {
+        if save.training {
+            return None;
+        }
+        let mut play = save.clone();
+        play.roll_back_to_foot();
+        play.release_keys();
+        Some(play)
     }
 
     /// The hero button (`0x10062ce0` with 0): the stack rolled back to mode 0 a mode at a

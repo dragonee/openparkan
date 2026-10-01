@@ -97,6 +97,7 @@ pub struct Drawn {
 }
 
 /// The cockpit's art, words and what it keeps from frame to frame.
+#[derive(Clone)]
 pub struct Cockpit {
     pub skin: Skin,
     pub strings: BTreeMap<u32, String>,

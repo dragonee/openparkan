@@ -12,6 +12,7 @@ mod mission_02;
 mod mission_03;
 mod mission_04;
 mod motion;
+mod quick_save;
 mod scene;
 mod selection;
 mod squad;
