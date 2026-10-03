@@ -1727,9 +1727,11 @@ impl App {
         // The sounds the ticks started play now, whether or not a frame can be drawn.
         if let (Some(play), Some(audio)) = (self.play.as_mut(), self.audio.as_mut()) {
             let eye = play.eye();
+            // The listener's front and top are the camera's forward and up axes
+            // (`Ngi32.dll:0x1000d567`); its right is the one crossed with the other.
             let right = eye.forward.cross(eye.up);
             for cue in std::mem::take(&mut play.cues) {
-                audio.play(&cue, eye.position, right);
+                audio.play(&cue, eye.position, right, eye.up);
             }
             // The rain's background sound, as loud as the rain is hard (docs/10, "Rain").
             audio.rain(play.rain_sound());

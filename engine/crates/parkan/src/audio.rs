@@ -39,18 +39,52 @@ pub struct Audio {
 /// How loud a cue is heard `distance` away, as Direct3D Sound hears a buffer whose
 /// minimum distance is `near` and maximum `far` (docs/11, "How a sound is heard"): whole
 /// within `near`, then `near ÷ (near + R × (d − near))` with the listener's rolloff R of 1,
-/// no quieter past `far`.
+/// and **nothing past `far`**: every buffer is made with `DSBCAPS_MUTE3DATMAXDISTANCE`
+/// (`Ngi32.dll:0x1000e1cf`), and the game itself stops a sound that is past its far distance
+/// before DirectSound has to ([`past`]).
 pub fn gain(distance: f32, near: f32, far: f32) -> f32 {
-    if distance <= near {
+    if past(distance, far) {
+        0.0
+    } else if distance <= near {
         1.0
     } else {
-        let d = distance.min(far.max(near));
-        if d <= 0.0 { 0.0 } else { near.max(0.0) / (near.max(0.0) + ROLLOFF * (d - near.max(0.0))) }
+        near.max(0.0) / (near.max(0.0) + ROLLOFF * (distance - near.max(0.0)))
     }
 }
 
-/// The listener's rolloff factor, which nothing sets (`Ngi32.dll:0x1000d123`).
+/// Whether a sound `distance` from the listener is past its far distance
+/// (`Ngi32.dll:0x1000e51b`): a one-shot is then ended, and a loop's buffer is stopped where it
+/// stands and played on from there once it is back inside (`0x1000e817`–`0x1000e8cf`).
+pub fn past(distance: f32, far: f32) -> bool {
+    distance > far
+}
+
+/// The listener's rolloff factor: 1 as its object is made (`Ngi32.dll:0x1000d123`), and the
+/// one call of its setter passes the flags alone (`World3D.dll:0x10013c34`).
 const ROLLOFF: f32 = 1.0;
+
+/// Where a sound `offset` from the listener sits between the speakers, −1 hard left to 1 hard
+/// right, for a listener whose front and top are the camera's forward and up
+/// (`Ngi32.dll:0x1000d567`–`0x1000d5c9`), so whose right is `front × top`.
+///
+/// Every buffer asks for `DS3DALG_NO_VIRTUALIZATION` (`0x1000e1c3`): *documented* by Microsoft
+/// as plain stereo panning in which a sound 90° to the left comes out of the left speaker
+/// alone, one 90° to the right out of the right alone, and the vertical axis is ignored but
+/// for the distance. So the offset is laid into the listener's own level plane first, and what
+/// is left of it is weighed against the right: a sound straight above or below, or at the
+/// listener's own place, is in the middle, and one behind pans as its mirror image in front
+/// does and is no quieter for it.
+///
+/// STAND-IN: docs/11-effects.md#how-a-sound-is-heard--read-and-measured -- the curve between
+/// the middle and either side is Microsoft's own mixer's, which is not one of the game's
+/// files: the sine of the bearing is taken, the one curve that meets both documented ends.
+/// And the Doppler shift is not played: the game hands both the listener's and each sound's
+/// velocity over with a Doppler factor of 1.
+pub fn pan(offset: Vec3, right: Vec3, up: Vec3) -> f32 {
+    let up = up.normalize_or_zero();
+    let level = offset - up * offset.dot(up);
+    level.normalize_or_zero().dot(right.normalize_or_zero()).clamp(-1.0, 1.0)
+}
 
 /// How long a playing sound takes to reach its new gain and pan.
 const MOVE_TWEEN: Duration = Duration::from_millis(30);
@@ -200,15 +234,14 @@ impl Audio {
         }
     }
 
-    /// Play `cue` as heard at `eye`, whose right is `right`.
-    ///
-    /// STAND-IN: docs/11-effects.md#not-resolved -- how Direct3D Sound places a sound
-    /// between the speakers is not read; it pans by its direction.
-    pub fn play(&mut self, cue: &Cue, eye: Vec3, right: Vec3) {
+    /// Play `cue` as heard at `eye`, whose right is `right` and whose top is `up`: the camera
+    /// the frame is drawn through, which `stdRenderGame` makes the listener every frame
+    /// (`World3D.dll:0x10013c34`).
+    pub fn play(&mut self, cue: &Cue, eye: Vec3, right: Vec3, up: Vec3) {
         let offset = cue.position - eye;
         let distance = offset.length();
         let volume = Decibels((20.0 * gain(distance, cue.near, cue.far).log10()).max(Decibels::SILENCE.0));
-        let pan = Panning(offset.normalize_or_zero().dot(right.normalize_or_zero()).clamp(-1.0, 1.0));
+        let pan = Panning(pan(offset, right, up));
         match cue.kind {
             CueKind::Stop => {
                 if let Some(mut handle) = self.loops.remove(&cue.key) {
@@ -216,18 +249,24 @@ impl Audio {
                 }
             }
             // A playing sound follows its emitter each update; a one-shot past its far
-            // distance is stopped (`Ngi32.dll:0x1000e51b`), a loop plays on.
+            // distance is ended (`Ngi32.dll:0x1000e51b`), and a loop is stopped where it stands
+            // and plays on from there once it is back inside (`0x1000e817`–`0x1000e8cf`).
             CueKind::Move => {
                 let tween = Tween { duration: MOVE_TWEEN, ..Default::default() };
                 if let Some(handle) = self.loops.get_mut(&cue.key) {
-                    handle.set_volume(volume, tween);
-                    handle.set_panning(pan, tween);
+                    if past(distance, cue.far) {
+                        handle.pause(Tween::default());
+                    } else {
+                        handle.set_volume(volume, tween);
+                        handle.set_panning(pan, tween);
+                        handle.resume(Tween::default());
+                    }
                 }
                 let done = self.onces.get(&cue.key).is_some_and(|h| h.state() == PlaybackState::Stopped);
                 if done {
                     self.onces.remove(&cue.key);
                 } else if let Some(handle) = self.onces.get_mut(&cue.key) {
-                    if distance > cue.far {
+                    if past(distance, cue.far) {
                         handle.stop(Default::default());
                         self.onces.remove(&cue.key);
                     } else {
@@ -238,7 +277,12 @@ impl Audio {
             }
             CueKind::Loop => {
                 let Some(sound) = self.sound(&cue.sound) else { return };
-                if let Ok(handle) = self.manager.play(sound.volume(volume).panning(pan).loop_region(..)) {
+                if let Ok(mut handle) = self.manager.play(sound.volume(volume).panning(pan).loop_region(..)) {
+                    // Marked to play past its far distance, its buffer is not started until
+                    // it is inside (`0x1000e874`).
+                    if past(distance, cue.far) {
+                        handle.pause(Tween::default());
+                    }
                     self.loops.insert(cue.key, handle);
                 }
             }
@@ -246,7 +290,7 @@ impl Audio {
                 if let Some(mut old) = self.onces.remove(&cue.key) {
                     old.stop(Default::default());
                 }
-                if distance > cue.far {
+                if past(distance, cue.far) {
                     return;
                 }
                 let Some(sound) = self.sound(&cue.sound) else { return };
@@ -300,7 +344,36 @@ mod tests {
         assert_eq!(gain(5.0, 10.0, 80.0), 1.0);
         assert_eq!(gain(20.0, 10.0, 80.0), 0.5, "6 dB a doubling");
         assert_eq!(gain(40.0, 10.0, 80.0), 0.25);
-        assert_eq!(gain(90.0, 10.0, 80.0), 0.125, "no quieter past far");
-        assert_eq!(gain(1000.0, 10.0, 80.0), 0.125);
+        assert_eq!(gain(80.0, 10.0, 80.0), 0.125, "at its far distance it is still heard");
+        // Past it nothing is: the buffer mutes at its maximum distance, and the game stops it.
+        assert!(past(80.5, 80.0) && !past(80.0, 80.0));
+        assert_eq!(gain(90.0, 10.0, 80.0), 0.0);
+        assert_eq!(gain(1000.0, 10.0, 80.0), 0.0);
+    }
+
+    /// Plain stereo panning, as the buffers ask for it: all of a sound 90° to one side is in
+    /// that speaker, height does not move it, and a sound behind is not told from one in front.
+    #[test]
+    fn a_sound_pans_by_its_bearing_in_the_listeners_level_plane() {
+        // A listener looking north, standing level: right is east.
+        let (front, up) = (Vec3::Y, Vec3::Z);
+        let right = front.cross(up);
+        assert_eq!(right, Vec3::X, "the listener's right is its front crossed with its top");
+        let near = |a: f32, b: f32| (a - b).abs() < 1e-6;
+        assert!(near(pan(Vec3::new(5.0, 0.0, 0.0), right, up), 1.0), "90° right: the right speaker alone");
+        assert!(near(pan(Vec3::new(-5.0, 0.0, 0.0), right, up), -1.0), "90° left: the left alone");
+        assert!(near(pan(Vec3::new(0.0, 7.0, 0.0), right, up), 0.0), "ahead");
+        assert!(near(pan(Vec3::new(0.0, -7.0, 0.0), right, up), 0.0), "behind");
+        // The vertical axis is ignored: a sound to the right and high above is still hard right,
+        // where its direction against the right alone would bring it halfway in.
+        assert!(near(pan(Vec3::new(3.0, 0.0, 30.0), right, up), 1.0));
+        // Straight overhead, and at the listener's own place, there is no bearing: the middle.
+        assert_eq!(pan(Vec3::new(0.0, 0.0, 9.0), right, up), 0.0);
+        assert_eq!(pan(Vec3::ZERO, right, up), 0.0);
+        // Behind and to the right pans as its mirror image in front does.
+        let ahead = pan(Vec3::new(1.0, 1.0, 0.0), right, up);
+        assert!(near(ahead, 0.5_f32.sqrt()) && near(pan(Vec3::new(1.0, -1.0, 0.0), right, up), ahead));
+        // A listener rolled on its side takes its own top, not the world's.
+        assert!(near(pan(Vec3::new(0.0, 0.0, 4.0), Vec3::Z, Vec3::NEG_X), 1.0));
     }
 }

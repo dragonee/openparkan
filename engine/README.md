@@ -686,11 +686,13 @@ presses a hero standing at it down), and which of Mission 04's units holds no mi
   while they update as ever.
 - Explosions, shots and steps fade with distance as Direct3D Sound fades them, which the game's
   sound server hands every emitter's sound to (docs/11, "How a sound is heard"): whole within
-  the emitter's near distance, then near ÷ distance, no quieter past its far distance, 6 dB a
-  doubling where the old straight line from near to far lost barely 1 dB by twice the near
+  the emitter's near distance, then near ÷ distance, 6 dB a doubling where the old straight
+  line from near to far lost barely 1 dB by twice the near distance, and nothing past its far
   distance. A one-shot farther than its far distance is not played, and stops once it gets
-  there; a loop plays on. Every update hands a playing sound its emitter's place again, so its
-  gain and pan follow the emitter and the eye.
+  there; a loop is stopped where it stands and plays on from there once it is back inside.
+  Every update hands a playing sound its emitter's place again, so its gain and pan follow the
+  emitter and the eye: the pan is its bearing in the listener's level plane, hard over at 90°
+  to either side and blind to height, as the buffers' plain stereo panning is documented.
 - A neutral unit Enter captures and the hero does not board answers as an ordered one does
   (docs/27, "A neutral unit is taken by the hero"): its size class picks `_S`, `_B` or the
   plain set of acknowledgements, never the voice given last, queued behind the voices before
@@ -1516,7 +1518,7 @@ a row here. A row leaves this table when research closes it.
 | M4 | When a stream emits its first particle | on its first update inside its window | [11](../docs/11-effects.md#bolts-streams-and-fades--read-and-measured) |
 | M4 | What slows an ambient stream: the read clock, emission and ageing give C03 M01's volcano smoke about twice the speed and flicker rate Part 5 of the let's play shows | the streams of every load group's effects (buildings, trees, stones) and of a lode's plume run at half pace; the construction sphere's and every gun's and round's run as read | [11](../docs/11-effects.md#bolts-streams-and-fades--read-and-measured) |
 | M4 | Which draws the game's generator makes, now that the generator itself is read: its thirteen states are module-wide and a burst's spawn draws are not reproducible from an instance | the game's own shift register, but seeded per burst so a redrawn frame gives the same particles | [11](../docs/11-effects.md#the-generator--read-and-measured) |
-| M5 | How Direct3D Sound places a sound between the speakers | panned by its direction against the eye's right | [11](../docs/11-effects.md#not-resolved) |
+| M5 | The curve Direct3D Sound's own mixer pans on between the middle and either side, which is in no file of the game's: every buffer asks for plain stereo panning (`DS3DALG_NO_VIRTUALIZATION`), which Microsoft documents as one speaker alone at 90° and blind to height; and the size of the Doppler shift the game's velocities drive at a factor of 1 | the sine of the bearing in the listener's level plane, the camera's front and top; no Doppler shift | [11](../docs/11-effects.md#how-a-sound-is-heard--read-and-measured) |
 | M5 | Where a caller of text-out puts the next line: the font gives its height and the routine draws one line | a line is the glyph cell, the header's height plus one, which is also the atlas's row pitch on all eleven fonts | [12](../docs/12-rsli.md#not-resolved) |
 | M6 | How the loader turns a `varset.var` default into a value | an integer type reads hex after `0x`, a decimal, or a float truncated; a float reads its decimal; anything else is 0 (every shipped default reads either way) | [15](../docs/15-behaviour.md#the-vocabulary-varsetvar) |
 | M6 | The formula parser and evaluator, beyond the operator table's priorities | parse by those priorities, left to right among equals, in doubles; `!` is 1 for 0, `&` and `\|` are logical, `N` holds to 0..1, `S` is the sign, `B` is 1 for non-zero, `A` the absolute value; an unknown name is refused (the shipped formulas use numbers, variables, `+ - *` and brackets) | [15](../docs/15-behaviour.md#a-statement) |
