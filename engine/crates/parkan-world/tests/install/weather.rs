@@ -90,8 +90,12 @@ fn c03_m02s_lightning_strikes_the_map_every_six_to_nine_seconds() {
         strikes.push((bolt.start_ms, bolt.frame.origin));
         let at = bolt.frame.origin;
         assert!((lo[0]..=hi[0]).contains(&at.x) && (lo[1]..=hi[1]).contains(&at.y), "{at}");
-        // The effect stands half its 600 above the ground, 40 wide and 600 tall.
-        let ground = play.ground.landscape_top(at.x, at.y).unwrap_or(play.ground.world_box().0.z);
+        // The effect stands half its 600 above the ground, 40 wide and 600 tall: the face
+        // nearest the map box's floor, a liquid's bed where the point is over one.
+        let ground = play.ground.strike_floor(at.x, at.y).unwrap_or(play.ground.world_box().0.z);
+        if let Some(sheet) = play.ground.water(at.x, at.y, at.z) {
+            assert!(ground < sheet, "over the liquid at {sheet} the strike is measured to the bed, {ground}");
+        }
         assert!((at.z - ground - BOLT_HEIGHT / 2.0).abs() < 1e-3, "{at} over {ground}");
         assert_eq!(bolt.frame.axes.map(|a| a.length()), [40.0, 40.0, 600.0]);
         assert_eq!((bolt.effect.header.mode, bolt.effect.header.duration), (1, 0.75));
@@ -135,6 +139,33 @@ fn c03_m02s_lightning_strikes_the_map_every_six_to_nine_seconds() {
     }
     // A bolt hurts nothing: the hero stands as it stood.
     assert!(!play.hero.dead());
+}
+
+/// The strike's ground query looks from the map box's floor with nothing shut out, so over
+/// a liquid the landscape answers with the bed (`Terrain.dll:0x100218de`-`0x10021b79`, docs/10,
+/// "Lightning"). Mission 01's map, `Tut_1`, has a lake.
+#[test]
+#[ignore = "needs the game install"]
+fn a_strike_over_mission_01s_lake_is_measured_to_its_bed() {
+    let play = campaign_play("MISSIONS/CAMPAIGN/CAMPAIGN.00/Mission.01");
+    let land = &play.ground.land;
+    let mut over = 0;
+    for face in land.faces.iter().filter(|f| f.is_water()) {
+        let [a, b, c] = face.vertices.map(|v| Vec3::from_array(land.positions[usize::from(v)]));
+        let m = (a + b + c) / 3.0;
+        let Some(sheet) = play.ground.water(m.x, m.y, m.z) else { continue };
+        let Some(struck) = play.ground.strike_floor(m.x, m.y) else { continue };
+        if play.ground.cut(m.x, m.y) {
+            continue;
+        }
+        assert!(struck < sheet - 1e-3, "at {m}: struck {struck}, the sheet {sheet}");
+        assert_eq!(play.ground.landscape_top(m.x, m.y), Some(sheet), "a ray from above stops on the sheet");
+        over += 1;
+    }
+    assert!(over > 100, "{over} liquid faces sampled");
+    // The floor the query looks from is the lowest vertex, the stream-2 header's corner 0.
+    let lowest = land.positions.iter().map(|p| p[2]).fold(f32::MAX, f32::min);
+    assert_eq!(play.ground.world_box().0.z, lowest);
 }
 
 #[test]

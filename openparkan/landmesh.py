@@ -261,6 +261,14 @@ class LandMesh:
     layer2_names: list[str] = field(default_factory=list)
     #: The map's own spatial index, from stream 2; empty if it has none.
     cells: list[Cell] = field(default_factory=list)
+    #: The eight corners that head stream 2, in the file's order: the box
+    #: ``CLandscape`` keeps and hands out through its ``IMesh2``
+    #: (``Terrain.dll:0x1001781c``).  Corner 0 is the box's lowest corner on all
+    #: 33 maps, corner 1 that moved along x and corner 3 along y, which is how a
+    #: lightning strike reads them: its point takes x from 0 to 1, y from 0 to
+    #: 3 and **z from corner 0** (``0x100720b0``), so its ground is looked for
+    #: from the map's floor.
+    corners: list[tuple[float, float, float]] = field(default_factory=list)
     #: One entry per grid square, from stream 1: the cells that cover it.
     squares: list[tuple[int, ...]] = field(default_factory=list)
     #: The landscape's own grid, cells across and down.  ``CLandscape`` takes the
@@ -414,6 +422,41 @@ class LandMesh:
         return not (self.face_surface[face] & (SURFACE_WATER_BIT | SURFACE_NOT_GROUND_BIT)
                     or self.face_flags[face] & FLAGS_NOT_GROUND_BIT)
 
+    def strike_floor(self, x: float, y: float) -> float | None:
+        """The landscape's height a lightning strike at ``(x, y)`` is measured to.
+
+        The strike asks from the map box's floor, along z either way, with
+        nothing shut out (``Terrain.dll:0x10071d95``), and the landscape answers
+        such a query twice -- without the liquid's surface and without its bed --
+        each time with the first face of the cell's run that holds the point,
+        keeping the second only where it is nearer (``0x100218de``-``0x10021b79``).
+        From the floor the bed is the nearer, so over a lake this is the bed.
+        ``None`` off the mesh.
+        """
+        if getattr(self, "_grid", None) is None:
+            self._build_index()
+        floor = self.corners[0][2] if self.corners else self.bounds()[0][2]
+        sx, sy = self._grid_step
+        ox, oy = self._grid_origin
+        held = []
+        for fi in sorted(self._grid.get((int((x - ox) / sx), int((y - oy) / sy)), ())):
+            a, b, c = (self.positions[i] for i in self.faces[fi])
+            den = (b[1] - c[1]) * (a[0] - c[0]) + (c[0] - b[0]) * (a[1] - c[1])
+            if abs(den) < 1e-12:
+                continue
+            l1 = ((b[1] - c[1]) * (x - c[0]) + (c[0] - b[0]) * (y - c[1])) / den
+            l2 = ((c[1] - a[1]) * (x - c[0]) + (a[0] - c[0]) * (y - c[1])) / den
+            l3 = 1.0 - l1 - l2
+            if l1 < 0 or l2 < 0 or l3 < 0:
+                continue
+            held.append((fi, l1 * a[2] + l2 * b[2] + l3 * c[2]))
+        dry = [z for f, z in held if not self.is_water(f)]
+        unbedded = [z for f, z in held if not self.face_flags[f] & FLAGS_LIQUID_BED_BIT]
+        best = dry[0] if dry else None
+        if unbedded and (best is None or abs(unbedded[0] - floor) < abs(best - floor)):
+            best = unbedded[0]
+        return best
+
     def water_faces(self) -> list[int]:
         return [i for i in range(self.face_count) if self.is_water(i)]
 
@@ -518,6 +561,13 @@ class LandMesh:
 def _read_wea(path: Path) -> list[str]:
     """Read a ``.wea`` name table from disk; the same format objects use."""
     return read_wea(path.read_bytes()) if path.exists() else []
+
+
+def parse_corners(raw: bytes | None) -> list[tuple[float, float, float]]:
+    """The eight box corners that head stream 2, or none where it is short."""
+    if not raw or len(raw) < BOX_HEADER:
+        return []
+    return [struct.unpack_from("<3f", raw, 12 * i) for i in range(BOX_CORNERS)]
 
 
 def parse_cells(raw: bytes | None) -> list[Cell]:
@@ -662,6 +712,7 @@ def load(path: str | Path) -> LandMesh:
 
     return LandMesh(
         cells=parse_cells(archive.one_of_type(STREAM_BOUNDS)),
+        corners=parse_corners(archive.one_of_type(STREAM_BOUNDS)),
         squares=parse_squares(archive.one_of_type(STREAM_SQUARES)),
         grid=grid,
         draw_order=parse_draw_order(raw_draw),

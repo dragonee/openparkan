@@ -31,6 +31,39 @@ def test_the_lava_bit_is_clear_on_lava():
     assert mesh.is_lava(2)
 
 
+def test_stream_2_is_headed_by_the_boxs_eight_corners():
+    import struct
+
+    corners = [(0.0, 0.0, -3.5), (100.0, 0.0, -3.5), (100.0, 80.0, -3.5), (0.0, 80.0, -3.5),
+               (0.0, 0.0, 40.0), (100.0, 0.0, 40.0), (100.0, 80.0, 40.0), (0.0, 80.0, 40.0)]
+    raw = b"".join(struct.pack("<3f", *c) for c in corners) + bytes(landmesh.CELL_START)
+    assert landmesh.parse_corners(raw) == corners
+    assert landmesh.parse_corners(raw[:90]) == []
+    assert landmesh.parse_corners(None) == []
+
+
+def test_a_strike_over_a_lake_is_measured_to_its_bed():
+    """From the box's floor the bed is nearer than the sheet, and the bed is the answer."""
+    bed, sheet, dry = 0, 1, 2
+    mesh = landmesh.LandMesh(
+        positions=[(0.0, 0.0, 2.0), (20.0, 0.0, 2.0), (0.0, 20.0, 2.0),
+                   (0.0, 0.0, 5.0), (20.0, 0.0, 5.0), (0.0, 20.0, 5.0),
+                   (20.0, 0.0, 0.0), (40.0, 0.0, 0.0), (20.0, 20.0, 0.0)],
+        normals=[], uv1=[], uv2=[], blend=[],
+        faces=[(0, 1, 2), (3, 4, 5), (6, 7, 8)],
+        adjacency=[(0xFFFF,) * 3] * 3,
+        face_flags=[landmesh.FLAGS_LIQUID_BED_BIT, 0, 0],
+        face_surface=[0x10, 0x12, 0x10],
+        face_tex1=[0, 0, 0], face_tex2=[0xFF] * 3, face_patch=[0] * 3,
+        corners=[(0.0, 0.0, 0.0), (40.0, 0.0, 0.0), (40.0, 20.0, 0.0), (0.0, 20.0, 0.0)] * 2,
+    )
+    assert mesh.is_water(sheet) and not mesh.is_water(bed) and not mesh.is_water(dry)
+    assert mesh.strike_floor(5.0, 5.0) == 2.0, "the bed, 2 over the floor, not the sheet at 5"
+    assert mesh.height_at(5.0, 5.0) == 5.0, "where a thing standing on the map rests"
+    assert mesh.strike_floor(25.0, 5.0) == 0.0
+    assert mesh.strike_floor(35.0, 19.0) is None, "off the mesh"
+
+
 def test_water_keeps_the_bit_set():
     """Water is 0x12: liquid, and not lava."""
     mesh = build([0x10, 0x12])

@@ -415,6 +415,61 @@ impl Ground {
         land.chain(self.footing_faces(x, y).map(|h| h.point.z)).reduce(f32::max)
     }
 
+    /// The ground a lightning strike is measured to at `(x, y)` (`Terrain.dll:0x10071d95`–
+    /// `0x10071e32`, docs/10, "Lightning"): `IWorld` slot 8 (`0x10025b40`) asked along z in
+    /// both directions (register 2, no direction bit) from **the map box's floor** -- the
+    /// strike's point takes its z from corner 0 of the landscape's box, the stream-2 header's,
+    /// which is the lowest vertex's on all 33 maps -- with a query of all twelve classes and
+    /// nothing required or excluded (`{0xfff, 0, …}`, the static at `0x100a6f54` written by
+    /// `0x100723d0`). Every object answers, and the nearest answer to that floor wins
+    /// (`0x10025c3b`).
+    ///
+    /// The landscape answers a query that neither asks for nor shuts out its liquids twice
+    /// (`0x100218de`–`0x10021b79`): once without the liquid's surface and once without its
+    /// bed, each the first face of the cell's run that holds the point, and keeps the second
+    /// only where it is nearer. From the floor the bed is the nearer, so **over a lake a
+    /// strike is measured to the bed, not the sheet**. A building's footing stands where it
+    /// cut the landscape away, and a solid answers with its walk face either way.
+    pub fn strike_floor(&self, x: f32, y: f32) -> Option<f32> {
+        let floor = self.world.0[2];
+        let gap = |z: f32| (z - floor) * (z - floor);
+        let nearer = |best: Option<f32>, z: f32| match best {
+            Some(b) if gap(z) >= gap(b) => Some(b),
+            _ => Some(z),
+        };
+        let cut = self.cut(x, y);
+        let bed = |f: usize| self.land.faces[f].flags & FLAGS_LIQUID_BED_BIT != 0;
+        // The cell's run in the file's order: the faces of both indexes, by their number.
+        let first = |skip: &dyn Fn(usize) -> bool| {
+            self.holding_in(&self.cells, x, y)
+                .chain(self.holding_in(&self.water, x, y))
+                .filter(|&(f, _)| !cut && !skip(f))
+                .min_by_key(|&(f, _)| f)
+                .map(|(_, z)| z)
+        };
+        let without_sheet = first(&|f| self.land.faces[f].is_water());
+        let without_bed = first(&bed);
+        let mut best = without_sheet;
+        if let Some(z) = without_bed {
+            best = nearer(best, z);
+        }
+        for h in self.footing_faces(x, y) {
+            best = nearer(best, h.point.z);
+        }
+        let p = Vec3::new(x, y, floor);
+        for s in self.solids.iter().filter(|s| s.present) {
+            if s.centre.truncate().distance(p.truncate()) > s.radius + crate::solid::WALK_MARGIN {
+                continue;
+            }
+            for up in [true, false] {
+                if let Some((_, z)) = s.walk_face(p, up) {
+                    best = nearer(best, z);
+                }
+            }
+        }
+        best
+    }
+
     /// The top face at `(x, y)` of the solids `keep` names, as a ray from above the world meets
     /// it: a face the ray reaches from its front, its normal up, or any face of a batch flagged
     /// 2, which is struck from either side ([`crate::hit`]); a batch flagged `0x400` is passed,
@@ -623,6 +678,91 @@ pub(crate) mod tests {
         assert!(hit.walkable());
         assert_eq!((g.water(30.0, 5.0, 0.0), g.water(30.0, 5.0, 9.0)), (Some(5.0), Some(5.0)));
         assert_eq!(g.water(5.0, 30.0, 0.0), None, "the sheet covers only the first half");
+    }
+
+    /// A lightning strike's ground query looks from the map box's floor with nothing shut
+    /// out, and the landscape answers it once without the sheet and once without the bed
+    /// (`Terrain.dll:0x100218de`-`0x10021b79`): the bed is the nearer to the floor.
+    #[test]
+    fn a_strike_over_a_lake_is_measured_to_the_bed_and_not_the_sheet() {
+        // A bed at 2 under a sheet at 5 over x 0 to 20, dry ground at 3 beside it, and the
+        // box's floor at 0 in a pit past x 40.
+        let mut g = quads(&[
+            [[0.0, 0.0, 2.0], [20.0, 0.0, 2.0], [20.0, 40.0, 2.0], [0.0, 40.0, 2.0]],
+            [[0.0, 0.0, 5.0], [20.0, 0.0, 5.0], [20.0, 40.0, 5.0], [0.0, 40.0, 5.0]],
+            [[20.0, 0.0, 3.0], [40.0, 0.0, 3.0], [40.0, 40.0, 3.0], [20.0, 40.0, 3.0]],
+            [[40.0, 0.0, 0.0], [60.0, 0.0, 0.0], [60.0, 40.0, 0.0], [40.0, 40.0, 0.0]],
+        ]);
+        let mut land = g.land.clone();
+        for f in 0..2 {
+            land.faces[f].flags |= FLAGS_LIQUID_BED_BIT;
+            land.faces[f + 2].surface |= SURFACE_WATER_BIT;
+        }
+        g = Ground::new(land);
+        assert_eq!(g.world_box().0.z, 0.0, "the floor the strike looks from");
+        assert_eq!(
+            g.strike_floor(10.0, 10.0),
+            Some(2.0),
+            "the bed, 2 from the floor, not the sheet 5 from it"
+        );
+        assert_eq!(g.landscape_top(10.0, 10.0), Some(5.0), "where a ray from above meets the sheet");
+        assert_eq!(g.strike_floor(30.0, 10.0), Some(3.0), "dry ground has the one face");
+        assert_eq!(g.strike_floor(-5.0, 10.0), None, "off the map");
+    }
+
+    /// Each of the landscape's two passes takes the first face of the cell's run that holds
+    /// the point, whichever way it lies (`0x10021cc6`-`0x100220fa`): no shipped map has two
+    /// dry faces at two heights over one point (0 of 118800), so only the rule is pinned.
+    #[test]
+    fn a_strike_takes_the_first_face_of_the_cells_run_and_a_solids_only_if_nearer_the_floor() {
+        let shelf_first = quads(&[
+            [[0.0, 0.0, 1.0], [20.0, 0.0, 1.0], [20.0, 40.0, 1.0], [0.0, 40.0, 1.0]],
+            [[0.0, 0.0, 0.0], [40.0, 0.0, 0.0], [40.0, 40.0, 0.0], [0.0, 40.0, 0.0]],
+        ]);
+        assert_eq!(shelf_first.strike_floor(10.0, 10.0), Some(1.0), "the run's first face");
+        let mut g = quads(&[[[0.0, 0.0, 0.0], [40.0, 0.0, 0.0], [40.0, 40.0, 0.0], [0.0, 40.0, 0.0]]]);
+        // A roof at 4 over x and y 0 to 20, and a cellar floor at −3 under the same square.
+        let slab = |z: f32| {
+            use crate::solid::{SolidFace, SolidNode};
+            let [a, b, c, d] =
+                [[0.0, 0.0], [20.0, 0.0], [20.0, 20.0], [0.0, 20.0]].map(|[x, y]| Vec3::new(x, y, z));
+            let face = |a, b, c| SolidFace {
+                a,
+                b,
+                c,
+                normal: Vec3::Z,
+                triangle_flags: 0,
+                batch_flags: 0,
+                surface: None,
+                damage_rate: 0.0,
+            };
+            let centre = Vec3::new(10.0, 10.0, z);
+            Solid {
+                centre,
+                radius: 15.0,
+                ground: true,
+                present: true,
+                mass: 0.0,
+                faces: vec![face(a, b, c), face(a, c, d)],
+                nodes: vec![SolidNode { centre, radius: 15.0, faces: 0..2, part: 0, node: 0, open: false }],
+            }
+        };
+        g.solids.push(slab(4.0));
+        assert_eq!(g.strike_floor(10.0, 10.0), Some(0.0), "a roof at 4 is farther from the floor");
+        g.solids.push(slab(-0.5));
+        assert_eq!(g.strike_floor(10.0, 10.0), Some(0.0), "the landscape's own answer is the floor itself");
+        g.solids[1].present = false;
+        g.solids[0] = slab(-3.0);
+        let mut pit = quads(&[
+            [[0.0, 0.0, 6.0], [40.0, 0.0, 6.0], [40.0, 40.0, 6.0], [0.0, 40.0, 6.0]],
+            [[40.0, 0.0, 0.0], [60.0, 0.0, 0.0], [60.0, 40.0, 0.0], [40.0, 40.0, 0.0]],
+        ]);
+        pit.solids.push(slab(2.0));
+        assert_eq!(
+            pit.strike_floor(10.0, 10.0),
+            Some(2.0),
+            "a face 2 from the floor, under ground 6 from it"
+        );
     }
 
     #[test]

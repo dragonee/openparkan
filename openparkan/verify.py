@@ -1497,6 +1497,67 @@ def check_water(check, game: Path) -> None:
           f"without writing depth")
 
 
+def _height(mesh, face: int, x: float, y: float) -> float:
+    """A face's plane at ``(x, y)``, from its three corners."""
+    p, q, r = (mesh.positions[v] for v in mesh.faces[face])
+    den = (q[1] - r[1]) * (p[0] - r[0]) + (r[0] - q[0]) * (p[1] - r[1])
+    l1 = ((q[1] - r[1]) * (x - r[0]) + (r[0] - q[0]) * (y - r[1])) / den
+    l2 = ((r[1] - p[1]) * (x - r[0]) + (p[0] - r[0]) * (y - r[1])) / den
+    return l1 * p[2] + l2 * q[2] + (1.0 - l1 - l2) * r[2]
+
+
+def check_strike_floor(check, game: Path) -> None:
+    """Where a lightning strike's ground query lands (docs/10, "Lightning")."""
+    maps = gamedir.maps(game)
+    floors = points = one = pairs = edge = other = none = on_bed = under = 0
+    steps = 60
+    for d in maps:
+        m = landmesh.load(d / "Land.msh")
+        lo, hi = m.bounds()
+        c = m.corners
+        floors += (len(c) == landmesh.BOX_CORNERS and _near(c[0], lo)
+                   and _near(c[1], (hi[0], lo[1], lo[2])) and _near(c[3], (lo[0], hi[1], lo[2])))
+        m._build_index()
+        sx, sy = m._grid_step
+        ox, oy = m._grid_origin
+        for i in range(steps):
+            for j in range(steps):
+                x = c[0][0] + (i + 0.37) / steps * (c[1][0] - c[0][0])
+                y = c[0][1] + (j + 0.61) / steps * (c[3][1] - c[0][1])
+                cell = m._grid.get((int((x - ox) / sx), int((y - oy) / sy)), ())
+                held = [f for f in cell if _covers(m, [f], x, y)]
+                points += 1
+                wet = [f for f in held if m.is_water(f)]
+                bed = [f for f in held if m.face_flags[f] & landmesh.FLAGS_LIQUID_BED_BIT]
+                if not held:
+                    none += 1
+                elif len(held) == 1:
+                    one += 1
+                elif len(held) == 2 and len(wet) == 1 and len(bed) == 1:
+                    pairs += 1
+                    z = m.strike_floor(x, y)
+                    on_bed += z is not None and abs(z - _height(m, bed[0], x, y)) < 1e-3
+                    under += z is not None and z < _height(m, wet[0], x, y) - 1e-3
+                elif not wet and len({round(_height(m, f, x, y), 2) for f in held}) == 1:
+                    edge += 1
+                else:
+                    other += 1
+    check("Land.msh: stream 2's corner 0 is the box's floor, corners 1 and 3 its x and y",
+          floors == len(maps),
+          f"{floors}/{len(maps)} maps: corner 0 is the lowest corner of the mesh's own bounds, "
+          f"corner 1 that moved along x and corner 3 along y -- the three a lightning strike "
+          f"draws its point from, its z corner 0's (Terrain.dll:0x100720b0)")
+    check("Land.msh: a strike's point has one landscape face, or a liquid's sheet and its bed",
+          points and not none and not other and on_bed == pairs,
+          f"{points} points, {steps} x {steps} over each of the {len(maps)} maps' boxes: "
+          f"{one} have one level-0 face over them, {pairs} two, a liquid's sheet and its "
+          f"bed, {edge} lie on an edge two dry faces share at one height, and {other} are "
+          f"anything else; {none} have none.  Asked from the box's floor with nothing shut "
+          f"out, the landscape answers the bed on {on_bed}/{pairs} of the pairs "
+          f"(Terrain.dll:0x100218de), which lies under the sheet on {under} and level with "
+          f"it on {pairs - under}")
+
+
 #: ``Terrain.dll``'s render settings by index, as ``0x1005eb10`` names them.
 REFLECTION_SETTINGS = {25: ("UseEmbossBump", 2), 26: ("UseReflections", 2),
                        30: ("UseEMBMReflections", 2), 31: ("EMBMCoeff00", 0),
@@ -27636,7 +27697,8 @@ def run(game: Path) -> int:
     print(f"verifying against {game}\n")
     checks = (
         check_nres, check_texm, check_terrain, check_uv,
-        check_water, check_water_reflection, check_layers, check_materials, check_material_draw,
+        check_water, check_strike_floor, check_water_reflection, check_layers, check_materials,
+        check_material_draw,
         check_sky,
         check_render_state, check_shade, check_light_highlights, check_blend_depth,
         check_minimap_agreement, check_arealmap,

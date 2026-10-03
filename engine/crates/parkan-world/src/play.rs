@@ -1442,17 +1442,18 @@ impl Play {
     /// the effect's own light, which the effects' lights carry like any other (docs/11, "What
     /// a light does to a surface").
     ///
-    /// STAND-IN: docs/10-sky.md#lightning--read-measured-and-seen -- which faces the
-    /// landscape's query for the ground under the strike takes is not read (slot 8, kind 2,
-    /// with the default filter): here the landscape's top face, and the map box's floor where
-    /// there is none.
+    /// The ground is [`Ground::strike_floor`]'s: the face nearest the map box's floor of
+    /// everything standing at the point, which over a lake is the bed. Where nothing answers,
+    /// the game's query leaves its record's height unwritten; no point of the shipped
+    /// landscapes lacks a face (0 of 118800 lattice points, docs/10, "Lightning"), and here the
+    /// box's floor stands for it.
     fn lightning(&mut self, now_ms: f64) {
         let (lo, hi) = self.ground.bounds();
         let Some((strike, effect)) = self.weather.as_mut().and_then(|w| w.strike(now_ms, lo, hi)) else {
             return;
         };
         let ground =
-            self.ground.landscape_top(strike.x, strike.y).unwrap_or_else(|| self.ground.world_box().0.z);
+            self.ground.strike_floor(strike.x, strike.y).unwrap_or_else(|| self.ground.world_box().0.z);
         let across = if strike.mirrored { -Vec3::Y } else { Vec3::Y };
         let frame = Frame {
             origin: Vec3::new(strike.x, strike.y, ground + BOLT_HEIGHT * 0.5),
