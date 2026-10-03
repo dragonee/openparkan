@@ -1942,6 +1942,23 @@ with the particle (`0x10012bf0`). The volcano's smoke ends 100 ± 30 m up and
 line, and a plume breaks into the separate billows the recording shows (4:19.4
 on), where puffs all on one line had made a smooth cone.
 
+**And a matrix of its own** (*read*, and against what is *seen*). The spawn also
+keeps a matrix with each particle (`0x10011daf`–`0x10011e73`, into the ring's
+64-byte slots at `+0x34`), which the draw turns it through in place of the
+instance's (`0x10012279`): its first axis is the **direction the effect moved**
+since the last emission, made unit (`0x10011bd6`, a maths slot not followed) — or
+the frame's own first axis where it has not moved (`0x10011b83`–`0x10011bb1`) —
+its second the frame's **third axis crossed with that**, its third the first
+crossed with the second, and its origin where the particle left. Where the three
+are parallel the frame about the one direction stands in (`0x10011e75`). So a
+trail's puffs are laid along the path. And by the read the second and third
+axes are as long as the frame's third, where the first is a unit: a stream on a
+frame whose third axis is 2.6 long, as a chimney's `Smoke_d` is, would rise 2.6
+times its block's 50 m. The recording has the Large Factory's plume dark to about
+29 m over the chimney and 31 across, which is the block's own 50 ± 15 m and 30,
+fading as it does; so openparkan only turns a stream's particles by its frame,
+and what takes the 2.6 out is **not established**.
+
 **A fade value.** A burst particle hands the renderer
 **+8 + (+12 − +8) × age^+16** (`0x100013c2`), a stream particle
 +4 + (+8 − +4) × age^+12 (`0x10012322`), a sprite +20 + (+24 − +20) ×
