@@ -600,6 +600,13 @@ impl TerrainRenderer {
 
     /// The ground into the reflection: every face but the water's and the beds', through the
     /// reflection camera.
+    ///
+    /// STAND-IN: docs/03-terrain.md#not-established -- the game's reflection camera, its mode
+    /// word not 0, passes over the beds and draws the water faces too, as ordinary surfaces of
+    /// group 1, while its eye is under no liquid, and draws the beds alone while it is
+    /// (`Terrain.dll:0x10043ccc`-`0x10043d11`). How the liquid's own surface and the mirrored
+    /// scene behind it share that picture is not read, so here the water is left out wherever
+    /// the eye stands and the ground is drawn wherever it stands.
     pub fn draw_reflection(&self, pass: &mut wgpu::RenderPass<'_>) {
         pass.set_pipeline(&self.reflection_pipeline);
         pass.set_bind_group(0, &self.reflection_frame_bind_group, &[]);

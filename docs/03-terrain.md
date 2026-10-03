@@ -1035,8 +1035,10 @@ map or the dome's colours. **It is the scene drawn a second time, through a came
 standing at the eye mirrored in the water plane** (`Terrain.dll`). There are
 two ways of doing that, and the shipped `Iron_3D.ini` picks the second:
 
-- **`REFLECTION`**: the mirrored scene is drawn into the frame, and the water
-  faces are left out, so the lake is a hole in the ground it shows through.
+- **`REFLECTION`**: the mirrored scene is drawn into the frame, and the
+  scene's camera leaves the water faces out, so the lake is a hole in the
+  ground the mirrored frame shows through. The mirrored camera draws them
+  itself, in a pass of their own, while its eye is under no liquid.
 - **`REFLECTION_SHIFTED`**: the mirrored scene is drawn into a small texture,
   and each water face draws that texture through an environment-mapped bump
   map, tinted by its lit colour.
@@ -1157,12 +1159,68 @@ of the 256 texture. The boxes run from 119 × 663 (0.47 × 2.59 a texel) to
 - **a liquid-bed face** (field 0 `0x2000`) **is not drawn** (`0x10043c43`,
   `0x10043c9f`), whatever the settings;
 - **a water face**, with `UseReflections` on, marks the frame (above), and:
-  - under `REFLECTION` **is not drawn** (`0x1004449b`);
+  - under `REFLECTION` **is not drawn** by the scene's camera (`0x1004449b`);
   - under `REFLECTION_SHIFTED` its batch draws as a surface of its own
     (`0x1002ca80`, called at `0x10043b39` and `0x100443cb`): the batch's
     vertices and colours, with two new UV sets, two textures and render
     phase 10.
 - With `UseReflections` off a water face draws its material like the ground.
+
+**The test, branch by branch** (`0x1004445b`–`0x1004454b`). A water face is
+passed over only when all four
+hold: `UseReflections` is on, the face is water, the drawing camera's mode
+word `CShade +0xbcc` is 0, and `UseEMBMReflections` is off (`0x1004449b`).
+The first three alone mark the frame (`0x10044488`). A face that is not passed
+over is drawn through the ground's own builder, and what differs is **where
+its item is filed**: a ground face in group 0, layer 0 (`0x10044550`), a water
+face in **group 1** (`0x10044510`), at **layer 12** where `UseReflections` is
+on and `UseEMBMReflections` off (`0x1004452f`) and at **layer 1** otherwise
+(`0x1004453b`); the pair goes to the prim buffer's add with the item
+(`0x10043b59`–`0x10043b72`, and `0x10043b8f` for the ordinary surface). Layer
+12 is the one layer of group 1 whose pass is of type 5
+([10-sky.md](10-sky.md#the-dome)). Under `REFLECTION_SHIFTED` the flush hands
+a water batch to `0x1002ca80` only while the mode word is 0 (`0x10043af4`–
+`0x10043b39`, and the three flushes like it at `0x100440f6`, `0x1004438f` and
+`0x10044dcf`); with the word set it is an ordinary surface. And **a water face
+takes the microtexture's flag whatever the mode word says** — the test that
+drops it under a camera of another mode asks first that the face is not water
+(`0x1004455e`–`0x100445a4`) — so a liquid that is drawn as itself carries its
+`*M` twin's texture into the builder. *Measured*: all 2624 `ENV_NLAVA` faces carry
+`0x608`, the `0x400` among it, and their twin on all four maps is
+`ENV_NLAVA_M`, `LAV07.0`.
+
+So layer 12 is reached only by a camera whose mode word is not 0, under
+`REFLECTION`: a liquid drawn as its own material, in a pass of its own kind,
+in a frame the mirrored scene is drawn into — and the reflection camera is
+such a camera: its mode, 1, is handed to its buffering camera, which is where
+the word comes from ([below](#not-established)). So under `REFLECTION` the
+mirrored camera draws the liquid and the scene's camera leaves it out, where
+this page had the liquid drawn by neither. **That is the one path read here
+on which a liquid's own texture and its reflection share a frame.** How they
+share it is not: the liquid's plane lies between the mirrored eye and all it
+mirrors, so an opaque, depth-tested surface would hide the lot, and what pass
+type 5 does with an item is not read.
+
+**What the reflection camera draws of the landscape** (`0x10043bff`–
+`0x10043d11`). The bed and under-water tests above are the scene camera's:
+they run only while the mode word is 0 (`0x10043c12`). A camera of another
+mode is asked less. With the under-water flag `+0xbb0` clear it passes over
+the beds and draws every other face, **the water's among them**
+(`0x10043cea`–`0x10043cff`) — as an ordinary surface, the flush having the
+`REFLECTION_SHIFTED` one only for the scene's camera; with the flag set it
+draws the beds and nothing else (`0x10043d01`–`0x10043d11`). So what the
+mirror holds of a lake depends on where the eye stands: over the liquid, the
+objects and the sky; off it, the ground and the liquid's own surface as well,
+in group 1. The engine leaves the water out of the reflection wherever the
+eye is, and what the liquid's surface does to the mirrored scene behind it —
+it is the nearer of the two to the mirrored eye — is not read.
+
+**Which mode a machine runs is its `Iron_3D.ini`'s, and nothing else's.**
+`CShade` copies settings 26 and 30 as they stand (`0x10046d94`–`0x10046dbc`),
+with no test of the device between, and `iron3d.dll` sends `REFLECTIONS` and
+`EMBM` as the file has them (`0x10061736`, `0x10061795`). Compiled, setting
+30 is 0, which is `REFLECTION`; what `iron3d.dll` sends for a file with no
+`EMBM` line is not read.
 
 **The `REFLECTION_SHIFTED` surface** (`0x1002ca80`), for a vertex at
 (*x*, *y*) and the box from (*x*₀, *y*₀) to (*x*₁, *y*₁):
@@ -1280,16 +1338,33 @@ yet reproduced (below).
   which is one way a lake under a lifted sun comes out brighter than its sky
   (*derived*, and not checked against the recording's (162, 248, 253)). Or
   that machine did not draw phase 10 (its record needs capability `0x1`).
-- **How the recordings' machine draws a liquid.** C03 M01's lava at briefing
-  time 38 s ("Let's Play - Parkan: Iron Strategy, Part 5", PfAg6zSe-yM, 1:25)
-  shows **both** the lava's own texture, bright — (187, 4, 3) to (225, 8, 5),
-  `LAV00.0`'s cells plain in it — **and** the mirrored image of the plant
-  standing over it. That is neither way as read: `REFLECTION` leaves the
-  liquid's faces out, and `REFLECTION_SHIFTED` draws the reflection times the
-  lit colour with no texture of the liquid's, which is what the engine draws,
-  a flat dim red. The lava's faces carry water's flags exactly (`0x608`,
-  surface 2, on all 2624), so nothing in the file tells them apart; what that
-  machine's device ran in place of phase 10 is not read.
+- **How the recordings' machine draws a liquid** — *narrowed*. C03 M01's lava
+  at briefing time 38 s ("Let's Play - Parkan: Iron Strategy, Part 5",
+  PfAg6zSe-yM, 1:25) shows **both** the lava's own texture, bright —
+  (187, 4, 3) to (225, 8, 5), `LAV00.0`'s cells plain in it — **and** the
+  mirrored image of the plant standing over it; the engine, on
+  `REFLECTION_SHIFTED` as this install's ini has it, draws the reflection
+  times the lit colour, (137, 20, 22). What is read since: no device test
+  stands between the ini and the mode, so that machine's mode is its ini's,
+  which is not known, where the compiled default is `REFLECTION`; and under
+  `REFLECTION`
+  a liquid face that is drawn at all is drawn as its own material, in group
+  1's layer 12, by a camera whose mode word is not 0
+  ([How a water face draws](#how-a-water-face-draws--read)). That would put
+  the lava's own surface and the mirrored scene in one frame, which is what
+  the recording shows, and the reflection camera is such a camera
+  ([`CShade +0xbcc`](#not-established), below). **The number does not close
+  it.** At that moment the
+  sun's two lights lie along the ground — 0.05 of the second reaches a level
+  face and none of the first — so the lava's lit colour is the scene colour's
+  floor,
+  (0.65, 0.19, 0.25) over `ENV_NLAVA`'s ambient (0, 47, 0), and `LAV00.0`'s
+  mean is (174, 23, 0): the texture by that colour is (113, 4, 0), and
+  doubled through `LAV07.0`, whose mean is (175, 23, 0), (155, 1, 0). The
+  recording's (208, 7, 4) is the texture at about 1.2 of itself, or the first
+  of those with half a red sky added; neither blend is read. Not found: what
+  pass type 5 does with an item — how the liquid and the mirrored scene
+  behind it share the frame — and which mode the recording's machine ran.
 - **The microtexture on a liquid drawn without its reflection.** A water face
   skips the one-pass second stage (`0x1002b49d`) and takes the microtexture
   in passes of their own, within 260 units of the eye over the field of view
@@ -1298,6 +1373,13 @@ yet reproduced (below).
 - **What the pass flags `0x120` leave out of the reflection** — the world
   draw passes them on to what it draws (`0x1001c8a8`), and their tests were
   not followed.
+- **The liquid in its own reflection.** With the eye off the liquid the
+  reflection camera draws the water faces as ordinary surfaces of group 1
+  ([How a water face draws](#how-a-water-face-draws--read)); the engine
+  draws none. The liquid's plane is nearer the mirrored eye than anything it
+  mirrors, so how the two share the picture turns on the pass the item is
+  filed in — type 2 at layer 1, type 5 at layer 12 — and neither render is
+  read.
 - **Culling in a mirrored frame.** Both reflection transforms have a
   determinant of −1, which turns every triangle's winding round on screen;
   whether a cull mode is changed for the reflection was not found.
@@ -1309,10 +1391,26 @@ yet reproduced (below).
   stand for −1 to 1 on the device, which would make the largest displacement
   0.01 × 64 ÷ 127 ≈ 0.005 of the box, about 5.5 units on Tut_1 (*derived*
   from Direct3D's convention, not from this binary).
-- **`CShade +0xbcc`.** Every water test above also asks that it be 0; it is
-  the buffering camera's `+0x280` (slot 24, `0x10083010`), and no call to
-  its setter (slot 23, `0x10082fd0`) was found — searched as every call
-  through slot `0x5c` in `Terrain.dll` — so it is taken as always 0.
+- ~~**`CShade +0xbcc`.**~~ — **it is the drawing camera's mode, and it is
+  set.** The word is what slot 24 of the camera a draw begins with answers
+  (`0x10045f53`–`0x10045f65`), the buffering camera's `+0x280`
+  (`0x10083010`), and its setter is slot 23 of the same vtable, `0x1009c3b0`
+  (`0x10082fd0`, the entry at `0x1009c40c`). An earlier reading here found no
+  call to it and took the word as always 0. The call is `0x10085365`, and it
+  was missed for being read in the wrong coordinates: the routine it stands
+  in, `0x100852e0`, is slot 14 of the vtable `CCamera` installs at its `+4`
+  (`0x1009c5c4`, the entry at `0x1009c5fc`), so its `this` is four past the
+  object, and what it reads as `+0x198` and `+0x19c` are the object's
+  `+0x19c` and `+0x1a0` — the buffering camera's interface `0x12`, which the
+  constructor asks for there (`0x10083aca`–`0x10083aed`) and which is the
+  start of that object, the vtable with the setter in it (`0x100818e8`–
+  `0x10081911`, `0x10081587`), and **the camera's own mode** (`0x10083aa6`): 2 on `REFLECTION_SHIFTED`, 1 on `REFLECTION`, 0
+  on every other. Under a second argument that is not 0 it hands the one to
+  slot 23 of the other (`0x1008533e`–`0x10085365`). So the word is 0 while
+  the scene's camera draws and 1 or 2 while the reflection camera does, which
+  is what `CSun`'s draw and the sky's fourth draw ask of it
+  ([10-sky.md](10-sky.md#the-skys-first-draw-is-a-screen-wide-quad--read)).
+  Not read: who calls slot 14, and with what.
 - ~~**What a basement builder's piece is, and where the band is
   triangulated.**~~ — **read**: a piece is one triangle of a quad-edge
   constrained Delaunay triangulation; the band is the triangulation of the ring
