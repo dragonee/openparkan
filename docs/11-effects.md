@@ -311,7 +311,7 @@ record's id.
 | 0x80 / 0x100 | 110 on 0x100 | hold *t* at 0 while the manager's bit 0 (messages 23, 24) is clear / set |
 | 0x200 | — | × linear progress |
 | 0x400 | 114 | **draw nothing while the tested point is hidden** (`0x10008016`): the building and robot beacon lights, `f_*light*`, `rb_*light*` |
-| 0x800 | 198 | **drawn only by a draw call that passes a nonzero pass argument** (`0x10007d44`; the manager skips such a call outright when all its instances are 0x800, `0x10004061`) — which every call the game makes does ([below](#who-passes-the-draws-pass-argument--read)). Lights, sounds, breath and beacons |
+| 0x800 | 198 | **drawn only by a draw call that passes a nonzero pass argument** (`0x10007d44`; the manager skips such a call outright when all its instances are 0x800, `0x10004061`) — which the world's two managers always are, and a unit's own only while its owner is seen ([below](#which-draw-reaches-a-units-own-manager--read-and-measured)). Lights, sounds, breath and beacons |
 | 0x1000 | 14 | **hand the emitters the manager's target point** every manager tick (`0x10006349`, manager slot `0x44`); a type-5 bolt takes it for its start (`0x10003070`). Exactly the 14 effects with a bolt, all bolt-only |
 | 0x2000 | 1 | passed to the renderer as effect draw flag 4 (`0x1001088c`, and the same `shr 0xd` in the other three drawing classes at `0x100016c2`, `0x10002fe3`, `0x10012326`), which **holds the sprite's fog factor at 1** instead of taking it from the distance (`Terrain.dll:0x10028417` into the shader's colour call, `0x1004f841` against `0x1004bf20` — [above](#how-an-effect-sprite-is-coloured--read-and-measured)); `env_lightning` alone |
 | 0x8000 | 5 | skip the attach point's second test |
@@ -366,10 +366,63 @@ action that calls each ([13-control.md](13-control.md#the-section-5-record--read
   impact and explosion carries it.
 
 **The manager ticks** on message 28 with the time in milliseconds
-(`0x10003d54`): an instance updates when 100 ms have passed since its last
-update, or within 50 ms of a command to it. The emitters' own clock is
-**seconds since the instance started** (`0x1000846c`), which is what a phase
-"in seconds when negative" and a stream's interval count.
+(`0x10003d54`), and the emitters' own clock is **seconds since the instance
+started** (`0x1000846c`), which is what a phase "in seconds when negative" and a
+stream's interval count. Who sends the message, with which clock, and what opens
+the two 100 ms gates behind it is
+[below](#who-hands-a-manager-its-time--read-and-seen).
+
+### Who hands a manager its time — *read*, and *seen*
+
+**One clock, for every manager.** `stdCalculateGame` runs the game object
+queue's takt once a pass (`World3D.dll:0x10006bf0`). The takt reads
+`timeGetTime`, adds the clock's base and takes off what was spent paused
+(`0x10006c11`–`0x10006c44`), and sends that one number, in milliseconds, to every
+object in the queue's registry **twice**: as `send(6, 1, clock)` (`0x10006c6f`)
+and then, once the collision manager has been stepped with it (`0x10006cb8`), as
+`send(6, 0x1c, clock)` (`0x10006ce1`). The second is the effect managers' tick,
+and each owner hands it on with its argument untouched:
+
+| the owner | where message `0x1c` goes |
+|---|---|
+| an agent: a unit, a round, a tree or a stone — and a building's, the agent it aggregates, which its own `CBuilding::SendMsg` is taken to pass the message to (*inferred*, not followed) | its sub-code table (`AniMesh.dll:0x1000157d`, table `0x10001964`) sends it to its control system (`+0x158`), to `+0x15c` and to **its effect manager at `+0x174`** (`0x100015ba`–`0x100015f9`) |
+| the landscape | to the manager at its `+0x7be8` (`Terrain.dll:0x1001f0b1`–`0x1001f0d2`) |
+| the atmosphere | to the manager at its `+0x17c` (`Terrain.dll:0x100702ff`–`0x10070320`) |
+
+So a volcano's smoke, a chimney's, a gun's and a round's are all handed the same
+argument, the game clock, on every pass, and **nothing between the queue and a
+manager divides it, scales it or skips it**: there is no slower clock for an
+effect that hangs on a building or on scenery. The mission loop is not capped
+([14-controls.md](14-controls.md#a-row-that-stays-down--read)), so a pass is a
+drawn frame. A sweep for the constant does not find these: across the 21 modules
+only one site loads `0x1c` into `edx` within ten instructions of a call through a
+`+8` slot, `AniMesh.dll:0x1000145a` — and that one is the agent's (6, 1) arm
+posting its **collision object** at `+0x170`, four bytes before the manager
+(`Control.dll:0x10020010`), not the manager's tick. The three above forward the
+sub-code they were handed, in a register.
+
+**Two gates, and the draw opens both.** The manager keeps the time of its last
+update and passes a tick over until **more than 100 ms** have gone by
+(`Effect.dll:0x10003e5a`) — unless its flag 8 is set, which puts a deadline 50 ms
+on and lets every tick up to it through (`0x10003e41`–`0x10003e58`). The
+manager's own draw sets flag 8 once it is past its first test — a pass argument,
+or a live instance without `0x800` (`0x10004061`, `0x1000408d`) — and an update
+clears it (`0x10003e74`). An instance has the same pair: 100 ms since its last update
+(`0x100081a7`), or a deadline 50 ms on from its flag `0x40` (`0x1000817e`), which
+its constructor sets (`0x10007502`) and its draw sets again whenever it is called
+with a pass argument, or with the eye inside its sounds' sphere (`0x10007de5`),
+and once more when its level lets it draw (`0x10007e8e`).
+
+**So an effect that is being drawn updates on every pass, and one that is not,
+every 100 ms.** The "100 ms, or within 50 ms of a command" this page had for
+every instance is the pace of the unseen ones, and the command is the draw. Either
+way an emitter is handed elapsed seconds, so the gate changes how finely an
+effect moves and not how fast: a stream catches up on what it missed
+([below](#bolts-streams-and-fades--read-and-measured)).
+
+*Seen*: "Let's Play - Parkan: Iron Strategy, Part 5" (PfAg6zSe-yM), 19:26.5 —
+over fourteen consecutive frames at 60 a second a puff of a volcano's flame
+moves on in every one, where an update every 100 ms would hold it for six.
 
 ### Time mode 0 waits for a start — *read*, and *measured*
 
@@ -462,10 +515,10 @@ channel numbers instead, the seven name a channel on that node twice.
 | 4 | 0x104, `0x1001e754` | +32..+36 | type 3's phase (`0x100108f0`); its update scales the window's progress by the eye's distance in the frame over +200 (`0x100109b0`) | a **glow** that keeps its size on the screen — [below](#type-4-is-a-glow-sized-by-the-eyes-distance--read-and-seen) |
 | 5 | 0x54, `0x1001e360` | +12..+16 | a phase from +40, seconds when negative (`0x10002a20`); a start point, and sprites along the line from it to where the effect is now, each lerp(+24, +28) wide by the progress (`0x10002be0`) | a **bolt**: laser and shock tails, `hero_laser_bullet` — [below](#bolts-streams-and-fades--read-and-measured) |
 | 6 | 0x1c, `0x1001e738` | — | — | never shipped |
-| 7 | 0x48, `0x1001e228` | +20..+24 | +0x24 × +0x28 particles, each running +44 → +56 in place and +92 → +104 in size over its life, both jittered at the high end and shaped by the powers at +80 and +128 (`0x10001720`, `0x10001300`); its age = (phase − its spawn) / +0x1c, one-shot flag, drag, and a fade value from +8/+12/+16 | a **particle burst** — smoke, fire, splashes |
-| 8 | 0xac, `0x1001e71c` | +16..+20 | windowed on *t* unless +0x8c; one particle every +24..+28 seconds into a ring of +36 (`0x100115c0`), each running +88 → +100 in place and +136 → +148 in size, shaped by the powers at +124 and +172 | a **particle stream** — dust, missile smoke |
+| 7 | 0x48, `0x1001e228` | +20..+24 | +0x24 **groups** of +0x28 particles, each running +44 → +56 in place and +92 → +104 in size over its life, both jittered at the high end and shaped by the powers at +80 and +128 (`0x10001720`, `0x10001300`); a group's age = (progress − its spawn) / +0x1c, and it is gone past 1; a fall from +140, and a fade value from +8/+12/+16 | a **particle burst** — smoke, fire, splashes — [below](#a-burst-is-groups-that-leave-one-after-another--read-and-measured) |
+| 8 | 0xac, `0x1001e71c` | +16..+20 | one particle every +24..+28 seconds into a ring of +36 while *t* is inside the window (`0x100115c0`), each running +88 → +100 in place and +136 → +148 in size, shaped by the powers at +124 and +172; the particles out are drawn until their turn of the ring is over, window or no (`+0x8c` is their count) | a **particle stream** — dust, missile smoke — [below](#bolts-streams-and-fades--read-and-measured) |
 | 9 | 0x100, `0x1001e700` | +32..+36 | type 3 with its own update (slot 3, `0x100138c0`), which hands the draw a shape code from +200 in place of the quad's, a level and +204's bit | a **half sphere** in place of the quad, its pole on the sprite's own z — [below](#type-9-is-a-half-sphere--read-measured-and-seen) |
-| 10 | 0x48, `0x1001e24c` | +20..+24 | type 7 with its own start | particles (`NE_Gibs_Stn` debris) |
+| 10 | 0x48, `0x1001e24c` | +20..+24 | type 7 with its own load (`0x10001a40`), which clears the flag that ends a group at an age of 1 (`0x10001ab1`) | **debris** that flies on and falls for as long as its window is open (`NE_Gibs_Stn`) |
 
 *Measured*: the window is an ordered span inside 0..1 on **4736 of 4737**
 emitters; read four bytes early or late, 705.
@@ -524,6 +577,64 @@ its name: (0.5, 1, 1) on 134 blocks, (1.5, 1.5, 0.5) on
 `aim_light_L` and `aim_light_S`, the position of `env_lightning` — and **2** holds it near
 its low end almost to the end of the window, which is what `B_Sphere_Sign` and
 `B_Sphere_Start` open with.
+
+### A burst is groups that leave one after another — *read*, and *measured*
+
+A type-7 or type-10 block's two counts are not one product. **+0x24 is a number
+of groups and +0x28 the particles in each** (the load helper both share,
+`0x10001000`): the emitter keeps a spawn and a clock for every group (`+0x28`,
+`+0x30`) and a detail number for every particle (`+0x2c`,
+[below](#an-instances-level--read-and-measured)).
+
+**A group's spawn is fixed at the load, and nothing is drawn for it.** Group *i*
+of *n* leaves at
+
+```
+(1 − +28) × i ÷ n
+```
+
+of the way through the window (`0x1000118a`–`0x100011b3`), and the draw ages it
+as (progress − that) ÷ +28 (`0x1000135b`–`0x10001364`): **+28 is a group's life
+as a share of the window**, the groups leave evenly from the window's opening, and
+the last leaves so that its life ends inside it. Every particle of a group shares
+that age. A group whose age is still under 0 is not drawn (`0x10001376`), and one
+past 1 is not drawn either while the emitter's `+0x3c` is set (`0x1000137c`) —
+which the shared load sets (`0x10001023`) and **type 10's own load clears**
+(`0x10001ab1`). So a type-7 group is gone at the end of its life, and type-10
+debris flies on past it for as long as the window is open, its channels running
+on beyond their high ends.
+
+A particle's material stands at **(progress − spawn) ÷ +32**, the same
+difference before it is divided by the life (`0x10001618`–`0x10001664`;
+[below](#a-phase-is-where-its-materials-animation-stands--read-and-measured)).
+
+**+140 is a fall.** The load keeps `+140 × g ÷ 2` (`0x1000120a`–`0x10001220`),
+*g* the world's gravity from `IWorld` slot 4, 10.0
+([24-motion.md](24-motion.md#gravity--read-and-measured)), and each time a group
+is drawn its clock takes the step of the last update (`0x10001525`) and the
+group's place in the world drops by that figure × the clock squared
+(`0x10001507`–`0x100015c8`): a body let go, in the world's z, whichever way the
+effect's frame points. A negative +140 rises.
+
+*Measured* over the **1321** burst blocks (1161 of type 7, 160 of type 10):
+
+- **754** are one group and **567** more, up to 20; a group is 1 to 30 particles,
+  and the largest block is 60 in all. +28 is exactly 1 on **318**, under 1 on the
+  other 1003 (0.85 on 253, 0.7 on 164, 0.5 on 158) and over 1 on none.
+- **539** blocks in **315** effects have both more than one group and a life
+  under 1, so their groups really leave apart — all of them type 7. The last
+  group leaves 0.05 to 0.887 of the way through; on 183 blocks, ten groups living
+  0.85, at 0.135.
+- All **160** type-10 blocks are one group with a life of 0.25 (112), 0.45 (42) or
+  0.2 (6): three quarters of the window is spent past the age of 1. 118 fade to 0
+  by then and 42 hold their fade at 1, and are drawn the whole way.
+- **+140 is 0 on 660**, above 0 on **486** — 1.0 on 375, and every one of the 160
+  type-10 blocks — and below 0 on **175**, all type 7, the smoke and fire that
+  rise (−0.35 on 61, −0.15 on 43). 319 effects carry a burst that falls or rises.
+
+Not read: what a fade below 0 draws. A type-10 block that fades 1 → 0 by the power
+4 is at 1 − age⁴ past its age of 1, and the renderer passes over a fade of exactly
+0 alone (`Terrain.dll:0x1002887e`).
 
 ### A control-point frame's axes are depth, width and height — *measured*
 
@@ -814,10 +925,124 @@ show a few metres across.
   the whole cell texture, cyan veins round dark blue cells. The engine had one copy of
   the texture wrapped round the whole dome, a smooth swirl.
 
-Not read: what gives an instance its level. The manager's draw takes it from its
-`+8`'s `+0x14` object, slot `0x4c`, handed the camera and the instance's sphere
-(`Effect.dll:0x10007e6d`), and draws nothing at 8 or over; that object is outside this
-module. openparkan draws every dome at level 0.
+The level in the code's top two bits is the instance's, and the next section reads
+where it comes from: a dome is at its finest while its effect stands 70 pixels or
+more on the screen, or 120 on a building.
+
+### An instance's level — *read*, and *measured*
+
+**One writer, and it is the draw.** Every time the manager draws an instance
+(`Effect.dll:0x10007d10`) it asks the shade for a level — `CShade` slot 19,
+`Terrain.dll:0x10047fe0`, on the object the manager took from `GetShade`
+(`0x10007e6d`) — and puts the answer in the context it hands each emitter's draw,
+at `+0x60` (`0x10008084`). Nothing keeps it between draws and no setter reaches
+it: the instance has no level of its own. At **8 or over the instance draws
+nothing** (`0x10007e79`).
+
+**What the shade is handed**: the camera, the instance's sphere, and the
+instance's `+0xc` — the **world class of the manager's owner**, which the
+instance's constructor asks the owner for once (slot 11, `0x10007481`). An agent's
+class is its archive tag's — `BTLU` 4, `BULL` 9, `WPNS` 2, `STAT` 10 — or its
+owner's where something aggregates it, as a building does (3)
+(`AniMesh.dll:0x1000314c`–`0x100031c5`); the landscape answers 1.
+
+**The sphere** is the one about the instance's drawing emitters, worked out by
+the update (`Effect.dll:0x10008662`–`0x100087aa`): each emitter that is inside
+its window answers a sphere, and they are merged two at a time — the larger where
+they share a centre or one holds the other, the sphere about both otherwise. The
+sounds are merged apart, into a second sphere the draw only tests the eye
+against. An emitter's own:
+
+| type | centre | radius, in the block's own numbers |
+|---:|---|---|
+| 3, 4, 9 | the instance's origin | the longer of the size's two ends as vectors, plus the largest component of the position's two ends (`0x10010515`–`0x100105d8`, at the load) |
+| 7, 10 | the origin, less the fall | the longer of the position's two ends, plus the largest size component of either end, plus the largest size jitter, plus the position jitter's length (`0x10001068`–`0x10001178`) |
+| 8 | midway between where the particle about to be overwritten left and where the stream is | the same sum (`0x10011434`–`0x10011576`), plus a share of that distance (`0x1001198b`–`0x10011a2d`, read in outline) |
+| 5 | midway along the bolt | half its length (`0x10002b91`–`0x10002bc0`) |
+
+Once they are merged the update multiplies the radius by **the length of the
+longest of the instance's matrix's three axes** (`0x100087d8`–`0x100088a5`) —
+the frame's axis times the size asked for and the header's scale — so a sphere
+is in the world's metres whatever frame the effect hangs in. The jitters go in
+whole, so it is generous: `tree_light_33a`'s smoke answers 100 + 80 + 4 + 66.3 =
+250.3 m on its unit frame. An instance whose sphere has no radius is not drawn
+at all (`0x10007df3`), and one outside any of the shade's six planes is not
+either (`0x10007e2f`).
+
+**The size the level is cut from is in pixels.** The shade takes the viewport's
+width from the camera (slot 4, right less left) and the eye from its matrix
+(slot 37). With the eye inside the sphere the size is that whole width; outside
+it is
+
+```
+size = pixels per radian × atan2(r, sqrt(d² − r²))
+```
+
+(`0x100480d9`–`0x10048146`) — the angle the sphere's radius subtends, times
+camera slot 27, the viewport's width over its field of view
+([10-sky.md](10-sky.md#the-sun-and-the-moon-are-drawn)). So the
+level follows the **resolution**: at the game's 1.7 rad a 1024-pixel view has 602
+pixels to the radian and a 640-pixel one 376.
+
+**Two arms, by the owner's class** (`0x10048174`, the table at `0x10048291`):
+
+| owner's class | the size is scaled by | not drawn | 3 | 2 | 1 | else |
+|---|---|---|---|---|---|---|
+| 1, 2, 4, 7, 9, 10 — the landscape, a unit, a round, scenery | `RobotDetail`, 1.0, and only under 70 | under **4** (before scaling) | under **8** | under **30** | under **70** | 0 — or 1 where `RobotBestLOD` is 0 |
+| 3 — a building | `BuildingDetail`, 1.0 | under **10** | under **40** | under **80** | under **120** | 0 |
+| 5, 6, 8, and anything over 10 | — | | | | | the answer is **not written**: the routine returns its local as it found it (`0x10048288`) |
+
+The three settings are `Terrain.dll`'s own page, entries 7, 8 and 14, as compiled
+— no `shade.cfg` ships
+([10-sky.md](10-sky.md#the-render-settings)) — which the shade copies to its
+`+0x1648`, `+0x1644` and `+0x164c` (`0x10046cd6`–`0x10046d32`). No effect
+manager's owner answers 5, 6 or 8: every agent is 4, 9, 2 or 10 or takes its
+owner's 3. The atmosphere's own class is not read.
+
+**What the level gates** — the five readers of the context's `+0x60`, which a
+sweep for that displacement over the module's draws returns, and the manager's
+own test:
+
+| reader | what it does |
+|---|---|
+| the instance's draw, `0x10007e79` | **8 or over: nothing of the instance is drawn** |
+| a burst's draw, `0x100015eb`–`0x10001612` | passes a particle over while the level is **more than the particle's detail number** |
+| a stream's draw, `0x100120cc`–`0x100120ea` | the same |
+| a type-9 dome, `0x100138ec` | the level picks the hemisphere's detail; **over 3 it is not drawn** |
+| a sprite and a type-4 glow, `0x100106e2`, `0x100109cb` | not drawn at 8 or over, which the instance's own test has already seen to |
+
+A bolt, a light and a sound do not read it. **So the level thins bursts and
+streams**, which matters far more than a dome's quad count. A particle's detail
+number is drawn once, as it is made — a burst's at the load (`0x100011d5`), a
+stream's as it leaves (`0x10011d5d`) — by the settings page
+(`0x1000ec50`): a uniform in 0..1 times its group's "LOD distribution", less its
+group's "High quality LOD"
+([below](#which-effects-run-the-settings-switch--read-and-measured)). At the
+install's `RENDER_QUALITY=2` that is 0 to 3 in groups 0 and 1, 2 to 5.5 in group
+2 and 3 to 8.5 in group 3, and the level is 0 to 3, so:
+
+| group | level 1 | level 2 | level 3 |
+|---:|---|---|---|
+| 0, 1 | a third of the particles gone | two thirds | all |
+| 2 | none | none | two in seven |
+| 3 | none | none | none |
+
+*Measured* over the 923 effects: of the **1558** burst and stream blocks,
+**215** in **111** effects are in groups 0 and 1 and thin from level 1 — 73 bursts
+and 142 streams, the chimneys' and volcanoes' smoke and the walkers' dust among
+them; **531** in 132 effects are in group 2 and thin only at level 3; and **812**
+in 279 effects are in group 3 and never do — group 3's `0x311` "Explode" alone is
+on 237 effects. All **266** domes take their detail from it.
+
+How far that is, at 1024 pixels across. A sphere of 5 m on a robot is whole
+within 43 m, at level 1 to 100 m, 2 to 376 m, 3 to 752 m and gone past that; on a
+building it is whole within 25 m, at 1 to 38 m, 2 to 75 m, 3 to 301 m and gone
+past that. A chimney's smoke is far larger: `smoke_fr_02`'s block answers
+124.6 m and its frame's axes are 2.6 long, 324 m, which on a building's arm
+stays whole to 1640 m and loses its first third of puffs only from there.
+`tree_light_33a`'s 250 m keeps a volcano's smoke whole to 2160 m. So on the
+shipped maps it is the small effects that thin and go — a lamp, a muzzle's
+smoke, a walker's dust — and the plumes stay whole.
 
 ### The generator — *read*, and *measured*
 
@@ -935,7 +1160,7 @@ How each type works the phase out:
 |---:|---|---|
 | 3, 4, 9 | `base + (+12 − base) × x^(+16)`, `base` = max(+8, 0), *x* the progress through the window — or **the seconds since the instance started** when +8 < 0 | `0x100104d4` (the load), `0x100105f0` (the update) |
 | 5 | the same from +40 and +44, its exponent fixed at 1.0 | `0x100029f0`, `0x10002a5f` |
-| 7, 10 | the particle's age over **+32** when +32 ≤ 1, else the fractional part of age × +32; a value at 1 or over is held at **0.99** | `0x10001625`–`0x10001664` |
+| 7, 10 | the progress through the window since the particle's group left — its age **before** it is divided by the life at +28 — over **+32** when +32 ≤ 1, else the fractional part of that × +32; a value at 1 or over is held at **0.99** | `0x10001618`–`0x10001664` |
 | 8 | the particle's age **to the power of +32** — or, when +32 < 0, a number drawn for the particle as it left and kept for its life (`0x10011d84`) | `0x10012165`, `0x1001217f` |
 
 *Measured*: **2062 of the 3577** material references the emitters make name a
@@ -1632,14 +1857,80 @@ seconds since the instance started (`0x1000846c`, where the manager builds the
 context it hands the emitter's update, the time argument less the start, times
 0.001).
 
-*Seen*, and not explained by that: C03 M01's volcano (`s_tree_33`,
-`tree_light_33a`) in "Let's Play - Parkan: Iron Strategy, Part 5"
-(PfAg6zSe-yM, 4:19.4–4:24.4). Measured frame by frame at 60 fps, its smoke rises
-120–125 px/s where 1.6 s lives give the same view about 190 px/s against the
-puffs' width, and the flame's brightness beats at 5.3 Hz with almost no power at
-the 0.08 s interval's 12.5 Hz. Both put the game's ambient streams at about half
-the read pace; the column's shape — its width against its height — is the
-same, so what runs slow is the clock, not the geometry.
+**The stamp starts unset, and the first update inside the window only sets it**
+(*read*). The stamp of the last emission is the emitter's `+0x24`, and **0 is
+that stamp unset**:
+
+- the load writes 0 (`0x10011257`), and so does every update that finds *t*
+  outside the window with no particle live (`0x10011628`–`0x10011655`);
+- an update that finds it 0 makes it *now*, notes where the effect is, and
+  **leaves without emitting** (`0x10011668`–`0x100116bf`);
+- one that finds it ahead of *now* — a start has moved the instance's clock
+  back — pulls it back to *now* (`0x100116c0`–`0x100116ce`), and the particles
+  already out stay in the ring;
+- only then does the loop run, and its test is strict: stamp + interval **<**
+  now.
+
+So a stream's first particle leaves on the first update **more than an interval
+after** the first update inside its window — never at the window's opening, and
+never a ring's worth at once for an effect that began long before it was first
+updated. An update whose clock is exactly 0, the one an instance gets in the
+millisecond it starts, stamps a 0 and so leaves the stamp unset for the next.
+
+**Two intervals, and a ring that turns after the window shuts** (*read*). The
+test adds lerp(+24, +28) by the **progress through the window**, held to 0..1
+(`0x10011a30`–`0x10011a78`); the step that moves the stamp on adds lerp(+24, +28)
+by the effect's ***t* itself** (`0x10011c66`–`0x10011c7b`). They are one number
+where the window is 0..1 or the two ends agree, and differ on **90** of the 237
+streams, whose interval changes across a window that is not 0..1 — the walkers'
+dust at (0.09, 0.07) over 0.001..0.999 among them (*measured*). Each step marks
+the slot it reaches live or not by whether *t* is inside the window
+(`0x10011cde`–`0x10011d0f`), keeps a count of the live ones at `+0x8c`, and
+makes a particle only in a live slot. While that count is not 0 the update runs
+and the draw draws whatever *t* is (`0x10011628`, `0x1001203e`): **outside its
+window a stream stops making particles and the ones it has out live their turn
+of the ring**, one going each interval.
+
+**The read pace is the recording's** — *seen*, and a correction. This page had
+C03 M01's volcano (`s_tree_33`, `tree_light_33a`: a ring of 20 at 0.08 s, 1.6 s
+of life over 100 ± 30 m) rising at about 0.63 of the read speed "against its
+puffs' width" in "Let's Play - Parkan: Iron Strategy, Part 5" (PfAg6zSe-yM,
+4:19.4–4:24.4), and the engine ran every ambient stream at half pace for it.
+Nothing in the read slows one
+([above](#who-hands-a-manager-its-time--read-and-seen)), and measured again with
+a scale that does not lean on the puffs the recording agrees with the read:
+
+- **A whole plume, with no scale at all** (19:25.1–19:28.3, the volcano seen
+  whole from a bot). Its smoke is seen to about 400 px over the crater — where
+  its darkness against the sky beside it has fallen to a tenth of its peak — and
+  four billows followed by hand over 0.13 to 0.23 s rise 225, 230, 262 and
+  279 px/s. A billow crosses the plume in **1.4 to 1.8 s**. The read's life is
+  1.6 s, and the block's fade reaches 0 at its end, so the top of the plume is
+  the end of a life; at 0.63 of the pace it would take 2.5 s and at half 3.2.
+- **The near view, by the crater's height** (4:20.1–4:25.4). The crater stands
+  632–678 px over the picture's middle for the 127 m it stands over an eye on the
+  player's base (158.5 against about 32), 5.0–5.3 px to the metre with the camera
+  level; the crater's glow, `tree_light_33b`'s 8 to 10 m sprites, is 39–46 px
+  across, which agrees. Over the **80–140 px** above the crater, clear of the
+  flame, the smoke's own structure moves up 210–308 px/s over lags of one to
+  eight frames: **39 to 62 m/s** against the read's 62.5 for a particle of the
+  mean reach (44 to 81 across the jitter), 0.63 to 0.99 of it. Half pace is 31.
+  This view alone does not tell the read from 0.63; the first does.
+- **The flame under it is the slower stream.** `tree_light_33a`'s second block
+  rises 15 ± 7.5 m in 0.64 s, 12 to 35 m/s, and a puff of it followed by hand
+  goes 165–175 px/s in both views, 31–35 m/s at the near view's scale: the read's
+  fastest, and twice what half pace allows. Under 80 px over the crater those
+  puffs share the strip with the smoke, and the same measure there gives
+  180–240 px/s — the band the earlier figure most likely came from (*inferred*,
+  from its taking its scale from the puffs' width).
+
+What is left of the earlier note is the flame's flicker. Its brightness shows no
+line at the interval's 12.5 Hz in either view — 4.5 to 9 % of the 4–20 Hz power
+lies in 12–13 Hz, where an even spread is 6 % — and the near view's power is
+mostly under 6 Hz. Each puff draws its own far end and size, which would smear
+such a line; that is not measured against the engine. *Not measured*: a second
+ambient stream in another mission, and a gun's or a round's — the read hands them
+all one clock, and no recording was set against it for them.
 
 **Each particle draws its own far ends as it leaves** (*read*, and *seen*).
 After the number for its material's phase (`0x10011d84`) the spawn draws the
@@ -1864,14 +2155,22 @@ numbers below.
 **What the two floats do** (*read*). One call reads them (`0x1000ec50`, a method
 of the page taking a settings id): it draws a 16-bit random number, scales it by
 `distribution[group] / 65536` and subtracts `highQuality[group]`. A burst
-(`0x100011d5`) and a stream (`0x10011d5d`) call it **once per particle per
-channel** as they spawn, into the emitter's per-particle array at `+0x2c`. The
-burst's update then compares a count against each particle's value and passes
-over the particle while the count is the larger (`0x100015eb`–`0x10001612`), and
-the stream's draw takes the value as that particle's lerp parameter in place of
-`age^exponent` where the block's **exponent is negative** (`0x10012125`, kept at
-`0x1001215e`). *Measured*: **0 of the 21426 position and size exponents are
-negative**, so no shipped effect takes the second path.
+(`0x100011d5`) and a stream (`0x10011d5d`) call it **once for each particle** as
+it is made, and keep the answer for it — a burst in its array at `+0x2c`, a
+stream at `+0x38`. It is the particle's **detail number**: the draw compares the
+instance's level with it and passes the particle over while the level is the
+larger (`0x100015eb`–`0x10001612` in a burst's draw, `0x100120cc`–`0x100120ea`
+in a stream's), so the two floats set how many of an effect's particles each
+level keeps ([above](#an-instances-level--read-and-measured)).
+
+*A correction.* This page had the number as read by nothing in the shipped data,
+on a count of 0 negative exponents among 21426. That was a second per-particle
+array misread as this one: a stream's `+0x2c` holds the number drawn at
+`0x10011d84`, which its material's phase takes in place of `age^(+32)` where +32
+is negative (`0x10012125`,
+[above](#a-phase-is-where-its-materials-animation-stands--read-and-measured)),
+and the count of what the burst compares was taken for a count of something
+else; it is the level, the draw context's `+0x60`.
 
 **The page's `+0x14a4`** is set by all three presets — 1000 for preset 3, 250 for
 preset 2, 50 for preset 1 (`0x1000e865`, `0x1000e8fe`, `0x1000e997`) — and
@@ -2345,8 +2644,16 @@ Read one slot either way, none of the seven name witnesses agrees.
   whole on every facet by the block's +204; 122 of the 266 blocks pair up, opposite
   directions, into balls, the generator's among them
   ([Type 9 is a half sphere](#type-9-is-a-half-sphere--read-measured-and-seen)).
-  Still open: what gives an instance the level that picks a dome's detail and drops
-  it at 4 and over.
+  ~~Still open: what gives an instance the level that picks a dome's detail and drops
+  it at 4 and over.~~ Answered: the draw asks the shade each time, with the camera,
+  the sphere about the instance's drawing emitters and its owner's world class.
+  The level is cut from the sphere's size on the screen in pixels — under 4 not
+  drawn, then 3, 2, 1 under 8, 30, 70 for a unit's, a round's, scenery's and the
+  landscape's effects; under 10 not drawn, then under 40, 80, 120 for a
+  building's. Besides the 266 domes it **thins bursts and streams**: 215 of the
+  1558 blocks lose a third of their particles at level 1, two thirds at 2 and all
+  at 3, 531 lose two in seven at 3, and 812 none
+  ([An instance's level](#an-instances-level--read-and-measured)).
 
 - **The rest of each emitter's floats.** The window, the phase, the sprite's
   moving and growing triples, the light, the bolt's segments, the stream's
@@ -2359,6 +2666,17 @@ Read one slot either way, none of the seven name witnesses agrees.
   each channel a (low, high, jitter, exponent) run the particle class lerps per axis,
   and a bolt's +24 and +28 are its width at the two ends of its *window*
   ([above](#a-channel-is-a-low-high-jitter-exponent-run--read-and-measured)).
+  ~~When each of a burst's particles spawns, and when a stream emits its first.~~
+  Answered: a burst is +36 groups of +40 particles, group *i* leaving
+  (1 − +28) × *i* ÷ +36 of the way through the window and its particles sharing
+  its age — 539 of the 1321 blocks leave in more than one — with +140 a fall under
+  the world's gravity, and type 10's debris not dropped at an age of 1
+  ([A burst is groups](#a-burst-is-groups-that-leave-one-after-another--read-and-measured));
+  a stream's stamp starts unset, its first update inside the window only sets it,
+  and its first particle leaves more than an interval after that
+  ([Bolts, streams and fades](#bolts-streams-and-fades--read-and-measured)).
+  With the fall a burst's block is read whole: +140 is its last float before the
+  material's name at +144.
 - ~~**How an effect sprite's pre-lit vertices are coloured** (draw flags 4, FVF
   `0x1e2`): the unlit branch of `CStridedPrimitive::RenderVB` picks its vertex
   path at `0x10030104`, and none of them was followed.~~ Answered: one colour on
@@ -2446,9 +2764,11 @@ Read one slot either way, none of the seven name witnesses agrees.
   `+0x1294` and the page's `+0x14a4` that the presets set.~~ Answered: a group is a
   detail class, its two floats are the settings the page names "LOD distribution"
   and "High quality LOD", and together they give each particle of a burst or a
-  stream a number — which the shipped data then never reads, since that needs a
-  negative exponent and none of the 21426 is. The page's `+0x14a4`, 50, 250 or 1000
-  by preset, has no reader at all
+  stream a number — ~~which the shipped data then never reads, since that needs a
+  negative exponent and none of the 21426 is~~ which the draw sets against the
+  instance's level, passing the particle over while the level is the larger: the
+  earlier "never read" took a stream's other per-particle array for this one. The
+  page's `+0x14a4`, 50, 250 or 1000 by preset, has no reader at all
   ([above](#which-effects-run-the-settings-switch--read-and-measured)).
 - ~~**The effect manager's random generator**, and whether its state is shared or
   per manager.~~ Answered: one routine, `Effect.dll:0x10002220`, a pair of 16-bit
