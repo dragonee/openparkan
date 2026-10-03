@@ -143,11 +143,13 @@ fn vs_main(v: VertexIn) -> VertexOut {
     let scene = frame.scene_colour.rgb;
     let first = shade_lit(light * layers.diffuse1.rgb, vec3<f32>(0.0), layers.ambient1.rgb, scene);
     let second = shade_lit(light * layers.diffuse2.rgb, vec3<f32>(0.0), layers.ambient2.rgb, scene);
-    out.lit1 = first.diffuse;
-    out.spill1 = first.specular;
-    out.lit2 = second.diffuse;
-    out.spill2 = second.specular;
-    out.keep = shade_fog(distance(v.position, frame.eye.xyz), frame.fog.x, frame.fog.y);
+    // The shade hands the device each vertex's two colours as bytes (`g_FastProc` slot 0x54,
+    // `Terrain.dll:0x1004f69f`), the fog's share in the second's alpha.
+    out.lit1 = shade_bytes(first.diffuse);
+    out.spill1 = shade_bytes(first.specular);
+    out.lit2 = shade_bytes(second.diffuse);
+    out.spill2 = shade_bytes(second.specular);
+    out.keep = shade_byte(shade_fog(distance(v.position, frame.eye.xyz), frame.fog.x, frame.fog.y));
     return out;
 }
 

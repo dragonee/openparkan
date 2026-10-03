@@ -51,7 +51,12 @@ struct GpuVertex {
 ///
 /// STAND-IN: docs/10-sky.md#the-clouds-are-lit-and-fogged-on-a-range-of-their-own--read-and-measured
 /// -- that list is the last drawn object's or cell's, its point lights with it; here the
-/// sun's two alone.
+/// sun's two alone. It comes to the same picture: the lighter passes over a vertex past a
+/// light's range, the cap's nearest vertices stand 5000 and 4580 over the eye, and the one
+/// light whose range comes near, the lightning's 4000 ± 200, reaches a first-ring vertex only
+/// from a strike 5341 away on ground more than 80 above the eye. The material has no specular
+/// power, so no light leaves a highlight, and the two colours go out as bytes like any lit
+/// item's ([`shade::byte`]).
 pub fn cloud_vertex(vertex: Vec3, cloud_colour: [f32; 3], lighting: &Lighting) -> ([f32; 4], [f32; 4]) {
     let normal = dome_normal(vertex);
     let mut lights = [0.0; 3];
@@ -64,9 +69,9 @@ pub fn cloud_vertex(vertex: Vec3, cloud_colour: [f32; 3], lighting: &Lighting) -
     let shaded = shade::lit(lights, [0.0; 3], [0.0; 3], lighting.scene_colour);
     // The cap's origin is the drop below the eye, so the eye stands that far up its axis.
     let keep = shade::fog((vertex - Vec3::Z * CLOUD_DROP).length(), CLOUD_FOG_START, CLOUD_FOG_END);
-    let [r, g, b] = shaded.diffuse;
-    let [sr, sg, sb] = shaded.specular;
-    ([r, g, b, 1.0], [sr, sg, sb, keep])
+    let [r, g, b] = shaded.diffuse.map(shade::byte);
+    let [sr, sg, sb] = shaded.specular.map(shade::byte);
+    ([r, g, b, 1.0], [sr, sg, sb, shade::byte(keep)])
 }
 
 #[repr(C)]
@@ -405,23 +410,25 @@ mod tests {
         let (colour, spill) = cloud_vertex(dome[0], cloud, &overhead);
         assert!((colour[0] - 0.83 * 200.0 / 255.0).abs() < 1e-3, "{colour:?}");
         assert_eq!((colour[1], colour[3]), (1.0, 1.0));
-        assert!((colour[2] - 0.263).abs() < 1e-6, "the floor");
-        assert!((spill[1] - 0.8 * (1.30 / 6.0 + 5.0 / 6.0 - 1.0)).abs() < 1e-4, "{spill:?}");
+        assert_eq!(colour[2], shade::byte(0.263), "the floor, as the byte it goes out as");
+        assert_eq!(spill[1], shade::byte(0.8 * (1.30 / 6.0 + 5.0 / 6.0 - 1.0)), "{spill:?}");
         assert_eq!(spill[3], 1.0);
         // Ring by ring the layer goes to the fog's colour: 0.77, 0.07, and none from the third.
         let ring = |r: usize| cloud_vertex(dome[1 + (r - 1) * sky::DOME_SEGMENTS], cloud, &overhead).1[3];
-        assert!((ring(1) - 0.766).abs() < 2e-3, "{}", ring(1));
-        assert!((ring(2) - 0.068).abs() < 2e-3, "{}", ring(2));
+        assert!((ring(1) - 0.766).abs() < 4e-3, "{}", ring(1));
+        assert!((ring(2) - 0.068).abs() < 4e-3, "{}", ring(2));
         assert_eq!((ring(3), ring(4), ring(5)), (0.0, 0.0, 0.0));
         // A body under the horizon lights nothing of a cap whose normals point up; then it is
         // the second light, which travels the other way, that falls on it.
         let (colour, spill) = cloud_vertex(dome[0], cloud, &last_bastion(Vec3::NEG_Z));
         assert!((colour[0] - 0.61 * 200.0 / 255.0).abs() < 1e-3, "{colour:?}");
-        assert_eq!((colour[1], colour[2]), (1.0, 0.263));
+        assert_eq!((colour[1], colour[2]), (1.0, shade::byte(0.263)));
         assert_eq!([spill[0], spill[1], spill[2]], [0.0; 3]);
         // And with both lights side-on the scene colour is all there is.
         let (colour, _) = cloud_vertex(dome[0], cloud, &last_bastion(Vec3::X));
-        assert_eq!([colour[0], colour[1], colour[2]], [0.337, 0.435, 0.263]);
+        assert_eq!([colour[0], colour[1], colour[2]], [0.337, 0.435, 0.263].map(shade::byte));
+        // 86, 111 and 67 of 255: the scene colour as the file gives it, to the byte.
+        assert_eq!([colour[0], colour[1], colour[2]].map(|c| c * 255.0), [86.0, 111.0, 67.0]);
     }
 
     #[test]

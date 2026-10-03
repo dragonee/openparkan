@@ -44,14 +44,25 @@ struct Instance {
     owner: vec4<f32>,
 };
 
-// What the frame's point lights give a vertex before its material's diffuse multiplies it
-// (CShade::ShadeIndexedStrided, Terrain.dll:0x1004df70, and Ngi32.dll:0x100164f0): each
-// light's colour times the cosine at the vertex times a0 + a1 x + a2 x^2, x the share of the
-// light's range left, and nothing past the range or on a vertex turned away (docs/11, "What a
-// light does to a surface"). The game lights per vertex, in software, and the rasteriser
-// carries the result across the face.
-fn point_lights(world: vec3<f32>, normal: vec3<f32>, owner: f32) -> vec3<f32> {
-    var sum = vec3<f32>(0.0);
+// What the frame's point lights give a vertex: `diffuse` before its material's diffuse
+// multiplies it, `highlight` before its material's specular does.
+struct PointSums {
+    diffuse: vec3<f32>,
+    highlight: vec3<f32>,
+};
+
+// What the frame's point lights give a vertex (CShade::ShadeIndexedStrided,
+// Terrain.dll:0x1004df70, and Ngi32.dll:0x100164f0): each light's colour times the cosine at
+// the vertex times a0 + a1 x + a2 x^2, x the share of the light's range left, and nothing past
+// the range or on a vertex turned away (docs/11, "What a light does to a surface"). Where the
+// material has a specular power the light's highlight rides the same falloff: its way to the
+// vertex mirrored in the normal against `to_eye`, squared `power - 1` times
+// (0x100166b5-0x10016750). The game lights per vertex, in software, and the rasteriser carries
+// the result across the face.
+fn point_lights(world: vec3<f32>, normal: vec3<f32>, owner: f32, to_eye: vec3<f32>, power: f32) -> PointSums {
+    var sum: PointSums;
+    sum.diffuse = vec3<f32>(0.0);
+    sum.highlight = vec3<f32>(0.0);
     if dot(normal, normal) <= 0.0 {
         return sum;
     }
@@ -75,7 +86,8 @@ fn point_lights(world: vec3<f32>, normal: vec3<f32>, owner: f32) -> vec3<f32> {
         // The share of the range left, and the three terms on it.
         let x = (light.position.w - d) / light.position.w;
         let fall = light.attenuation.x + (light.attenuation.y + light.attenuation.z * x) * x;
-        sum += light.colour.rgb * (facing * fall);
+        sum.diffuse += light.colour.rgb * (facing * fall);
+        sum.highlight += light.colour.rgb * (fall * shade_point_highlight(n, to / d, facing, to_eye, power));
     }
     return sum;
 }
@@ -166,13 +178,22 @@ fn vs_main(v: VertexIn) -> VertexOut {
     var n = vec3<f32>(0.0);
     if dot(out.normal, out.normal) > 0.0 {
         // The normal as the model's frame turns it; the matrix's scale goes with the length.
+        //
+        // STAND-IN: docs/10-sky.md#the-lit-colour-is-the-games-own--read-and-measured -- the
+        // game puts a directional light into the item's frame by the transpose of the frame's
+        // 3 x 3 and normalises nothing (`g_FastProc` slot 0x8c, `Ngi32.dll:0x10024260`), so an
+        // item drawn in a frame scaled by s takes s times the light; here a unit normal against
+        // a unit direction, whatever the scale. Which shipped frames carry a scale is not
+        // measured.
         n = normalize(out.normal);
     }
     let a = shade_cosine(n, frame.light_direction.xyz);
     let b = shade_cosine(n, frame.second_direction.xyz);
-    let lights = frame.light_colour.rgb * a
-        + frame.second_colour.rgb * b
-        + point_lights(world.xyz, out.normal, instance.owner.x);
+    let to_eye = normalize(frame.eye.xyz - world.xyz);
+    // A lit batch's power is made 0 with its diffuse (`0x1002c1a0`), so it takes no highlight.
+    let power = select(look.specular.w, 0.0, look.lit.x > 0.5);
+    let points = point_lights(world.xyz, out.normal, instance.owner.x, to_eye, power);
+    let lights = frame.light_colour.rgb * a + frame.second_colour.rgb * b + points.diffuse;
     let scene = frame.scene_colour.rgb;
     out.gloss = vec3<f32>(0.0);
     if frame.paint.x > 0.5 {
@@ -181,8 +202,8 @@ fn vs_main(v: VertexIn) -> VertexOut {
         // own: the view's lights on the diffuse plus the self-light, held up to the scene
         // colour, through the knee, what passes 1 going to the specular.
         let painted = shade_lit(look.diffuse.rgb * lights, vec3<f32>(0.0), instance.paint.rgb, scene);
-        out.paint = vec4<f32>(painted.diffuse, 1.0);
-        out.gloss = painted.specular;
+        out.paint = vec4<f32>(shade_bytes(painted.diffuse), 1.0);
+        out.gloss = shade_bytes(painted.specular);
     }
     // The world's own draw: the lights on the material's diffuse, and their highlights on its
     // specular. A batch that takes a lightmap has had its diffuse made its self-light and its
@@ -196,20 +217,21 @@ fn vs_main(v: VertexIn) -> VertexOut {
         diffuse = vec3<f32>(0.0);
         ambient = look.diffuse.rgb;
     } else {
-        let to_eye = normalize(frame.eye.xyz - world.xyz);
-        // STAND-IN: docs/10-sky.md#the-lit-colour-is-the-games-own--read-and-measured -- a
-        // point light's highlight is taken the same way (Ngi32.dll:0x100166b5); here the
-        // sun's two alone.
+        // A light leaves its highlight on the material's specular unless it is flagged against
+        // one (`+0x4c` bit 1, `Terrain.dll:0x1004ec12`, `0x1004ed91`): the sun's first light
+        // (`Ngi32.dll:0x1001616f`) and the effects' point lights (`0x100166b5`) do, and the
+        // sun's second does not -- `CSun` flags it as it makes it (`Terrain.dll:0x1007d03b`).
         highlight = look.specular.rgb
             * (frame.light_colour.rgb * shade_highlight(n, frame.light_direction.xyz, to_eye, a, look.specular.w)
-                + frame.second_colour.rgb
-                    * shade_highlight(n, frame.second_direction.xyz, to_eye, b, look.specular.w));
+                + points.highlight);
     }
     let shaded = shade_lit(diffuse, highlight, ambient, scene);
-    out.lit = shaded.diffuse;
+    // The two colours go to the device as bytes (`g_FastProc` slot 0x54), the fog's share in
+    // the second's alpha with them.
+    out.lit = shade_bytes(shaded.diffuse);
     out.spill = vec4<f32>(
-        shaded.specular,
-        shade_fog(distance(world.xyz, frame.eye.xyz), frame.fog.x, frame.fog.y),
+        shade_bytes(shaded.specular),
+        shade_byte(shade_fog(distance(world.xyz, frame.eye.xyz), frame.fog.x, frame.fog.y)),
     );
     return out;
 }

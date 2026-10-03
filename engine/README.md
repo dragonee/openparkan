@@ -156,7 +156,9 @@ starts at the file's closing time and plays its sections in turn:
   is the game's own"): the lights on the material's diffuse plus its ambient
   (its self-light), **held up to the scene colour** rather than added to it,
   kneed past 1 with the excess whitening through the specular, and a light's
-  highlight on a material that has a specular power. Every colour is the
+  highlight on a material that has a specular power — the sun's first light's
+  and every effect's light's, and not the counter light's, which the game
+  flags against one — the two colours rounded to bytes. Every colour is the
   files' own value and the frame holds stored values, as the game's device
   blends them; the texture's alpha is scaled by the ambient alpha;
 - the **weather** runs from its start keyframe to its stop. Snow and rain are a
@@ -1501,13 +1503,13 @@ a row here. A row leaves this table when research closes it.
 | milestone | what is unknown | stand-in | see |
 |---|---|---|---|
 | M1 | What the sky's screen-wide quad paints: it is drawn first of all in every scene camera's frame (mode 0; only mode 1 skips it, `0x1007a325`), and that it carries the scene colour is derived, not checked against a frame | never drawn; the frame is cleared to the fog colour instead | [10](../docs/10-sky.md#the-skys-first-draw-is-a-screen-wide-quad--read) |
-| M1 | Whose light list the cloud layer is lit with: the item takes the list the shade last gathered, the last drawn object's or cell's, point lights and all | the sun's two lights alone | [10](../docs/10-sky.md#the-clouds-are-lit-and-fogged-on-a-range-of-their-own--read-and-measured) |
-| M1 | A point light's highlight on a material's specular (`Ngi32.dll:0x100166b5`), and the bytes a vertex's two colours are rounded to | the sun's two lights' highlights alone; the colours are not rounded | [10](../docs/10-sky.md#the-lit-colour-is-the-games-own--read-and-measured) |
+| M1 | Whose light list the cloud layer is lit with: the item takes the list the shade last gathered, the last drawn object's or cell's, point lights and all | the sun's two lights alone, which is what any list comes to: no point light's range reaches the cap but the lightning's, 4000 ± 200, and that only from a strike 5341 away on ground more than 80 above the eye, for under a hundredth of its colour | [10](../docs/10-sky.md#the-clouds-are-lit-and-fogged-on-a-range-of-their-own--read-and-measured) |
+| M1 | A light's direction in a scaled frame: the shade puts it there by the transpose of the frame's 3 × 3 and normalises nothing (`Ngi32.dll:0x10024260`), so an item drawn at scale *s* takes *s* times a directional light | a unit normal against a unit direction, whatever the scale; which shipped frames carry one is not measured | [10](../docs/10-sky.md#the-lit-colour-is-the-games-own--read-and-measured) |
 | M4 | Whether a target the hero's AI set before the player took over survives | none: nothing sets it while the player drives, so the plasma bolt and the missile fly straight | [29](../docs/29-weapons.md#not-established) |
 | M4 | How a **building's** gun capacitor refills; a unit's runs the read power tick | a gun on a building, or on a unit with no battery, is served at a level of 1 | [23](../docs/23-economy.md#bots-spend-power-through-the-same-code-priced-by-part--read-and-measured) |
 | M4 | Poses of other units for the hit test | their rest poses: other units' animation is not played | [24](../docs/24-motion.md#playing-a-state--read-and-measured) |
 | M4 | When each of a burst's particles spawns | every particle of a type-7 or type-10 burst is as old as the emitter's progress through the window over +28, so they fly as one | [11](../docs/11-effects.md#a-channel-is-a-low-high-jitter-exponent-run--read-and-measured) |
-| M4 | How an effect sprite fogs: the game puts a factor linear in the *squared* distance in its specular alpha (`Terrain.dll:0x1004bf20`) | a fog linear in the distance itself, where the world's pipelines take the squared one; none on an effect whose header carries `0x2000`, as read | [11](../docs/11-effects.md#how-an-effect-sprite-is-coloured--read-and-measured) |
+| M4 | How an effect sprite fogs: the game puts one factor on the sprite's four corners, linear in the squared distance its item is built with (`Terrain.dll:0x1004bf20`, `0x1003c340`) | the same squares, a pixel at a time, from the pixel's own distance; none on an effect whose header carries `0x2000`, as read | [11](../docs/11-effects.md#how-an-effect-sprite-is-coloured--read-and-measured) |
 | M5 | The weather's random draws: where a particle spawns and when and where a bolt strikes come off `Terrain.dll`'s one C-runtime `rand` state, seeded 1 and shared with every other caller in the module, and the snow's flutter off a generator seeded from the clock | the weather keeps states of its own of the same two generators | [10](../docs/10-sky.md#the-weather--read-and-seen) |
 | M5 | Which faces the lightning's ground query takes (the landscape's slot 8, kind 2, the default filter) | the landscape's top face under the strike, and the map box's floor where there is none | [10](../docs/10-sky.md#lightning--read-measured-and-seen) |
 | M5 | The flags the rain's background sound is made with, `0x102` | a loop, heard alike from everywhere, its volume the read one | [10](../docs/10-sky.md#rain--read) |

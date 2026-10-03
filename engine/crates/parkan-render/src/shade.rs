@@ -98,6 +98,44 @@ pub fn highlight(normal: Vec3, travel: Vec3, to_eye: Vec3, power: u8) -> f32 {
     (1..power).fold(s, |s, _| s * s)
 }
 
+/// What one point light adds to a vertex's two sums before the material's diffuse and
+/// specular multiply them (`Ngi32.dll:0x100164f0`): the cosine at the vertex times the falloff
+/// a₀ + a₁ x + a₂ x² on the share x of the range left, and, where the material has a specular
+/// `power`, that falloff times the highlight -- the way to the light mirrored in the normal,
+/// 2 (n · L) n − L, against the unit vector to the eye, squared `power − 1` times
+/// (`0x100166b5`–`0x10016750`). Nothing past the range (`0x100165bb`), on a vertex turned away
+/// (`0x1001663d`), or for a highlight whose mirror points away from the eye (`0x10016705`).
+/// `to_light` is from the vertex to the light, at its own length.
+pub fn point(
+    normal: Vec3,
+    to_light: Vec3,
+    range: f32,
+    attenuation: [f32; 3],
+    to_eye: Vec3,
+    power: u8,
+) -> (f32, f32) {
+    let d = to_light.length();
+    if d > range || d <= 0.0 {
+        return (0.0, 0.0);
+    }
+    let facing = normal.dot(to_light / d);
+    if facing <= 0.0 {
+        return (0.0, 0.0);
+    }
+    let x = (range - d) / range;
+    let fall = attenuation[0] + (attenuation[1] + attenuation[2] * x) * x;
+    let s = (2.0 * facing * normal - to_light / d).dot(to_eye);
+    let highlight = if s <= 0.0 || power == 0 { 0.0 } else { (1..power).fold(s, |s, _| s * s) };
+    (facing * fall, highlight * fall)
+}
+
+/// A component of a vertex's colour as the byte the shade packs it to (`g_FastProc` slot
+/// `0x54`, called at `Terrain.dll:0x1004f69f`): times 255 (`Ngi32.dll:0x10037230`), rounded to
+/// the nearest whole and held to 0..255 (`cvtps2pi` and `packuswb`, `0x1001d940`).
+pub fn byte(c: f32) -> f32 {
+    (c * 255.0).round_ties_even().clamp(0.0, 255.0) / 255.0
+}
+
 /// How much of a vertex's colour the fog keeps: all of it up to `start`, none past `end`,
 /// and between them linear in the **squared** distance to the eye
 /// (`0x1004f187`–`0x1004f213`; the squares and the reciprocal of their difference are kept
@@ -207,6 +245,83 @@ mod tests {
         assert!((highlight(Vec3::Z, travel, to_eye, 6) - s.powi(32)).abs() < 1e-5);
         assert_eq!(highlight(Vec3::Z, travel, to_eye, 0), 0.0, "power 0 has no highlight");
         assert_eq!(highlight(Vec3::Z, travel, -mirrored, 3), 0.0, "nor the far side of the mirror");
+    }
+
+    /// `smoke_fr_02`'s light over a Large Factory's chimney, (0, 1, 0) on a range of 39, and
+    /// the next chimney's rim 28 units off at the same height: a vertex facing it takes 11/39
+    /// of the colour on its diffuse, and a material of power 3 the same share on its specular
+    /// where the eye stands in the mirror -- which is what turns the masts of C03 M02's
+    /// factories yellow on the side their neighbour's flame is seen in.
+    #[test]
+    fn a_point_light_leaves_its_highlight_where_its_mirror_meets_the_eye() {
+        let to_light = Vec3::new(28.0, 0.0, 0.0);
+        let fall = 11.0 / 39.0;
+        // Square on, the eye in the mirror: the whole of the falloff on both sums.
+        let (diffuse, highlight) = point(Vec3::X, to_light, 39.0, [0.0, 1.0, 0.0], Vec3::X, 3);
+        assert!((diffuse - fall).abs() < 1e-6 && (highlight - fall).abs() < 1e-6);
+        // A normal 30 degrees off the light mirrors it 60 degrees off; an eye there takes the
+        // whole highlight on cos 30 of the diffuse, and an eye back along the light takes
+        // cos 60 squared twice at power 3 and five times at power 6.
+        let n = Vec3::new(30f32.to_radians().cos(), 30f32.to_radians().sin(), 0.0);
+        let mirror = Vec3::new(60f32.to_radians().cos(), 60f32.to_radians().sin(), 0.0);
+        let (diffuse, highlight) = point(n, to_light, 39.0, [0.0, 1.0, 0.0], mirror, 3);
+        assert!((diffuse - fall * 30f32.to_radians().cos()).abs() < 1e-6);
+        assert!((highlight - fall).abs() < 1e-5);
+        let (_, back) = point(n, to_light, 39.0, [0.0, 1.0, 0.0], Vec3::X, 3);
+        assert!((back - fall * 0.5f32.powi(4)).abs() < 1e-6);
+        let (_, sharp) = point(n, to_light, 39.0, [0.0, 1.0, 0.0], Vec3::X, 6);
+        assert!((sharp - fall * 0.5f32.powi(32)).abs() < 1e-9);
+        // No highlight at power 0, behind the mirror, on a vertex turned away or past the range.
+        assert_eq!(point(n, to_light, 39.0, [0.0, 1.0, 0.0], mirror, 0).1, 0.0);
+        assert_eq!(point(n, to_light, 39.0, [0.0, 1.0, 0.0], -mirror, 3).1, 0.0);
+        assert_eq!(point(Vec3::NEG_X, to_light, 39.0, [0.0, 1.0, 0.0], Vec3::X, 3), (0.0, 0.0));
+        assert_eq!(point(Vec3::X, to_light, 27.0, [0.0, 1.0, 0.0], Vec3::X, 3), (0.0, 0.0));
+        // The quadratic term rides both: (0, 1, 1) at half the range is 0.75.
+        let (diffuse, highlight) = point(Vec3::X, Vec3::X * 10.0, 20.0, [0.0, 1.0, 1.0], Vec3::X, 4);
+        assert!((diffuse - 0.75).abs() < 1e-6 && (highlight - 0.75).abs() < 1e-6);
+    }
+
+    /// The objects' shader takes the highlight of the sun's first light and of the point
+    /// lights, and not of the sun's second: `CSun`'s constructor calls the light manager's
+    /// slot 18 with 0 on it (`Terrain.dll:0x1007d03b`), which sets `D3DLIGHT_NO_SPECULAR`
+    /// (`0x10080aea`), and the shade asks no highlight of a light that carries it
+    /// (`0x1004ed91`–`0x1004edad`). At C03 M02's briefing time 54 s the slope Enemy 1's Medium
+    /// Mine turns to the camera is (139, 13, 23) in the recording; with the second light's
+    /// highlight on its material's specular this renderer drew it (191, 44, 74), and without
+    /// it (142, 17, 27).
+    #[test]
+    fn the_suns_second_light_leaves_no_highlight_and_a_point_light_does() {
+        let text = crate::models::source();
+        assert!(text.contains("shade_highlight(n, frame.light_direction.xyz, to_eye, a, look.specular.w)"));
+        assert!(!text.contains("shade_highlight(n, frame.second_direction.xyz"), "the counter light is diffuse alone");
+        assert!(text.contains("+ points.highlight"), "the point lights' highlights ride the specular");
+        assert!(
+            text.contains("sum.highlight += light.colour.rgb * (fall * shade_point_highlight(n, to / d, facing, to_eye, power));")
+        );
+        assert!(SHADE_WGSL.contains("let s = dot(2.0 * facing * normal - to_light, to_eye);"));
+    }
+
+    #[test]
+    fn a_vertexs_colours_reach_the_device_as_bytes() {
+        // 255.0 four times at `Ngi32.dll:0x10037230`.
+        assert_eq!(f32::from_bits(0x437f_0000), 255.0);
+        assert_eq!(byte(0.0), 0.0);
+        assert_eq!(byte(1.0), 1.0);
+        assert_eq!(byte(1.7), 1.0, "held to 255");
+        assert_eq!(byte(-0.2), 0.0);
+        // C03 M02's scene colour at briefing time 54 s, 159.88 of 255, goes out as 160.
+        assert_eq!(byte(159.88 / 255.0) * 255.0, 160.0);
+        // A tie goes to the even byte, as the processor's rounding has it.
+        assert_eq!(byte(0.5 / 255.0), 0.0);
+        assert_eq!(byte(1.5 / 255.0) * 255.0, 2.0);
+        for needle in ["round(c * 255.0)", "shade_bytes(shaded.diffuse)", "shade_bytes(first.diffuse)"] {
+            assert!(
+                SHADE_WGSL.contains(needle)
+                    || crate::models::source().contains(needle)
+                    || include_str!("terrain.wgsl").contains(needle),
+                "the shaders lost {needle}"
+            );
+        }
     }
 
     #[test]

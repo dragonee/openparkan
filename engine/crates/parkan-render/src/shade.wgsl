@@ -22,6 +22,30 @@ fn shade_highlight(normal: vec3<f32>, travel: vec3<f32>, to_eye: vec3<f32>, cosi
     return pow(s, exp2(max(power - 1.0, 0.0)));
 }
 
+// A point light's highlight (`Ngi32.dll:0x100166b5`-`0x10016750`): the way to the light mirrored
+// in the normal, 2 (n . L) n - L, against the way to the eye, squared `power - 1` times as a
+// directional light's is. `to_light` is the unit vector to the light and `facing` its cosine
+// with the normal, which the caller has found above 0; the caller scales the result by the
+// light's falloff, as the routine does (`0x1001672c`).
+fn shade_point_highlight(normal: vec3<f32>, to_light: vec3<f32>, facing: f32, to_eye: vec3<f32>, power: f32) -> f32 {
+    let s = dot(2.0 * facing * normal - to_light, to_eye);
+    if s <= 0.0 || power < 0.5 {
+        return 0.0;
+    }
+    return pow(s, exp2(max(power - 1.0, 0.0)));
+}
+
+// A vertex's colour as the byte the shade packs it to (`g_FastProc` slot 0x54, called at
+// `Terrain.dll:0x1004f69f`): times 255, rounded to the nearest whole, and held to 0..255
+// (`cvtps2pi` and `packuswb`, `Ngi32.dll:0x1001d940`). The device carries bytes across a face.
+fn shade_bytes(c: vec3<f32>) -> vec3<f32> {
+    return clamp(round(c * 255.0), vec3<f32>(0.0), vec3<f32>(255.0)) / 255.0;
+}
+
+fn shade_byte(c: f32) -> f32 {
+    return clamp(round(c * 255.0), 0.0, 255.0) / 255.0;
+}
+
 // A lit component past 1 is kneed: c/6 + 5/6 up to 7, and 2 beyond (`0x1004f26d`-`0x1004f2b2`,
 // the constants at `0x100a2354` and `0x100a2360`).
 fn shade_knee(c: vec3<f32>) -> vec3<f32> {
