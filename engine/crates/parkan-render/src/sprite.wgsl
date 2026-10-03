@@ -4,7 +4,7 @@ struct Camera {
     view_proj: mat4x4<f32>,
     eye: vec4<f32>,
     fog_colour: vec4<f32>,
-    // x start, y end.
+    // x start, y end; z 1 while the camera's infrared is on.
     fog: vec4<f32>,
     // Added to a lit batch's emissive (sky slot 20), in display space. An effect sprite
     // never goes through a device material, so it is not read here.
@@ -112,6 +112,13 @@ fn fs_main(v: VertexOut) -> @location(0) vec4<f32> {
     let own = v.tint.w > 1.5 && v.tint.w < 2.5;
     let unfogged = v.tint.w > 1.5;
     let plain = v.tint.w < 0.5 || v.tint.w > 2.5;
-    let lit = select(select(device, look.ambient.rgb * v.tint.rgb, plain), v.tint.rgb, own);
+    var lit = select(select(device, look.ambient.rgb * v.tint.rgb, plain), v.tint.rgb, own);
+    // With the camera's infrared on the quad's one colour goes through the shader component's
+    // slot 5 (`Terrain.dll:0x1004f8ee` for an effect's sprite, `0x10075b2b` and `0x100764ab`
+    // for the snow's and the rain's): seven times 0.33 of its three channels' sum, held to 1,
+    // as the green alone.
+    if camera.fog.z > 0.5 {
+        lit = vec3<f32>(0.0, min((lit.r * 0.33 + lit.g * 0.33 + lit.b * 0.33) * 7.0, 1.0), 0.0);
+    }
     return vec4<f32>(mix(fog, display(texel.rgb) * lit, select(keep, 1.0, unfogged)), texel.a * v.alpha);
 }

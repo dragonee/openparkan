@@ -2899,6 +2899,15 @@ impl Play {
         self.outer.on() && self.view_mode() == self.outer_mode
     }
 
+    /// Whether the world is drawn through the infrared: the view's flag `0x20`, which the
+    /// unit's camera turns on the state rows N sends (`Control.dll:0x10023a00`) and
+    /// `CCamera::Render` hands the shader component for the length of its own render
+    /// (`Terrain.dll:0x10084514`-`0x1008456a`; docs/10, "The colour filter is the camera's
+    /// infrared").
+    pub fn infrared(&self) -> bool {
+        self.driving.as_ref().map_or(self.hero.pilot.switches, |d| d.pilot.switches).infrared
+    }
+
     /// Whether a camera at `eye` stands in a room of a building, where the rain and the snow
     /// are not drawn: the building's draw asks it of every camera inside its sphere
     /// ([`parkan_sim::solid::in_a_room`]).

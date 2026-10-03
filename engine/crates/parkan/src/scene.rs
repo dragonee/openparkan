@@ -113,22 +113,33 @@ pub fn world(game: &Path, loaded: &Loaded) -> Result<World> {
 }
 
 /// The bodies to draw this frame: each one up, along its own arc, with its slot's texture.
+/// With the camera's `infrared` on the sprite's colour, slot 17's, goes through the shader
+/// component's filter and comes out green (`Terrain.dll:0x1007d945`-`0x1007d968`).
 ///
-/// STAND-IN: docs/10-sky.md#not-resolved -- what tints a body's sprite is not read; it is
-/// drawn in its texture's own colours.
-pub fn body_sprites(world: &World, seconds: f64) -> Vec<parkan_render::body::Sprite> {
+/// STAND-IN: docs/10-sky.md#the-sun-and-the-moon-are-drawn -- the sprite's four vertices carry
+/// slot 17's colour (`0x1007cd98`), which is read; whether its alpha reaches the blend, and so
+/// how the disc looks at the 50 of 255 many keyframes give it, is not checked against a frame,
+/// and outside the infrared the sprite is drawn in its texture's own colours.
+pub fn body_sprites(world: &World, seconds: f64, infrared: bool) -> Vec<parkan_render::body::Sprite> {
     let Some(a) = world.atmosphere.as_ref() else {
         return Vec::new();
+    };
+    let sky = parkan_sim::sky::at(a, parkan_sim::sky::position(a, seconds));
+    let tint = match (&sky, infrared) {
+        (Some(s), true) => {
+            let [r, g, b] = parkan_sim::sky::infrared(s.body_tint);
+            [r, g, b, 1.0]
+        }
+        _ => [1.0; 4],
     };
     parkan_sim::sky::bodies_aloft(a, seconds)
         .into_iter()
         .map(|(body, progress)| parkan_render::body::Sprite {
             toward: body.direction(progress),
-            extent: parkan_sim::sky::at(a, parkan_sim::sky::position(a, seconds))
-                .map_or([1.0, 1.0], |s| s.body_extent),
+            extent: sky.as_ref().map_or([1.0, 1.0], |s| s.body_extent),
             texture: world.body_textures[body.slot() - parkan_sim::sky::Body::Sun.slot()],
             cell: world.body_cells[body.slot() - parkan_sim::sky::Body::Sun.slot()],
-            tint: [1.0; 4],
+            tint,
         })
         .collect()
 }
@@ -142,12 +153,20 @@ pub use parkan_world::play::Play;
 /// The clock starts at the file's closing time and plays the sections in turn; the sun
 /// object's two lights shine while a body is up, the first along the body's travel and the
 /// second against it (docs/10-sky.md).
+///
+/// With the camera's `infrared` on (docs/10, "The colour filter is the camera's infrared"):
+/// the fog colour and every colour of the dome go through the shader component's slot 5 and
+/// come out green (`Terrain.dll:0x10079b05`, `0x10079b4f`-`0x10079bb6`); the sun's draw skips
+/// its flare and the flare's lift of the main light with it (`0x1007e7ee`-`0x1007e7f9`), so
+/// the light takes its plain colour (`0x1007eba3`); and the frame carries the flag for the
+/// shade, which greens every lit item's material and the scene colour.
 pub fn lighting(
     world: &World,
     seconds: f64,
     eye: Vec3,
     forward: Vec3,
     field: f32,
+    infrared: bool,
 ) -> Option<(parkan_render::frame::Lighting, Vec<[f32; 4]>)> {
     use parkan_render::frame::Light;
     use parkan_sim::sky as atm;
@@ -158,15 +177,15 @@ pub fn lighting(
     // turning towards +x (Terrain.dll:0x100850f0); that column is the view direction --
     // Ngi32.dll's view builder makes it the view's depth axis (0x10009450).
     let heading = forward.x.atan2(forward.y);
-    let fog = sky.fog_colour(heading);
     // No shipped section has the sun and the moon up at once; where two bodies are up,
     // the first started lights the scene.
-    let lights = match atm::bodies_aloft(a, seconds).first() {
-        Some(&(body, progress)) => {
-            // CSun sets both directions every takt (Terrain.dll:0x1007ed40): the first
-            // light travels the way the body's light does, the second the opposite way.
-            let toward = body.direction(progress);
-            let [main, second] = atm::sun_lights(&sky, toward, forward);
+    let toward = atm::bodies_aloft(a, seconds).first().map(|&(body, progress)| body.direction(progress));
+    let seen = sky.seen(heading, toward, forward, infrared);
+    let lights = match toward {
+        // CSun sets both directions every takt (Terrain.dll:0x1007ed40): the first light
+        // travels the way the body's light does, the second the opposite way.
+        Some(toward) => {
+            let [main, second] = seen.lights;
             [Light { direction: -toward, colour: main }, Light { direction: toward, colour: second }]
         }
         None => [Light::OFF; 2],
@@ -174,7 +193,7 @@ pub fn lighting(
     let lighting = parkan_render::frame::Lighting {
         lights,
         scene_colour: sky.scene_colour,
-        fog_colour: fog,
+        fog_colour: seen.fog,
         fog_start: sky.fog_start,
         fog_end: sky.fog_end,
         eye,
@@ -182,10 +201,11 @@ pub fn lighting(
         clock_ms: seconds * 1000.0,
         // The effects' point lights follow, once the battle is synced ([`sync`]).
         points: Default::default(),
+        infrared,
     };
     // The dome's colours go to its vertices as the file gives them: the frame holds stored
     // values (docs/10, "The frame holds what the files hold").
-    Some((lighting, sky.dome_colours(fog)))
+    Some((lighting, seen.dome))
 }
 
 /// The sky's textured layers this frame: the mission's own nebula and clouds, the clouds'
@@ -205,13 +225,18 @@ pub fn sky_layers(world: &World, seconds: f64) -> parkan_render::dome::Layers {
     layers
 }
 
-/// This frame's lens flare, or `None` where no body is up.
+/// This frame's lens flare, or `None` where no body is up -- or while the camera's
+/// `infrared` is on, when the sun's draw passes over the whole of it
+/// (`Terrain.dll:0x1007e7ee`-`0x1007e7f9`).
 ///
 /// The second of its two gates is here, on how high the body stands (`docs/10-sky.md`,
 /// "The lens flare"); the first is on the view, so the renderer takes it from the camera
 /// the frame is actually drawn with.
-pub fn flare(world: &World, seconds: f64) -> Option<parkan_render::flare::Flare> {
+pub fn flare(world: &World, seconds: f64, infrared: bool) -> Option<parkan_render::flare::Flare> {
     use parkan_sim::sky as atm;
+    if infrared {
+        return None;
+    }
     let a = world.atmosphere.as_ref()?;
     let &(body, progress) = atm::bodies_aloft(a, seconds).first()?;
     let toward = body.direction(progress);

@@ -450,6 +450,12 @@ pub struct Sky {
     pub sun_light: Rgb,
     /// Slot 17's alpha ÷ 255: how far the flare gates may lift the main light.
     pub sun_boost: f32,
+    /// Slot 17's colour: the one colour all four vertices of a body's sprite carry. The
+    /// sprite's stream block gives its diffuse as `CSun +0x95c`, property 5, with a stride of
+    /// 0 (`Terrain.dll:0x1007cd98`-`0x1007cdaa`), and its specular as `0xff000000`
+    /// (`0x1007cd7e`), no fog. *Measured*: black on 31 of the 576 keyframes inside a body's
+    /// window and on 53 of the 80 outside one.
+    pub body_tint: Rgb,
     /// The sun object's second light: slot 21.
     pub second_light: Rgb,
     /// The body sprite's extent across and up: the first two floats (`CSun +0x94`,
@@ -519,6 +525,7 @@ pub fn at(atmosphere: &Atmosphere, now: Position) -> Option<Sky> {
         scene_colour: colour(k0, k1, SCENE_COLOUR_SLOT, t),
         sun_light: colour(k0, k1, SUN_LIGHT_SLOT, t).map(|c| c * light),
         sun_boost: channels(k0, k1, SUN_BOOST_SLOT, t)[3],
+        body_tint: colour(k0, k1, SUN_BOOST_SLOT, t),
         second_light: colour(k0, k1, SUN_SECOND_LIGHT_SLOT, t),
         body_extent: [EXTENT_ACROSS_FLOAT, EXTENT_UP_FLOAT]
             .map(|f| k0.intensity[f] + (k1.intensity[f] - k0.intensity[f]) * t),
@@ -565,7 +572,64 @@ pub fn sun_lights(sky: &Sky, toward: Vec3, view: Vec3) -> [Rgb; 2] {
     [main, sky.second_light]
 }
 
+/// The infrared's two constants: a third of each channel, and the gain on their sum
+/// (`Terrain.dll:0x1009b360`, 0.33, and `0x1009b35c`, 7.0).
+pub const INFRARED_SHARE: f32 = 0.33;
+pub const INFRARED_GAIN: f32 = 7.0;
+
+/// The camera's infrared on a stored colour: the shader component's slot 5
+/// (`Terrain.dll:0x1004f900`, docs/10, "The colour filter is the camera's infrared"). Seven
+/// times 0.33 of the three bytes' sum, rounded and held to 255, as the green alone; the red
+/// and the blue are 0 and the alpha is the caller's to keep.
+pub fn infrared(c: Rgb) -> Rgb {
+    let [r, g, b] = c.map(|v| (v.clamp(0.0, 1.0) * 255.0).round());
+    let green = ((r * INFRARED_SHARE + g * INFRARED_SHARE + b * INFRARED_SHARE) * INFRARED_GAIN).round();
+    [0.0, green.min(255.0) / 255.0, 0.0]
+}
+
+/// What the sky's and the sun's draws leave of a frame's colours.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Seen {
+    /// The fog colour: the device's `FOGCOLOR`, the rim's colour and the colour of the sky's
+    /// screen-wide quad.
+    pub fog: Rgb,
+    /// The dome's vertex colours in [`dome`]'s order.
+    pub dome: Vec<[f32; 4]>,
+    /// The sun object's two lights' colours.
+    pub lights: [Rgb; 2],
+    /// Whether the lens flare is drawn at all.
+    pub flare: bool,
+}
+
 impl Sky {
+    /// This frame's sky from a camera heading `heading` and looking along `view`, the body up
+    /// standing at `toward`. With the camera's `infrared` on, the sky's draw puts its fog
+    /// colour through the shader component's slot 5 (`Terrain.dll:0x10079b05`) and then every
+    /// one of the dome's vertex colours (`0x10079b4f`-`0x10079bb6`), the rim taking the fog
+    /// colour as it then is (`0x10079bb8`); and the sun's draw passes over its flare and the
+    /// flare's lift of the main light (`0x1007e7ee`-`0x1007e7f9`), handing the light manager
+    /// the plain colour instead (`0x1007eba3`). The lights' own colours are not filtered.
+    pub fn seen(&self, heading: f32, toward: Option<Vec3>, view: Vec3, infrared: bool) -> Seen {
+        let through = |c: Rgb| if infrared { self::infrared(c) } else { c };
+        let fog = through(self.fog_colour(heading));
+        let rim = self.dome_colours(fog).len() - DOME_SEGMENTS;
+        let dome = self
+            .dome_colours(fog)
+            .into_iter()
+            .enumerate()
+            .map(|(i, [r, g, b, a])| {
+                let [r, g, b] = if i >= rim { fog } else { through([r, g, b]) };
+                [r, g, b, a]
+            })
+            .collect();
+        let lights = match toward {
+            Some(_) if infrared => [self.sun_light, self.second_light],
+            Some(toward) => sun_lights(self, toward, view),
+            None => [[0.0; 3]; 2],
+        };
+        Seen { fog, dome, lights, flare: toward.is_some() && !infrared }
+    }
+
     /// The fog colour looking along `heading`, radians from +y towards +x
     /// (`Terrain.dll:0x10079730`): whole degrees from −180, the quadrant and the
     /// fraction through it blending two horizon colours.
@@ -996,6 +1060,52 @@ mod tests {
             [0.5, 0.2, 0.0],
             "slot 17's alpha scales it"
         );
+    }
+
+    /// With the camera's infrared on the sky's fog colour and every colour of its dome go
+    /// through slot 5, each keeping its alpha, and the sun's flare and its lift of the main
+    /// light are passed over.
+    #[test]
+    fn the_infrared_greens_the_fog_and_the_dome_and_passes_over_the_flare() {
+        assert_eq!(
+            (f32::from_bits(0x3ea8_f5c3), f32::from_bits(0x40e0_0000)),
+            (INFRARED_SHARE, INFRARED_GAIN)
+        );
+        // C02 M04's horizon ahead, (107, 172, 25): 2.31 × 304 is past the byte.
+        assert_eq!(infrared([107.0 / 255.0, 172.0 / 255.0, 25.0 / 255.0]), [0.0, 1.0, 0.0]);
+        // A night's (10, 10, 30) is 2.31 × 50 = 115.5, 116 of green.
+        assert_eq!(infrared([10.0 / 255.0, 10.0 / 255.0, 30.0 / 255.0]), [0.0, 116.0 / 255.0, 0.0]);
+        // The sky's constant white becomes the 0xff00ff00 it is given outright (`0x100797a8`).
+        assert_eq!((infrared([1.0; 3]), infrared([0.0; 3])), ([0.0, 1.0, 0.0], [0.0; 3]));
+
+        let mut sky = at(&day(vec![sky_keyframe(0, 0, 1.0)]), at_seconds(0, 0.0)).unwrap();
+        sky.horizon = [[0.1, 0.0, 0.02], [0.0, 0.1, 0.0], [0.0, 0.0, 0.1], [0.04, 0.04, 0.04]];
+        sky.apex = [0.02, 0.02, 0.1];
+        sky.apex_alpha = 0.25;
+        sky.sun_light = [0.5, 0.2, 0.0];
+        sky.second_light = [0.3, 0.3, 0.4];
+        sky.sun_boost = 1.0;
+        let plain = sky.seen(0.0, Some(SUN_DIRECTION), SUN_DIRECTION, false);
+        assert_eq!(plain.fog, sky.fog_colour(0.0));
+        assert_eq!(plain.dome, sky.dome_colours(plain.fog));
+        assert!((plain.lights[0][0] - 2.5).abs() < 1e-4 && plain.flare, "{:?}", plain.lights);
+        let seen = sky.seen(0.0, Some(SUN_DIRECTION), SUN_DIRECTION, true);
+        // The fog: 26 + 0 + 5 of 255, 2.31 × 31 = 71.6, 72 of green.
+        assert_eq!(seen.fog, [0.0, 72.0 / 255.0, 0.0]);
+        assert_eq!(seen.dome.len(), plain.dome.len());
+        for (i, (s, p)) in seen.dome.iter().zip(&plain.dome).enumerate() {
+            assert_eq!((s[0], s[2], s[3]), (0.0, 0.0, p[3]), "vertex {i}: green alone, its alpha kept");
+        }
+        // The apex, (5, 5, 26) at alpha 0.25: 2.31 × 36 = 83.2.
+        assert_eq!(seen.dome[0], [0.0, 83.0 / 255.0, 0.0, 0.25]);
+        // The rim is the fog colour as the filter left it, not filtered a second time.
+        assert_eq!(*seen.dome.last().unwrap(), [0.0, 72.0 / 255.0, 0.0, 1.0]);
+        // The sun on the view axis lifts nothing, and the lights keep their own colours.
+        assert_eq!(seen.lights, [[0.5, 0.2, 0.0], [0.3, 0.3, 0.4]]);
+        assert!(!seen.flare);
+        // No body up: no lights and no flare either way.
+        assert_eq!(sky.seen(0.0, None, Vec3::Y, false).lights, [[0.0; 3]; 2]);
+        assert!(!sky.seen(0.0, None, Vec3::Y, false).flare);
     }
 
     #[test]

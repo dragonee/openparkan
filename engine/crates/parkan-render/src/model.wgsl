@@ -194,7 +194,12 @@ fn vs_main(v: VertexIn) -> VertexOut {
     let power = select(look.specular.w, 0.0, look.lit.x > 0.5);
     let points = point_lights(world.xyz, out.normal, instance.owner.x, to_eye, power);
     let lights = frame.light_colour.rgb * a + frame.second_colour.rgb * b + points.diffuse;
-    let scene = frame.scene_colour.rgb;
+    // The camera's infrared greys the item's material and the scene colour into green before
+    // the lights are summed (`0x1004e0ad`-`0x1004e236`); the lights' own colours it leaves.
+    let scene = shade_infrared(frame.scene_colour.rgb, frame.paint.y);
+    let material_diffuse = shade_infrared(look.diffuse.rgb, frame.paint.y);
+    let material_ambient = shade_infrared(look.ambient.rgb, frame.paint.y);
+    let material_specular = shade_infrared(look.specular.rgb, frame.paint.y);
     out.gloss = vec3<f32>(0.0);
     if frame.paint.x > 0.5 {
         // The camera's mode 2 (docs/35, "The unit in the middle"): the batch's self-light is
@@ -210,18 +215,18 @@ fn vs_main(v: VertexIn) -> VertexOut {
     // diffuse and power made 0 before this (`0x1002c1a0`, docs/07, "How a lightmapped batch
     // is drawn"), so no light reaches it and the scene colour is the floor under that colour
     // alone.
-    var diffuse = look.diffuse.rgb * lights;
+    var diffuse = material_diffuse * lights;
     var highlight = vec3<f32>(0.0);
-    var ambient = look.ambient.rgb;
+    var ambient = material_ambient;
     if look.lit.x > 0.5 {
         diffuse = vec3<f32>(0.0);
-        ambient = look.diffuse.rgb;
+        ambient = material_diffuse;
     } else {
         // A light leaves its highlight on the material's specular unless it is flagged against
         // one (`+0x4c` bit 1, `Terrain.dll:0x1004ec12`, `0x1004ed91`): the sun's first light
         // (`Ngi32.dll:0x1001616f`) and the effects' point lights (`0x100166b5`) do, and the
         // sun's second does not -- `CSun` flags it as it makes it (`Terrain.dll:0x1007d03b`).
-        highlight = look.specular.rgb
+        highlight = material_specular
             * (frame.light_colour.rgb * shade_highlight(n, frame.light_direction.xyz, to_eye, a, look.specular.w)
                 + points.highlight);
     }

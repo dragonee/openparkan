@@ -428,7 +428,10 @@ impl SpriteRenderer {
         // The frame's fog colour is the stored one; this shader encodes what it is handed.
         let [r, g, b] = crate::frame::linear(lighting.fog_colour);
         camera[20..24].copy_from_slice(&[r, g, b, 1.0]);
-        camera[24..28].copy_from_slice(&[lighting.fog_start, lighting.fog_end, 0.0, 0.0]);
+        // z 1 while the camera's infrared is on: a sprite's one colour goes through the shader
+        // component's slot 5 (`Terrain.dll:0x1004f8cc`-`0x1004f8f4`, docs/10).
+        let infrared = if lighting.infrared { 1.0 } else { 0.0 };
+        camera[24..28].copy_from_slice(&[lighting.fog_start, lighting.fog_end, infrared, 0.0]);
         let [r, g, b] = lighting.scene_colour;
         camera[28..32].copy_from_slice(&[r, g, b, 1.0]);
         queue.write_buffer(&self.camera, 0, bytemuck::cast_slice(&camera));

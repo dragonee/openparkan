@@ -141,6 +141,31 @@ fn c03_m02s_lightning_strikes_the_map_every_six_to_nine_seconds() {
     assert!(!play.hero.dead());
 }
 
+/// N sends `CIS_INFRARED_INV` to the unit's camera (`hero.tbl`, `Control.dll:0x10023a00`), which
+/// flips the view's flag `0x20`: the world is drawn through the infrared while it is set
+/// (docs/10, "The colour filter is the camera's infrared").
+#[test]
+#[ignore = "needs the game install"]
+fn the_heros_n_turns_the_infrared_the_world_is_drawn_through() {
+    let mut play = with_weather(C03_M02);
+    play.tick(TICK, [0.0; 2]);
+    assert!(!play.infrared(), "off as the mission starts");
+    for (pressed, on) in [(true, true), (false, true), (true, false), (false, false)] {
+        play.key("SCAN_N", pressed);
+        play.tick(TICK, [0.0; 2]);
+        assert_eq!(play.infrared(), on, "N {}", if pressed { "down" } else { "up" });
+    }
+    // The sky as the infrared leaves it at this hour: the fog and the dome green alone, and
+    // no flare, whatever the red of this world.
+    let a = &play.weather.as_ref().expect("a sky.ske").atmosphere;
+    let sky = parkan_sim::sky::at(a, parkan_sim::sky::position(a, play.hero.time_ms / 1000.0)).unwrap();
+    let plain = sky.seen(0.3, Some(Vec3::Z), Vec3::Y, false);
+    assert!(plain.fog[0] > plain.fog[1] * 4.0, "C03's horizon is red: {:?}", plain.fog);
+    let seen = sky.seen(0.3, Some(Vec3::Z), Vec3::Y, true);
+    assert!(seen.fog[1] > 0.5 && seen.fog[0] == 0.0 && seen.fog[2] == 0.0, "{:?}", seen.fog);
+    assert!(seen.dome.iter().all(|c| c[0] == 0.0 && c[2] == 0.0) && !seen.flare);
+}
+
 /// A building's draw sets the view's flag `0x200` while the camera stands in one of its rooms
 /// (`Terrain.dll:0x100599f9`), and a view carrying it is not handed the weather's pass
 /// (`0x10084790`): the dust that fills C03 M02's air is gone inside its Small Bunker, as the

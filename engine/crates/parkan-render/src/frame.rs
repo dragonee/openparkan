@@ -122,6 +122,24 @@ pub struct Lighting {
     /// The effects' point lights, which the device lights every lit surface with beside the
     /// sun's two (docs/11, "What a light does to a surface").
     pub points: Points,
+    /// The camera's infrared, the view's flag `0x20`, which `CCamera::Render` hands the shader
+    /// component for the length of its own render (`Terrain.dll:0x10084514`-`0x1008456a`, and
+    /// off again at `0x1008481a`): every lit item's material colours and the scene colour go
+    /// through [`crate::shade::infrared`]. The colours the sky and the sprites put through
+    /// slot 5 -- the fog colour here among them -- come already filtered.
+    pub infrared: bool,
+}
+
+impl Lighting {
+    /// A material's colour as the shade takes it this frame.
+    pub fn material(&self, c: [f32; 3]) -> [f32; 3] {
+        if self.infrared { crate::shade::infrared(c) } else { c }
+    }
+
+    /// The floor under every lit colour as the shade takes it this frame.
+    pub fn scene(&self) -> [f32; 3] {
+        self.material(self.scene_colour)
+    }
 }
 
 impl Default for Lighting {
@@ -142,6 +160,7 @@ impl Default for Lighting {
             field: parkan_world::models::PORTAL_FIELD,
             clock_ms: 0.0,
             points: Points::default(),
+            infrared: false,
         }
     }
 }
@@ -171,7 +190,8 @@ pub struct FrameUniform {
     pub fog: [f32; 4],
     /// The eye, and in w its field of view across.
     pub eye: [f32; 4],
-    /// x 1 where the instances draw in their paint, as a HUD panel's view does.
+    /// x 1 where the instances draw in their paint, as a HUD panel's view does; y 1 while the
+    /// camera's infrared is on.
     pub paint: [f32; 4],
     /// x how many of the point lights light every surface, which come first; y how many
     /// there are.
@@ -197,7 +217,7 @@ impl FrameUniform {
             fog_colour: rgb(l.fog_colour),
             fog: [l.fog_start, l.fog_end, 0.0, 0.0],
             eye: [l.eye.x, l.eye.y, l.eye.z, l.field],
-            paint: [0.0; 4],
+            paint: [0.0, if l.infrared { 1.0 } else { 0.0 }, 0.0, 0.0],
             point_counts: [l.points.shared as f32, l.points.count as f32, 0.0, 0.0],
             points: l.points.lights.map(|p| PointUniform {
                 position: [p.position.x, p.position.y, p.position.z, p.range],

@@ -4,7 +4,8 @@
 
 struct Layer {
     view_proj: mat4x4<f32>,
-    // The clouds: the fog colour their own fog draws toward. Unused by the other layers.
+    // The clouds: the fog colour their own fog draws toward. The nebula: its vertices'
+    // constant colour. Unused by the gradient.
     tint: vec4<f32>,
     uv_scale: f32,
     // 0 the gradient, 1 a texture as it is, 2 the gradient held opaque, 3 the clouds.
@@ -58,7 +59,8 @@ fn fs_main(v: VertexOut) -> @location(0) vec4<f32> {
         let lit = min(texel.rgb * v.colour.rgb + v.spill.rgb, vec3<f32>(1.0));
         return vec4<f32>(mix(layer.tint.rgb, lit, v.spill.w), texel.a * v.colour.a);
     }
-    // The nebula's vertices carry a constant white (`0x100792f5`) and a specular of
-    // 0xff000000 (`0x100792bc`): its texture as it is, and no fog.
-    return texel;
+    // The nebula's vertices carry one constant colour and a specular of 0xff000000
+    // (`0x100792bc`): its texture by that colour, and no fog. The colour is white
+    // (`0x100792f5`), and 0xff00ff00 while the camera's infrared is on (`0x100797a8`).
+    return texel * layer.tint;
 }

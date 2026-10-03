@@ -60,6 +60,16 @@ fn shade_spill(s: vec3<f32>) -> vec3<f32> {
     return select(select(vec3<f32>(1.0), over, s <= vec3<f32>(3.0)), s * 0.8, s <= vec3<f32>(1.0));
 }
 
+// The camera's infrared on a material's colour or the scene's (`0x1004e0ad`-`0x1004e236`,
+// docs/10, "The colour filter is the camera's infrared"): while `on` is set, seven times
+// 0.33 of the three channels' sum as the green alone, in floats and not held to 1.
+fn shade_infrared(c: vec3<f32>, on: f32) -> vec3<f32> {
+    if on < 0.5 {
+        return c;
+    }
+    return vec3<f32>(0.0, (c.r * 0.33 + c.g * 0.33 + c.b * 0.33) * 7.0, 0.0);
+}
+
 struct Shaded {
     // The vertex's diffuse colour, which the texture stages modulate.
     diffuse: vec3<f32>,

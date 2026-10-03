@@ -59,14 +59,17 @@ struct GpuVertex {
 /// item's ([`shade::byte`]).
 pub fn cloud_vertex(vertex: Vec3, cloud_colour: [f32; 3], lighting: &Lighting) -> ([f32; 4], [f32; 4]) {
     let normal = dome_normal(vertex);
+    // The item's diffuse and the scene colour as the shade takes them: greyed into green
+    // while the camera's infrared is on (`0x1004e0ad`).
+    let diffuse = lighting.material(cloud_colour);
     let mut lights = [0.0; 3];
     for light in &lighting.lights {
         let cosine = shade::cosine(normal, light.direction.normalize_or_zero());
         for c in 0..3 {
-            lights[c] += light.colour[c] * cloud_colour[c] * cosine;
+            lights[c] += light.colour[c] * diffuse[c] * cosine;
         }
     }
-    let shaded = shade::lit(lights, [0.0; 3], [0.0; 3], lighting.scene_colour);
+    let shaded = shade::lit(lights, [0.0; 3], [0.0; 3], lighting.scene());
     // The cap's origin is the drop below the eye, so the eye stands that far up its axis.
     let keep = shade::fog((vertex - Vec3::Z * CLOUD_DROP).length(), CLOUD_FOG_START, CLOUD_FOG_END);
     let [r, g, b] = shaded.diffuse.map(shade::byte);
@@ -280,7 +283,10 @@ impl DomeRenderer {
             let u = Uniform { view_proj: matrix.to_cols_array(), tint, uv_scale, mode, _pad: [0.0; 2] };
             queue.write_buffer(&pass.uniform, 0, bytemuck::bytes_of(&u));
         };
-        write(&self.nebula, placed, [1.0; 4], NEBULA_UV_SCALE, TEXTURED);
+        // The nebula's vertices carry the sky's one constant colour: white, and 0xff00ff00
+        // while the camera's infrared is on (`0x100797a8`).
+        let constant = if lighting.infrared { [0.0, 1.0, 0.0, 1.0] } else { [1.0; 4] };
+        write(&self.nebula, placed, constant, NEBULA_UV_SCALE, TEXTURED);
         write(&self.gradient, placed, [1.0; 4], 1.0, GRADIENT);
         // The clouds ride the same cap with its origin 5000 below the camera (`0x1007a08e`),
         // fogged toward the frame's fog colour.
@@ -429,6 +435,31 @@ mod tests {
         assert_eq!([colour[0], colour[1], colour[2]], [0.337, 0.435, 0.263].map(shade::byte));
         // 86, 111 and 67 of 255: the scene colour as the file gives it, to the byte.
         assert_eq!([colour[0], colour[1], colour[2]].map(|c| c * 255.0), [86.0, 111.0, 67.0]);
+    }
+
+    /// With the camera's infrared on the clouds' material and the scene colour are greyed
+    /// into green before the lights are summed: only a light's green reaches the layer, and
+    /// the floor under it is 2.31 of the scene colour's sum.
+    #[test]
+    fn under_the_infrared_the_clouds_are_green_alone() {
+        let dome = sky::dome();
+        let cloud = [200.0 / 255.0, 1.0, 0.0];
+        let seen = Lighting { infrared: true, ..last_bastion(Vec3::Z) };
+        let (colour, spill) = cloud_vertex(dome[0], cloud, &seen);
+        assert_eq!([colour[0], colour[1], colour[2]], [0.0, 1.0, 0.0]);
+        assert_eq!((spill[0], spill[2]), (0.0, 0.0));
+        // The diffuse is 2.31 × (200/255 + 1), the main light's green 1.30 on it 5.36: kneed
+        // to 1.73, and 0.8 of the 0.73 past 1 goes to the specular.
+        let lit = 1.30 * 2.31 * (200.0 / 255.0 + 1.0);
+        // Either colour reaches the device as a byte, so each is within half of one.
+        let half_a_byte = 0.5 / 255.0 + 1e-6;
+        assert!((spill[1] - 0.8 * (lit / 6.0 + 5.0 / 6.0 - 1.0)).abs() < half_a_byte, "{spill:?}");
+        // Side-on to both lights the floor is the scene colour's own green, 2.31 × 1.035.
+        let (colour, spill) =
+            cloud_vertex(dome[0], cloud, &Lighting { infrared: true, ..last_bastion(Vec3::X) });
+        assert_eq!([colour[0], colour[1], colour[2]], [0.0, 1.0, 0.0]);
+        let floor = 2.31 * (0.337 + 0.435 + 0.263);
+        assert!((spill[1] - 0.8 * (floor / 6.0 + 5.0 / 6.0 - 1.0)).abs() < half_a_byte, "{spill:?}");
     }
 
     #[test]

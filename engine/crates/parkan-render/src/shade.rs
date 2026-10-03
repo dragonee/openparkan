@@ -79,6 +79,29 @@ pub fn lit(lights: [f32; 3], highlight: [f32; 3], ambient: [f32; 3], scene: [f32
     }
 }
 
+/// The infrared's two constants: a third of each channel, and the gain on their sum
+/// (`Terrain.dll:0x1009b360`, 0.33, and `0x1009b35c`, 7.0; docs/10, "The colour filter is the
+/// camera's infrared").
+pub use parkan_sim::sky::{INFRARED_GAIN, INFRARED_SHARE};
+
+/// The infrared on a material's colour, as the shade's two lighters do it while the state's
+/// flag bit 0 is set (`0x1004e0ad`–`0x1004e236` in slot 8, `0x1004c6bd`–`0x1004c849` in slot
+/// 3): the green becomes seven times 0.33 of the three channels' sum, and the red and the
+/// blue 0. It is done in floats and **not held to 1**: the item's diffuse, its ambient and
+/// its specular each take it, and so does the scene colour, the floor under the lit sum.
+pub fn infrared(c: [f32; 3]) -> [f32; 3] {
+    [0.0, (c[0] * INFRARED_SHARE + c[1] * INFRARED_SHARE + c[2] * INFRARED_SHARE) * INFRARED_GAIN, 0.0]
+}
+
+/// The infrared on a stored colour, the shader component's slot 5 (`0x1004f900`): the same
+/// sum on the three bytes, rounded and **held to 255**, as the green alone. The alpha is the
+/// caller's to keep. What takes it: the sky's fog colour and every dome vertex's
+/// (`0x10079b1e`, `0x10079ba1`), the body sprite's tint (`0x1007d95f`), an effect sprite's
+/// diffuse (`0x1004f8ee`) and the rain's and the snow's colour (`0x10075b2b`, `0x100764ab`).
+pub fn infrared_stored(c: [f32; 3]) -> [f32; 3] {
+    parkan_sim::sky::infrared(c)
+}
+
 /// What a directional light gives a normal: the cosine to the way back along its travel,
 /// nothing from behind (`Ngi32.dll:0x10016139`–`0x10016159`).
 pub fn cosine(normal: Vec3, travel: Vec3) -> f32 {
@@ -365,9 +388,41 @@ mod tests {
         assert!((drawn([0.3; 3], &shaded, [0.675; 3], 1.0)[0] - 0.15).abs() < 1e-6);
     }
 
+    /// The infrared greys a colour into green with a gain of seven on the mean: the shade's
+    /// own, in floats and unheld, and slot 5's on a stored colour, held to 255.
+    #[test]
+    fn the_infrared_puts_seven_thirds_of_a_colours_sum_into_the_green_alone() {
+        assert_eq!(
+            (f32::from_bits(0x3ea8_f5c3), f32::from_bits(0x40e0_0000)),
+            (INFRARED_SHARE, INFRARED_GAIN)
+        );
+        // A white diffuse is 6.93 of green, past 1: the lights' sum on it is kneed and what
+        // passes 1 goes to the specular, green too.
+        let white = infrared([1.0; 3]);
+        assert!((white[1] - 6.93).abs() < 1e-5 && white[0] == 0.0 && white[2] == 0.0, "{white:?}");
+        // Mission 01's scene colour at its brightest keyframe, 40 of 255 grey, is a floor of
+        // 1.087 green: every lit vertex shows its texture's green whole.
+        let floor = infrared([40.0 / 255.0; 3]);
+        assert!((floor[1] - 1.087).abs() < 1e-3, "{floor:?}");
+        let lit = lit([0.0; 3], [0.0; 3], [0.0; 3], floor);
+        assert_eq!(lit.diffuse, [0.0, 1.0, 0.0]);
+        assert!(lit.specular[1] > 0.0 && lit.specular[0] == 0.0, "{:?}", lit.specular);
+        // Slot 5 on a stored colour: C02 M04's fog (107, 172, 25) sums to 304, 702 past the
+        // byte, so its green is 255; a dark (10, 10, 30) is 2.31 × 50 = 115.5, which rounds to
+        // 116; black stays black.
+        assert_eq!(infrared_stored([107.0 / 255.0, 172.0 / 255.0, 25.0 / 255.0]), [0.0, 1.0, 0.0]);
+        let dark = infrared_stored([10.0 / 255.0, 10.0 / 255.0, 30.0 / 255.0]);
+        assert!((dark[1] * 255.0 - 115.5).abs() <= 0.5 && dark[0] == 0.0 && dark[2] == 0.0, "{dark:?}");
+        assert_eq!(infrared_stored([0.0; 3]), [0.0; 3]);
+        // The mask the sky gives its constant white, 0xff00ff00, is that white through the
+        // same filter.
+        assert_eq!(infrared_stored([1.0; 3]), [0.0, 1.0, 0.0]);
+    }
+
     #[test]
     fn the_shader_twin_parses_and_names_the_same_constants() {
         for needle in [
+            "0.33",
             "c / 6.0",
             "5.0 / 6.0",
             "vec3<f32>(7.0)",

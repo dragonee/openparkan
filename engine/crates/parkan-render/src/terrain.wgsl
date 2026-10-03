@@ -140,9 +140,22 @@ fn vs_main(v: VertexIn) -> VertexOut {
     let light = frame.light_colour.rgb * shade_cosine(v.normal, frame.light_direction.xyz)
         + frame.second_colour.rgb * shade_cosine(v.normal, frame.second_direction.xyz)
         + point_lights(v.position, v.normal);
-    let scene = frame.scene_colour.rgb;
-    let first = shade_lit(light * layers.diffuse1.rgb, vec3<f32>(0.0), layers.ambient1.rgb, scene);
-    let second = shade_lit(light * layers.diffuse2.rgb, vec3<f32>(0.0), layers.ambient2.rgb, scene);
+    // The camera's infrared greys each material and the scene colour into green before the
+    // lights are summed (`0x1004e0ad`-`0x1004e236`, docs/10).
+    let ir = frame.paint.y;
+    let scene = shade_infrared(frame.scene_colour.rgb, ir);
+    let first = shade_lit(
+        light * shade_infrared(layers.diffuse1.rgb, ir),
+        vec3<f32>(0.0),
+        shade_infrared(layers.ambient1.rgb, ir),
+        scene,
+    );
+    let second = shade_lit(
+        light * shade_infrared(layers.diffuse2.rgb, ir),
+        vec3<f32>(0.0),
+        shade_infrared(layers.ambient2.rgb, ir),
+        scene,
+    );
     // The shade hands the device each vertex's two colours as bytes (`g_FastProc` slot 0x54,
     // `Terrain.dll:0x1004f69f`), the fog's share in the second's alpha.
     out.lit1 = shade_bytes(first.diffuse);

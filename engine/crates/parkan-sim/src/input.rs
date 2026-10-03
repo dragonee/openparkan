@@ -125,9 +125,10 @@ pub struct Pilot {
 
 /// A unit's switched systems, as the input table's `MCMD_STATE` rows leave them.
 ///
-/// STAND-IN: docs/35-hud.md#the-indicators--read-and-seen -- the repair system, the detection
-/// shield's camouflage and the camera's infrared are not simulated: a row turns only the
-/// switch, which does nothing else.
+/// STAND-IN: docs/35-hud.md#the-indicators--read-and-seen -- the repair system and the detection
+/// shield's camouflage are not simulated: a row turns only the switch, which does nothing
+/// else. The camera's infrared is drawn: the world is seen through it while its switch is on
+/// (docs/10, "The colour filter is the camera's infrared").
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Switches {
     /// The repair system's `0x20`: `CIS_SWITCHON` sets it, `CIS_SWITCHOFF` clears it and
