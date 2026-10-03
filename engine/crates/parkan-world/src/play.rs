@@ -1307,9 +1307,10 @@ impl Play {
     /// unit's (`0x10075727`) write it from the clan the record holds, so a capture changes it
     /// with the owner. Scenery has no such record and keeps the control system's 0.
     ///
-    /// The game gives the clans their signs on a fresh start alone (`0x100a1f90`), and a
-    /// loaded save sets none, so there every emblem is seen to be the arrow (docs/07, "In a
-    /// network game, and after a load"). This keeps the clan's index across a load.
+    /// The game gives the clans their signs on a fresh start alone (`0x100a1f90`). A loaded
+    /// save sets none, so there every clan keeps the 0 its record is made with (`0x10038c70`)
+    /// and every emblem is the arrow, as a recording shows (docs/07, "In a network game, and
+    /// after a load"). This keeps the clan's index across a load.
     pub fn insignia(&self, t: usize) -> usize {
         let clan =
             self.units.get(t).filter(|u| matches!(u.kind, KIND_UNIT | KIND_BUILDING)).and_then(|u| u.clan);

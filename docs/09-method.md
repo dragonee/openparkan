@@ -136,6 +136,12 @@ find.
   ([30-turrets.md](30-turrets.md#what-the-outer-cameras-line-meets--read)). The fix
   is to find the constructor first — the routine that installs the vtables — and to
   shift every offset by where the interface it installs sits.
+  An array of records in an object is the same trap without an interface: a clan
+  record's sign is the mission's `+0x738 + 0x68 i`, and a sweep for `0x738` finds
+  five of its eight stores. The other three reach the record by its own address,
+  `+0x724 + 0x68 i`, and store at `[reg + 0x14]`; and the constructor's zero is in
+  the record's own routine, with no mission offset at all
+  ([07-objects.md](07-objects.md#in-a-network-game-and-after-a-load--read-and-seen)).
 - **Looking for a flag by its immediate.** A plain immediate scan finds a mask
   only where the compiler kept it as one. `Ngi32.dll`'s texture loader isolates
   bit 21 of its load flags with a shift and an `and 1`, so the constant

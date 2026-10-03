@@ -1039,10 +1039,6 @@ mask and 3 — 1 in mode 5, `0x20` in mode 6, and `0x40` in the takeover
   that is not the player's keeps the constructor's 0, or the sign of the last
   frame the player held it; units are signed on every machine
   ([07-objects.md](07-objects.md#in-a-network-game-and-after-a-load--read-and-seen)).
-- What a clan record's sign holds after a **load**. No path of a loaded game
-  stores it, and a recording shows an enemy's building wearing track 0 there
-  ([07-objects.md](07-objects.md#in-a-network-game-and-after-a-load--read-and-seen));
-  where the record is made, and with what, is not read.
 - ~~The other four writers of a unit record's `+0xa2` (`0x1005e7e8`,
   `0x10074dbf`, `0x1007e2ad`, `0x100a2a73`).~~ The briefing's end, the
   record's binding and constructor, and the briefing's start

@@ -1535,34 +1535,55 @@ takt.
   (`0x1007d6e0`) has no such test: it calls the takt for every record whose
   owner word is not `0xfffe` (`0x1007d7c8`), and the takt writes the sign
   (`0x10075727`).
-- The signs themselves come from the session: its table as the game is set up
-  (`0x100a23e1`, and `0x100a25e0` on the branch a machine takes when the
-  game's `+0xe7` is clear), and a joining player's record after
-  (`0x10060029`, `0x10060057`).
+- The signs themselves come from the session: its table as the game is set up,
+  a joining player's record after, and the player's own from the parameter
+  block ([below](#in-a-network-game-and-after-a-load--read-and-seen), every
+  store).
 
-**A loaded game sets no clan's sign** — *read*, and *seen*. The loop that
+**After a load every clan's sign is 0** — *read*, and *seen*. The loop that
 gives clan *i* sign *i* is in the mission's set-up, `0x100a1f90`, and the level
 calls that only on a **fresh start**: with the parameter block's `+0x154` set
 (`0x100a1e24`–`0x100a1e81`). With it clear the level calls the save's loader
-instead (`0x100a2bd0`, [17-saves.md](17-saves.md#loading--read-and-seen)), and
-a save holds one word of each clan record, its `+0x10`, and no sign.
+instead (`0x100a2bd0`, [17-saves.md](17-saves.md#loading--read-and-seen)).
 
-- The five stores above are every store into the field. The sign is the clan
-  record's `+0x14`, at the mission's `+0x738 + 0x68 i`, and `iron3d.dll` has 13
-  operands with the displacement `0x738`: those five, the two writers' reads
-  (`0x10033059`, `0x10075712`), two more reads (`0x10073a83`, `0x10073d08`),
-  and four on another class's member at the same offset (a vector, at
-  `0x1001a0f2` and `0x1001a1f6`; `0x100198e4` and `0x100d2f97` are taken with
-  them by their place and were not read).
-- So after a load every clan keeps what its record was made with. What that is
-  was not read. **The recording shows track 0.** In "Let's Play - Parkan: Iron
-  Strategy, Part 2" (LjjOqRyCV7o) on C01 M04 the enemy's Medium Factory
-  (`mplant01`) wears cell 6 at 2:55 and 5:19, before any load. The player
-  loads at 6:32.5, and at 7:21 the factory, the enemy's by its red gear on the
-  map, wears the **arrow**; again at 11:27, after what a contact sheet shows
-  as a second load at about 9:03.
-- The emblem on the HUD reads the same field, so a load changes it too
-  (*derived*; not looked for).
+- **The record is made with 0.** The mission's constructor builds nine clan
+  records of `0x68` bytes at its `+0x724` (`0x100a120b`–`0x100a1219`, the
+  vector constructor handed `0x10038c40`), and that constructor zeroes `+4` to
+  `+0x20`, the sign at `+0x14` among them (`0x10038c70`).
+- **The loader leaves it.** It fills each record from the mission's clan
+  through `0x10038ea0` (at `0x100a2f23`), which the fresh start calls too
+  (`0x100a2095`) and which stores `+4`, `+8`, `+0xc`, `+0x20` and the name at
+  `+0x24`; and it stores the save's one word of the record at `+0x10`
+  (`0x100a3101`). Of its 16 stores through a register that is the only one
+  into a clan record's own words, and a save holds no sign.
+- **Every store into the field** is then the constructor's and eight more:
+  - the fresh start's (`0x100a2420`), the one a single-player game reaches;
+  - seven behind the network game's flag or its session: the session table's
+    (`0x100a23f2`, `0x100a25e2`; and `0x100a3bbd`, `0x100a3c05` in `0x100a36a0`,
+    the set-up a fresh start runs in place of `0x100a1f90` when the block's
+    `+0x156` is 1), a joining player's (`0x10060029`, `0x10060057`), and the
+    player's own from the block's `+0x104` (`0x1005e6d8`).
+- **How they were found**, since the first sweep missed three. The sign is at
+  the mission's `+0x738 + 0x68 i`, and `iron3d.dll` has 13 operands with the
+  displacement `0x738`: five stores, the two writers' reads (`0x10033059`,
+  `0x10075712`), two more reads (`0x10073a83`, `0x10073d08`) and four on another
+  class's member at that offset. But a record is also reached by its own
+  address, `+0x724 + 0x68 i`, and then the sign is `[reg + 0x14]`: of the 112
+  operands with the displacement `0x724`, 59 are a `lea`, and three of those are
+  followed within thirteen instructions by a store at `+0x14` through the
+  register. Of the 21 routines beside the record's constructor
+  (`0x10038c40`–`0x100396ff`) only the constructor stores at `+0x14`. A
+  record's address parked in a local and stored through later would still be
+  missed
+  ([09-method.md](09-method.md#searches-that-do-not-discriminate-so-nobody-repeats-them),
+  "the wrong coordinates").
+- **Seen.** In "Let's Play - Parkan: Iron Strategy, Part 2" (LjjOqRyCV7o) on
+  C01 M04 the enemy's Medium Factory (`mplant01`) wears cell 6 at 2:55 and
+  5:19, before any load. The player loads at 6:32.5, and at 7:21 the factory,
+  the enemy's by its red gear on the map, wears the **arrow**, track 0; again
+  at 11:27, after what a contact sheet shows as a second load at about 9:03.
+- The emblem on the HUD reads the same field, so after a load every clan's is
+  emblem 0 (*derived*; not looked for).
 - Every sighting above of a clan's own cell is on a fresh start, and so is the
   captured warbot's (Part 6, the mission's first run).
 - **The engine** keeps a clan's index as its sign across its own load
