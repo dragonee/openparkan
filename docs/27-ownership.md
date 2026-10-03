@@ -310,7 +310,12 @@ set (`0x1003300c`), and stores the new clan at the record's `+0x24`
 (`0x10033012`). The record's step writes that clan's sign into the building's
 control system as its material track every game frame (`0x10033072`), so from
 the next frame the emblem on the building's walls, `B_LBL_01`, is the taker's
-([07-objects.md](07-objects.md#who-picks-an-object-meshs-material-track--read)).
+([07-objects.md](07-objects.md#who-picks-an-object-meshs-material-track--read))
+— *seen* on training mission 4's Large Factory, cell 6 before and the arrow
+after. In a network game the step runs for the player's own clan's records
+alone, so there a building taken from the player keeps the player's sign on
+the player's machine (*derived*)
+([07-objects.md](07-objects.md#in-a-network-game-and-after-a-load--read-and-seen)).
 A captured unit's changes the same way
 ([below](#a-neutral-unit-is-taken-by-the-hero--read-and-measured)).
 
@@ -1020,13 +1025,24 @@ mask and 3 — 1 in mode 5, `0x20` in mode 6, and `0x40` in the takeover
   building and make it the interface's current one
   ([Capture](#capture--read)).
 - The hero's target field (record `+0x38`, `+4`) and what sets it.
-- A captured **building's** emblem has not been seen in a recording. That it
+- ~~A captured **building's** emblem has not been seen in a recording. That it
   becomes the taker's is *read*
   ([Capture](#capture--read)), and a captured unit's is *seen*
-  ([A neutral unit is taken by the hero](#a-neutral-unit-is-taken-by-the-hero--read-and-measured)).
-- What gives another clan's building its sign in a network game, where the
+  ([A neutral unit is taken by the hero](#a-neutral-unit-is-taken-by-the-hero--read-and-measured)).~~
+  — **seen**: the Large Factory of training mission 4 wears cell 6 before the
+  player takes it and the arrow after, with no load between
+  ([07-objects.md](07-objects.md#who-picks-an-object-meshs-material-track--read)).
+- ~~What gives another clan's building its sign in a network game, where the
   game frame steps only the player's own clan's building records
-  (`iron3d.dll:0x1007db57`).
+  (`iron3d.dll:0x1007db57`).~~ — **read**: nothing does. The step is the only
+  caller of the sign's setter a building has, so on each machine a building
+  that is not the player's keeps the constructor's 0, or the sign of the last
+  frame the player held it; units are signed on every machine
+  ([07-objects.md](07-objects.md#in-a-network-game-and-after-a-load--read-and-seen)).
+- What a clan record's sign holds after a **load**. No path of a loaded game
+  stores it, and a recording shows an enemy's building wearing track 0 there
+  ([07-objects.md](07-objects.md#in-a-network-game-and-after-a-load--read-and-seen));
+  where the record is made, and with what, is not read.
 - ~~The other four writers of a unit record's `+0xa2` (`0x1005e7e8`,
   `0x10074dbf`, `0x1007e2ad`, `0x100a2a73`).~~ The briefing's end, the
   record's binding and constructor, and the briefing's start

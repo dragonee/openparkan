@@ -1410,7 +1410,7 @@ the track to the manager's slot 5 (`Terrain.dll:0x100454e6`) or slot 3
     first thing, before its first-run gate: the clan record's `+0x14` of the
     clan the record holds at `+0x24`. The game frame runs the step for every
     building record (`0x1005eaa0` → `0x1007db30`). In a network game it runs
-    only the player's own clan's (`0x1007db57`).
+    only the player's own clan's (`0x1007db57`; [below](#in-a-network-game-and-after-a-load--read-and-seen)).
   - **A unit record's takt** (`0x10075680`, at `0x10075727`) writes the same
     word each game frame (`0x1007d6e0`), once past its dead check.
   - **A unit record's bind** (`0x10074d30`, slot 3 of the record's vtable
@@ -1420,10 +1420,11 @@ the track to the manager's slot 5 (`Terrain.dll:0x100454e6`) or slot 3
 - **The value.** The clan record's `+0x14` is the clan's sign, the index of
   its emblem on the HUD
   ([25-sensors.md](25-sensors.md#the-unit-markers-layout--read-and-measured)).
-  A single-player game gives clan *i* sign *i* as the mission loads
+  A single-player game gives clan *i* sign *i* as a mission **starts**
   (`0x100a2420`); a network game takes each from the session's table
   (`0x100a23e1`). So in the campaign the track is the clan's index, and the
-  two words the question could not tell apart are the same number.
+  two words the question could not tell apart are the same number — until a
+  save is loaded ([below](#in-a-network-game-and-after-a-load--read-and-seen)).
 - **A track a material has not got is track 0.** Both of the manager's fetches
   compare the track with the material's count and take 0 at or past it, or
   below 0 (`World3D.dll:0x1000322f`, `0x10003709`). So a sign changes only a
@@ -1493,10 +1494,79 @@ slot either (one `jmp` at that offset, on a `this` in `ecx`).
   and stepped out again ("Part 6", -yNnsqudMzw, 7:30, from 16 m, its panel
   reading *[searching]*). Before the capture that run shows it only from the
   front, where the turret's sides do not show (7:04–7:09).
-- **Not seen**: a captured building's emblem. No frame in the passages looked
+- ~~**Not seen**: a captured building's emblem. No frame in the passages looked
   through shows one legibly (Part 6 at 8:21–8:26 and 53:30–54:20, Part 6.5 at
   2:16–4:10 and 20:00–22:35, Part 5 at 7:50–10:20, Part 4 at 2:20–3:50,
-  26:14–27:30 and 38:00–41:30).
+  26:14–27:30 and 38:00–41:30).~~ — **seen**, where those passages did not
+  look. **A captured building wears its taker's.**
+  - "training mission 4 teleport" (xoPlGMdKVSY), C00 M04: the neutral clan 1's
+    Large Factory (`lplant01`, `fr_b_plant`) wears cell 6 in the briefing
+    (0:36, the sign on its roof slope face on). The player's flyer takes it at
+    2:55.5, and from the ground at 59 m it wears the arrow, cell 0 (5:22.3,
+    5:23.3). The recording has no load between: no black interval from 1:09 to
+    7:05.
+  - "Tricky Tellus mission 3 Unstable equilibrium" (CxlS0fqCI5M), C01 M04:
+    the enemy's Small Outpost (`shang03`) wears cell 6 in the briefing
+    (0:29–0:31), is taken at 13:25, and wears the arrow at 14:29–14:30.5 from
+    120 m. This recording was not checked for loads.
+  - The two cells cannot be mistaken for each other from the wrong side: cell
+    6's middle is dark and cell 0's pale. Both were set against each cell
+    laid on the building's own `B_LBL_01` quad through its texture
+    coordinates.
+
+#### In a network game, and after a load — *read*, and *seen*
+
+**In a network game a building of another clan is never signed** — *read*.
+The frame's walk over the building records (`iron3d.dll:0x1007db30`) reads the
+game's `+0xe4`, and with it set steps a record only when the clan at its
+`+0x24` is the player's, the mission's `+0xad0` (`0x1007db57`–`0x1007db64`).
+The step is the one caller of slot 16 a building has
+([above](#who-picks-an-object-meshs-material-track--read)), so nothing else
+signs it: not a message from its owner, not the host, not the object's own
+takt.
+
+- On each machine the control system of a building that is not the player's
+  keeps the constructor's **0**, and draws track 0 — or keeps the sign of the
+  last frame the player held it (*derived*).
+- A capture there travels as `GMSG_CHANGE_OBJECT_OWNER`, whose handler calls
+  `Capture` ([27-ownership.md](27-ownership.md#capture--read)), and `Capture`
+  sets the owner word, slot 10, not the sign.
+- **Units are signed everywhere.** The walk over the unit records
+  (`0x1007d6e0`) has no such test: it calls the takt for every record whose
+  owner word is not `0xfffe` (`0x1007d7c8`), and the takt writes the sign
+  (`0x10075727`).
+- The signs themselves come from the session: its table as the game is set up
+  (`0x100a23e1`, and `0x100a25e0` on the branch a machine takes when the
+  game's `+0xe7` is clear), and a joining player's record after
+  (`0x10060029`, `0x10060057`).
+
+**A loaded game sets no clan's sign** — *read*, and *seen*. The loop that
+gives clan *i* sign *i* is in the mission's set-up, `0x100a1f90`, and the level
+calls that only on a **fresh start**: with the parameter block's `+0x154` set
+(`0x100a1e24`–`0x100a1e81`). With it clear the level calls the save's loader
+instead (`0x100a2bd0`, [17-saves.md](17-saves.md#loading--read-and-seen)), and
+a save holds one word of each clan record, its `+0x10`, and no sign.
+
+- The five stores above are every store into the field. The sign is the clan
+  record's `+0x14`, at the mission's `+0x738 + 0x68 i`, and `iron3d.dll` has 13
+  operands with the displacement `0x738`: those five, the two writers' reads
+  (`0x10033059`, `0x10075712`), two more reads (`0x10073a83`, `0x10073d08`),
+  and four on another class's member at the same offset (a vector, at
+  `0x1001a0f2` and `0x1001a1f6`; `0x100198e4` and `0x100d2f97` are taken with
+  them by their place and were not read).
+- So after a load every clan keeps what its record was made with. What that is
+  was not read. **The recording shows track 0.** In "Let's Play - Parkan: Iron
+  Strategy, Part 2" (LjjOqRyCV7o) on C01 M04 the enemy's Medium Factory
+  (`mplant01`) wears cell 6 at 2:55 and 5:19, before any load. The player
+  loads at 6:32.5, and at 7:21 the factory, the enemy's by its red gear on the
+  map, wears the **arrow**; again at 11:27, after what a contact sheet shows
+  as a second load at about 9:03.
+- The emblem on the HUD reads the same field, so a load changes it too
+  (*derived*; not looked for).
+- Every sighting above of a clan's own cell is on a fresh start, and so is the
+  captured warbot's (Part 6, the mission's first run).
+- **The engine** keeps a clan's index as its sign across its own load
+  (`parkan_world::Play::insignia`), which the game does not.
 
 **The manager** is the mesh's own (`+0x24`, `QueryInterface` 0xd, taken at
 `0x10007022`) — unless IAnimation slot 27 (`AniMesh.dll:0x10005970`) has given

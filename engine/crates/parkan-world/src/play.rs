@@ -1306,6 +1306,10 @@ impl Play {
     /// (`iron3d.dll:0x100a2407`). Each game frame a building's record (`0x10033072`) and a
     /// unit's (`0x10075727`) write it from the clan the record holds, so a capture changes it
     /// with the owner. Scenery has no such record and keeps the control system's 0.
+    ///
+    /// The game gives the clans their signs on a fresh start alone (`0x100a1f90`), and a
+    /// loaded save sets none, so there every emblem is seen to be the arrow (docs/07, "In a
+    /// network game, and after a load"). This keeps the clan's index across a load.
     pub fn insignia(&self, t: usize) -> usize {
         let clan =
             self.units.get(t).filter(|u| matches!(u.kind, KIND_UNIT | KIND_BUILDING)).and_then(|u| u.clan);
