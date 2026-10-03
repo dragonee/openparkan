@@ -2899,6 +2899,18 @@ impl Play {
         self.outer.on() && self.view_mode() == self.outer_mode
     }
 
+    /// Whether a camera at `eye` stands in a room of a building, where the rain and the snow
+    /// are not drawn: the building's draw asks it of every camera inside its sphere
+    /// ([`parkan_sim::solid::in_a_room`]).
+    pub fn in_a_room(&self, eye: Vec3) -> bool {
+        self.battle.combat.targets.iter().zip(&self.ground.solids).any(|(target, solid)| {
+            solid.ground
+                && solid.present
+                && eye.distance_squared(target.centre) <= target.radius * target.radius
+                && parkan_sim::solid::in_a_room(&target.parts, eye)
+        })
+    }
+
     /// `CMD_JAMES_OUTER_CAMERA` (`0x10072244`): in modes 0, 1 and 2, on the driven unit
     /// (`0x10038b30`).
     fn press_outer(&mut self) {

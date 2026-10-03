@@ -32,6 +32,10 @@ pub const NO_SLOT: u16 = 0xFFFF;
 pub const NO_PARENT: u16 = 0xFFFF;
 pub const NO_ANIMATION: u16 = 0xFFFF;
 pub const NODE_INTERIOR: u16 = 0x0001;
+/// A cell of a building: a node `CBuilding` draws by itself, its exterior or, with
+/// [`NODE_INTERIOR`], a room (`Terrain.dll:0x100580b0`, docs/24, "A building is drawn cell by
+/// cell through its portals").
+pub const NODE_CELL: u16 = 0x0004;
 /// A collision hull: tested against, never drawn.
 pub const NODE_COLLISION: u16 = 0x0020;
 /// The high byte of a batch's material word when the batch takes the lightmap.

@@ -52,6 +52,65 @@ pub fn pair_radius(radius: f32, robot: bool) -> f32 {
     if robot { radius.min(PAIR_RADIUS_HOLD) } else { radius }
 }
 
+/// Whether `p` stands in a room of the building `parts` make, as `CBuilding::Render` asks of
+/// the camera (`Terrain.dll:0x10059166`-`0x1005957a`, docs/10, "The weather"): a room is a
+/// node past the first whose flags carry the cell's 4 and the interior's 1; the point is
+/// turned into the room's own frame and must lie in its level-0 slot's box, corner to corner
+/// (`0x100592af`-`0x1005934f`), and the room's mesh must then say it holds it -- interface
+/// `0x20` slot 7 (`AniMesh.dll:0x10010550`), which sends a line through the point across
+/// the slot's triangles, counts the crossings to either side (`0x10010995`, `0x100109a5`)
+/// and answers whether either count is odd.
+///
+/// A camera in a room has the building set the view's flag `0x200` (`0x100599f9`), and a
+/// view carrying it is not handed the pass the rain and the snow are drawn in
+/// (`0x10084790`-`0x1008479e`).
+///
+/// STAND-IN: docs/10-sky.md#the-weather--read-and-seen -- the line's direction is the mesh's
+/// `+0x150`, whose writer is not read; here the room's own z.
+pub fn in_a_room(parts: &[Part], p: Vec3) -> bool {
+    use parkan_formats::mesh::{NODE_CELL, NODE_INTERIOR};
+    parts.iter().any(|part| {
+        let mesh = &part.mesh;
+        (1..mesh.nodes.len()).any(|i| {
+            let room = NODE_CELL | NODE_INTERIOR;
+            if mesh.nodes[i].flags & room != room {
+                return false;
+            }
+            let (Some(pose), Some(slot)) =
+                (part.nodes.get(i), part.slot(i).and_then(|s| mesh.slots.get(usize::from(s))))
+            else {
+                return false;
+            };
+            let local = pose.invert().apply([p.x, p.y, p.z].map(f64::from)).map(|v| v as f32 / part.scale);
+            if (0..3).any(|a| local[a] < slot.aabb_min[a] || local[a] > slot.aabb_max[a]) {
+                return false;
+            }
+            let first = usize::from(slot.first_triangle).min(mesh.triangles.len());
+            let last = (first + usize::from(slot.triangle_count)).min(mesh.triangles.len());
+            let (mut above, mut below) = (0, 0);
+            for t in &mesh.triangles[first..last] {
+                let [a, b, c] = t.map(|v| Vec3::from_array(mesh.positions[usize::from(v)]));
+                let den = (b.y - c.y) * (a.x - c.x) + (c.x - b.x) * (a.y - c.y);
+                if den.abs() < 1e-9 {
+                    continue;
+                }
+                let l1 = ((b.y - c.y) * (local[0] - c.x) + (c.x - b.x) * (local[1] - c.y)) / den;
+                let l2 = ((c.y - a.y) * (local[0] - c.x) + (a.x - c.x) * (local[1] - c.y)) / den;
+                let l3 = 1.0 - l1 - l2;
+                if l1 < 0.0 || l2 < 0.0 || l3 < 0.0 {
+                    continue;
+                }
+                if l1 * a.z + l2 * b.z + l3 * c.z > local[2] {
+                    above += 1;
+                } else {
+                    below += 1;
+                }
+            }
+            above % 2 == 1 || below % 2 == 1
+        })
+    })
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SolidFace {
     pub a: Vec3,
@@ -467,6 +526,91 @@ pub fn push(start: Vec3, end: Vec3, radius: f32, obstacle: &Solid, keeps_floors:
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A building of two nodes: an exterior, and a room whose floor at 0 and ceiling at 4 are
+    /// an L -- the square from 0 to 10 less its corner past (5, 5) -- so its box holds a
+    /// corner the room does not. `flags` are the room's.
+    fn hall(flags: u16, at: Vec3) -> Part {
+        use parkan_formats::mesh::{Mesh, NO_SLOT, Node, Slot};
+        use parkan_formats::pose::{IDENTITY, Pose};
+        let l = [[0.0, 0.0], [10.0, 0.0], [10.0, 5.0], [5.0, 5.0], [5.0, 10.0], [0.0, 10.0]];
+        let mut positions = Vec::new();
+        for z in [0.0, 4.0] {
+            positions.extend(l.iter().map(|&[x, y]| [x, y, z]));
+        }
+        let fan = [[0u16, 1, 2], [0, 2, 3], [0, 3, 4], [0, 4, 5]];
+        let triangles: Vec<[u16; 3]> =
+            fan.iter().copied().chain(fan.iter().map(|t| t.map(|v| v + 6))).collect();
+        let node = |name: &str, flags: u16, slot: u16| Node {
+            name: name.into(),
+            flags,
+            parent: 0xFFFF,
+            anim_start: 0xFFFF,
+            fallback_key: 0,
+            slot_index: std::array::from_fn(|k| if k == 0 { slot } else { NO_SLOT }),
+        };
+        let mesh = Mesh {
+            name: "hall".into(),
+            positions,
+            normals: Vec::new(),
+            uv: Vec::new(),
+            lightmap_uv: Vec::new(),
+            nodes: vec![node("o01", 0, NO_SLOT), node("i01", flags, 0)],
+            slots: vec![Slot {
+                first_triangle: 0,
+                triangle_count: triangles.len() as u16,
+                first_batch: 0,
+                batch_count: 0,
+                aabb_min: [0.0, 0.0, 0.0],
+                aabb_max: [10.0, 10.0, 4.0],
+                sphere: [5.0, 5.0, 2.0, 7.4],
+                area: 0.0,
+                volume: 0.0,
+            }],
+            triangles,
+            batches: Vec::new(),
+            face_two_sided: Vec::new(),
+            face_flags: Vec::new(),
+            face_normals: Vec::new(),
+            keys: Vec::new(),
+            frame_map: Vec::new(),
+            frame_count: 0,
+            sphere: None,
+            corners: None,
+        };
+        let pose = Pose { translation: [at.x, at.y, at.z].map(f64::from), ..IDENTITY };
+        Part {
+            mesh: std::rc::Rc::new(mesh),
+            nodes: vec![pose, pose],
+            scale: 1.0,
+            life: None,
+            portals: std::rc::Rc::default(),
+            host: None,
+        }
+    }
+
+    /// The camera stands in a room when it lies in the room's box and a line through it
+    /// crosses the room's faces an odd number of times to either side
+    /// (`Terrain.dll:0x100592af`, `AniMesh.dll:0x10010550`): the weather is not drawn there.
+    #[test]
+    fn a_point_is_in_a_room_inside_its_box_and_between_its_floor_and_its_ceiling() {
+        use parkan_formats::mesh::{NODE_CELL, NODE_INTERIOR};
+        let at = Vec3::new(100.0, 200.0, 30.0);
+        let room = [hall(NODE_CELL | NODE_INTERIOR, at)];
+        assert!(in_a_room(&room, at + Vec3::new(2.0, 2.0, 1.5)), "under its ceiling, over its floor");
+        assert!(in_a_room(&room, at + Vec3::new(2.0, 8.0, 3.9)), "in the L's other arm");
+        assert!(
+            !in_a_room(&room, at + Vec3::new(8.0, 8.0, 1.5)),
+            "in the box, but in the corner the L leaves out"
+        );
+        assert!(!in_a_room(&room, at + Vec3::new(2.0, 2.0, 5.0)), "over the roof, out of the box");
+        assert!(!in_a_room(&room, at + Vec3::new(-1.0, 2.0, 1.5)), "outside the wall");
+        assert!(!in_a_room(&room, Vec3::new(2.0, 2.0, 1.5)), "the room is where the building stands");
+        // A cell without the interior bit is the exterior's, and a node without the cell's 4
+        // is drawn with the cell it hangs under: neither is a room.
+        assert!(!in_a_room(&[hall(NODE_CELL, at)], at + Vec3::new(2.0, 2.0, 1.5)));
+        assert!(!in_a_room(&[hall(NODE_INTERIOR, at)], at + Vec3::new(2.0, 2.0, 1.5)));
+    }
 
     fn quad(z: f32, normal: Vec3) -> Solid {
         let (a, b, c, d) = (

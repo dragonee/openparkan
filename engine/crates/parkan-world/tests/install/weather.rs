@@ -141,6 +141,50 @@ fn c03_m02s_lightning_strikes_the_map_every_six_to_nine_seconds() {
     assert!(!play.hero.dead());
 }
 
+/// A building's draw sets the view's flag `0x200` while the camera stands in one of its rooms
+/// (`Terrain.dll:0x100599f9`), and a view carrying it is not handed the weather's pass
+/// (`0x10084790`): the dust that fills C03 M02's air is gone inside its Small Bunker, as the
+/// recording shows it ("Part 6", -yNnsqudMzw, 28:16 at the doorway and 28:20 inside).
+#[test]
+#[ignore = "needs the game install"]
+fn c03_m02s_dust_is_not_drawn_from_inside_a_room() {
+    use parkan_formats::mesh::{NODE_CELL, NODE_INTERIOR};
+    let play = with_weather(C03_M02);
+    let eye = play.eye().position;
+    assert!(!play.in_a_room(eye), "the hero starts out of doors");
+    assert!(!play.in_a_room(eye + Vec3::Z * 500.0), "and so does the sky");
+    let (mut rooms, mut held, mut buildings) = (0, 0, 0);
+    for (target, solid) in play.battle.combat.targets.iter().zip(&play.ground.solids) {
+        if !solid.ground || !solid.present {
+            continue;
+        }
+        let before = rooms;
+        for part in &target.parts {
+            for (i, node) in part.mesh.nodes.iter().enumerate().skip(1) {
+                let room = NODE_CELL | NODE_INTERIOR;
+                let Some(slot) = part.slot(i).and_then(|s| part.mesh.slots.get(usize::from(s))) else {
+                    continue;
+                };
+                if node.flags & room != room {
+                    continue;
+                }
+                // The middle of the room's box, in the world.
+                let mid: [f64; 3] = std::array::from_fn(|a| {
+                    f64::from((slot.aabb_min[a] + slot.aabb_max[a]) * 0.5 * part.scale)
+                });
+                let [x, y, z] = part.nodes[i].apply(mid).map(|v| v as f32);
+                rooms += 1;
+                held += usize::from(play.in_a_room(Vec3::new(x, y, z)));
+                // Over the building's own sphere nothing is a room.
+                assert!(!play.in_a_room(Vec3::new(x, y, target.centre.z + target.radius + 1.0)));
+            }
+        }
+        buildings += usize::from(rooms > before);
+    }
+    assert!(buildings >= 3 && rooms >= 10, "{rooms} rooms in {buildings} buildings");
+    assert!(held * 4 >= rooms * 3, "the middle of {held} of {rooms} rooms' boxes is in a room");
+}
+
 /// The strike's ground query looks from the map box's floor with nothing shut out, so over
 /// a liquid the landscape answers with the bed (`Terrain.dll:0x100218de`-`0x10021b79`, docs/10,
 /// "Lightning"). Mission 01's map, `Tut_1`, has a lake.

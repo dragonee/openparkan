@@ -835,7 +835,9 @@ fn screenshot(loaded: &scene::Loaded, game: &Path, args: &Args, out: &Path) -> R
         if let Some(w) = p.weather.as_mut() {
             w.specks(before, &weather);
         }
-        let weather = (!args.top_down).then_some(&weather);
+        // A camera in a building's room is not handed the weather's pass (docs/10, "The
+        // weather").
+        let weather = (!args.top_down && !p.in_a_room(eye)).then_some(&weather);
         scene::sync(&mut renderer, &gpu.device, &gpu.queue, p, &world.objects, view_proj, eye, weather);
         if let Some(v) = &view {
             let outside = briefing.is_some() || p.view_mode().shows_cursor() || p.outer_shows();
@@ -1855,7 +1857,7 @@ impl App {
                     &self.world.objects,
                     view_proj,
                     eye.position,
-                    Some(&weather),
+                    (!play.in_a_room(eye.position)).then_some(&weather),
                 );
                 if let Some(v) = &self.view {
                     let outside = briefing.is_some() || play.view_mode().shows_cursor() || play.outer_shows();
