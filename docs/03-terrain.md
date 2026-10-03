@@ -1266,8 +1266,13 @@ A model's batch takes its blend mode from its material's flags byte, through
 immediate), and they sort into four groups: five are
 `InitAlphaBlendModeTranslateTable` filling it (`0x10046a3c` to `0x10046b25`);
 seven read it at a **constant** index, all inside one `CShade` init
-(`0x100411f2` to `0x10041347`); one is an accessor at `0x10042832` that no call
-reaches; and **two** read it at a material's own blend field — `0x10028907`
+(`0x100411f2` to `0x10041347`); one is an accessor at `0x10042832`, slot 3 of
+the vtable at `0x1009b17c` (`0x10042820`), which an earlier reading here had
+as reached by no call and which the sky calls for its two material blocks
+without a slot, at index 1 (`0x100785a2`–`0x100785b5`) and at index 0
+(`0x100785f5`–`0x10078605`) — the sky's own
+([10-sky.md](10-sky.md#the-skys-first-draw-is-a-screen-wide-quad--read)), and
+not the ground's; and **two** read it at a material's own blend field — `0x10028907`
 and `0x1004565f`, the two mesh draws, the only ones whose SIB scale is 4 on a
 register the caller filled. None of the four groups is the ground. What the
 ground's surfaces take instead is one of the fields that init fills:
