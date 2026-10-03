@@ -145,7 +145,7 @@ fn mission_01s_objects_build_and_stand_on_the_ground() {
 
 #[test]
 #[ignore = "needs the game install"]
-fn mission_01s_leaves_blend_and_write_depth_and_nothing_on_it_is_translucent() {
+fn mission_01s_leaves_are_see_through_by_their_batch_word_two_hundred_batches_a_crown() {
     use parkan_formats::mission;
     use parkan_world::{assembly::Assembly, models};
 
@@ -155,14 +155,27 @@ fn mission_01s_leaves_blend_and_write_depth_and_nothing_on_it_is_translucent() {
     let mut store = TextureStore::open(&game).unwrap();
     let mut assembly = Assembly::new(&game).unwrap();
     let objects = models::build(&mut assembly, &mut store, &m).unwrap();
-    // A batch is translucent, drawn last without writing depth, only for an ambient alpha below
-    // 1; the palm's `TF2` leaves blend at mode 4 in the first list, writing depth
-    // (docs/07, "What a blended batch writes").
+    // A batch is see-through, drawn in the sorted layer 5 without writing depth, for an ambient
+    // alpha below 1 or for its word's 0x100 (docs/07, "What a blended batch writes"; docs/11,
+    // "Effect sprites are drawn far to near"). No Mission 01 material has such an alpha; the
+    // palm's `TF2` leaves, which blend at mode 4, carry the word on every batch.
     let groups: Vec<_> = objects.models.iter().flat_map(|model| &model.groups).collect();
     assert!(groups.iter().all(|g| !g.look.translucent()), "no Mission 01 look is translucent");
     let leaves: Vec<_> = groups.iter().filter(|g| g.look.material.eq_ignore_ascii_case("TF2")).collect();
     assert!(!leaves.is_empty(), "the palms' leaves");
     assert!(leaves.iter().all(|g| g.look.blend_mode == 4), "leaves blend SRCALPHA/INVSRCALPHA");
+    assert!(leaves.iter().all(|g| g.see_through), "and every leaf batch is filed see-through");
+    // A palm's crown is not one batch but some two hundred, so the layer sorts it piece by piece:
+    // `s_tree_0_04`'s level 0 has 192 of them and `s_tree_0_05`'s 216.
+    let crowns: Vec<usize> = objects
+        .models
+        .iter()
+        .map(|model| model.groups.iter().filter(|g| g.look.material.eq_ignore_ascii_case("TF2")).count())
+        .filter(|&leaves| leaves > 0)
+        .collect();
+    assert!(crowns.iter().all(|&leaves| leaves == 192 || leaves == 216), "{crowns:?}");
+    // What is not flagged stays in the first list: a trunk's batches among them.
+    assert!(groups.iter().any(|g| !g.see_through && g.portal.is_none()));
 }
 
 #[test]

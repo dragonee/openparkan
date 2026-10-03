@@ -6,7 +6,9 @@
 //! `DESTCOLOR/SRCCOLOR`. Every mode but 0 also alpha-tests against 1, so it drops the
 //! fragments whose alpha is 0. Each mode has two pipelines, one for the queue's first list,
 //! which writes depth whatever it blends, and one for the translucent second list, drawn
-//! after it without writing depth (docs/07, "What a blended batch writes").
+//! after it without writing depth (docs/07, "What a blended batch writes"). The second list
+//! is the queue's layer 5, which is sorted: its batches draw far to near, whatever each
+//! blends with (docs/11, "Effect sprites are drawn far to near").
 
 use std::cell::Cell;
 
@@ -127,6 +129,9 @@ struct DrawGroup {
     lit: bool,
     /// Filed in the queue's second list: drawn last, writing no depth.
     translucent: bool,
+    /// The first vertex its index list names, in the model's frame: what the sorted layer
+    /// measures its distance from the camera to ([`see_through_distance`]).
+    anchor: Vec3,
     portal: Option<PortalQuad>,
     look: wgpu::Buffer,
     /// A bind group for each texture the material's phases draw, and the one drawn now.
@@ -150,6 +155,9 @@ struct GpuInstance {
     buffer: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
     visible: bool,
+    /// Where it stands, as its uniform has it: what carries a batch's first vertex into the
+    /// world for the sorted layer.
+    matrix: Cell<Mat4>,
     /// Whose it is, which an owner-only point light is matched against; 0 on what nobody owns.
     owner: Cell<u32>,
 }
@@ -159,6 +167,8 @@ struct GpuInstance {
 pub struct ViewFrame {
     buffer: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
+    /// The view's eye, which its see-through batches are sorted from.
+    eye: Cell<Vec3>,
 }
 
 pub struct ModelRenderer {
@@ -167,8 +177,19 @@ pub struct ModelRenderer {
     frame_layout: wgpu::BindGroupLayout,
     frame: wgpu::Buffer,
     frame_bind_group: wgpu::BindGroup,
+    /// The scene's eye, which its see-through batches are sorted from.
+    eye: Cell<Vec3>,
     models: Vec<GpuModel>,
     instances: Vec<GpuInstance>,
+}
+
+/// How far a see-through batch stands from the camera, as the sorted layer asks its item
+/// (slot 5, `Terrain.dll:0x1003c340`): the distance from the camera's place to the **first
+/// vertex the batch's index list names** (slot 6, `0x1003c4e0`), carried into the world by the
+/// item's matrix. Not the batch's middle, nor its object's: a long batch is filed by one
+/// corner.
+pub fn see_through_distance(eye: Vec3, matrix: Mat4, first_vertex: Vec3) -> f32 {
+    matrix.transform_point3(first_vertex).distance(eye)
 }
 
 /// An object's placement: `T(position) · Rz(rotation) · S(scale)`.
@@ -376,14 +397,21 @@ impl ModelRenderer {
                             });
                             bind_groups.push((phase.texture, bind_group));
                         }
+                        let anchor = m
+                            .indices
+                            .get(g.start as usize)
+                            .and_then(|&v| m.vertices.get(v as usize))
+                            .map_or(Vec3::ZERO, |v| Vec3::from_array(v.position));
                         DrawGroup {
                             start: g.start,
                             count: g.count,
                             mode,
                             lit,
-                            // A portal quad is filed translucent by its batch word's 8
-                            // (`Terrain.dll:0x1004552a`).
-                            translucent: g.look.translucent() || g.portal.is_some(),
+                            // A batch is filed translucent by its phase's ambient alpha below
+                            // 1, or its word's 8 or `0x100` (`Terrain.dll:0x1004555e`-
+                            // `0x10045598`).
+                            translucent: g.look.translucent() || g.portal.is_some() || g.see_through,
+                            anchor,
                             portal: g.portal,
                             look: buffer,
                             bind_groups,
@@ -426,11 +454,26 @@ impl ModelRenderer {
                     layout: &instance_layout,
                     entries: &[wgpu::BindGroupEntry { binding: 0, resource: buffer.as_entire_binding() }],
                 });
-                GpuInstance { model: i.model, buffer, bind_group, visible: !i.hidden, owner: Cell::new(0) }
+                GpuInstance {
+                    model: i.model,
+                    buffer,
+                    bind_group,
+                    visible: !i.hidden,
+                    matrix: Cell::new(matrix),
+                    owner: Cell::new(0),
+                }
             })
             .collect();
 
-        Self { pipelines, frame_layout, frame, frame_bind_group, models, instances }
+        Self {
+            pipelines,
+            frame_layout,
+            frame,
+            frame_bind_group,
+            eye: Cell::new(Vec3::ZERO),
+            models,
+            instances,
+        }
     }
 
     /// Move instance `index` to `matrix`, or hide it from the scene; a view still draws a
@@ -439,6 +482,7 @@ impl ModelRenderer {
         if let Some(i) = self.instances.get_mut(index) {
             i.visible = visible;
             if visible {
+                i.matrix.set(matrix);
                 queue.write_buffer(&i.buffer, 0, bytemuck::bytes_of(&matrix.to_cols_array()));
             }
         }
@@ -447,6 +491,7 @@ impl ModelRenderer {
     /// Put instance `index` at `matrix` without showing or hiding it.
     pub fn move_instance(&self, queue: &wgpu::Queue, index: usize, matrix: Mat4) {
         if let Some(i) = self.instances.get(index) {
+            i.matrix.set(matrix);
             queue.write_buffer(&i.buffer, 0, bytemuck::bytes_of(&matrix.to_cols_array()));
         }
     }
@@ -482,11 +527,13 @@ impl ModelRenderer {
             layout: &self.frame_layout,
             entries: &[wgpu::BindGroupEntry { binding: 0, resource: buffer.as_entire_binding() }],
         });
-        ViewFrame { buffer, bind_group }
+        ViewFrame { buffer, bind_group, eye: Cell::new(Vec3::ZERO) }
     }
 
     /// A view's uniforms for this frame.
     pub fn prepare_view(&self, queue: &wgpu::Queue, frame: &ViewFrame, uniform: &FrameUniform) {
+        let [x, y, z, _] = uniform.eye;
+        frame.eye.set(Vec3::new(x, y, z));
         queue.write_buffer(&frame.buffer, 0, bytemuck::bytes_of(uniform));
     }
 
@@ -503,6 +550,7 @@ impl ModelRenderer {
     /// or, where its model carries one, at its own: its colours and cell, and the texture
     /// its key names.
     pub fn prepare(&self, queue: &wgpu::Queue, view_proj: Mat4, lighting: &crate::frame::Lighting) {
+        self.eye.set(lighting.eye);
         queue.write_buffer(&self.frame, 0, bytemuck::bytes_of(&FrameUniform::new(view_proj, lighting)));
         for model in &self.models {
             let stands = model.phase.get();
@@ -519,16 +567,16 @@ impl ModelRenderer {
         }
     }
 
-    /// Every group of the first list, mode by mode, then the translucent groups.
+    /// Every group of the first list, mode by mode, then the translucent groups far to near.
     pub fn draw(&self, pass: &mut wgpu::RenderPass<'_>) {
         pass.set_bind_group(0, &self.frame_bind_group, &[]);
-        self.draw_instances(pass, self.instances.iter().filter(|i| i.visible));
+        self.draw_instances(pass, self.instances.iter().filter(|i| i.visible), self.eye.get());
     }
 
     /// Every shown instance through a view's uniforms, as the water's reflection draws them.
     pub fn draw_through(&self, pass: &mut wgpu::RenderPass<'_>, frame: &ViewFrame) {
         pass.set_bind_group(0, &frame.bind_group, &[]);
-        self.draw_instances(pass, self.instances.iter().filter(|i| i.visible));
+        self.draw_instances(pass, self.instances.iter().filter(|i| i.visible), frame.eye.get());
     }
 
     /// Only `indices`, shown or hidden, through a view's uniforms; a painted view draws every
@@ -543,7 +591,7 @@ impl ModelRenderer {
         pass.set_bind_group(0, &frame.bind_group, &[]);
         let instances = indices.iter().filter_map(|&i| self.instances.get(i));
         if !painted {
-            self.draw_instances(pass, instances);
+            self.draw_instances(pass, instances, frame.eye.get());
             return;
         }
         let Some((_, _, opaque)) = self.pipelines.first() else { return };
@@ -560,17 +608,23 @@ impl ModelRenderer {
         }
     }
 
+    /// The queue's two lists (`Terrain.dll:0x10032c60`): the first mode by mode, which is free
+    /// to draw in any order because every item of it writes depth; then the second, layer 5,
+    /// each batch an item of its own, far to near from `eye` ([`crate::order::far_to_near`]).
+    /// Nothing in the second list writes depth, so its order is all that says which of two
+    /// see-through batches lies over the other.
     fn draw_instances<'a>(
         &'a self,
         pass: &mut wgpu::RenderPass<'_>,
         instances: impl Iterator<Item = &'a GpuInstance> + Clone,
+        eye: Vec3,
     ) {
-        for (mode, translucent, pipeline) in &self.pipelines {
+        for (mode, _, pipeline) in self.pipelines.iter().filter(|(_, translucent, _)| !translucent) {
             pass.set_pipeline(pipeline);
             for instance in instances.clone() {
                 let model = &self.models[instance.model];
                 let mut bound = false;
-                for g in model.groups.iter().filter(|g| g.mode == *mode && g.translucent == *translucent) {
+                for g in model.groups.iter().filter(|g| g.mode == *mode && !g.translucent) {
                     if !bound {
                         pass.set_bind_group(1, &instance.bind_group, &[]);
                         pass.set_vertex_buffer(0, model.vertices.slice(..));
@@ -581,6 +635,33 @@ impl ModelRenderer {
                     pass.draw_indexed(g.start..g.start + g.count, 0, 0..1);
                 }
             }
+        }
+        // Filed as the objects draw: instance by instance, each batch in its model's order.
+        let filed: Vec<(&GpuInstance, &DrawGroup)> = instances
+            .flat_map(|i| self.models[i.model].groups.iter().filter(|g| g.translucent).map(move |g| (i, g)))
+            .collect();
+        let distances: Vec<f32> =
+            filed.iter().map(|(i, g)| see_through_distance(eye, i.matrix.get(), g.anchor)).collect();
+        let mut drawn: Option<(u8, *const GpuInstance)> = None;
+        for at in crate::order::far_to_near(&distances) {
+            let (instance, g) = filed[at as usize];
+            let model = &self.models[instance.model];
+            if drawn.is_none_or(|(mode, _)| mode != g.mode) {
+                let Some((_, _, pipeline)) =
+                    self.pipelines.iter().find(|(mode, translucent, _)| *mode == g.mode && *translucent)
+                else {
+                    continue;
+                };
+                pass.set_pipeline(pipeline);
+            }
+            if drawn.is_none_or(|(_, last)| !std::ptr::eq(last, instance)) {
+                pass.set_bind_group(1, &instance.bind_group, &[]);
+                pass.set_vertex_buffer(0, model.vertices.slice(..));
+                pass.set_index_buffer(model.indices.slice(..), wgpu::IndexFormat::Uint32);
+            }
+            drawn = Some((g.mode, instance));
+            pass.set_bind_group(2, &g.bind_groups[g.current.get()].1, &[]);
+            pass.draw_indexed(g.start..g.start + g.count, 0, 0..1);
         }
     }
 }
@@ -594,5 +675,25 @@ mod tests {
         let m = placement([10.0, 20.0, 5.0], std::f32::consts::FRAC_PI_2, 2.0);
         let p = m.transform_point3(Vec3::new(0.0, 1.0, 0.0));
         assert!((p - Vec3::new(8.0, 20.0, 5.0)).length() < 1e-5, "{p}");
+    }
+
+    /// Layer 5 files a batch by its first vertex, where its instance puts it: a pane whose
+    /// first corner is the far one goes under a pane that stands behind its middle.
+    #[test]
+    fn see_through_batches_draw_far_to_near_by_their_first_vertex() {
+        let eye = Vec3::new(0.0, -10.0, 0.0);
+        // A long pane running away from the eye, its list starting at its far end.
+        let long = see_through_distance(eye, Mat4::IDENTITY, Vec3::new(0.0, 40.0, 0.0));
+        // A small pane 20 away, behind the long one's middle and before its far end.
+        let small = see_through_distance(eye, placement([0.0, 10.0, 0.0], 0.0, 1.0), Vec3::ZERO);
+        // A third, nearest, turned and scaled by its instance.
+        let near = see_through_distance(
+            eye,
+            placement([0.0, -6.0, 0.0], std::f32::consts::FRAC_PI_2, 2.0),
+            Vec3::new(1.0, 0.0, 0.0),
+        );
+        assert!((long - 50.0).abs() < 1e-5 && (small - 20.0).abs() < 1e-5 && (near - 6.0).abs() < 1e-5);
+        // Filed nearest first, they draw farthest first.
+        assert_eq!(crate::order::far_to_near(&[near, small, long]), [2, 1, 0]);
     }
 }

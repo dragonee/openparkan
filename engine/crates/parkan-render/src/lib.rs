@@ -16,6 +16,7 @@ pub mod flare;
 pub mod frame;
 pub mod hud;
 pub mod models;
+pub mod order;
 pub mod shade;
 pub mod sprites;
 pub mod terrain;

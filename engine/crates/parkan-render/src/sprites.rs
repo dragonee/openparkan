@@ -32,8 +32,12 @@ pub struct Quad {
     /// Each corner's (u, v) across the look's cell, where the quad is a piece of a larger
     /// shape; `None` spans the cell.
     pub uv: Option<[[f32; 2]; 4]>,
-    /// How far its sprite stands from the eye: the key the effects' layer files it by, one
-    /// for every piece of a larger shape.
+    /// How far its first corner stands from the eye: the key the effects' layer files it by.
+    /// An item answers the layer with the distance from the camera to the first vertex its
+    /// index list names (`Terrain.dll:0x1003c340`, slot 6 at `0x1003cc20`), carried into the
+    /// world by its matrix -- on the shade's unit quad the corner (−½, ½), whose list runs
+    /// 0, 1, 2, 2, 3, 0 (`0x10027cf9`–`0x10027d44`) -- and every piece of a larger shape is an
+    /// item of its own.
     pub depth: f32,
     /// The group-1 layer it is filed in: [`EFFECTS_LAYER`] for an effect's sprite,
     /// [`LIGHTS_LAYER`] for a light drawn on a surface, which goes first.
@@ -46,8 +50,9 @@ pub struct Quad {
 }
 
 /// The layers of group 1 the drawn quads are filed in (docs/10, "The dome"): the weather's
-/// goes last, over the effects, and a layer of that kind draws its items in the order they
-/// were filed.
+/// goes last, over the effects. The lights' and the weather's are of sort type 2, which draws
+/// its items in the order they were filed (`Terrain.dll:0x10031ca0`, `0x1003d990`); the
+/// effects' is type 3, sorted.
 pub const LIGHTS_LAYER: u8 = 3;
 pub const EFFECTS_LAYER: u8 = 6;
 pub const WEATHER_LAYER: u8 = 8;
@@ -57,21 +62,36 @@ pub const PLAIN_TINT: [f32; 4] = [1.0, 1.0, 1.0, 0.0];
 /// an effect sprite is coloured").
 pub const UNFOGGED_TINT: [f32; 4] = [1.0, 1.0, 1.0, 3.0];
 
-/// The order an effect's quads are drawn in: far to near across every look and blend mode.
+/// The order the quads are drawn in: layer by layer, and the effects' far to near across
+/// every look and blend mode.
 ///
 /// Every effect sprite is filed in group 1, layer 6 (`Terrain.dll:0x10042202`–`0x1004221d`),
 /// a type-3 `CCamDistSortLayerVB` (docs/10, "The dome"), whose add slot (`0x1003e090`) keeps
 /// its list sorted by the item's distance from the camera (item slot 5), nearer items further
 /// down, and whose render (`0x1003e1d0`) walks it from the top. So a far sprite is drawn
-/// before a near one whatever either blends with; an item whose fade is 0 is not filed. The
-/// sort is stable, so the pieces of one shape keep their own order.
+/// before a near one whatever either blends with; an item whose fade is 0 is not filed, in
+/// either kind of layer. A tie goes as the layer's own search leaves it
+/// ([`crate::order::far_to_near`]): of two quads at one distance the one filed later is drawn
+/// first.
 ///
-/// The layers draw in their order (`0x1003e1d0`'s caller walks them one by one), so a light's
-/// item, filed in layer 3, goes before every sprite.
+/// The layers draw in their order (the queue's draw, `0x10032c60`, walks them one by one), so
+/// a light's item, filed in layer 3, goes before every sprite.
 pub fn draw_order(quads: &[Quad]) -> Vec<&Quad> {
-    let mut sorted: Vec<&Quad> = quads.iter().filter(|q| q.alpha != 0.0).collect();
-    sorted.sort_by(|a, b| a.layer.cmp(&b.layer).then(b.depth.total_cmp(&a.depth)));
-    sorted
+    let filed: Vec<&Quad> = quads.iter().filter(|q| q.alpha != 0.0).collect();
+    let mut layers: Vec<u8> = filed.iter().map(|q| q.layer).collect();
+    layers.sort_unstable();
+    layers.dedup();
+    let mut drawn = Vec::with_capacity(filed.len());
+    for layer in layers {
+        let items: Vec<&Quad> = filed.iter().copied().filter(|q| q.layer == layer).collect();
+        if layer == EFFECTS_LAYER {
+            let depths: Vec<f32> = items.iter().map(|q| q.depth).collect();
+            drawn.extend(crate::order::far_to_near(&depths).into_iter().map(|i| items[i as usize]));
+        } else {
+            drawn.extend(items);
+        }
+    }
+    drawn
 }
 
 /// The corners of a sprite drawn with its own matrix, and their (u, v): the shade's unit quad
@@ -471,32 +491,37 @@ impl SpriteRenderer {
 mod tests {
     use super::*;
 
-    /// A near additive plume is drawn after a far alpha-blended smoke, so it lies over it,
-    /// and the pieces of a dome keep their order.
+    /// A near additive plume is drawn after a far alpha-blended smoke, so it lies over it; a
+    /// tie goes to the quad filed later; and a layer that is not sorted keeps its filing order.
     #[test]
     fn effect_quads_are_drawn_far_to_near_whatever_they_blend_with() {
-        let quad = |look: usize, depth: f32, alpha: f32| Quad {
+        let quad = |look: usize, depth: f32, alpha: f32, layer: u8| Quad {
             look,
             corners: [Vec3::ZERO; 4],
             alpha,
             overlay: false,
             uv: None,
             depth,
-            layer: EFFECTS_LAYER,
+            layer,
             tint: PLAIN_TINT,
         };
         let quads = [
-            quad(0, 50.0, 1.0),  // the lode's plume, additive, near
-            quad(1, 300.0, 1.0), // a chimney's smoke, see-through, far
-            quad(2, 120.0, 0.5), // a dome's first piece
-            quad(2, 120.0, 0.5), // and its second
-            quad(1, 10.0, 0.0),  // faded out: not filed
+            quad(0, 50.0, 1.0, EFFECTS_LAYER),  // the lode's plume, additive, near
+            quad(1, 300.0, 1.0, EFFECTS_LAYER), // a chimney's smoke, see-through, far
+            quad(2, 120.0, 0.5, EFFECTS_LAYER), // a glow
+            quad(3, 120.0, 0.5, EFFECTS_LAYER), // and a disc on the same matrix, filed after it
+            quad(1, 10.0, 0.0, EFFECTS_LAYER),  // faded out: not filed
+            quad(4, 5.0, 1.0, WEATHER_LAYER),   // two drops, the nearer filed first
+            quad(5, 9.0, 1.0, WEATHER_LAYER),
+            quad(6, 1.0, 1.0, LIGHTS_LAYER), // two discs on the ground, the nearer filed first
+            quad(7, 80.0, 1.0, LIGHTS_LAYER),
+            quad(6, 40.0, 0.0, LIGHTS_LAYER), // a light with no alpha: not filed there either
         ];
         let order: Vec<(usize, f32)> = draw_order(&quads).iter().map(|q| (q.look, q.depth)).collect();
-        assert_eq!(order, [(1, 300.0), (2, 120.0), (2, 120.0), (0, 50.0)]);
-        let pieces: Vec<*const Quad> =
-            draw_order(&quads).into_iter().filter(|q| q.look == 2).map(|q| q as *const Quad).collect();
-        assert_eq!(pieces, [&quads[2] as *const Quad, &quads[3] as *const Quad]);
+        assert_eq!(
+            order,
+            [(6, 1.0), (7, 80.0), (1, 300.0), (3, 120.0), (2, 120.0), (0, 50.0), (4, 5.0), (5, 9.0)]
+        );
     }
 
     /// The shade's hemisphere (`Terrain.dll:0x10027a20`): radius 1, its pole on the sprite's

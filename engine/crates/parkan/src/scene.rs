@@ -727,6 +727,8 @@ pub fn sync(
                     Some(d) => dome(s.centre, m, d.segments, d.rings, d.projected),
                     None => vec![turned(s.centre, m)],
                 };
+                // Each piece is an item of its own, filed by its own first vertex: a dome's far
+                // side goes under its near one (`Terrain.dll:0x10028c64`, `0x10028d88`).
                 return pieces
                     .into_iter()
                     .map(|(corners, uv)| Quad {
@@ -735,7 +737,7 @@ pub fn sync(
                         alpha: s.alpha,
                         overlay: s.overlay,
                         uv: Some(uv),
-                        depth: s.centre.distance(eye),
+                        depth: corners[0].distance(eye),
                         layer: EFFECTS_LAYER,
                         tint,
                     })
@@ -745,13 +747,14 @@ pub fn sync(
                 Some(axes) => framed(s.centre, axes, eye),
                 None => billboard(s.centre, s.along, s.width, s.height, eye),
             };
+            let corners = if s.lengthwise { lengthwise(corners) } else { corners };
             vec![Quad {
                 look,
-                corners: if s.lengthwise { lengthwise(corners) } else { corners },
+                corners,
                 alpha: s.alpha,
                 overlay: s.overlay,
                 uv: None,
-                depth: s.centre.distance(eye),
+                depth: corners[0].distance(eye),
                 layer: EFFECTS_LAYER,
                 tint,
             }]
@@ -856,7 +859,11 @@ pub struct OwnView {
 /// model. The game gives layers 9 and 10 a frustum of their own -- near 0.05, far 10,
 /// viewport z 0.0 to 0.1, against the world's 0.5, 700 and 0.1 to 0.99 -- and draws them
 /// after the scene, so a cockpit close to the eye is never clipped by the world's near
-/// plane and never occluded by anything in the world.
+/// plane and never occluded by anything in the world. And the effects of the unit the camera
+/// rides go between the two: its mesh's draw files its own manager's sprites in layer 7, with
+/// a near plane of 0.2 and the depth test off, after every sprite of the world and before the
+/// cockpit (`AniMesh.dll:0x100151ac`, `Terrain.dll:0x10042930`; docs/11, "Which draw reaches
+/// a unit's own manager"); here they are filed with the world's, depth-tested.
 pub fn own_view(objects: &mut Objects, store: &mut TextureStore, play: &Play) -> Result<OwnView> {
     // Every whole model drawn node by node leaves first: removing one shifts the instances
     // after it, so no node's instance may be counted before the last removal.

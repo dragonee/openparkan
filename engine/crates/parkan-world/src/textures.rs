@@ -185,13 +185,14 @@ impl Look {
 
     /// Whether `CShade` files a batch in this look translucent: layer 5 of the queue's
     /// second list, drawn after the first and writing no depth (`Terrain.dll:0x1004552a`,
-    /// `0x10045b1e`). Its phase's ambient alpha is below 1; the blend mode does not enter,
-    /// so a leaf blends and writes depth (docs/07, "What a blended batch writes").
+    /// `0x10045b1e`). Its phase's ambient alpha is below 1; the blend mode does not enter.
+    /// A batch is filed there by its own word besides, 8 or `0x100`, which is the batch's and
+    /// not the look's (`crate::models::Group::see_through`): that, and not its material, is
+    /// what files a palm's leaf (docs/07, "What a blended batch writes").
     ///
-    /// STAND-IN: docs/07-objects.md#what-a-blended-batch-writes-and-the-alpha-tests-reference--read
-    /// -- the game tests the phase it draws each time, and a batch word carrying 8 or 0x100,
-    /// whose writer is not found: here a look is translucent when any of its phases is, and no
-    /// batch word makes one.
+    /// The game tests the phase it draws each time; here a look is translucent when any of
+    /// its phases is, decided once (engine/README.md, "closed, and the code still carries the
+    /// stand-in").
     pub fn translucent(&self) -> bool {
         self.still.alpha < 1.0
             || self.animation.as_ref().is_some_and(|a| a.keys.iter().any(|(p, _)| p.alpha < 1.0))
@@ -398,7 +399,7 @@ mod tests {
                 keys: k.into_iter().map(|a| (Phase { alpha: a, ..Phase::PLAIN }, 100.0)).collect(),
             }),
         };
-        assert!(!look(1.0, 4, None).translucent(), "a blended leaf writes depth");
+        assert!(!look(1.0, 4, None).translucent(), "a blend mode files nothing see-through");
         assert!(look(0.6, 0, None).translucent());
         assert!(look(1.0, 4, Some(vec![0.0, 1.0])).translucent(), "FIRESTORM's fade-in");
     }

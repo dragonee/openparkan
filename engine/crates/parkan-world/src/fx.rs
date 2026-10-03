@@ -393,10 +393,14 @@ impl Fx {
     /// `in_view` says whether a point is in view from the camera, for the instances
     /// that test one.
     ///
-    /// The pass argument header flag 0x800 waits for is 1 in every call the game makes --
-    /// the landscape's and the atmosphere's draws pass it outright, an object's draw passes
-    /// it while the object is inside the camera's planes -- so a 0x800 effect draws with
-    /// the rest ([11](../../../docs/11-effects.md#who-passes-the-draws-pass-argument--read)).
+    /// STAND-IN: docs/11-effects.md#which-draw-reaches-a-units-own-manager--read-and-measured
+    /// -- the pass argument header flag 0x800 waits for is 1 in the landscape's and the
+    /// atmosphere's draws, and in an object's own draw of its manager only while it is seen: it
+    /// stands in a cell the landscape draws and its sphere is inside the camera's six planes
+    /// (`AniMesh.dll:0x10014c3d`, `0x100151c6`). An object that is not seen draws none of its
+    /// 0x800 effects -- its lights, beacons, breath and looped sounds -- and here every
+    /// instance draws and sounds whether or not its owner is seen: which cells the landscape
+    /// walks, and the sphere a mesh answers with, are not read.
     pub fn sprites(&self, now_ms: f64, eye: Vec3, in_view: impl Fn(Vec3) -> bool) -> Vec<(usize, Sprite)> {
         let mut out = Vec::new();
         let mut buffer = Vec::new();

@@ -49,6 +49,14 @@ pub const BATCH_PORTAL_SIGN: u32 = 0x10;
 /// (`0x1002c5ae`).
 pub const BATCH_PORTAL_OPEN: u32 = 0x40;
 
+/// The batch word's see-through bit: `CShade`'s mesh draw files a batch that carries it in the
+/// queue's sorted layer 5, with the depth write off, whatever its material blends with
+/// (`Terrain.dll:0x1004557d`–`0x10045598`, `0x10045b32`). 2953 of the install's 15153 batches
+/// carry it, every portal among them: the palm's leaves (`TF2`, 704), the buildings' and the
+/// robots' glass, the bridges' rails and the consoles' screens (docs/07, "What a blended batch
+/// writes").
+pub const BATCH_SEE_THROUGH: u32 = 0x100;
+
 /// `PortalNearDist` and `PortalFarDist`, the render settings' entries 27 and 28 at their
 /// compiled defaults (docs/10, "The render settings"), which `CShade` keeps at `+0x1660` and
 /// `+0x1664` (`0x10046d77`).
@@ -167,6 +175,8 @@ pub struct Group {
     /// A portal quad's batch, which fades by its distance from the camera and is filed
     /// translucent, as every batch whose word carries 8 is (`Terrain.dll:0x1004552a`).
     pub portal: Option<PortalQuad>,
+    /// Its batch's word carries [`BATCH_SEE_THROUGH`]: filed with the see-through surfaces.
+    pub see_through: bool,
 }
 
 /// What a model's batches resolve through: a material's look, and a lightmap page.
@@ -307,7 +317,8 @@ impl Model {
                     kind,
                     anchor: mesh.triangles.get(first).map_or([0.0; 3], |t| place(usize::from(t[0])).position),
                 });
-                self.groups.push(Group { start, count, look, lightmap, portal });
+                let see_through = batch.flags & BATCH_SEE_THROUGH != 0;
+                self.groups.push(Group { start, count, look, lightmap, portal, see_through });
             }
         }
         Ok(())
@@ -670,6 +681,33 @@ mod tests {
         loaded.wear.materials[0] = "HULL".to_owned();
         let model = build_node(&loaded, 0, 0, &mut Fake).unwrap().expect("the hull");
         assert_eq!(model.groups[0].portal, None);
+    }
+
+    /// The batch word's `0x100` files a batch with the see-through surfaces, whatever its
+    /// material is; the install's other words do not (docs/07, "What a blended batch writes").
+    #[test]
+    fn a_batch_whose_word_carries_0x100_is_filed_see_through() {
+        let mut loaded = cockpit_mesh();
+        let see_through = |loaded: &LoadedMesh| {
+            build_node(loaded, 0, 0, &mut Fake).unwrap().expect("the hull").groups[0].see_through
+        };
+        // The palm's leaves and the glass: `0x100`, and two-sided `0x102`.
+        for word in [0x100, 0x101, 0x102] {
+            loaded.mesh.batches[0].flags = word;
+            assert!(see_through(&loaded), "{word:#x}");
+        }
+        // Every shipped portal word that is drawn carries it too.
+        loaded.wear.materials[0] = "DEFAULT".to_owned();
+        for word in [0x108, 0x118, 0x4108, 0x4118] {
+            loaded.mesh.batches[0].flags = word;
+            assert!(see_through(&loaded), "{word:#x}");
+        }
+        // The words without it: plain, struck from behind, and a lit batch's.
+        loaded.wear.materials[0] = "HULL".to_owned();
+        for word in [0, 1, 2, 4, 0x2000] {
+            loaded.mesh.batches[0].flags = word;
+            assert!(!see_through(&loaded), "{word:#x}");
+        }
     }
 
     #[test]
