@@ -799,3 +799,50 @@ fn a_column_button_under_a_resting_cursor_shows_its_tooltip_after_a_quarter_seco
     assert_eq!([x1 - x0, y1 - y0], [width + 8.0, fonts[2].line_height + 8.0]);
     let _ = m;
 }
+
+/// Camouflage draws the machine in the material of the face its ground search holds
+/// (docs/07, "What a camouflaged machine wears"): on the landscape the face's first material,
+/// on a bridge's deck the batch's own.
+#[test]
+#[ignore = "needs the game install"]
+fn a_camouflaged_hero_wears_the_grounds_first_material_and_a_bridges_deck_on_it() {
+    use glam::Vec3;
+    let (mut play, _) = mission_01_play();
+    play_for(&mut play, 0.25, |_| {});
+    assert_eq!(play.camouflage(), None, "off, the hero draws in its own skin");
+    play.hero.pilot.switches.camouflage = true;
+
+    // Where Mission 01 starts: a landscape face, and `Land1.wea` at its first byte.
+    let hit = play.hero.walker.ground.expect("the hero stands on something");
+    let face = hit.face.expect("a landscape face");
+    let land = &play.ground.land;
+    let first = land.layer1[usize::from(land.faces[face].tex1)].clone();
+    assert_eq!(play.camouflage(), Some(first.as_str()));
+    // A face with a second material laid over it still gives its first.
+    let two = land
+        .faces
+        .iter()
+        .position(|f| f.tex2 != parkan_formats::landmesh::NO_TEXTURE && f.tex1 != f.tex2 && f.normal[2] > 0.9)
+        .expect("Tut_1 has two-material faces");
+    let corner = |i: usize| Vec3::from_array(land.positions[usize::from(land.faces[two].vertices[i])]);
+    let middle = (corner(0) + corner(1) + corner(2)) / 3.0;
+    let (lower, upper) = (
+        land.layer1[usize::from(land.faces[two].tex1)].clone(),
+        land.layer1[usize::from(land.faces[two].tex2)].clone(),
+    );
+    put(&mut play.hero.walker, &play.ground, middle + Vec3::Z * 5.0);
+    assert_eq!(play.hero.walker.ground.and_then(|h| h.face), Some(two));
+    assert_eq!(play.camouflage(), Some(lower.as_str()));
+    assert_ne!(lower, upper);
+
+    // On the bridge over the gorge: the deck's batch, in the bridge's own wear.
+    put(&mut play.hero.walker, &play.ground, Vec3::new(790.5, 690.0, 40.0));
+    let deck = play.hero.walker.ground.expect("the deck holds the hero");
+    let (bridge, _) = deck.solid.expect("a face of the bridge, not the gorge under it");
+    let worn = play.camouflage().expect("the deck's batch has a material").to_owned();
+    assert!(play.battle.wears[bridge].iter().flatten().any(|name| *name == worn), "{worn} is the bridge's");
+    assert!(!play.ground.land.layer1.contains(&worn), "{worn} is not the landscape's");
+
+    play.hero.pilot.switches.camouflage = false;
+    assert_eq!(play.camouflage(), None);
+}

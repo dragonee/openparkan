@@ -231,6 +231,9 @@ pub struct Model {
     pub vertices: Vec<Vertex>,
     pub indices: Vec<u32>,
     pub groups: Vec<Group>,
+    /// Each batch's own look while the model wears the ground's: what [`Model::wear_ground`]
+    /// puts back.
+    own: Option<Vec<Look>>,
 }
 
 impl Model {
@@ -243,7 +246,16 @@ impl Model {
     /// frame its record writes its new clan's sign into its control system, and the draw
     /// asks for each batch's material on that track (docs/07, "Who picks an object mesh's
     /// material track"). Whether any batch's look changed.
+    ///
+    /// A model wearing the ground's material draws track 0 of that whatever its sign
+    /// (`AniMesh.dll:0x10014ddf`), so the track changes the looks it will take back.
     pub fn wear_track(&mut self, skins: &mut impl Skins, track: usize) -> Result<bool> {
+        if let Some(own) = &mut self.own {
+            for look in own {
+                *look = skins.look_on_track(&look.material, track)?;
+            }
+            return Ok(false);
+        }
         let mut changed = false;
         for group in &mut self.groups {
             let look = skins.look_on_track(&group.look.material, track)?;
@@ -253,6 +265,42 @@ impl Model {
             }
         }
         Ok(changed)
+    }
+
+    /// Draw every batch in one material, as a camouflaged machine draws in the material of
+    /// the ground face under it, or with `None` in its own again (docs/07, "What a
+    /// camouflaged machine wears"). Whether any batch's look changed.
+    ///
+    /// The mesh's draw swaps one word of each batch's descriptor, the material
+    /// (`AniMesh.dll:0x10013595`), so the batch keeps its vertices, its own texture
+    /// coordinates and normals, its flags and its lightmap.
+    pub fn wear_ground(&mut self, look: Option<&Look>) -> bool {
+        let mut changed = false;
+        match look {
+            Some(look) => {
+                if self.own.is_none() {
+                    self.own = Some(self.groups.iter().map(|g| g.look.clone()).collect());
+                }
+                for group in &mut self.groups {
+                    if group.look != *look {
+                        group.look = look.clone();
+                        changed = true;
+                    }
+                }
+            }
+            None => {
+                for (group, own) in self.groups.iter_mut().zip(self.own.take().unwrap_or_default()) {
+                    changed |= group.look != own;
+                    group.look = own;
+                }
+            }
+        }
+        changed
+    }
+
+    /// Whether the model is wearing the ground's material and not its own.
+    pub fn camouflaged(&self) -> bool {
+        self.own.is_some()
     }
 
     /// Append a slot's batches, each in its wear's material, placing every vertex it
@@ -640,6 +688,40 @@ mod tests {
         loaded.wear.materials[0] = "HULL".to_owned();
         let mut hull = build_node(&loaded, 0, 0, &mut Emblems).unwrap().unwrap();
         assert!(!hull.wear_track(&mut Emblems, 5).unwrap());
+    }
+
+    #[test]
+    fn a_camouflaged_model_draws_every_batch_in_the_grounds_material_and_takes_its_own_back() {
+        let mut loaded = cockpit_mesh();
+        loaded.wear.materials[0] = "LABEL".to_owned();
+        let mut model =
+            build_node(&loaded, 0, 0, &mut OnTrack { skins: &mut Emblems, track: 1 }).unwrap().unwrap();
+        let built = model.clone();
+        let grass = Emblems.look("GRASS").unwrap();
+        // Camouflage on: every batch in the ground's material, track 0, and nothing else of
+        // the batch moves -- its triangles, its texture coordinates, its lightmap.
+        assert!(model.wear_ground(Some(&grass)));
+        assert!(model.camouflaged());
+        assert!(model.groups.iter().all(|g| g.look == grass));
+        assert_eq!(model.vertices, built.vertices);
+        assert_eq!(model.indices, built.indices);
+        let ranges = |m: &Model| m.groups.iter().map(|g| (g.start, g.count, g.lightmap)).collect::<Vec<_>>();
+        assert_eq!(ranges(&model), ranges(&built));
+        assert!(!model.wear_ground(Some(&grass)), "the same ground changes nothing");
+        // Onto another ground: the new face's material.
+        let sand = Emblems.look("SAND").unwrap();
+        assert!(model.wear_ground(Some(&sand)));
+        assert!(model.groups.iter().all(|g| g.look == sand));
+        // A capture while it is worn changes no batch now, and the emblem it takes back.
+        assert!(!model.wear_track(&mut Emblems, 3).unwrap());
+        assert!(model.groups.iter().all(|g| g.look == sand));
+        // Off: its own skin, on the track its new clan signs.
+        assert!(model.wear_ground(None));
+        assert!(!model.camouflaged());
+        let captured =
+            build_node(&loaded, 0, 0, &mut OnTrack { skins: &mut Emblems, track: 3 }).unwrap().unwrap();
+        assert_eq!(model.groups, captured.groups);
+        assert!(!model.wear_ground(None), "off twice changes nothing");
     }
 
     #[test]

@@ -192,7 +192,10 @@ shield draws `value 4` a second on top of its power figure (`0x100264b0`), and
 shield that is a level under 0.09 / 0.29, 31% — derived from the table below.
 The cockpit says so: `iron3d.dll` watches the player's class-10
 component for state `0x1000` (`0x10076e40`) and plays `VOICE_CHAMELEON_SYS_ON`
-or `_OFF` when it changes.
+or `_OFF` when it changes. And the machine shows it: while the state reads
+`0x1000` every batch of its mesh is drawn in the material of the ground face
+under it
+([07-objects.md](07-objects.md#what-a-camouflaged-machine-wears--read-and-seen)).
 
 **When the AI wears it** — *read*. A behaviour's device manager switches every
 detection shield's camouflage on (`0x1000`) or off (`0x2000`)

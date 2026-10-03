@@ -735,6 +735,7 @@ pub(crate) mod tests {
                 batch_flags: 0,
                 surface: None,
                 damage_rate: 0.0,
+                skin: None,
             };
             let centre = Vec3::new(10.0, 10.0, z);
             Solid {

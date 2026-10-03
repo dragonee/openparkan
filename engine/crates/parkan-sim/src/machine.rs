@@ -962,6 +962,7 @@ mod tests {
             batch_flags: 0,
             surface: None,
             damage_rate: 0.0,
+            skin: None,
         };
         g.solids.push(crate::solid::Solid {
             centre: Vec3::new(500.0, 500.0, 100.0 * rise),

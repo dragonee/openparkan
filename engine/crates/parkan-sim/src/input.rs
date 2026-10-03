@@ -125,17 +125,20 @@ pub struct Pilot {
 
 /// A unit's switched systems, as the input table's `MCMD_STATE` rows leave them.
 ///
-/// STAND-IN: docs/35-hud.md#the-indicators--read-and-seen -- the repair system and the detection
-/// shield's camouflage are not simulated: a row turns only the switch, which does nothing
-/// else. The camera's infrared is drawn: the world is seen through it while its switch is on
-/// (docs/10, "The colour filter is the camera's infrared").
+/// STAND-IN: docs/35-hud.md#the-indicators--read-and-seen -- the repair system is not
+/// simulated: its row turns only the switch, which does nothing else. The detection shield's
+/// camouflage dresses the hero alone and cuts no signature (docs/07, "What a camouflaged
+/// machine wears"). The camera's infrared is drawn: the world is seen through it while its
+/// switch is on (docs/10, "The colour filter is the camera's infrared").
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Switches {
     /// The repair system's `0x20`: `CIS_SWITCHON` sets it, `CIS_SWITCHOFF` clears it and
     /// `CIS_SWITCH_INV` flips it (`Control.dll:0x10022c90`, docs/26).
     pub repair: bool,
     /// The detection shield's camouflage: `0x1000` on, `0x2000` off, `0x4000` flips it
-    /// (`0x10026570`, docs/25).
+    /// (`0x10026570`, docs/25). On, the shield draws its extra power (`parkan_world::power`)
+    /// and the hero is drawn in the material of the ground under it (docs/07, "What a
+    /// camouflaged machine wears"); its cut of the three signatures is not applied.
     pub camouflage: bool,
     /// The camera's infrared: the same three bits (`0x10023a00`).
     pub infrared: bool,

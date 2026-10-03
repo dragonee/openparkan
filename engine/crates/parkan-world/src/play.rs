@@ -1316,6 +1316,36 @@ impl Play {
         clan.and_then(|c| usize::try_from(c).ok()).unwrap_or(0)
     }
 
+    /// The material the hero's machine draws every batch in while its camouflage is on: that
+    /// of the face its ground search holds under it, or `None` with the camouflage off or no
+    /// face held, when it draws in its own (docs/07, "What a camouflaged machine wears").
+    ///
+    /// The ground contact hands the mesh the face it holds while the detection shield's state
+    /// reads `0x1000` (`Control.dll:0x1001a923`-`0x1001a95d`), and the mesh takes the
+    /// material the world answers for that face (`AniMesh.dll:0x100059b8`,
+    /// `Terrain.dll:0x10024e31`): on the landscape the face's **first**, `Land1.wea` at its low
+    /// byte (`0x1002025c`, `0x1001add0`), and never the second laid over it; on a building's
+    /// floor or a bridge the struck batch's own, in that object's wear
+    /// (`AniMesh.dll:0x100135c8`).
+    pub fn camouflage(&self) -> Option<&str> {
+        if !self.hero.pilot.switches.camouflage {
+            return None;
+        }
+        let hit = self.hero.walker.ground?;
+        match (hit.solid, hit.face) {
+            (Some((s, f)), _) => {
+                let (part, material) = self.ground.solids.get(s)?.faces.get(f)?.skin?;
+                let wear = self.battle.wears.get(s)?.get(usize::from(part))?;
+                wear.get(usize::from(material & 0xFF)).map(String::as_str)
+            }
+            (None, Some(f)) => {
+                let land = &self.ground.land;
+                land.layer1.get(usize::from(land.faces.get(f)?.tex1)).map(String::as_str)
+            }
+            (None, None) => None,
+        }
+    }
+
     /// Whether target `t` is drawn node by node -- each node at its own pose and its own damage
     /// stage -- rather than as one model built whole at its placement.
     ///
@@ -5330,6 +5360,7 @@ mod tests {
             batch_flags: 0,
             surface: None,
             damage_rate: 0.0,
+            skin: None,
         };
         let mut faces = Vec::new();
         for (lo, hi) in [(-40.0, -11.1), (11.1, 40.0)] {

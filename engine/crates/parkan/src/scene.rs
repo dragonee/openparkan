@@ -871,6 +871,8 @@ pub struct OwnView {
     /// A boarded bot's own view: an instance for each node's fifth slot, with the target, its
     /// part and the node (docs/39, "The view and the HUD").
     cockpits: Vec<(usize, usize, usize, usize)>,
+    /// The ground material the hero's nodes are drawn in, while its camouflage is on.
+    camouflage: Option<String>,
 }
 
 /// Draw the hero from now on as its own view does (docs/07-objects.md, "The fifth slot is
@@ -980,7 +982,44 @@ pub fn own_view(objects: &mut Objects, store: &mut TextureStore, play: &Play) ->
             }
         }
     }
-    Ok(OwnView { nodes, outside, placed: objects.placed.clone(), targets, cockpits: Vec::new() })
+    Ok(OwnView {
+        nodes,
+        outside,
+        placed: objects.placed.clone(),
+        targets,
+        cockpits: Vec::new(),
+        camouflage: None,
+    })
+}
+
+/// The hero's nodes in the material of the ground under it while its camouflage is on, and in
+/// their own again when it goes off or the hero leaves the ground: every batch, of the view's
+/// own geometry and of the hull the outer camera sees, on track 0 (docs/07, "What a
+/// camouflaged machine wears"). Whether any batch's look changed.
+///
+/// STAND-IN: docs/07-objects.md#what-a-camouflaged-machine-wears--read-and-seen -- the hero's
+/// alone. The game dresses every machine whose detection shield's state reads `0x1000`, a
+/// boarded bot and the AI's among them; here a unit the player does not drive keeps its
+/// camouflage off (docs/25), and a boarded bot draws in its own skin.
+fn wear_camouflage(
+    objects: &mut Objects,
+    store: &mut TextureStore,
+    view: &mut OwnView,
+    play: &Play,
+) -> Result<bool> {
+    let wears = play.camouflage().map(str::to_owned);
+    if wears == view.camouflage {
+        return Ok(false);
+    }
+    let look = wears.as_deref().map(|name| store.look(name)).transpose()?;
+    let mut changed = false;
+    let hero = view.nodes.iter().map(|n| n.0).chain(view.outside.iter().map(|o| o.0));
+    for instance in hero {
+        let model = objects.instances[instance].model;
+        changed |= objects.models[model].wear_ground(look.as_ref());
+    }
+    view.camouflage = wears;
+    Ok(changed)
 }
 
 /// Units the play has made since the last call, drawn node by node as `own_view` draws a
@@ -1032,6 +1071,7 @@ pub fn add_targets(
             reskinned |= objects.models[model].wear_track(&mut *store, track)?;
         }
     }
+    reskinned |= wear_camouflage(objects, store, view, play)?;
     for &t in added.iter().filter(|&&t| t != usize::MAX) {
         let target = &play.battle.combat.targets[t];
         for (p, part) in target.parts.iter().enumerate() {

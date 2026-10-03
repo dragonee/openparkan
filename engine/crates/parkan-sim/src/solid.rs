@@ -126,6 +126,11 @@ pub struct SolidFace {
     pub surface: Option<u8>,
     /// The damage a second the material deals what touches it (`+0x1a4`).
     pub damage_rate: f32,
+    /// The part it belongs to and the material word of the batch it is drawn in: the batch's
+    /// own material is what the world answers for the face (`AniMesh.dll:0x100135c8`), and
+    /// what a camouflaged machine standing on it wears (docs/07, "What a camouflaged machine
+    /// wears").
+    pub skin: Option<(u8, u16)>,
 }
 
 /// One node's level-0 slot: its sphere in the world, and its faces.
@@ -210,6 +215,7 @@ impl Solid {
                         batch_flags: batch.map_or(0, |b| b.flags),
                         surface: material.map(|m| m.0),
                         damage_rate: material.map_or(0.0, |m| m.1),
+                        skin: batch.and_then(|b| Some((u8::try_from(p).ok()?, b.material))),
                     });
                 }
                 let [cx, cy, cz, r] = slot.sphere;
@@ -628,6 +634,7 @@ mod tests {
             batch_flags: 0,
             surface: Some(5),
             damage_rate: 0.0,
+            skin: None,
         };
         Solid {
             centre: Vec3::new(5.0, 5.0, z),
@@ -677,6 +684,7 @@ mod tests {
             batch_flags: 0,
             surface: None,
             damage_rate: 0.0,
+            skin: None,
         };
         let wall = Solid {
             centre: Vec3::ZERO,
@@ -732,7 +740,17 @@ mod tests {
 
     fn face(a: Vec3, b: Vec3, c: Vec3, triangle_flags: u16) -> SolidFace {
         let normal = (b - a).cross(c - a).normalize();
-        SolidFace { a, b, c, normal, triangle_flags, batch_flags: 0, surface: None, damage_rate: 0.0 }
+        SolidFace {
+            a,
+            b,
+            c,
+            normal,
+            triangle_flags,
+            batch_flags: 0,
+            surface: None,
+            damage_rate: 0.0,
+            skin: None,
+        }
     }
 
     #[test]

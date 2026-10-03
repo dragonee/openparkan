@@ -1603,9 +1603,111 @@ it is what camouflage looks like.
   on**, every batch, sign and all, and in its own skin again when the shield
   is switched off. The names say so: `CMD_CAMOUFLAGE_WEAR`,
   `CIS_CHAMELEON_INV`, `VOICE_CHAMELEON_SYS_ON`.
-- *Not read*: which of the face's two layers the handle names (the world
+- ~~*Not read*: which of the face's two layers the handle names (the world
   face's `+0x74`), and what a machine standing on a building's floor wears.
-  *Not seen*: no recording looked at shows a machine with its camouflage on.
+  *Not seen*: no recording looked at shows a machine with its camouflage on.~~
+  — **read**, and **seen**: the face's first material, the floor's batch's own,
+  and the hero of training mission 1 from outside
+  ([below](#what-a-camouflaged-machine-wears--read-and-seen)).
+
+#### What a camouflaged machine wears — *read*, and *seen*
+
+**The face** slot 27 takes is the five-word record a world query answers with:
+an object, a node and three words more. It is empty when the object is 0, the
+node −2 or any of the three −1 (`AniMesh.dll:0x10005979`–`0x10005991`), which
+is the record a search that met nothing leaves. The ground contact hands on the
+one it holds at `+0xa4` (`Control.dll:0x1001a92d`–`0x1001a95d`).
+
+**The material is what the world answers for that face.** Slot 27 asks
+`CWorld::GetWorldFace` with 8 (`Terrain.dll:0x10024d70`, at
+`AniMesh.dll:0x100059b8`) and keeps the answer's `+0x74`. That word is the
+`+0x34` of what the face's owner answers from interface `0x18` slot 3
+(`Terrain.dll:0x10024dd3`, `0x10024e2e`–`0x10024e31`):
+
+- **The landscape's is the face's first material** (`0x100200d0`). Its `+0x34`
+  is a copy of its `+4`, the fetched record's `+0x18`
+  (`0x1002025c`–`0x10020271`), and the fetch fills that from byte 4 of the
+  file's face, the low byte of word 2 (`0x1001add0`–`0x1001adeb`). The second
+  material, byte 5, goes to the record's `+0x58` (`0x1001adf1`–`0x1001ae06`)
+  and no further. Nothing is mixed: a face under a second layer at full alpha
+  still gives the first.
+- **A mesh's is the struck batch's own** (`AniMesh.dll:0x100134d0`): the
+  node's wear base with the batch's material byte (`0x100135c8`–`0x100135ce`).
+  So on a building's floor, a bridge's deck or another machine it is that
+  batch's material, fetched through that object's own manager (`0x100059e3`).
+- What the building's own slot 3 answers (`Terrain.dll:0x10056c10`) was not
+  read.
+- It is the word the ground contact reads the surface from
+  (`Control.dll:0x1001aaee`,
+  [above](#the-class-byte-is-the-grounds-surface-id)), so a machine wears the
+  material whose dust it raises.
+
+**The draw swaps one word of each batch.** The mesh builds a batch's
+descriptor in `0x100134d0`, and with a handle set its `+4`, the material, is
+the handle in place of the batch's own (`0x10013595`–`0x100135b2`). The batch's
+flags, its vertex and index ranges and its second byte, at `+8`, are as they
+were. So:
+
+- **every batch takes it**: hull, guns, the fifth slot's cockpit, the lights
+  and the sign;
+- **the texture coordinates and the normals are the mesh's own**: the ground's
+  texture at the model's scale, shaded as the machine is;
+- **track 0**, the sign not asked for
+  ([above](#who-picks-an-object-meshs-material-track--read));
+- a batch keeps its own flags, and what the material's alpha and blend decide
+  is now the ground's.
+
+**No face, no camouflage.** An empty record puts the mesh's own manager back
+and the handle to −1 (`0x10005993`). A flyer's contact holds the face its
+ground search finds below it, so it wears that in flight (*seen*, below).
+
+**What turns it off is the shield's state**, and what turns that is in
+[25-sensors.md](25-sensors.md#the-detection-shield-hides-all-three-and-camouflage-hides-them-again--read-and-measured):
+the key, a power level that no longer covers the shield's plain draw, and for
+the AI its engagement check and every new task. The contact asks for the state
+and nothing else (`0x1001a923`): not the shield's value 3, which is 0 on a MK1.
+
+**Seen**, with the HUD's third indicator lit
+([35-hud.md](35-hud.md#the-indicators--read-and-seen)):
+
+- **From outside.** "training mission 1 line of fire" (9wNogdbFvec), 3:38.4
+  to 3:40.4, the outer camera on the hero. Launcher tube, shoulder pods, torso,
+  arms, legs and feet are all in the island's olive grass and nothing of the
+  silver and blue skin shows. The figure is opaque, its silhouette whole against
+  the sky, and its faces are shaded each by its own normal. The mottling is
+  finer than the ground's beside it and turns with each part. The cyan and red
+  lights of its own skin are gone. At 3:40.43, the indicator out, it is in its
+  own skin, whole and at once.
+- **The view's own geometry takes it.** In "Let's Play - Parkan: Iron
+  Strategy, Part 1" (9_rcJkRzgZQ) the gun bar across the bottom of the cockpit
+  is cyan, white and pink through 12:32.90 and olive from 12:32.95, the frame
+  the indicator lights.
+- **It follows the ground.** The same bar is olive over grass (12:36–13:16),
+  orange over sand (13:20, 13:24) and sand-brown (13:28).
+- **On a floor it takes the floor's, face by face.** Part 1 on the bunker:
+  grey-lilac stripes, dark purple, lilac-grey (13:29–13:31). Part 2
+  (LjjOqRyCV7o), a boarded flyer inside the factory: green, grey-brown, bright
+  green, the yellow and white hazard stripes, red-brown (3:03–4:06).
+- **A flyer in flight wears the ground under it** (Part 2, from 2:21; Part 4,
+  Qqs8_i9IeUU, 2:38–3:36).
+- **Firing and being hit do not put it out.** "Tricky Tellus mission 2"
+  (1X-DyyPw0_w): the indicator is lit in all 725 samples from 1:20.5 to 7:33.5,
+  through the fights at 1:33–2:15 and 6:51–7:15.
+- **On a MK1 shield too** (*inferred*). Part 2's flyer is the only one clan 0
+  has on C01 M04, `13fly1`, whose shield is `i_dsh_l_df`.
+- *Not seen*: a camouflaged machine from outside on a floor or a bridge, and
+  any enemy in the ground's texture. *Not established*: what the dark patch
+  with a white highlight is, where the hero's backpack lights sit, in every
+  camouflaged frame of training mission 1; and what puts it out in Part 1
+  between 13:32 and 13:36, at the bunker's pod.
+
+The earlier line here, that no recording shows camouflage on, had not looked:
+the indicator is lit on 279 of 299 cockpit samples of that one recording.
+
+**The engine** dresses the hero: `parkan_world::Play::camouflage` names the
+material, and every batch of the hero's nodes, its own view's and the hull the
+outer camera sees, takes that material's look on track 0
+(`Model::wear_ground`). A boarded bot and the AI's machines are a stand-in.
 
 The landscape draws through the same call with its own manager and track 0
 (`Terrain.dll:0x1001b95e`).
