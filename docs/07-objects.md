@@ -937,12 +937,17 @@ slot only **the two broad sides** are flagged — 8 triangles of 20 on 34 of the
 52 nodes, 4 of 12 on twelve small ones, 10 of 16 on four and 12 of 36 on two —
 never the slab's rim.
 
-**What reads them** — *read*, and narrowed. Three places in the install, all in
+**What reads them** — *read*. Three places in the install, all in
 `AniMesh.dll`: the triangle visitor `0x10008120`, which loads the flags word and
-tests it against its filter's required and excluded masks (`+4` and `+8`); the
-push-out's test of a gathered face's `+0x44` against the filter's `+0x18` and
-`+0x1c` (`0x1000dbfb`, `0x1000dc0e`); and the door test's required `0x10`
-(`0x1000dbba`). The visitor has exactly two callers, `0x100106a4` and
+tests it against its filter's last two words, a required and an excluded mask
+at `+0x18` and `+0x1c` (`0x1000824a`, `0x10008255`); the push-out's test of a
+gathered face's `+0x44` against the same two words (`0x1000dbfb`,
+`0x1000dc0e`); and the door test's required `0x10` (`0x1000dbba`). An earlier
+draft put the visitor's pair at `+4` and `+8`: those it tests against the
+**node's** word, the first of its 38-byte record (`0x1000814b`–`0x10008169`),
+and `+0x10` and `+0x14` against the batch's flags (`0x100081fa`), as
+[26-damage.md](26-damage.md#the-query-record-and-what-a-round-excludes--read-and-measured)
+lays the record out. The visitor has exactly two callers, `0x100106a4` and
 `0x10010c91`, both inside the segment hit test's node visitors, and it is **not
 exported** — `AniMesh.dll` exports `LoadAgent` and `LoadAniMesh` and nothing
 else. (Control: the same direct-call and whole-section dword scan does find the
@@ -958,10 +963,101 @@ six-word filter constructor `Control.dll:0x10013f60` has four call sites —
 `0x10013481`, `0x1001db67`, `0x1001dbb8`, `0x1001dc03` — the last three the
 collision pair query already read, the first writing 0 into both triangle masks.
 
-Still open: whether anything **outside `Control.dll`** hands a face query a mask
+~~Still open: whether anything **outside `Control.dll`** hands a face query a mask
 carrying 2 or 16. The round's filter is built inline rather than through the
 constructor, so enumerating the constructor's callers is not a complete
-enumeration of filters.
+enumeration of filters.~~ — **read**: nothing does. Flag 2 is in one filter in
+the install and flag 16 in one, both the push-out's
+([below](#who-fills-a-face-querys-filter--read)).
+
+#### Who fills a face query's filter — *read*
+
+**31 filters are filled in the install, in seven modules, and 29 of them carry
+neither flag.** `analysis/filters.py` follows `esp` through every function
+(depth zero at every `ret` on 16048 of 17081) so that a store names the same
+stack slot wherever it is made, and lists every call at a face-query slot with
+the eight words of the block it is handed.
+
+**The slots** are what its `closure` reaches from the three readers, through
+the tables in `AniMesh.dll` and `Terrain.dll` that hold them:
+
+| slot | whose | the filter is |
+|---|---|---|
+| interface `0x18` slot 6 | the mesh's (`AniMesh.dll:0x10013ef0`), the building's (`Terrain.dll:0x1005a6c0`, table `0x1009b4ec`), the landscape's `GetFirstIntersectedFace` (`0x100205c0`, table `0x1009a3f8`), and one in `iron3d.dll` that hands it on (`0x10070bd0`, table `0x100e6458`) | pushed argument 2 of 3 |
+| slot 7 | the world's segment query (`Terrain.dll:0x10024fd0`, table `0x1009a630`, which walks every object's slot 6 from `0x100250c0`); on a mesh, the walk-face query | 2 of 3 |
+| slot 8 | the world's (`0x10025b40`), the building's (`0x10056b10`) | 2 of 3 |
+| slot 10 | a segment through one node, interface `0x20` (`AniMesh.dll:0x10010a50`); the world's ground query (`Terrain.dll:0x10026b20`) | 3 of 4 |
+| slot 12 | the world's (`0x10025540`, walking from `0x10025630`) | 2 of 5 |
+| interface `0x25` slot 3 | the push-out (`AniMesh.dll:0x1000d410`) | 3 and 4 of 5 |
+
+The install makes 3581 indirect calls at those six offsets. **34** pass a
+block filled as a filter is, and one more reaches the visitor directly
+(`AniMesh.dll:0x100106a4`). Six pass a **copy** of the caller's own filter:
+the mesh's slot 6 to each node with `+0xc` set to 1 (`0x10013fa8`), the
+building's to its parts (`Terrain.dll:0x1005ae9f`, `0x1005af13`, `0x1005b1bd`)
+and the landscape's slot 7 (`0x10021a09`, `0x10021aa0`), both with the batch
+mask narrowed and the triangle words as they came. Two more are the
+landscape's own translating wrappers (`0x1001e280`, `0x1001e400`, slots 11 and
+5 of table `0x1009a3c4`), for which no caller was found.
+
+**The filters**, by the triangle words they carry:
+
+| required, excluded | filters | who |
+|---|---|---|
+| 0, `0x24` | 2 | the round (`Control.dll:0x1001d9d0`, eight stores inline, handed on at `0x1001da6b`); the outer camera's line (`iron3d.dll:0x100384d0`, at `0x10038699`) |
+| 0, 4 | 1 | the collision pair's segment (`Control.dll:0x1001daf0`, at `0x1001dd24`, and the push-out's third argument at `0x1001e007`) |
+| 0, 4 and **2** unless the mover's flags carry 8 | 1 | the pair's face filter, the push-out's fourth argument (`0x1001dbce`, `0x1001e007`) |
+| **`0x10`**, the caller's | 1 | the door test, inside the push-out: a copy of that fourth argument (`AniMesh.dll:0x1000dba2`) with `0x10` required (`0x1000dbba`) |
+| 0, 8 | 3 | the walker's ground queries into the world's slot 10 (`Control.dll:0x100195a0`; the ground contact `0x1001a450`, twice) |
+| 0, 0 | 23 | everything else |
+
+- **0, 8 excludes nothing on a mesh.** 8 is a landscape surface class there
+  ([26-damage.md](26-damage.md#the-query-record-and-what-a-round-excludes--read-and-measured));
+  as a triangle flag it is on 0 of 241887 faces.
+- **The 23 that carry nothing** are every sight and every placement:
+  - `Control.dll`: the pair's small-face query (`0x1001de0b`), the guns' sight
+    (`0x1002a610`), the ground contact's query into slot 8 (`0x1001aa8e`) and
+    `0x10013180`;
+  - `iron3d.dll`: the builder's cursor (`0x10035e40`), `0x10063350` and
+    `0x100a14d0`;
+  - `Behavior.dll`: the fight module (`0x10023ff0`), `MakeGoCommand`
+    (`0x10027580`), `0x100146b0` (two) and `0x1001d440`;
+  - `ArealMap.dll`: `0x1000e7a0`, `0x10011b70` (two), `0x10015290` and
+    `0x10021490`;
+  - `Effect.dll`: an effect's view test (`0x10007d10`);
+  - `Terrain.dll`: `CheckMaxBasementAngle` (`0x10014c60`), the strike
+    (`0x10071d70`) and a **static** filter at `0x100a6038`, filled by its
+    initialiser (`0x10040e90`) and handed on at `0x1004669c`;
+  - `AniMesh.dll`: `0x1000b050`, and interface `0x20` slot 7 (`0x10010550`).
+- So **a sight ray strikes glass and leaves**, flags 4 and `0x20`, which a
+  round passes; and no query but the push-out's can tell a floor or a door's
+  leaf from any other face.
+- **How they are built.** 15 are stored word by word, the round's among them.
+  16 go through one of three small constructors, which every module carries
+  its own copy of: three by the eight-word one, seven by the six-word one and
+  two stores, five by the four-word one and four stores, and the door test's by
+  a copy and two. The constructors are not a list of filters either way: the
+  four-word one's third caller in `Control.dll` (`0x10015a6b`) builds a
+  quaternion.
+
+**The controls** are the round's inline filter and the collision pair's three,
+all of which the listing gives. **What it cannot see** is a filter filled off
+the stack and passed as a loaded pointer. One static is passed by its address
+and found (above); of the other 159 arguments at those slots that are not on
+the stack, 138 are static addresses in six of `Behavior.dll`'s setting readers
+(two looked at: the names `Patrol_Place_SpeedPercent` and `Type`), one is a
+field of a resource entry (`AniMesh.dll:0x10003936`), and 20 are values loaded
+from a field, which were not read one by one. A sweep for the fill itself —
+whole dwords stored at k + `0x10` to k + `0x1c` off one base that is not the
+stack, with a constant carrying 2 or 16 in a triangle word — does not
+discriminate ([09-method.md](09-method.md#searches-that-do-not-discriminate-so-nobody-repeats-them)).
+
+**The engine** agrees on all of them: a round's and the outer camera's line
+pass `0x24` (`parkan_sim::hit::ROUND_SKIPS_FACE`), the sights pass nothing
+(`SIGHT_SKIPS_FACE`), and the push-out passes 4, and 2 unless the mover keeps
+floors (`parkan_sim::solid`). Its `0x20` there is still a stand-in
+([24-motion.md](24-motion.md#the-cap-where-two-halves-meet--measured-and-a-stand-in)):
+no filter in the install hands the push-out that bit.
 
 ### Indices are batch-relative
 

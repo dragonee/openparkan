@@ -110,6 +110,21 @@ find.
   unrelated `0x10`s in `ArealMap.dll` and `Behavior.dll`, and separates nothing.
   What did work was going the other way: enumerate the readers of the field, and
   then the callers of each.
+  The enumeration that closed it went from the write instead, and only on the
+  stack: follow `esp` through every function, so that `[esp + k]` names one
+  slot wherever it is stored to, and print the eight words of every block
+  handed to a call at a face-query slot (`analysis/filters.py`; 31 filters,
+  [07-objects.md](07-objects.md#who-fills-a-face-querys-filter--read)). The
+  same shape **off** the stack separates nothing again: whole dwords stored at
+  k + `0x10` to k + `0x1c` off one register or a static, with a constant
+  carrying 2 or 16 in the last two, is 126 of 6819 runs, 94 of them in
+  `ArealMap.dll` and `Behavior.dll`, whose containers keep a `0x10` beside
+  three zeros.
+- **Listing a small constructor's callers as the things it builds.** The
+  six-word constructor a filter is made with is a shape, not a type: every
+  module carries its own copy, the round fills its filter without one, and the
+  four-word one's third caller in `Control.dll` builds a quaternion
+  (`0x10015a6b`). Its callers are neither all the filters nor only filters.
 - **Looking for a field's writer in the wrong coordinates.** A C++ object with
   several interfaces is addressed through whichever sub-object a method was entered
   on, and a constructor writes the whole thing through the most-derived pointer. A

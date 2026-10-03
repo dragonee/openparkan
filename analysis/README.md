@@ -382,6 +382,41 @@ makes other calls at the same offset on other objects, and the list has those
 too. The arity settles each — a setter that pops one dword is not a getter
 called with none.
 
+## `filters.py`, for a block nobody constructs
+
+```
+uv run --group analysis python analysis/filters.py check     # is the tracker to be believed
+uv run --group analysis python analysis/filters.py queries   # every call at a face-query slot
+uv run --group analysis python analysis/filters.py closure   # how those slots were found
+uv run --group analysis python analysis/filters.py at Control.dll 0x1001da6b
+```
+
+The two searches above ask who *calls* something. This asks what a call is
+*handed*: a face query takes an eight-word filter, and the question was who
+fills its last two words. The round stores all eight inline, so the filter's
+constructor has no complete list of callers, and the constants do not
+discriminate.
+
+It follows `esp` through every function — pushes, pops, what each direct
+callee's `ret` takes off, a guess for a call through a pointer — so that
+`[esp + k]` names one slot wherever it is written. Its own control is that the
+depth it carries is zero at every `ret`: 16048 of 17081 functions. A function
+that fails is not dropped; its calls are listed apart with every filter-shaped
+block among their arguments, and read by hand. Eight of the 31 filters are in
+such functions: the ground contact's three and five in `Behavior.dll`.
+
+Then, for a call, each argument's origin: the address of a stack block (with
+the block's eight words — a constant, a register and where it was set, an
+argument of one of the small constructors), the caller's own argument handed
+on, a copy of it, a static's address, or a loaded value. The 31 filters and
+the slots are in
+[../docs/07-objects.md](../docs/07-objects.md#who-fills-a-face-querys-filter--read).
+
+What it leaves: a filter filled off the stack and passed as a loaded pointer
+is not seen, and `closure` follows any argument handed on at a matching
+offset, an unrelated interface's too, so its 297 hands are a superset to read
+for the tables that matter and not a result.
+
 
 ## `stdcalls.py`, for a slot told by how it is called
 
