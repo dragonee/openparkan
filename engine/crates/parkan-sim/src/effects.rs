@@ -672,11 +672,8 @@ pub struct Instance {
     streams: Vec<Stream>,
     /// The bursts that fall, and how long each of their groups has been out.
     bursts: Vec<Burst>,
-    /// Seconds on the streams' clock, and where the effect was, at the last update.
+    /// Seconds on the instance's clock, and where the effect was, at the last update.
     updated: Option<(f32, Vec3)>,
-    /// What the streams' clock runs at against the instance's: 1 plays them as their blocks
-    /// read. Their emission, their particles' life and so their rise all scale with it.
-    pub stream_pace: f32,
 }
 
 /// A lerp whose parameter is given per axis, which is how a particle's channels move
@@ -881,7 +878,6 @@ impl Instance {
             streams,
             bursts,
             updated: None,
-            stream_pace: 1.0,
         }
     }
 
@@ -981,7 +977,7 @@ impl Instance {
         }
         let t = self.t(now_ms);
         self.draw_light_jitter(now_ms, t);
-        let seconds = self.seconds(now_ms) * self.stream_pace;
+        let seconds = self.seconds(now_ms);
         let origin = self.frame.origin;
         let (then, from) = self.updated.unwrap_or((seconds, origin));
         for stream in &mut self.streams {
@@ -1334,7 +1330,7 @@ impl Instance {
             if e.kind == 8 {
                 // A stream draws the particles it has out whether or not *t* is still inside
                 // its window (`Effect.dll:0x1001203e`): the window only stops it making more.
-                self.stream(i, e, seconds * self.stream_pace, level, out);
+                self.stream(i, e, seconds, level, out);
             } else {
                 let Some(p) = progress(e, t) else { continue };
                 match e.kind {
