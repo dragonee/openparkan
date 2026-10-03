@@ -491,6 +491,37 @@ impl SpriteRenderer {
 mod tests {
     use super::*;
 
+    /// A sprite's fog runs on the squared distance, as the world's does: the shader component
+    /// keeps the squares of the fog's start and end and the reciprocal of their difference
+    /// (`Terrain.dll:0x1004bfb0`) and hands a sprite 1 − (d² − start²) ÷ (end² − start²)
+    /// (`0x1004bf20`). Half way to a fog ending at 500 a sprite keeps three quarters of itself,
+    /// where the fog linear in the distance this shader had kept half.
+    #[test]
+    fn a_sprite_fogs_on_the_squared_distance() {
+        let text = include_str!("sprite.wgsl");
+        let module = wgpu::naga::front::wgsl::parse_str(text).expect("sprite.wgsl parses");
+        wgpu::naga::valid::Validator::new(
+            wgpu::naga::valid::ValidationFlags::all(),
+            wgpu::naga::valid::Capabilities::empty(),
+        )
+        .validate(&module)
+        .expect("sprite.wgsl validates");
+        for needle in [
+            "fn sprite_fog(distance: f32, start: f32, end: f32) -> f32",
+            "let d = distance * distance;",
+            "let near = start * start;",
+            "let far = end * end;",
+            "return 1.0 - (d - near) / max(far - near, 1e-6);",
+            "let keep = sprite_fog(distance(v.world, camera.eye.xyz), camera.fog.x, camera.fog.y);",
+        ] {
+            assert!(text.contains(needle), "sprite.wgsl lost {needle}");
+        }
+        assert!(!text.contains("(camera.fog.y - d)"), "the fog linear in the distance is gone");
+        // The same arithmetic, tested where it can run.
+        assert!((crate::shade::fog(250.0, 0.0, 500.0) - 0.75).abs() < 1e-6);
+        assert!((crate::shade::fog(375.0, 0.0, 500.0) - 0.4375).abs() < 1e-6);
+    }
+
     /// A near additive plume is drawn after a far alpha-blended smoke, so it lies over it; a
     /// tie goes to the quad filed later; and a layer that is not sorted keeps its filing order.
     #[test]

@@ -30,6 +30,22 @@ fn display(c: vec3<f32>) -> vec3<f32> {
     return select(high, low, c <= vec3<f32>(0.0031308));
 }
 
+// How much of a sprite the fog keeps (`Terrain.dll:0x1004bf20`, the shader component's slot 4
+// at `0x1004f710`): all of it up to `start`, none past `end`, and between them
+// 1 - (d^2 - start^2) / (end^2 - start^2). `shade.rs`'s `fog` is the same arithmetic, tested.
+fn sprite_fog(distance: f32, start: f32, end: f32) -> f32 {
+    let d = distance * distance;
+    let near = start * start;
+    let far = end * end;
+    if d <= near {
+        return 1.0;
+    }
+    if d >= far {
+        return 0.0;
+    }
+    return 1.0 - (d - near) / max(far - near, 1e-6);
+}
+
 struct VertexIn {
     @location(0) position: vec3<f32>,
     @location(1) uv: vec2<f32>,
@@ -63,13 +79,16 @@ fn vs_main(v: VertexIn) -> VertexOut {
 @fragment
 fn fs_main(v: VertexOut) -> @location(0) vec4<f32> {
     let texel = textureSample(skin, skin_sampler, v.uv);
-    let d = distance(v.world, camera.eye.xyz);
+    // The fog's share is in the specular alpha of the sprite's one colour pair, linear in the
+    // *squared* distance between the fog's start and end as the world's is
+    // (`Terrain.dll:0x1004bf20`, docs/11, "How an effect sprite is coloured"); effect draw flag
+    // 4 holds it at 1, which the tint's w says below.
+    //
     // STAND-IN: docs/11-effects.md#how-an-effect-sprite-is-coloured--read-and-measured -- the
-    // game puts a fog factor of its own in the specular alpha of every vertex, linear in the
-    // *squared* distance between its near and far (`Terrain.dll:0x1004bf20`), and effect draw
-    // flag 4 forces it to 1. Here the renderer's own fog, linear in the distance itself, and
-    // none where that flag is set.
-    let keep = clamp((camera.fog.y - d) / max(camera.fog.y - camera.fog.x, 0.001), 0.0, 1.0);
+    // game takes one distance for the sprite, the one its item is built with
+    // (`Terrain.dll:0x1003c340`), and all four corners carry that factor; here each pixel
+    // takes its own distance.
+    let keep = sprite_fog(distance(v.world, camera.eye.xyz), camera.fog.x, camera.fog.y);
     let fog = display(mix(camera.fog_colour.rgb, look.toward.rgb, look.toward.w));
     // An effect sprite's quad carries one pre-lit colour on every vertex: the material's
     // ambient, with the ambient alpha -- where the fade lands -- as its alpha
