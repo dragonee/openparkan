@@ -1723,6 +1723,11 @@ and nothing else (`0x1001a923`): not the shield's value 3, which is 0 on a MK1.
   with a white highlight is, where the hero's backpack lights sit, in every
   camouflaged frame of training mission 1; and what puts it out in Part 1
   between 13:32 and 13:36, at the bunker's pod.
+- *Measured*, for that patch: the training hero (`tut1_p`: `r_h_02` and
+  `o_tur_ha_02`) draws 164 batches, **none** with a lightmap byte, so no baked
+  light stays over the ground's material; **37** of the turret's 133 carry
+  `0x100` in their word, 36 of them `NH_GLS`, and the swap leaves a batch's
+  word as it is. Whether the patch is one of those is not established.
 
 The earlier line here, that no recording shows camouflage on, had not looked:
 the indicator is lit on 279 of 299 cockpit samples of that one recording.
