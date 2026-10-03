@@ -25,114 +25,134 @@ remainder a closed line names stays here as a line of its own.
 [10-sky](docs/10-sky.md#not-resolved), [02-texm](docs/02-texm.md),
 [07-objects](docs/07-objects.md), [06](docs/06-open-questions.md)
 
-- [ ] What lies below the dome's rim, and which views carry mode 1. *Narrowed 2026-09-20* out of the
-  closed line on the sky's pass descriptor
-  ([COMPLETED-QUESTIONS](COMPLETED-QUESTIONS.md#sky-and-rendering)): the sky's fourth draw is **read** — four pre-transformed screen vertices from the viewport
-  rectangle (`0x1007a1a6`), flags `0xc`, depth test and write both off, and a material block (sky
-  `+0x484`) whose only written fields in the whole module are the ambient alpha at `+0x20`, two zero
-  texture fields and a format id, so the only colour it can carry is the **scene colour**. It is
-  **skipped whenever the view's mode (slot 24, `0x10083010`) is 1** (`0x1007a325`), and which views
-  carry which mode is not read; that the world's view is mode 1 is *inferred*, not established. What
-  lies below the rim was again not reached ([10-sky](docs/10-sky.md#the-dome)).
-- [ ] What the colour filter's slot 5 computes. *Narrowed 2026-09-20*: it is **not the shader**, as this
-  page said. The object reaches the bodies from `CAtmosphere`'s `+0x16c` (`0x1006fde6`) and the item
-  renderer from the shader component's **interface 4** (`0x10032a75`); its slot 7 returns a block whose
-  `+8` bit 0 is the flag, tested at `0x10079786`, `0x1007d923` and `0x1002fe79`, and its slot 5 maps one
-  `D3DCOLOR`. The `0xff00ff00` mask names it — the camera's **infrared** (`CMD_CAMERA_INFRARED`,
-  `CIS_INFRARED_ON/OFF/INV`, `NightVisionOn`), which is also what the outer view's flag `0x20` turned out
-  to be. What slot 5 computes is still unread: the object's vtable is installed outside `Terrain.dll` and
-  its class was not found ([10-sky](docs/10-sky.md)).
-- [ ] Whether any caller besides the round's hit test and the collision pass hands a face query a
-  triangle mask carrying 2 or 16 — the round builds its filter inline, so enumerating the filter
-  constructor's call sites is not a complete enumeration. (~~What reads object face flags 2 and 16~~ —
-  narrowed 2026-09-18: a face flag can be read in only three places, all `AniMesh.dll`, whose visitor is
-  not exported and has two callers; and the walk-face query reads no triangle flag at all, so the flagged
-  floors are the push-out's and not the ground search's. What the two flags **are** is measured through:
-  2 is the walkable surface, all 6166 in a level-0 slot and 6100 above the engine's own cos-80° threshold,
-  a chosen subset; 16 is the broad face of a door leaf, all 384 vertical on 52 interior nodes
-  ([07-objects](docs/07-objects.md)).)
-- [ ] A captured building's emblem, and a network game's. The emblem is read to follow the owner:
-  the building's and the unit's records write their clan's sign into the life system every game
-  frame, and a capture rewrites the record's clan
-  ([COMPLETED-QUESTIONS](COMPLETED-QUESTIONS.md#sky-and-rendering)). *Seen* for a building, a unit and
-  a captured unit; a captured **building's** emblem was found in no frame of Parts 4 to 6.5 of the
-  let's play. And in a network game the frame steps only the player's own clan's building records
-  (`iron3d.dll:0x1007db57`), so what signs another clan's building there is not read
-  ([07-objects](docs/07-objects.md), [27-ownership](docs/27-ownership.md)).
-- [ ] What a camouflaged machine wears. `IAnimation` slot 27 hands the mesh the ground face under the
-  machine while its detection shield's state `0x600` reads `0x1000` (`Control.dll:0x1001a95d`), and
-  the mesh then draws every batch in that face's material. Not read: which of the face's two layers,
-  and what it wears on a building's floor. No recording looked at shows camouflage on, and the engine
-  does not model it ([07-objects](docs/07-objects.md)).
-- [ ] The weather's remainders, left when the line closed 2026-10-01
-  ([COMPLETED-QUESTIONS](COMPLETED-QUESTIONS.md#sky-and-rendering)): what the rain sound's flags
-  `0x102` mean (the engine loops it); which faces the lightning's ground query takes; who calls
-  `ICamera2` slot 23 to give a camera a mode other than 0, the one gate on the weather's draw (38
-  calls through `+0x5c` across the install, none with a constant); and whether the weather draws in a
-  pod room that is its own world ([10-sky](docs/10-sky.md#the-weather)).
-- [ ] **What draws C03 M01's lava.** *Narrowed 2026-10-01* with the haze and the ground closed
-  ([COMPLETED-QUESTIONS](COMPLETED-QUESTIONS.md#sky-and-rendering)). The recording's lava is bright
-  red, (208, 7, 4), and shows its own texture and the mirrored plant together ("Let's Play - Parkan:
-  Iron Strategy, Part 5", PfAg6zSe-yM, 1:25, briefing time 38 s); the engine's is (137, 20, 22).
-  Neither reflection mode as read draws that: `REFLECTION` leaves liquid faces out, and
-  `REFLECTION_SHIFTED` draws the reflection times the lit colour with no liquid texture, which is
-  what the engine draws. Lava faces carry water's flags exactly, `0x608` and surface 2 on all 2624.
-  What that machine ran in place of phase 10 is not read; the lake's brightness is the same line
+- [ ] **[M10] How the recordings' machine draws a liquid**: C03 M01's lava, and the lake's
+  brightness with it. *Narrowed 2026-10-03* ([COMPLETED-QUESTIONS](COMPLETED-QUESTIONS.md#the-rounds)).
+  The recording's lava is (208, 7, 4) and shows its own texture and the mirrored plant together
+  ("Let's Play - Parkan: Iron Strategy, Part 5", PfAg6zSe-yM, 1:25, briefing time 38 s); the
+  engine, on `REFLECTION_SHIFTED` as this install's ini has it, draws (136, 17, 20). Read since:
+  the drawing camera's type does reach the shade (`CShade +0xbcc`, set at
+  `Terrain.dll:0x10085365`), a water face is filed in group 1 at layer 12 with `UseReflections`
+  on and `UseEMBMReflections` off and at layer 1 otherwise (`0x1004452f`, `0x1004453b`), and
+  with its under-water flag clear the reflection camera draws the water faces too
+  (`0x10043ccc`–`0x10043d11`) — so under the plain `REFLECTION` it is the mirrored camera that
+  draws the liquid as its own material into the frame the mirrored scene is in, the one read
+  path on which texture and reflection share a picture. **The number does not come out**: the
+  lava's lit colour is the scene-colour floor over its ambient, (0.65, 0.19, 0.25), and
+  `LAV00.0`'s mean (174, 23, 0) gives (113, 4, 0) alone or (155, 1, 0) doubled through its
+  twin's `LAV07.0`. Left: how a type-5 pass's liquid and the mirrored scene behind it share the
+  picture (the liquid's plane is the nearer to the mirrored eye), which mode the recording's
+  machine ran — no device test stands between `Iron_3D.ini` and the mode, and the compiled
+  default is `REFLECTION` — and the lake's (162, 248, 253)
   ([03-terrain](docs/03-terrain.md#not-established)).
-- [ ] The lit colour's remainders, left 2026-10-01: a point light's highlight, its mirrored travel
-  against the way to the eye raised to the material's power less 1 (`Ngi32.dll:0x1001616f`), which
-  the engine does not take; the clouds' light list, where the engine lights them with the sun's two
-  lights only; a sprite's fog, still linear in the engine where the world's now runs on the squared
-  distance; and one face of C03 M02's Outpost, plain red in the recording at briefing time 54 s,
-  (136, 14, 24), and lavender in the engine, (188, 42, 71), lit there by the second light
-  ([10-sky](docs/10-sky.md#not-resolved)).
-- [ ] What a type-1, 2 or 5 pass does with its items' order. The effect sprites' layer 6 is a type-3
-  `CCamDistSortLayerVB`, read to draw far to near (`Terrain.dll:0x1003e090`, `0x1003e1d0`;
-  [11-effects](docs/11-effects.md#effect-sprites-are-drawn-far-to-near--read-and-seen)); the see-through
-  surfaces' layer 5 is type 1, and group 1's layers 0–4, 8, 10 and 13 are type 2 and layer 12 type 5
-  ([10-sky](docs/10-sky.md#the-dome)), whose render slots are not read. Narrowed 2026-09-30 out of
-  [07-objects](docs/07-objects.md)'s note on the queue's sort types.
+- [ ] Who calls `CCamera`'s `+4` slot 14 (`Terrain.dll:0x100852e0`), the routine that hands a
+  camera's type — 2 `REFLECTION_SHIFTED`, 1 `REFLECTION`, 0 otherwise, made of its name at
+  `0x10083a54` — to the buffering camera's slot 23 at `0x10085365`. Reached by the sky's and the
+  light's branches independently on 2026-10-03; its caller was found by neither
+  ([10-sky](docs/10-sky.md#the-skys-first-draw-is-a-screen-wide-quad--read),
+  [03-terrain](docs/03-terrain.md#not-established)).
+- [ ] [M1] Whether slot 17's alpha reaches a body's sprite. The sun's and the moon's sprite
+  carries slot 17's colour on its four vertices (`Terrain.dll:0x1007cd98`), alpha and all, and
+  the alpha is 50 of 255 or less on 249 of the 656 keyframes; what the device does with it is
+  not checked against a frame, and the engine draws a body in its texture's own colours
+  ([10-sky](docs/10-sky.md#the-sun-and-the-moon-are-drawn)).
+- [ ] [M5] The line a room's mesh is asked along. A building's room test is the room's box and
+  then a count of crossings by its mesh (`AniMesh.dll:0x10010550`) along the direction at the
+  mesh's `+0x150`, whose writer is not read; the engine takes the room's own z. It decides
+  whether the rain and the snow are drawn ([10-sky](docs/10-sky.md#the-weather--read-and-seen)).
+- [ ] What sets camera flag 8. A camera whose flag word carries it draws neither the sky's pass
+  nor the world (`Terrain.dll:0x100845eb`, `0x10084701`) ([10-sky](docs/10-sky.md#not-resolved)).
+- [ ] [M1] Which shipped frames carry a scale. The shade puts a directional light into an
+  item's frame by the transpose of the frame's 3 × 3 and normalises nothing
+  (`Ngi32.dll:0x10024260`, `0x1001ba50`; three other builds of `g_FastProc`'s `+0x8c` were not
+  read), so an item drawn at scale *s* takes *s* times the light; the engine takes a unit
+  direction whatever the scale ([10-sky](docs/10-sky.md#the-lit-colour-is-the-games-own--read-and-measured)).
+- [ ] Which light manager the gather passes over under bit 1 of the draw's mode: one whose
+  registered object answers class 7 (`Terrain.dll:0x10047633`–`0x10047653`), for an agent
+  attached to a parent's node whose record carries bit 0 at `+0xc`, or a draw whose argument
+  carries `0x400` (`AniMesh.dll:0x10014d9d`). What answers class 7 and which nodes carry the
+  bit are not read; if it is the sun's, a part hung inside a building takes no sunlight
+  ([11-effects](docs/11-effects.md#not-resolved)).
+- [ ] C03 M02's Large Factories' roofs, and the mine's glow. *Seen 2026-10-03 and not
+  investigated*: in the briefing frames that settled the masts ("Part 6", -yNnsqudMzw, briefing
+  time 49–62 s) each Large Factory's roof is violet-blue under its antenna in the recording and
+  not in the engine, and `mineglow` on Enemy 1's Medium Mine is stronger there than here
+  ([11-effects](docs/11-effects.md#what-a-light-does-to-a-surface--read-and-measured)).
+- [ ] **[M9] Camouflage's remainders**, left when the line closed 2026-10-03 for the hero
+  ([COMPLETED-QUESTIONS](COMPLETED-QUESTIONS.md#sky-and-rendering)): a dark patch with a white
+  highlight where the hero's backpack lights sit, in every camouflaged frame of the recordings
+  (its 164 batches carry no lightmap byte, and 37 carry the see-through word `0x100`, which the
+  swap leaves alone — whether the patch is one of those is not established); what puts it out
+  in Part 1 at 13:32–13:36, at the bunker's pod, where neither firing nor a hit does (725 of
+  725 samples of "Tricky Tellus mission 2"); a camouflaged machine seen from outside on a floor
+  or a bridge, and any enemy in the ground's texture, neither found in a frame; and, in the
+  engine, a boarded bot and the AI's machines, which stay in their own skin, and camouflage's
+  cut of the three signatures, which is not applied
+  ([07-objects](docs/07-objects.md#what-a-camouflaged-machine-wears--read-and-seen)).
+- [ ] **A loaded game's emblems.** Raised 2026-10-03: after a load every clan's sign is 0, the
+  arrow — the loop that gives clan *i* sign *i* (`iron3d.dll:0x100a2420`) runs only on a fresh
+  start, and the save's loader stores no sign — and Part 2 shows it, the enemy's Medium Factory
+  wearing cell 6 before the player's load at 6:32.5 and the arrow after. **The engine keeps a
+  clan's index as its sign across a load**, deliberately left: matching the game would turn
+  every emblem into the arrow after a quick load, and whether to is the player's call. Not
+  re-checked for a load before it: docs/07's own sighting of a captured warbot's arrow (Part 6,
+  7:30) ([07-objects](docs/07-objects.md#in-a-network-game-and-after-a-load--read-and-seen)).
+- [ ] The face filters the enumeration could not see. Of 159 non-stack arguments at the six
+  face-query slots, 138 are static addresses in six `Behavior.dll` setting readers, one is a
+  resource field, and **20 are values loaded from a field**, not read one by one; and the
+  landscape's two translating wrappers (`Terrain.dll:0x1001e280`, `0x1001e400`) have no caller
+  found. Left when the triangle-mask line closed 2026-10-03
+  ([07-objects](docs/07-objects.md#who-fills-a-face-querys-filter--read)).
 
 ## Effects and sound
 
 [11-effects](docs/11-effects.md#not-resolved)
 
-- [ ] [M4] When a stream emits its first particle, and where burst and stream particles go.
-- [ ] **What slows an ambient stream.** Raised 2026-09-30 from checking C03 M01 against a recording
-  ("Let's Play - Parkan: Iron Strategy, Part 5", PfAg6zSe-yM, 4:19.4–4:24.4). A stream's clock is
-  read as the seconds since its instance started (`Effect.dll:0x1000846c`, the context's first word),
-  it emits every interval and catches up (`0x10011bf5`–`0x1001201c`, `last += interval`), and a
-  particle ages one ring slot an emission (`0x1001209e`): `tree_light_33a`'s `fire_smoke`, a ring of
-  20 at 0.08 s, lives 1.6 s and rises 100 m. The recording's volcano smoke rises at about 0.63 of
-  that against its own puffs' width, and its flame flickers at 5.3 Hz with almost nothing at the
-  interval's 12.5 Hz. Not read: who hands the manager its time, and whether an ambient effect — a
-  load group's on a building, tree or stone, or a lode's plume — is updated on a slower clock. The
-  engine runs those streams at half pace and every other at the read one (engine README,
-  *Stand-ins*). Seen alongside: the recording's plume is distinct billows — the spawn's read
-  jitter of each particle's far ends, which the engine now draws — over a flame about twice
-  the engine's, whose brightness varies a third as much (not explained).
-- [ ] What gives an effect's instance its level. A type-9 block's shape code carries the instance's
-  level in its top two bits; the level picks the half sphere's detail, 8 × 3, 16 × 6 or 24 × 9 at the
-  finest, and at 4 or more the block is not drawn (`Effect.dll:0x10007e6d`). The engine draws every
-  dome at level 0 ([11-effects](docs/11-effects.md#not-resolved)).
-- [ ] What lights the masts of C03 M02's Large Factory lavender. Raised 2026-10-01: in the briefing
-  ("Let's Play - Parkan: Iron Strategy, Part 6", -yNnsqudMzw, 1:44.5, briefing time 61–62 s) Enemy
-  2's Large Factory's masts are lavender on one side and yellow-orange on the other. With an effect's
-  light now lighting the vertices in its range the engine shows a yellow lamp tint on one mast; which
-  light the lavender is was not established ([11-effects](docs/11-effects.md)).
-- [ ] How Direct3D Sound places a sound between the speakers. (~~[M5] How a sound falls off between
-  its near and far distances~~ — this half was **stale**: the game takes the Direct3D Sound path
-  rather than its own mixer, so the law is DirectSound's — whole within the near distance, then
-  *min* ÷ (*min* + *R* × (*d* − *min*)) for the listener's rolloff *R* of 1, and no further past the
-  far distance. Re-checked by the coordinator 2026-09-18: `services.dll:0x10011914` pushes flags
-  `0x120` into `niCreate3DSound`, so bit 16 is clear and each buffer goes to DirectSound whole
-  through `SetAllParameters`
-  ([11-effects](docs/11-effects.md#how-a-sound-is-heard--read-and-measured)). What is left is only
-  how DirectSound itself pans.)
-- [ ] **Which draw reaches a unit's own manager**, the one an agent makes at `AniMesh.dll:0x100033ba`
-  and a controller drives at its `+0x3c`. The remainder, narrowed, of the header flag `0x800` line
-  closed 2026-09-19 ([COMPLETED-QUESTIONS](COMPLETED-QUESTIONS.md#effects-and-sound),
-  [11-effects](docs/11-effects.md)).
+- [ ] [M4] What a burst's fade below 0 draws. Type-10 debris is not dropped at an age of 1
+  (its load clears the flag that ends a group there, `Effect.dll:0x10001ab1`), and 118 of its
+  160 blocks fade to 0 at that age and below it after; the renderer draws nothing **at** 0
+  (`Terrain.dll:0x1002887e`), and what it does under it is not read. The engine draws nothing
+  at or under 0, and steps a group's clock for its fall by each update where the game adds it
+  as the group is drawn. Left when the stream's and the burst's line closed 2026-10-03
+  ([11-effects](docs/11-effects.md#a-burst-is-groups-that-leave-one-after-another--read-and-measured)).
+- [ ] [M4] An instance's level, its remainders: a **moving** stream's share of its instance's
+  sphere is read only in outline, a light's sphere is not read, and neither is the
+  atmosphere's owner class, so the engine's lightning takes the robots' thresholds. Left when
+  the level's line closed 2026-10-03
+  ([11-effects](docs/11-effects.md#an-instances-level--read-and-measured)).
+- [ ] The scale a stream particle's own matrix carries. By the read the matrix is built from
+  the way the effect moved and the frame's third axis, and carries that axis's length on two
+  of its axes (`Effect.dll:0x10011daf`–`0x10011e73`), which would make a chimney's plume 2.6
+  times its block; the Large Factory's recording shows the block's own size, so the engine
+  keeps its stand-in and the read is *not established*
+  ([11-effects](docs/11-effects.md#bolts-streams-and-fades--read-and-measured)).
+- [ ] [M4] How fast a lamp shimmers. Raised 2026-10-03 by a contradiction between two branches
+  of one round: a light's jitter is redrawn on every update of its instance, and an instance
+  that is being drawn updates on **every pass**, its draw's flag `0x40` opening the gate
+  (`Effect.dll:0x1000817a`, `0x10007de5`, the 50 at `0x1001e4e8` and the 100 at `0x1001e4e4`
+  re-read by the coordinator), where the page had every light stepping ten times a second.
+  The engine still holds each draw for 100 ms, and no recording has been measured for a lamp's
+  flicker ([11-effects](docs/11-effects.md#a-lights-jitter-is-five-draws-an-update--read-and-measured)).
+- [ ] [M4] What *seen* is for a unit's own effect manager. A mesh draws its agent's manager
+  with the pass 1 only while its sphere is inside the camera's six planes and the draw's flag 1
+  is clear, and the landscape draws an object of no seen cell with `flags | 1`
+  (`Terrain.dll:0x1001c8d7`), so the 198 effects carrying `0x800` — 147 of the 618 lights and
+  29 looped sounds among them — stop with their owner unseen. Not read: which cells the
+  landscape walks, the mesh's sphere, which flags `CBuilding::Render` (`0x10058b90`) adds, and
+  whether a gun hung on a turret counts the camera as its own. The engine draws every effect
+  whether or not its owner is seen, and files the camera's own unit's sprites with the world's
+  where the game puts them in layer 7, under the cockpit ([M3], waiting on the cockpit's own
+  pass) ([11-effects](docs/11-effects.md#which-draw-reaches-a-units-own-manager--read-and-measured)).
+- [ ] [M14] What silences the hero's breath in its own view. Not a head-relative mode — no
+  buffer's mode is ever set — and not, as far as it is read, the pass its flag `0x800` waits
+  for, which a unit's own mesh passes while the unit is seen. Queued 2026-10-03 from the doc's
+  own list ([11-effects](docs/11-effects.md#how-a-sound-is-heard--read-and-measured)).
+- [ ] The volcano's flame. The feedback's line — the crater's flame about twice as large in
+  the recording, its brightness varying a third as much, beating at 5.3 Hz with almost nothing
+  at the interval's 12.5 Hz (Part 5, 4:19–4:24) — was queued with the stream's pace, which
+  closed 2026-10-03 without it: the recording's bright glow measures 39–46 px, about 8–9 m,
+  which is `tree_light_33b`'s 8–10 m sprites, and the beat was not measured again. Whether the
+  engine's flame still differs is not looked at
+  ([11-effects](docs/11-effects.md#who-hands-a-manager-its-time--read-and-seen)).
 
 ## Motion, ground and controls
 
