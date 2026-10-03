@@ -3846,6 +3846,207 @@ def check_shade(check, game: Path) -> None:
           f"item's flags are 0x414, lit ({lit_item})")
 
 
+def check_light_highlights(check, game: Path) -> None:
+    """Which lights leave a highlight, what reaches the clouds, and where a water face is filed."""
+    paths = {n: game / n for n in ("Terrain.dll", "Ngi32.dll", "AniMesh.dll")}
+    if not all(p.exists() for p in paths.values()):
+        return
+    t_at, n_at, a_at = (_image_at(p.read_bytes()) for p in paths.values())
+
+    # CSun's constructor: the first light's flags, the second's, then slot 18 (+0x48) with 0
+    # on the second -- which sets bit 1 of its +0x4c, D3DLIGHT_NO_SPECULAR -- and both
+    # switched on.  A light is made with the word 0, and the shade asks the bit of each light.
+    flagged = (t_at(0x1007CFAA, 5) == bytes.fromhex("6800000008")
+               and t_at(0x1007D005, 5) == bytes.fromhex("6800000010")
+               and t_at(0x1007D023, 2) == bytes.fromhex("6a00")
+               and t_at(0x1007D03B, 3) == bytes.fromhex("ff5148")
+               and t_at(0x1007D03E, 2) == bytes.fromhex("6a01")
+               and t_at(0x1007D056, 3) == bytes.fromhex("ff5018")
+               and t_at(0x1007D071, 3) == bytes.fromhex("ff5218"))
+    slot_18 = (t_at(0x10080AB8, 3) == bytes.fromhex("83e1fd")
+               and t_at(0x10080AEA, 3) == bytes.fromhex("83c902")
+               and t_at(0x1008076A, 7) == bytes.fromhex("c7414c00000000"))
+    asked = (t_at(0x1004EA8D, 10) == bytes.fromhex("8b514c83e20285d27402")
+             and t_at(0x1004EC18, 8) == bytes.fromhex("8b514c83e20285d2")
+             and t_at(0x1004ED97, 8) == bytes.fromhex("8b424c83e00285c0"))
+    check("Terrain.dll: the sun's second light is flagged against a highlight",
+          flagged and slot_18 and asked,
+          "CSun's constructor pushes 0 at 0x1007d023 and calls the manager's slot 18 at "
+          "0x1007d03b on the light it has just flagged 0x10000000; slot 18 sets bit 1 of "
+          "+0x4c for 0 (0x10080aea) and clears it otherwise (0x10080ab8), a light is made "
+          "with the word 0 (0x1008076a), and the shade tests the bit at 0x1004ea90, "
+          "0x1004ec1b and 0x1004ed9a")
+
+    # The point light's highlight: 2 (n.L) n - L against the way to the eye, over |L|,
+    # squared power - 1 times, times the falloff.  And the pack: x 255, to the nearest, held.
+    mirror = (n_at(0x100166B5, 10) == bytes.fromhex("d94424188b442428dcc0")
+              and n_at(0x10016705, 6) == bytes.fromhex("d815d4110310")
+              and n_at(0x10016715, 4) == bytes.fromhex("d84c2414")
+              and n_at(0x10016721, 8) == bytes.fromhex("4848d9c0dec975f9")
+              and n_at(0x1001672C, 2) == bytes.fromhex("d8c9")
+              and n_at(0x100165BB, 4) == bytes.fromhex("d85c2420"))
+    packed = (struct.unpack("<4f", n_at(0x10037230, 16)) == (255.0,) * 4
+              and n_at(0x1001D954, 3) == bytes.fromhex("0f2dc0")
+              and n_at(0x1001D974, 3) == bytes.fromhex("0f67c2")
+              and t_at(0x1004F69A, 8) == bytes.fromhex("a1f8a00910ff5054"))
+    turned = (t_at(0x1004ED18, 5) == bytes.fromhex("83f8017522")
+              and t_at(0x1004ED76, 11) == bytes.fromhex("a1f8a00910ff908c000000")
+              and n_at(0x1000330A, 5) == bytes.fromhex("b960420210")
+              and n_at(0x1000348B, 6) == bytes.fromhex("890de4a00310")
+              and n_at(0x10024260, 4) == bytes.fromhex("d901d80a"))
+    check("Ngi32.dll: a point light's highlight is its mirror against the eye, times its falloff",
+          mirror and packed and turned,
+          "0x100166b5 doubles n.L, 0x10016705 passes over a mirror not above 0, 0x10016715 "
+          "divides by the light's distance, 0x10016721 squares power - 1 times and "
+          "0x1001672c multiplies by the falloff; the colours are packed x 255 "
+          "(0x10037230) by cvtps2pi and packuswb (0x1001d954, 0x1001d974); a directional "
+          "light's vector goes into a frame that is not the world's through slot 0x8c "
+          "(0x1004ed7b), the transpose multiply at 0x10024260, unnormalised")
+
+    # A water face's item: group 1, layer 12 under REFLECTION and 1 otherwise; a ground
+    # face's group 0, layer 0.  And the gather's pass over a class-7 manager under mode bit 1.
+    filed = (t_at(0x1004449B, 5) == bytes.fromhex("e9d6f4ffff")
+             and t_at(0x10044510, 7) == bytes.fromhex("c745bc01000000")
+             and t_at(0x1004452F, 10) == bytes.fromhex("c785e4fdffff0c000000")
+             and t_at(0x1004453B, 10) == bytes.fromhex("c785e4fdffff01000000")
+             and t_at(0x10044550, 7) == bytes.fromhex("c745bc00000000")
+             and t_at(0x10044557, 7) == bytes.fromhex("c745f800000000")
+             and t_at(0x10046D94, 8) == bytes.fromhex("b91a000000c1e102")
+             and t_at(0x10046DAB, 8) == bytes.fromhex("b91e000000c1e102"))
+    # A camera whose mode is not 0 skips the scene camera's bed and water tests: with the
+    # under-water flag clear it passes over the beds alone, with it set it draws them alone;
+    # and the flush keeps the REFLECTION_SHIFTED surface for a mode word of 0.
+    mirrored = (t_at(0x10043C0B, 13) == bytes.fromhex("83bd0cffffff000f85b4000000")
+                and t_at(0x10043CCF, 6) == bytes.fromhex("8a91b00b0000")
+                and t_at(0x10043CE6, 4) == bytes.fromhex("85c07517")
+                and t_at(0x10043CF0, 10) == bytes.fromhex("81e20020000085d27405")
+                and t_at(0x10043D07, 10) == bytes.fromhex("81e10020000085c97505")
+                and t_at(0x10043B21, 9) == bytes.fromhex("83bd18ffffff00754d"))
+    class_7 = (t_at(0x10047633, 6) == bytes.fromhex("8b551483e202")
+               and t_at(0x1004764E, 3) == bytes.fromhex("83f807")
+               and a_at(0x10014D9D, 6) == bytes.fromhex("8a8efc010000")
+               and a_at(0x10014DA7, 3) == bytes.fromhex("83cf02")
+               and a_at(0x10014DAA, 3) == bytes.fromhex("f6c604")
+               and a_at(0x10007361, 4) == bytes.fromhex("f6400c01")
+               and a_at(0x10007367, 7) == bytes.fromhex("c6830002000001"))
+    # The camera's mode reaches the shade: CCamera's +4 vtable's slot 14 (so `this` is four
+    # past the object) hands the object's +0x1a0 to slot 23 of the interface at its +0x19c,
+    # the buffering camera's 0x12, whose vtable 0x1009c3b0 has the setter there.
+    mode = (struct.unpack("<I", t_at(0x1009C5FC, 4))[0] == 0x100852E0
+            and 0x1009C5FC == 0x1009C5C4 + 4 * 14
+            and t_at(0x10083A34, 7) == bytes.fromhex("c74204c4c50910")
+            and t_at(0x10083AA6, 6) == bytes.fromhex("8988a0010000")
+            and t_at(0x10083ACA, 9) == bytes.fromhex("8b55e481c29c010000")
+            and t_at(0x10083AD4, 5) == bytes.fromhex("ba12000000")
+            and t_at(0x1008533E, 4) == bytes.fromhex("837d0c00")
+            and t_at(0x10085348, 9) == bytes.fromhex("8b4d088b919c010000")
+            and t_at(0x10085354, 6) == bytes.fromhex("8b8898010000")
+            and t_at(0x10085365, 3) == bytes.fromhex("ff505c")
+            and struct.unpack("<2I", t_at(0x1009C40C, 8)) == (0x10082FD0, 0x10083010)
+            and 0x1009C40C == 0x1009C3B0 + 4 * 23
+            and t_at(0x10081587, 6) == bytes.fromhex("c700b0c30910")
+            and t_at(0x10082FF6, 9) == bytes.fromhex("8b45f8898280020000")
+            and t_at(0x10045F53, 3) == bytes.fromhex("ff5260")
+            and t_at(0x10045F65, 6) == bytes.fromhex("8988cc0b0000")
+            and t_at(0x1007D8F3, 8) == bytes.fromhex("ff526083f8027505"))
+    check("Terrain.dll: a camera hands its mode to its buffering camera, and the shade reads it",
+          mode,
+          "0x100852e0 is slot 14 of the vtable CCamera puts at its +4 (0x1009c5fc), so its "
+          "+0x198 and +0x19c are the object's +0x19c, the buffering camera's interface 0x12, "
+          "and +0x1a0, the mode the constructor stores (0x10083aa6); at 0x10085365 it calls "
+          "that interface's slot 23, the setter 0x10082fd0 (0x1009c40c), which stores +0x280 "
+          "(0x10082ff9); the shade keeps slot 24's answer at +0xbcc (0x10045f65) and CSun "
+          "compares it with 2 (0x1007d8f6)")
+    check("Terrain.dll: a water face is filed in group 1, at layer 12 under REFLECTION",
+          filed and mirrored and class_7,
+          "0x10044510 stores group 1 and 0x1004452f layer 12 where UseReflections is on and "
+          "UseEMBMReflections off, 0x1004453b layer 1 otherwise, 0x10044550 group 0 and "
+          "layer 0 for the ground; settings 26 and 30 are copied as they stand "
+          "(0x10046d94, 0x10046dab); a camera whose mode word is not 0 jumps past the bed "
+          "and water tests (0x10043c12) to pass over the beds alone, or under a liquid to "
+          "draw them alone (0x10043cf0, 0x10043d07); the gather passes over a manager whose "
+          "object answers class 7 under mode bit 1 (0x10047633, 0x1004764e), which the mesh's "
+          "render sets "
+          "from the agent's +0x200 or its argument's 0x400 (AniMesh.dll:0x10014d9d)")
+
+    # Measured: the light blocks' ranges against the clouds' cap, and what makes the masts.
+    fx = effects.EffectLibrary(game / "effects.rlb")
+    reach = []
+    for effect in fx:
+        for emitter in effect.emitters:
+            light = emitter.light
+            if light is not None:
+                span = max(math.sqrt(sum(c * c for c in d)) for d in light.direction)
+                reach.append(((max(light.range) + light.range_jitter / 2)
+                              * max(abs(s) for s in effect.scale) * span, effect.name))
+    reach.sort(reverse=True)
+    smoke = next(e.light for e in fx.get("smoke_fr_02").emitters if e.light is not None)
+    bolt = next(e.light for e in fx.get("env_lightning").emitters if e.light is not None)
+    # The cap's sphere, and its first ring with the cap's origin 5000 under the eye.
+    radius = sky.DOME_HEIGHT / (2 * math.sin(sky.DOME_ANGLE / 2) ** 2)
+    ring = (radius * math.sin(sky.DOME_ANGLE / sky.DOME_RINGS),
+            radius * math.cos(sky.DOME_ANGLE / sky.DOME_RINGS) - radius + sky.DOME_HEIGHT - 5000.0)
+    lib = materials.MaterialLibrary(game / "Material.lib")
+    clouds = [lib.get(n).variant(0) for n in ("ENV_CLOUDS", "ENV_CLOUDS_2", "ENV_CLOUDS_4")]
+    fortif = NResArchive.open(game / "fortif.rlb")
+    members = {e.name.lower(): e for e in fortif}
+    plant = objmesh.parse(fortif.read(members["fr_b_plant.msh"]), "fr_b_plant.msh")
+    wear = objmesh.parse_wear(fortif.read(members["fr_b_plant.wea"])).materials
+    skins = Counter()
+    for batch in plant.batches:
+        entry = lib.get(wear[batch.material]).variant(0)
+        skins[(entry.specular, entry.power)] += 1
+    mast = lib.get("B_PLT_01").variant(0)
+    points = {p.name: p for p in objmesh.parse_control_points(
+        fortif.read(members["fr_b_plant.cpt"]), "fr_b_plant")}
+    widths = [round(math.sqrt(sum(c * c for c in points[n].direction)), 2)
+              for n in ("Smoke_w", "Smoke1_w", "Smoke2_w")]
+    check("measured: only the lightning's light comes near the clouds; a chimney's reaches a mast",
+          len(reach) == 618 and reach[0] == (300.0, "r_lightray_w") and reach[1][0] == 162.5
+          and (bolt.range, bolt.range_jitter) == ((100.0, 0.0), 10.0)
+          and bolt.attenuation == (0.0, 0.0, 1.0)
+          and round(ring[0]) == 5341 and round(ring[1]) == 4580
+          and all(c.power == 0 and c.specular == (0, 0, 0) for c in clouds)
+          and smoke.flags == 0xA0000000 and smoke.colour[0][:3] == (2.0, 2.0, 0.5)
+          and smoke.range == (15.0, 15.0) and smoke.attenuation == (0.0, 1.0, 0.0)
+          and widths == [3.73, 2.6, 2.6]
+          and (mast.colour, mast.specular, mast.power) == ((208, 203, 191), (255, 245, 239), 3)
+          and len(plant.batches) == 438 and skins[((255, 245, 239), 3)] == 118
+          and skins[((10, 10, 10), 3)] + skins[((11, 11, 11), 3)] == 210,
+          f"{len(reach)} light blocks, the largest range {reach[0][0]:.0f} ({reach[0][1]}) and "
+          f"the next {reach[1][0]} with its header's scale; env_lightning's {bolt.range[0]:.0f} "
+          f"+- {bolt.range_jitter / 2:.0f} through a frame 40 wide is 4000 +- 200, and the "
+          f"cap's first ring stands {ring[1]:.0f} over the eye {ring[0]:.0f} out, its apex 5000; "
+          f"the three cloud materials have power 0; smoke_fr_02's light is kind 6, "
+          f"{smoke.colour[0][:3]} on a range of {smoke.range[0]:.0f} through frames {widths} "
+          f"long, and B_PLT_01's specular is {mast.specular} at power {mast.power}, on "
+          f"{skins[((255, 245, 239), 3)]} of the Large Factory's {len(plant.batches)} batches")
+
+    lava = Counter()
+    twins = set()
+    for directory in sorted(p for p in (game / "DATA" / "MAPS").iterdir() if p.is_dir()):
+        path = next((p for p in directory.iterdir() if p.name.lower() == "land.msh"), None)
+        if path is None:
+            continue
+        land = landmesh.load(path)
+        names = [n.upper() for n in land.layer1_names]
+        if "ENV_NLAVA" not in names:
+            continue
+        index = names.index("ENV_NLAVA")
+        twins.add(land.layer2_names[index].upper())
+        for face in range(len(land.faces)):
+            if land.face_tex1[face] == index:
+                lava[(land.face_flags[face], land.face_surface[face])] += 1
+    micro = lib.get("ENV_NLAVA_M").entry_for_track(1)
+    check("measured: every lava face carries the microtexture's flag, and its twin is LAV07.0",
+          lava == {(0x608, 2): 2624} and twins == {"ENV_NLAVA_M"}
+          and micro is not None and micro.texture.upper() == "LAV07.0",
+          f"{sum(lava.values())} ENV_NLAVA faces on 4 maps, flags and surface "
+          f"{ {(hex(k[0]), k[1]): v for k, v in lava.items()} }; "
+          f"their Land2 twin is {sorted(twins)}, whose track 1 is "
+          f"{micro.texture if micro else None}")
+
+
 def check_blend_depth(check, game: Path) -> None:
     """What a blended batch writes: the alpha test's reference and the item's depth states."""
     paths = {n: game / n for n in ("Ngi32.dll", "Terrain.dll", "Effect.dll")}
@@ -27437,7 +27638,8 @@ def run(game: Path) -> int:
         check_nres, check_texm, check_terrain, check_uv,
         check_water, check_water_reflection, check_layers, check_materials, check_material_draw,
         check_sky,
-        check_render_state, check_shade, check_blend_depth, check_minimap_agreement, check_arealmap,
+        check_render_state, check_shade, check_light_highlights, check_blend_depth,
+        check_minimap_agreement, check_arealmap,
         check_grid, check_missions, check_scale, check_objects, check_poses, check_lod,
         check_damage, check_blasts, check_node_stages, check_scenery_life,
         check_effects, check_effect_timing, check_sprite_modes, check_sounds, check_draw_order,
