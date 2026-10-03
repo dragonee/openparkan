@@ -202,6 +202,72 @@ def setting_enabled(setting: int, preset: int = 1) -> bool:
     """Whether a settings id's switch is on under a preset."""
     return setting in EFFECT_PRESETS.get(preset, frozenset())
 
+
+#: The two floats a preset gives each settings group, "LOD distribution" and
+#: "High quality LOD" (``0x1000e865``..), by preset and then by group.  A burst's
+#: or a stream's particle draws a **detail number** from them as it is made --
+#: a uniform in 0..1 times the first, less the second (``0x1000ec50``) -- and
+#: the draw passes it over while the instance's level is more than that number
+#: (``0x100015eb``, ``0x100120cc``).
+LOD_DISTRIBUTION: dict[int, tuple[float, ...]] = {
+    1: (3.0, 3.0, 3.5, 5.5),
+    2: (1.5, 1.5, 1.75, 2.75),
+    3: (3.0, 3.0, 3.5, 5.5),
+}
+HIGH_QUALITY_LOD: tuple[float, ...] = (0.0, 0.0, -2.0, -3.0)
+
+#: The level at which the manager draws nothing of an instance (``0x10007e79``).
+LEVEL_HIDDEN = 8
+
+#: The owner classes whose effects take the building's arm of the level
+#: (``Terrain.dll:0x10048291``): 3 alone.  1, 2, 4, 7, 9 and 10 take the
+#: robot's, and 5, 6 and 8 leave the answer unwritten.
+LEVEL_BUILDING_CLASSES = frozenset({3})
+LEVEL_ROBOT_CLASSES = frozenset({1, 2, 4, 7, 9, 10})
+
+
+def detail_span(setting: int, preset: int = 1) -> tuple[float, float]:
+    """The ``(low, high)`` a particle's detail number is drawn between."""
+    group = min(setting >> 8, 3)
+    low = -HIGH_QUALITY_LOD[group]
+    return (low, low + LOD_DISTRIBUTION[preset][group])
+
+
+def kept_at_level(setting: int, level: int, preset: int = 1) -> float:
+    """The share of a burst's or a stream's particles a level leaves drawn."""
+    low, high = detail_span(setting, preset)
+    if level <= low:
+        return 1.0
+    return max(0.0, (high - level) / (high - low))
+
+
+def level(size: float, building: bool = False, *, robot_detail: float = 1.0,
+          robot_best_lod: bool = True, building_detail: float = 1.0) -> int:
+    """An instance's level from its sphere's size on the screen, in pixels.
+
+    ``CShade`` slot 19 (``Terrain.dll:0x10047fe0``), asked by the manager's
+    draw each time (``Effect.dll:0x10007e6d``): the robot's arm
+    (``0x1004817b``) or the building's (``0x10048210``), by the world class of
+    the manager's owner.  The three settings are ``Terrain.dll``'s
+    ``RobotDetail``, ``RobotBestLOD`` and ``BuildingDetail``, as compiled.
+    """
+    if building:
+        size *= building_detail
+        for limit, answer in ((10.0, LEVEL_HIDDEN), (40.0, 3), (80.0, 2), (120.0, 1)):
+            if size < limit:
+                return answer
+        return 0
+    best = 0 if robot_best_lod else 1
+    if size < 4.0:
+        return LEVEL_HIDDEN
+    if size >= 70.0:
+        return best
+    size *= robot_detail
+    for limit, answer in ((8.0, 3), (30.0, 2), (70.0, 1)):
+        if size < limit:
+            return answer
+    return best
+
 #: How effect time *t*, 0 to 1, is found (``Effect.dll:0x10005c60``): set from
 #: outside and 0 until set; once through the duration; looping; reversed; the
 #: animation value of an owner's mesh node (``TIME_POINT``: the node action 14
@@ -384,6 +450,19 @@ BOLT_SEGMENT_AT = 36
 #: (``0x1001209e``).
 STREAM_INTERVAL_AT = (24, 28)
 STREAM_CAPACITY_AT = 36
+
+#: A type-7 or type-10 burst is **groups of particles**: +36 groups of +40
+#: (``Effect.dll:0x10001000``).  Group *i* leaves ``(1 - life) * i / groups`` of
+#: the way through the window (``0x1000118a``) and is ``(progress - that) /
+#: life`` old (``0x1000135b``), ``life`` the float at +28.  A type-7 group is
+#: gone past an age of 1 (``0x1000137c``); type 10's load clears the flag that
+#: ends it (``0x10001ab1``).  +140 is a **fall**: a group drops by ``+140 *
+#: gravity / 2`` times the square of the seconds it has been out
+#: (``0x1000120a``, ``0x10001507``), gravity the world's 10.
+BURST_LIFE_AT = 28
+BURST_GROUPS_AT = 36
+BURST_EACH_AT = 40
+BURST_FALL_AT = 140
 
 #: The value a particle (types 7 and 10, or a stream's, type 8) or a sprite
 #: (3, 4 and 9) hands the renderer: ``start + (end - start) * x ** power``, x
@@ -604,6 +683,48 @@ class Emitter:
             return None
         ring = struct.unpack_from("<I", self.body, STREAM_CAPACITY_AT)[0]
         return (ring * interval[0], ring * interval[1])
+
+    @property
+    def burst_groups(self) -> tuple[int, int] | None:
+        """A type 7 or 10 burst's ``(groups, particles a group)``; None for the rest."""
+        if self.kind not in (7, 10) or len(self.body) < BURST_EACH_AT + 4:
+            return None
+        return struct.unpack_from("<2I", self.body, BURST_GROUPS_AT)
+
+    @property
+    def burst_life(self) -> float | None:
+        """A burst group's life, as a share of the window."""
+        if self.burst_groups is None:
+            return None
+        return struct.unpack_from("<f", self.body, BURST_LIFE_AT)[0]
+
+    @property
+    def burst_spawns(self) -> tuple[float, ...] | None:
+        """Where each of a burst's groups leaves, as progress through its window."""
+        counts = self.burst_groups
+        if counts is None or counts[0] == 0:
+            return None
+        return tuple((1.0 - self.burst_life) * i / counts[0] for i in range(counts[0]))
+
+    @property
+    def burst_fall(self) -> float | None:
+        """A burst's +140: what gravity ÷ 2 × seconds² is multiplied by; below 0 rises."""
+        if self.burst_groups is None or len(self.body) < BURST_FALL_AT + 4:
+            return None
+        return struct.unpack_from("<f", self.body, BURST_FALL_AT)[0]
+
+    @property
+    def stream_window_and_step_differ(self) -> bool:
+        """Whether a stream's test interval and its stamp's step can differ.
+
+        The test adds lerp(+24, +28) by the progress through the window
+        (``Effect.dll:0x10011a30``) and the step by the effect's *t* itself
+        (``0x10011c66``): two numbers wherever the interval changes across a
+        window that is not 0..1.
+        """
+        interval = self.emission_interval
+        return (interval is not None and interval[0] != interval[1]
+                and tuple(self.window) != (0.0, 1.0))
 
     @property
     def fade(self) -> tuple[float, float, float] | None:

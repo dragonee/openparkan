@@ -11,7 +11,7 @@ use parkan_formats::exp::Explosion;
 use parkan_formats::fxid::{self, Effect};
 use parkan_formats::gamedir;
 use parkan_formats::nres::Archive;
-use parkan_sim::effects::{Cue, Frame, Instance, PointLight, Rng, Sprite};
+use parkan_sim::effects::{Arm, Cue, Frame, Instance, LEVEL_HIDDEN, Lens, PointLight, Rng, Sprite};
 
 use crate::textures::{Animation, Phase, TextureStore};
 
@@ -56,6 +56,17 @@ pub enum Owner {
     Shield(usize, usize),
     /// The lightning object's one instance of its effect (`Terrain.dll:0x10071a8d`).
     Lightning,
+}
+
+impl Owner {
+    /// The target the instance hangs on, where it hangs on one: a building's or a tree's own
+    /// load group, and the guns and the shield fitted to a target, which are its agent's.
+    pub fn target(self) -> Option<usize> {
+        match self {
+            Owner::Building(t, _) | Owner::Gun(t, _, _) | Owner::Shot(t, _) | Owner::Shield(t, _) => Some(t),
+            _ => None,
+        }
+    }
 }
 
 /// A material's look for sprites: its texture, the cell of it the entry takes, and its blend
@@ -369,6 +380,42 @@ impl Fx {
         self.instances.iter_mut().filter(move |(o, _)| *o == owner).map(|(_, i)| i)
     }
 
+    /// Put every instance on the arm of the shade's level its owner's class takes
+    /// (docs/11, "An instance's level"): `building` says whether an owner is a building,
+    /// class 3; everything else an effect hangs on -- a unit, a round, scenery, the landscape
+    /// -- takes the robot's arm.
+    pub fn set_arms(&mut self, building: impl Fn(Owner) -> bool) {
+        for (owner, instance) in &mut self.instances {
+            instance.arm = if building(*owner) { Arm::Building } else { Arm::Robot };
+        }
+    }
+
+    /// [`Fx::sprites`] through `lens`: each instance at the level the shade answers for its
+    /// sphere seen from `eye` (`Effect.dll:0x10007e6d`, `Terrain.dll:0x10047fe0`), which the
+    /// manager's draw asks afresh each time. At 8 or over nothing of it is drawn; under that
+    /// the level thins its bursts and streams and picks its domes' detail.
+    pub fn sprites_seen(
+        &self,
+        now_ms: f64,
+        eye: Vec3,
+        lens: Lens,
+        in_view: impl Fn(Vec3) -> bool,
+    ) -> Vec<(usize, Sprite)> {
+        let mut out = Vec::new();
+        let mut buffer = Vec::new();
+        for (_, instance) in &self.instances {
+            let level = instance.level(now_ms, eye, lens);
+            if level >= LEVEL_HIDDEN {
+                continue;
+            }
+            buffer.clear();
+            let seen = instance.test_point().is_none_or(&in_view);
+            instance.sprites_at(now_ms, Some(eye), seen, level, &mut buffer);
+            out.extend(buffer.drain(..).filter_map(|s| Some((self.sprite_look(&s.material, s.phase)?, s))));
+        }
+        out
+    }
+
     /// Every sound an instance starts by `now_ms`.
     pub fn cues(&mut self, now_ms: f64) -> Vec<Cue> {
         let mut out = std::mem::take(&mut self.stops);
@@ -379,9 +426,13 @@ impl Fx {
     /// Update every instance at `now_ms`, once their owners have placed them, and drop
     /// the instances that have run their course.
     ///
-    /// STAND-IN: docs/11-effects.md#how-an-effect-runs--read -- the manager updates an
-    /// instance once 100 ms have passed since its last update; here every instance
-    /// updates on every tick the caller runs.
+    /// The game updates an effect that is being drawn on every pass -- its manager's draw and
+    /// its own each open the 100 ms gate behind them -- as every instance here updates on
+    /// every tick the caller runs (docs/11, "Who hands a manager its time").
+    ///
+    /// STAND-IN: docs/11-effects.md#who-hands-a-manager-its-time--read-and-seen -- an effect
+    /// that is not being drawn updates once more than 100 ms have passed since its last
+    /// update (`Effect.dll:0x10003e5a`, `0x100081a7`); here it too updates on every tick.
     pub fn tick(&mut self, now_ms: f64) {
         for (_, instance) in &mut self.instances {
             instance.update(now_ms);

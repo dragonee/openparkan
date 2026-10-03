@@ -8239,8 +8239,9 @@ def check_effect_timing(check, game: Path) -> None:
 
     # The switch id's high byte is the settings group, and a group carries two floats --
     # "LOD distribution" (page +0x1084) and "High quality LOD" (+0x1294) -- that a burst
-    # or a stream draws a per-particle value from (Effect.dll:0x1000ec50).  A drawing
-    # block reads that value only where its exponent is negative, and none is.
+    # or a stream draws each particle's detail number from (Effect.dll:0x1000ec50), which
+    # the draw sets the instance's level against (0x100015eb, 0x100120cc).  No position or
+    # size exponent is negative: the number is not a lerp parameter anywhere.
     groups = Counter(fx.gate >> 8 for fx in library)
     negative = exponents = 0
     for effect in library:
@@ -8258,8 +8259,75 @@ def check_effect_timing(check, game: Path) -> None:
           "the switch id's high byte is the group: "
           + ", ".join(f"{g} on {n}" for g, n in sorted(groups.items()))
           + f"; {negative} of the {exponents} position and size exponents are "
-          f"negative, which is the one reading of a group's 'LOD distribution' and "
-          f"'High quality LOD' floats (Effect.dll:0x10012125)")
+          f"negative, so a particle's own number is never its lerp parameter "
+          f"(Effect.dll:0x10012125 is the phase's, on +32)")
+
+    # The level thins bursts and streams by their settings group, and picks a dome's detail.
+    thinned = Counter()
+    thinned_effects = {0: set(), 1: set(), 2: set(), 3: set()}
+    domes = 0
+    for fx in library:
+        for e in fx.emitters:
+            if e.kind in (7, 8, 10):
+                thinned[fx.gate >> 8] += 1
+                thinned_effects[fx.gate >> 8].add(fx.name)
+            domes += e.kind == 9
+    early = thinned[0] + thinned[1]
+    check("FXID: a level of 1 thins the bursts and streams of settings groups 0 and 1",
+          sum(thinned.values()) == 1558 and early == 215
+          and len(thinned_effects[0] | thinned_effects[1]) == 111
+          and thinned[2] == 531 and len(thinned_effects[2]) == 132
+          and thinned[3] == 812 and len(thinned_effects[3]) == 279 and domes == 266
+          and [effects.level(s) for s in (3.9, 7.9, 29.9, 69.9, 70.0)] == [8, 3, 2, 1, 0]
+          and [effects.level(s, True) for s in (9.9, 39.9, 79.9, 119.9, 120.0)] == [8, 3, 2, 1, 0]
+          and effects.kept_at_level(0x001, 1) == 2 / 3 and effects.kept_at_level(0x311, 3) == 1.0,
+          f"of the {sum(thinned.values())} burst and stream blocks {early} in "
+          f"{len(thinned_effects[0] | thinned_effects[1])} effects draw detail numbers of 0 to 3 "
+          f"and lose a third of their particles at each level; {thinned[2]} in "
+          f"{len(thinned_effects[2])} draw 2 to 5.5 and lose two in seven at level 3; "
+          f"{thinned[3]} in {len(thinned_effects[3])} draw 3 to 8.5 and lose none "
+          f"(Effect.dll:0x1000ec50, 0x100015eb, 0x100120cc); the level is CShade slot 19's "
+          f"(Terrain.dll:0x10047fe0), under 4 px not drawn then 3, 2, 1 under 8, 30, 70, and "
+          f"on a building under 10 then 40, 80, 120; all {domes} domes take their detail from it")
+
+    # A burst is groups that leave one after another, and +140 is a fall.
+    bursts = [(fx, e) for fx in library for e in fx.emitters if e.kind in (7, 10)]
+    one = sum(1 for _, e in bursts if e.burst_groups[0] == 1)
+    whole = sum(1 for _, e in bursts if e.burst_life == 1.0)
+    staggered = [(fx, e) for fx, e in bursts if e.burst_groups[0] > 1 and e.burst_life != 1.0]
+    debris = [e for _, e in bursts if e.kind == 10]
+    falls = Counter((e.burst_fall > 0) - (e.burst_fall < 0) for _, e in bursts)
+    last = [e.burst_spawns[-1] for _, e in staggered]
+    check("FXID: a burst is groups of particles, group i leaving (1 - +28) x i / groups of the way",
+          len(bursts) == 1321 and one == 754 and whole == 318
+          and all(0.0 < e.burst_life <= 1.0 for _, e in bursts)
+          and len(staggered) == 539 and len({fx.name for fx, _ in staggered}) == 315
+          and all(e.kind == 7 for _, e in staggered)
+          and len(debris) == 160 and all(e.burst_groups[0] == 1 for e in debris)
+          and Counter(round(e.burst_life, 2) for e in debris) == {0.25: 112, 0.45: 42, 0.2: 6}
+          and all(e.burst_fall > 0 for e in debris)
+          and (falls[0], falls[1], falls[-1]) == (660, 486, 175)
+          and max(e.burst_groups[0] * e.burst_groups[1] for _, e in bursts) == 60,
+          f"of the {len(bursts)} bursts {one} are one group and {len(bursts) - one} more; "
+          f"+28, a group's life as a share of the window, is 1 on {whole} and under 1 on the "
+          f"rest; {len(staggered)} blocks in {len({fx.name for fx, _ in staggered})} effects "
+          f"have both several groups and a life under 1, all type 7, their last group leaving "
+          f"{min(last):.3g} to {max(last):.3g} of the way through (Effect.dll:0x1000118a, "
+          f"0x1000135b); all {len(debris)} type-10 blocks are one group living "
+          f"{sorted({round(e.burst_life, 2) for e in debris})} of the window and not dropped at "
+          f"an age of 1 (0x10001ab1); +140, the fall, is 0 on {falls[0]}, above 0 on "
+          f"{falls[1]} -- every type-10 block -- and below on {falls[-1]} (0x1000120a, 0x10001507)")
+
+    # A stream's two intervals.
+    streams = [e for fx in library for e in fx.emitters if e.kind == 8]
+    steady = sum(1 for e in streams if e.emission_interval[0] == e.emission_interval[1])
+    differ = sum(1 for e in streams if e.stream_window_and_step_differ)
+    check("FXID: a stream's test and its stamp's step add two intervals on 90 of the 237",
+          len(streams) == 237 and steady == 124 and differ == 90,
+          f"{steady} of the {len(streams)} streams keep one interval across their window; on "
+          f"{differ} the interval changes across a window that is not 0..1, where the test "
+          f"adds lerp(+24, +28) by the window's progress (Effect.dll:0x10011a30) and the "
+          f"stamp moves on by lerp(+24, +28) by t itself (0x10011c66)")
 
     # The test point and bit 8.
     points = Counter(fx.test_point for fx in library)

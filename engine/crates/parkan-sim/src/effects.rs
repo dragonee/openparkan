@@ -403,10 +403,15 @@ pub struct Dome {
 
 /// A type-9 block's shape (`+200`), which the sprite's update turns into the shade's shape
 /// code 3, 5 or 6 (`Effect.dll:0x100138c8`; any other value draws nothing), and the detail
-/// each gives its dome at the finest of the four levels the code's top two bits pick (tables
-/// `Terrain.dll:0x1009a750` and `0x1009a780`): around, and from pole to rim.
+/// each gives its dome at each of the four levels the code's top two bits carry (tables
+/// `Terrain.dll:0x1009a750` and `0x1009a780`): around, and from pole to rim. The level is the
+/// instance's ([`level`]), and over 3 the block is not drawn (`Effect.dll:0x100138f1`).
 pub const DOME_SHAPE_AT: usize = 200;
-pub const DOME_DETAIL: [(u8, u8); 3] = [(8, 3), (16, 6), (24, 9)];
+pub const DOME_DETAIL: [[(u8, u8); 4]; 3] = [
+    [(8, 3), (6, 3), (5, 2), (4, 1)],
+    [(16, 6), (12, 5), (10, 4), (8, 3)],
+    [(24, 9), (20, 8), (16, 6), (10, 4)],
+];
 /// A type-9 block's `+204`: 0 lays the texture over the whole dome (code bit `0x8000000`,
 /// `Effect.dll:0x1001390e`), anything else gives every facet the whole of it.
 pub const DOME_TILED_AT: usize = 204;
@@ -436,15 +441,140 @@ pub enum Through {
     Unturned,
 }
 
-/// A particle a stream left: when, from where, and how long it lives, in seconds.
+/// The level at which an instance is not drawn at all (`Effect.dll:0x10007e79`).
+pub const LEVEL_HIDDEN: u32 = 8;
+
+/// Which of the shade's two answers an instance's level is (`CShade` slot 19,
+/// `Terrain.dll:0x10047fe0`): the query is handed the **world class of the manager's owner**
+/// (the instance's `+0xc`, `Effect.dll:0x10007481`) and switches on it (`0x10048174`, the
+/// table at `0x10048291`). Classes 1, 2, 4, 7, 9 and 10 -- the landscape, a unit, a round,
+/// scenery -- take the robot's arm and class 3, a building, the building's; 5, 6 and 8 leave
+/// the answer unwritten, and no effect manager's owner answers one of them (an agent's class
+/// is 4, 9, 2 or 10 by its archive tag, or its owner's, `AniMesh.dll:0x1000314c`–`0x100031c5`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Arm {
+    #[default]
+    Robot,
+    Building,
+}
+
+/// What the level's query asks of the camera: the viewport's width in pixels (camera slot 4,
+/// its right less its left, `Terrain.dll:0x10047ff9`) and its **pixels per radian** (slot 27,
+/// that width over the view's field of view; docs/10, "The sun and the moon are drawn").
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Lens {
+    pub width: f32,
+    pub pixels_per_radian: f32,
+}
+
+impl Lens {
+    /// A viewport `width` pixels across a field of view of `fov_x` radians.
+    pub fn new(width: f32, fov_x: f32) -> Self {
+        Lens { width, pixels_per_radian: if fov_x > 0.0 { width / fov_x } else { 0.0 } }
+    }
+}
+
+impl Default for Lens {
+    /// 1024 pixels across the game's own 1.7 rad (`Terrain.dll:0x1001ffd7`): what a caller
+    /// with no window of its own asks with.
+    fn default() -> Self {
+        Lens::new(1024.0, 1.7)
+    }
+}
+
+/// The settings the level's two arms scale by, as compiled: no `shade.cfg` ships
+/// (docs/10, "The render settings"). `RobotDetail` (7), `RobotBestLOD` (8) and
+/// `BuildingDetail` (14), which the shade keeps at its `+0x1648`, `+0x1644` and `+0x164c`
+/// (`Terrain.dll:0x10046cd6`–`0x10046d32`).
+pub const ROBOT_DETAIL: f32 = 1.0;
+pub const ROBOT_BEST_LOD: bool = true;
+pub const BUILDING_DETAIL: f32 = 1.0;
+
+/// How large a sphere stands on the screen, as the level's query measures it
+/// (`Terrain.dll:0x10048092`–`0x10048146`): the viewport's whole width where the eye is
+/// inside it, and otherwise the camera's pixels per radian times the angle its radius
+/// subtends, atan2(r, sqrt(d² − r²)).
+pub fn seen_size(lens: Lens, eye: Vec3, (centre, radius): (Vec3, f32)) -> f32 {
+    let d2 = (eye - centre).length_squared();
+    let r2 = radius * radius;
+    if d2 < r2 { lens.width } else { lens.pixels_per_radian * radius.atan2((d2 - r2).sqrt()) }
+}
+
+/// An instance's **level** from its size on the screen, in pixels (`Terrain.dll:0x1004817b`,
+/// `0x10048210`). The robot's arm: under 4 it is not drawn; under 70 the size is scaled by
+/// `RobotDetail` and gives 3 under 8, 2 under 30 and 1 under 70; anything else is 0, or 1
+/// when `RobotBestLOD` is 0. The building's: the size times `BuildingDetail` is not drawn
+/// under 10, and gives 3 under 40, 2 under 80, 1 under 120 and 0 from there.
+pub fn level(arm: Arm, size: f32) -> u32 {
+    match arm {
+        Arm::Robot => {
+            let best = u32::from(!ROBOT_BEST_LOD);
+            if size < 4.0 {
+                return LEVEL_HIDDEN;
+            }
+            if size >= 70.0 {
+                return best;
+            }
+            match size * ROBOT_DETAIL {
+                s if s < 8.0 => 3,
+                s if s < 30.0 => 2,
+                s if s < 70.0 => 1,
+                _ => best,
+            }
+        }
+        Arm::Building => match size * BUILDING_DETAIL {
+            s if s < 10.0 => LEVEL_HIDDEN,
+            s if s < 40.0 => 3,
+            s if s < 80.0 => 2,
+            s if s < 120.0 => 1,
+            _ => 0,
+        },
+    }
+}
+
+/// The two floats each settings group gives a particle's **detail number**, as the page's
+/// preset 1 writes them, which `Iron_3D.ini`'s `RENDER_QUALITY=2` asks for
+/// (`Effect.dll:0x1000e7c0`; docs/11, "Which effects run"): "LOD distribution" and
+/// "High quality LOD", by the group in the high byte of the effect's settings id.
+pub const LOD_DISTRIBUTION: [f32; 4] = [3.0, 3.0, 3.5, 5.5];
+pub const HIGH_QUALITY_LOD: [f32; 4] = [0.0, 0.0, -2.0, -3.0];
+
+/// The number a burst's or a stream's particle draws as it is made (`Effect.dll:0x1000ec50`,
+/// from `0x100011d5` and `0x10011d5d`): a uniform in 0..1 times its group's distribution,
+/// less its group's high-quality figure. The draw passes the particle over while the
+/// instance's level is **more** than it (`0x100015eb`–`0x10001612`, `0x100120cc`–`0x100120ea`),
+/// so a group-0 or group-1 effect loses a third of its particles at level 1, two thirds at 2
+/// and all at 3, a group-2 effect two in seven at level 3, and a group-3 effect none.
+pub fn detail_number(rng: &mut Rng, gate: u32) -> f32 {
+    let group = ((gate >> 8) as usize).min(LOD_DISTRIBUTION.len() - 1);
+    rng.unit() * LOD_DISTRIBUTION[group] - HIGH_QUALITY_LOD[group]
+}
+
+/// The sphere that holds two (`Effect.dll:0x10008662`–`0x100087aa`): the larger radius where
+/// they share a centre or one holds the other, and otherwise the sphere about both.
+fn merged((a, ra): (Vec3, f32), (b, rb): (Vec3, f32)) -> (Vec3, f32) {
+    let d = (b - a).length();
+    if d == 0.0 || ra - rb >= d {
+        (a, ra.max(rb))
+    } else if rb - ra >= d {
+        (b, rb)
+    } else {
+        let r = (ra + rb + d) * 0.5;
+        (a + (b - a) * ((r - ra) / d), r)
+    }
+}
+
+/// A particle a stream left: when, from where, and what it drew as it left.
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct Particle {
+    /// Seconds on the instance's clock when it left, which its material's clock counts from.
     born: f32,
     frame: Frame,
-    life: f32,
     /// The number drawn for it as it left (`Effect.dll:0x10011d84`), which its material's
     /// animation stands at for its whole life when the block's +32 is negative.
     drawn: f32,
+    /// Its detail number, drawn before the rest (`0x10011d5d`; [`detail_number`]).
+    detail: f32,
     /// Its own far ends, drawn as it left: the block's position high end +100 and size high
     /// end +148, each axis moved by a uniform in ±half of the jitter 12 on, z first
     /// (`0x10011e81`–`0x10011f7f`).
@@ -456,8 +586,23 @@ struct Particle {
 #[derive(Clone, Debug, PartialEq)]
 struct Stream {
     emitter: usize,
-    last: Option<f32>,
-    ring: VecDeque<Particle>,
+    /// The last emission's stamp (`+0x24`), in seconds on the instance's clock. **0 is
+    /// unset**, as the game keeps it: the load writes 0 (`0x10011257`), and so does every
+    /// update that finds *t* outside the window and no particle live (`0x10011655`).
+    last: f32,
+    /// The interval the last update worked out (`+0x48`), which the draw ages by.
+    interval: f32,
+    /// The ring, the newest slot last. A slot the ring stepped to while *t* was outside the
+    /// window holds no particle (`0x10011cde`–`0x10011d4e`).
+    ring: VecDeque<Option<Particle>>,
+}
+
+/// A type-7 or type-10 emitter's clocks: the seconds each of its groups has been out, which
+/// its fall runs on (`+0x30`, `Effect.dll:0x10001525`).
+#[derive(Clone, Debug, PartialEq)]
+struct Burst {
+    emitter: usize,
+    out: Vec<f32>,
 }
 
 #[derive(Clone, Debug)]
@@ -493,9 +638,15 @@ pub struct Instance {
     /// point, which its owner hands it every tick when the header asks ([`FX_TARGET_POINT`]).
     pub start_point: Vec3,
     seed: u32,
+    /// Which arm of the shade's level its manager's owner puts it on ([`Arm`]): the caller
+    /// that starts it on a building says so.
+    pub arm: Arm,
     /// The state header flag 1's jitter is drawn from, one per instance rather than the
     /// module-wide one the game shares.
     rng: Rng,
+    /// The state its particles' detail numbers are drawn from. The game draws them from the
+    /// settings page's own state, `Effect.dll:0x10024a48`, apart from the streams'.
+    detail_rng: Rng,
     /// What flag 1 last moved *t* by: the game redraws it every time it works *t* out,
     /// which is at most once per manager tick, so it is drawn on the update instead.
     jitter: f32,
@@ -519,6 +670,8 @@ pub struct Instance {
     /// The one-shots started, which may still be playing.
     sounding: Vec<usize>,
     streams: Vec<Stream>,
+    /// The bursts that fall, and how long each of their groups has been out.
+    bursts: Vec<Burst>,
     /// Seconds on the streams' clock, and where the effect was, at the last update.
     updated: Option<(f32, Vec3)>,
     /// What the streams' clock runs at against the instance's: 1 plays them as their blocks
@@ -568,20 +721,39 @@ pub fn phase_fraction(start: f32, end: f32, power: f32, x: f32, seconds: f32) ->
     v - v.floor()
 }
 
-/// The same for a burst's particle (types 7 and 10, `Effect.dll:0x10001625`): its age over
-/// the block's `+32` when that is 1 or less, and the fractional part of age × `+32` when it
-/// is more. A value at 1 or over is held at **0.99**, and a negative `+32` — on 350 of the
-/// 1161 type-7 blocks — sends it negative, which the draw clamps to 0, so those particles
-/// never leave their material's first key.
-pub fn burst_fraction(age: f32, rate: f32) -> f32 {
+/// The same for a burst's particle (types 7 and 10, `Effect.dll:0x10001618`–`0x10001664`):
+/// **how far the window has run since its group left** -- the progress less the group's
+/// spawn, not yet divided by the life at `+28` -- over the block's `+32` when that is 1 or
+/// less, and the fractional part of it × `+32` when it is more. A value at 1 or over is held
+/// at **0.99**, and a negative `+32` — on 350 of the 1161 type-7 blocks — sends it negative,
+/// which the draw clamps to 0, so those particles never leave their material's first key.
+pub fn burst_fraction(since: f32, rate: f32) -> f32 {
     let v = if rate <= 1.0 {
-        if rate == 0.0 { 0.0 } else { age / rate }
+        if rate == 0.0 { 0.0 } else { since / rate }
     } else {
-        let scaled = age * rate;
+        let scaled = since * rate;
         scaled - scaled.floor()
     };
     if v >= 1.0 { 0.99 } else { v.clamp(0.0, 1.0) }
 }
+
+/// Where a burst's group `group` of `groups` leaves, as progress through the window
+/// (`Effect.dll:0x1000118a`–`0x100011b3`, the load): **(1 − `+28`) × group ÷ groups**. The
+/// groups leave evenly from the window's opening, and the last so that its life of `+28`
+/// ends inside the window. Nothing is drawn for it: the stagger is the same every time.
+pub fn burst_spawn(life: f32, group: u32, groups: u32) -> f32 {
+    (1.0 - life) * group as f32 / groups.max(1) as f32
+}
+
+/// The world's gravity, which a burst's fall is scaled by: 10.0, `IWorld` slot 4
+/// (docs/24, "Gravity").
+pub const BURST_GRAVITY: f32 = 10.0;
+/// A burst block's fall (`+140`): each group drops by **`+140` × gravity ÷ 2 × s²** in the
+/// world's z, *s* the seconds it has been out (`Effect.dll:0x1000120a`–`0x10001220` at the
+/// load, `0x10001507`–`0x100015c8` in the draw). It is 0 on 660 of the 1321 shipped bursts,
+/// above 0 on every one of the 160 of type 10, the debris, and negative on the smoke that
+/// rises.
+pub const BURST_FALL_AT: usize = 140;
 
 /// Where `t` is in `e`'s window, 0 to 1, or `None` outside it.
 fn progress(e: &Emitter, t: f32) -> Option<f32> {
@@ -645,6 +817,11 @@ fn light_seed(seed: u32) -> u32 {
     stream_seed(seed, 0x4c49_4748)
 }
 
+/// A seed for its particles' detail numbers, apart from both.
+fn detail_seed(seed: u32) -> u32 {
+    stream_seed(seed, 0x4c4f_4421)
+}
+
 /// The most particles one burst draws: a guard against a malformed block, since the
 /// shipped bursts are 3 to 60.
 pub const BURST_CAP: u32 = 1024;
@@ -669,7 +846,11 @@ impl Instance {
         let mode = mode.unwrap_or(effect.header.mode);
         let streams = (effect.emitters.iter().enumerate())
             .filter(|(_, e)| e.kind == 8)
-            .map(|(emitter, _)| Stream { emitter, last: None, ring: VecDeque::new() })
+            .map(|(emitter, _)| Stream { emitter, last: 0.0, interval: 0.0, ring: VecDeque::new() })
+            .collect();
+        let bursts = (effect.emitters.iter().enumerate())
+            .filter(|(_, e)| matches!(e.kind, 7 | 10) && e.f(BURST_FALL_AT) != 0.0)
+            .map(|(emitter, e)| Burst { emitter, out: vec![0.0; word(e, 36).min(BURST_CAP) as usize] })
             .collect();
         Self {
             effect,
@@ -686,6 +867,8 @@ impl Instance {
             seed,
             rng: Rng::new(seed),
             jitter: 0.0,
+            arm: Arm::default(),
+            detail_rng: Rng::new(detail_seed(seed)),
             light_rng: Rng::new(light_seed(seed)),
             light_jitter: Vec::new(),
             light_drawn_ms: None,
@@ -696,6 +879,7 @@ impl Instance {
             looping: Vec::new(),
             sounding: Vec::new(),
             streams,
+            bursts,
             updated: None,
             stream_pace: 1.0,
         }
@@ -761,14 +945,30 @@ impl Instance {
         asks.then(|| self.frame.point(Vec3::from_array(self.effect.header.point) * self.scale))
     }
 
-    /// An update at `now_ms`, once the owner has placed the frame. A stream inside its
-    /// window emits a particle each time its last emission plus lerp(+24, +28) by window
-    /// progress has come round, spaced along the path the effect moved since the last
-    /// update, into its ring of +36 (`0x10011a6c`, `0x10011230`); a particle lives +36
-    /// intervals (`0x1001209e`).
+    /// An update at `now_ms`, once the owner has placed the frame.
     ///
-    /// STAND-IN: docs/11-effects.md#bolts-streams-and-fades--read-and-measured -- when a
-    /// stream's first particle leaves is not read: on its first update inside the window.
+    /// **A stream** (`Effect.dll:0x100115c0`) keeps the stamp of its last emission, and 0 is
+    /// that stamp unset:
+    ///
+    /// - *t* outside its window and no particle live: the stamp goes back to 0 (`0x10011655`);
+    /// - the stamp at 0: it becomes now, and **nothing leaves** (`0x10011668`–`0x100116bf`). So
+    ///   the first particle leaves on the first update more than an interval after the first
+    ///   one inside the window, and an update whose clock is exactly 0 -- the one an instance
+    ///   gets in the millisecond it started -- leaves the stamp unset for the next;
+    /// - the stamp ahead of now, as a start that moved the clock back leaves it: it becomes now
+    ///   (`0x100116cc`);
+    /// - then, while the stamp plus the interval is before now, the ring steps on and the stamp
+    ///   moves on by an interval (`0x10011a6c`, `0x10011bf5`, `0x10011c72`, `0x1001201c`). The
+    ///   test's interval is lerp(+24, +28) by the **progress through the window**, held to
+    ///   0..1, and the step's by the effect's *t* itself. The slot stepped to takes a particle
+    ///   while *t* is inside the window and is left empty outside it (`0x10011cde`), which is
+    ///   how the particles already out live their turn of the ring after the window shuts.
+    ///
+    /// A particle is spaced along the path the effect moved since the last update.
+    ///
+    /// **A burst's** groups count the seconds they have been out, for their fall
+    /// ([`BURST_FALL_AT`]). The game adds the update's step to a group's clock as it draws it
+    /// (`0x10001525`); here the update does, whether or not the burst is in view.
     pub fn update(&mut self, now_ms: f64) {
         if !self.on {
             return;
@@ -786,49 +986,67 @@ impl Instance {
         let (then, from) = self.updated.unwrap_or((seconds, origin));
         for stream in &mut self.streams {
             let e = &self.effect.emitters[stream.emitter];
-            let Some(p) = progress(e, t) else {
-                stream.ring.retain(|q| seconds - q.born < q.life);
-                stream.last = None;
+            let inside = progress(e, t).is_some();
+            if !inside && stream.ring.iter().all(Option::is_none) {
+                stream.ring.clear();
+                stream.last = 0.0;
                 continue;
-            };
+            }
+            if stream.last == 0.0 {
+                stream.last = seconds;
+                continue;
+            }
+            stream.last = stream.last.min(seconds);
             let ring = word(e, 36).max(1);
-            let interval = (e.f(24) + (e.f(28) - e.f(24)) * p).max(SHORTEST_INTERVAL);
-            let mut next = stream.last.map_or(seconds, |last| last + interval);
+            let (low, high) = e.window().unwrap_or((0.0, 1.0));
+            let through = if high > low { ((t - low) / (high - low)).clamp(0.0, 1.0) } else { 1.0 };
+            let (base, change) = (e.f(24), e.f(28) - e.f(24));
+            let interval = (base + change * through).max(SHORTEST_INTERVAL);
+            let step = (base + change * t).max(SHORTEST_INTERVAL);
+            stream.interval = interval;
             let mut emitted = 0;
-            while next <= seconds && emitted < ring {
-                let share =
-                    if seconds > then { ((next - then) / (seconds - then)).clamp(0.0, 1.0) } else { 1.0 };
-                let frame = Frame { origin: from.lerp(origin, share), ..self.frame };
-                let drawn = self.rng.unit();
-                let jittered = |rng: &mut Rng, high: usize| {
-                    let (end, spread) = (e.triple(high), e.triple(high + 12));
-                    let z = end[2] + rng.spread(spread[2]);
-                    let y = end[1] + rng.spread(spread[1]);
-                    let x = end[0] + rng.spread(spread[0]);
-                    [x, y, z]
-                };
-                let high = jittered(&mut self.rng, 100);
-                let size_high = jittered(&mut self.rng, 148);
-                stream.ring.push_back(Particle {
-                    born: next,
-                    frame,
-                    life: ring as f32 * interval,
-                    drawn,
-                    high,
-                    size_high,
+            while stream.last + interval < seconds && emitted < ring {
+                stream.last += step;
+                let born = stream.last;
+                let particle = inside.then(|| {
+                    let share =
+                        if seconds > then { ((born - then) / (seconds - then)).clamp(0.0, 1.0) } else { 1.0 };
+                    let frame = Frame { origin: from.lerp(origin, share), ..self.frame };
+                    let detail = detail_number(&mut self.detail_rng, self.effect.header.gate);
+                    let drawn = self.rng.unit();
+                    let jittered = |rng: &mut Rng, high: usize| {
+                        let (end, spread) = (e.triple(high), e.triple(high + 12));
+                        let z = end[2] + rng.spread(spread[2]);
+                        let y = end[1] + rng.spread(spread[1]);
+                        let x = end[0] + rng.spread(spread[0]);
+                        [x, y, z]
+                    };
+                    let high = jittered(&mut self.rng, 100);
+                    let size_high = jittered(&mut self.rng, 148);
+                    Particle { born, frame, drawn, detail, high, size_high }
                 });
+                stream.ring.push_back(particle);
                 if stream.ring.len() > ring as usize {
                     stream.ring.pop_front();
                 }
-                stream.last = Some(next);
-                next += interval;
                 emitted += 1;
             }
-            if next <= seconds {
+            if stream.last + interval < seconds {
                 // A whole ring behind: the rest would be overwritten before they showed.
-                stream.last = Some(seconds);
+                stream.last = seconds;
             }
-            stream.ring.retain(|q| seconds - q.born < q.life);
+        }
+        let step = (seconds - then).max(0.0);
+        for burst in &mut self.bursts {
+            let e = &self.effect.emitters[burst.emitter];
+            let Some(p) = progress(e, t) else { continue };
+            let (groups, life) = (burst.out.len() as u32, e.f(28));
+            for (group, out) in burst.out.iter_mut().enumerate() {
+                let age = (p - burst_spawn(life, group as u32, groups)) / life;
+                if age >= 0.0 && (e.kind != 7 || age <= 1.0) {
+                    *out += step;
+                }
+            }
         }
         self.updated = Some((seconds, origin));
     }
@@ -1005,9 +1223,101 @@ impl Instance {
         }
     }
 
-    /// [`Self::sprites`] seen from `eye`, which a type-4 sprite sizes itself by.
+    /// [`Self::sprites`] seen from `eye`, which a type-4 sprite sizes itself by, at level 0.
     pub fn sprites_from(&self, now_ms: f64, eye: Option<Vec3>, in_view: bool, out: &mut Vec<Sprite>) {
-        if !self.on || (self.effect.header.flags & FX_HIDE_OCCLUDED != 0 && !in_view) {
+        self.sprites_at(now_ms, eye, in_view, 0, out);
+    }
+
+    /// The sphere the level is asked with: the one about the instance's drawing emitters,
+    /// each inside its window answering its own and the answers merged two at a time
+    /// (`Effect.dll:0x10008662`–`0x100087aa`; the sounds' are merged apart). None where no
+    /// emitter answers one with a radius, and such an instance is not drawn (`0x10007df3`).
+    ///
+    /// An emitter's own is about the instance's origin, its radius from its block's numbers
+    /// as they stand, the jitters in whole; and once they are merged the instance multiplies
+    /// the radius by **the length of the longest of its matrix's three axes**
+    /// (`0x100087d8`–`0x100088a5`): the frame's axis times the instance's scale.
+    ///
+    /// - a sprite (3, 4, 9): the longer of the size's two ends as vectors, plus the largest
+    ///   component of the position's two ends (`0x10010515`–`0x100105d8`);
+    /// - a burst (7, 10): the longer of the position's two ends, plus the largest size
+    ///   component of either end, plus the largest size jitter, plus the position jitter's
+    ///   length (`0x10001068`–`0x10001178`), about the origin less its fall;
+    /// - a stream (8): the same sum (`0x10011434`–`0x10011576`) about the middle of where its
+    ///   oldest particle left and where it is now;
+    /// - a bolt (5): half its length about its middle (`0x10002b91`–`0x10002bc0`).
+    ///
+    /// STAND-IN: docs/11-effects.md#an-instances-level--read-and-measured -- a moving
+    /// stream's radius takes a share of the distance it has come that is read only in
+    /// outline (`0x1001198b`–`0x10011a2d`): a quarter of it here. What a light answers is not
+    /// read, and it answers none here; and the shade's six planes are left to the renderer.
+    pub fn sphere(&self, now_ms: f64) -> Option<(Vec3, f32)> {
+        if !self.on {
+            return None;
+        }
+        let t = self.t(now_ms);
+        let origin = self.frame.origin;
+        let largest = |v: [f32; 3]| v[0].max(v[1]).max(v[2]);
+        let length = |v: [f32; 3]| Vec3::from_array(v).length();
+        let particles = |e: &Emitter, at: usize| {
+            length(e.triple(at)).max(length(e.triple(at + 12)))
+                + largest(e.triple(at + 48)).max(largest(e.triple(at + 60)))
+                + largest(e.triple(at + 72))
+                + length(e.triple(at + 24))
+        };
+        let mut all: Option<(Vec3, f32)> = None;
+        for (i, e) in self.effect.emitters.iter().enumerate() {
+            let inside = progress(e, t).is_some();
+            let own = match e.kind {
+                3 | 4 | 9 if inside => {
+                    let size = length(e.triple(100)).max(length(e.triple(112)));
+                    Some((origin, size + largest(e.triple(40)).max(largest(e.triple(52)))))
+                }
+                7 | 10 if inside => {
+                    let out = self.bursts.iter().find(|b| b.emitter == i);
+                    let out = out.map_or(0.0, |b| b.out.iter().copied().fold(0.0, f32::max));
+                    let fall = e.f(BURST_FALL_AT) * BURST_GRAVITY * 0.5 * out * out;
+                    Some((origin - Vec3::Z * fall, particles(e, 44)))
+                }
+                8 => self.streams.iter().find(|s| s.emitter == i).filter(|s| s.last != 0.0).map(|s| {
+                    let left = s.ring.iter().flatten().next().map_or(origin, |q| q.frame.origin);
+                    ((left + origin) * 0.5, (origin - left).length() * 0.25 + particles(e, 88))
+                }),
+                5 if inside => {
+                    let line = origin - self.start_point;
+                    Some((self.start_point + line * 0.5, line.length() * 0.5))
+                }
+                _ => None,
+            };
+            if let Some(own) = own.filter(|own| own.1 > 0.0) {
+                all = Some(all.map_or(own, |all| merged(all, own)));
+            }
+        }
+        let longest = self.frame.axes.iter().map(|a| a.length()).fold(0.0, f32::max) * self.scale;
+        all.map(|(centre, radius)| (centre, radius * longest))
+    }
+
+    /// The instance's level as the manager's draw asks it of the shade, each time it draws
+    /// (`Effect.dll:0x10007e6d`): from how large its sphere stands in `lens` seen from `eye`,
+    /// on its owner's arm ([`level`]). [`LEVEL_HIDDEN`] where it has no sphere.
+    pub fn level(&self, now_ms: f64, eye: Vec3, lens: Lens) -> u32 {
+        self.sphere(now_ms).map_or(LEVEL_HIDDEN, |sphere| level(self.arm, seen_size(lens, eye, sphere)))
+    }
+
+    /// [`Self::sprites_from`] at `level`, the instance's own ([`Self::level`]). At
+    /// [`LEVEL_HIDDEN`] or over nothing is drawn; a burst's and a stream's particle is passed
+    /// over while the level is more than its detail number; and a type-9 dome takes its
+    /// detail from it and is not drawn over 3.
+    pub fn sprites_at(
+        &self,
+        now_ms: f64,
+        eye: Option<Vec3>,
+        in_view: bool,
+        level: u32,
+        out: &mut Vec<Sprite>,
+    ) {
+        if !self.on || level >= LEVEL_HIDDEN || (self.effect.header.flags & FX_HIDE_OCCLUDED != 0 && !in_view)
+        {
             return;
         }
         let t = self.t(now_ms);
@@ -1019,16 +1329,21 @@ impl Instance {
             if e.kind == EMITTER_LIGHT || e.kind == EMITTER_SOUND || e.resource.member.is_empty() {
                 continue;
             }
-            let Some(p) = progress(e, t) else { continue };
             let first = out.len();
             let age_ms = seconds * 1000.0;
-            match e.kind {
-                3 | 9 => self.sprite(e, p, eye, age_ms, seconds, out),
-                4 => self.sprite(e, self.flare(e, p, eye), eye, age_ms, seconds, out),
-                5 => self.bolt(e, p, age_ms, seconds, out),
-                7 | 10 => self.burst(e, i as u32, p, age_ms, out),
-                8 => self.stream(i, e, seconds * self.stream_pace, out),
-                _ => {}
+            if e.kind == 8 {
+                // A stream draws the particles it has out whether or not *t* is still inside
+                // its window (`Effect.dll:0x1001203e`): the window only stops it making more.
+                self.stream(i, e, seconds * self.stream_pace, level, out);
+            } else {
+                let Some(p) = progress(e, t) else { continue };
+                match e.kind {
+                    3 | 9 => self.sprite(e, p, eye, age_ms, seconds, level, out),
+                    4 => self.sprite(e, self.flare(e, p, eye), eye, age_ms, seconds, level, out),
+                    5 => self.bolt(e, p, age_ms, seconds, out),
+                    7 | 10 => self.burst(e, i, p, age_ms, level, out),
+                    _ => {}
+                }
             }
             // A beacon's own emitters carry no bit 8, so its glow is depth-tested like any
             // other sprite: the pass argument its flag 0x800 waits for decides whether the
@@ -1122,7 +1437,9 @@ impl Instance {
     /// docs/11, "A channel is a (low, high, jitter, exponent) run"). Its **phase**, from
     /// +8, +12 and +16, is where its material's animation stands ([`phase_fraction`]), and its
     /// direction, lerp(+76, +88) straight by the progress, is what its mode turns it by
-    /// ([`Instance::through`]). A type-9 block draws a dome through the same matrix.
+    /// ([`Instance::through`]). A type-9 block draws a dome through the same matrix, its
+    /// detail the instance's `level`'s.
+    #[allow(clippy::too_many_arguments)]
     fn sprite(
         &self,
         e: &Emitter,
@@ -1130,6 +1447,7 @@ impl Instance {
         eye: Option<Vec3>,
         age_ms: f32,
         seconds: f32,
+        level: u32,
         out: &mut Vec<Sprite>,
     ) {
         let local = lerp3_axis(e.triple(40), e.triple(52), shaped(p, e.triple(64)));
@@ -1145,12 +1463,13 @@ impl Instance {
             Through::Unturned => {}
         }
         if e.kind == 9 {
-            // A shape past the three the update knows draws nothing (`0x100138d7`).
-            //
-            // STAND-IN: docs/11-effects.md#type-9-is-a-half-sphere--read-measured-and-seen --
-            // what gives an instance its level, which picks the dome's detail and drops it at
-            // 4 and over, is not read: every dome is drawn at level 0, its finest.
-            let Some(&(segments, rings)) = DOME_DETAIL.get(word(e, DOME_SHAPE_AT) as usize) else { return };
+            // A shape past the three the update knows draws nothing (`0x100138d7`), and nor
+            // does a level over 3; the level goes into the shape code's top two bits and
+            // picks the dome's detail (`0x100138ec`–`0x10013909`).
+            let shape = DOME_DETAIL.get(word(e, DOME_SHAPE_AT) as usize);
+            let Some(&(segments, rings)) = shape.and_then(|levels| levels.get(level as usize)) else {
+                return;
+            };
             sprite.dome = Some(Dome { segments, rings, projected: word(e, DOME_TILED_AT) == 0 });
         }
         out.push(sprite);
@@ -1257,41 +1576,75 @@ impl Instance {
         }
     }
 
-    /// A type 7 or 10 burst of +0x24 × +0x28 particles (`0x10001720`), each fading
-    /// +8 + (+12 − +8) × age^+16 (`0x100013c2`).
+    /// A type 7 or 10 burst: **+0x24 groups of +0x28 particles** (`0x10001000`, `0x10001720`),
+    /// each fading +8 + (+12 − +8) × age^+16 (`0x100013c2`).
+    ///
+    /// **A group has a spawn of its own and its particles share its age** (`0x1000135b`): group
+    /// *i* leaves at [`burst_spawn`], (1 − +28) × *i* ÷ groups of the way through the window,
+    /// and is (progress − that) ÷ +28 old. A group not yet out is not drawn (`0x10001376`), and
+    /// a **type-7** group past an age of 1 is not either (`0x1000137c`, on the flag its load
+    /// sets at `0x10001023`). A type-10 load clears that flag (`0x10001ab1`), so its debris
+    /// flies on past 1 for as long as the window is open, its channels running past their
+    /// high ends.
     ///
     /// A particle runs from +44 to +56 in the frame and from +92 to +104 in size, each
     /// axis by its age raised to that axis's exponent — +80..+88 for the position,
     /// +128..+136 for the size (`0x10001684`, `0x10001693`). The spawn jitters each high
     /// end by ±half of the triple that follows it, +68 on the position and +116 on the
-    /// size (`0x1000186a`, `0x1000195b`, the generator at `0x10002680`).
+    /// size (`0x1000186a`, `0x1000195b`, the generator at `0x10002680`). And the group
+    /// **falls** by [`BURST_FALL_AT`] × gravity ÷ 2 × the square of the seconds it has been out.
     ///
-    /// STAND-IN: docs/11-effects.md#bolts-streams-and-fades--read-and-measured -- when each
-    /// particle spawns is not read: every one is as old as the emitter's progress through
-    /// the window over +28.
-    fn burst(&self, e: &Emitter, index: u32, p: f32, age_ms: f32, out: &mut Vec<Sprite>) {
-        let count = word(e, 36).saturating_mul(word(e, 40)).min(BURST_CAP);
-        let life = if e.f(28) > 0.0 { e.f(28) } else { 1.0 };
-        let age = (p / life).clamp(0.0, 1.0);
-        if p > life {
+    /// STAND-IN: docs/11-effects.md#a-burst-is-groups-that-leave-one-after-another--read-and-measured
+    /// -- what a fade below 0 draws is not read. A type-10 block that fades 1 → 0 by the power
+    /// 4 is at 1 − age⁴ past its age of 1, and the renderer passes over a fade of exactly 0
+    /// alone (`Terrain.dll:0x1002887e`): here a fade at or under 0 draws nothing.
+    fn burst(&self, e: &Emitter, index: usize, p: f32, age_ms: f32, level: u32, out: &mut Vec<Sprite>) {
+        let groups = word(e, 36).min(BURST_CAP);
+        let each = word(e, 40).min(BURST_CAP / groups.max(1));
+        let life = e.f(28);
+        if life <= 0.0 {
+            // The age divides by it, and none of the 1321 shipped blocks is under 0.05.
             return;
         }
-        let alpha = fade(e.f(8), e.f(12), e.f(16), age);
-        let phase = burst_fraction(age, e.f(32));
-        let mut rng = Rng::new(stream_seed(self.seed, index));
-        for _ in 0..count {
-            let jitter = |rng: &mut Rng, at: usize| {
-                let (hi, spread) = (e.triple(at), e.triple(at + 12));
-                [0, 1, 2].map(|i| hi[i] + rng.spread(spread[i]))
-            };
-            let local = lerp3_axis(e.triple(44), jitter(&mut rng, 56), shaped(age, e.triple(80)));
-            let size = lerp3_axis(e.triple(92), jitter(&mut rng, 104), shaped(age, e.triple(128)));
-            out.push(self.quad(e, &self.frame, local, size, alpha, age_ms, phase));
+        let fall = e.f(BURST_FALL_AT) * BURST_GRAVITY * 0.5;
+        let clocks = self.bursts.iter().find(|b| b.emitter == index);
+        let mut rng = Rng::new(stream_seed(self.seed, index as u32));
+        let mut details = Rng::new(stream_seed(detail_seed(self.seed), index as u32));
+        for group in 0..groups {
+            let since = p - burst_spawn(life, group, groups);
+            let age = since / life;
+            let alpha = fade(e.f(8), e.f(12), e.f(16), age);
+            let shown = age >= 0.0 && (e.kind != 7 || age <= 1.0) && alpha > 0.0;
+            let phase = burst_fraction(since, e.f(32));
+            let out_for = clocks.and_then(|b| b.out.get(group as usize)).copied().unwrap_or(0.0);
+            for _ in 0..each {
+                // Every particle's far ends are drawn at the load, shown or not.
+                let jitter = |rng: &mut Rng, at: usize| {
+                    let (hi, spread) = (e.triple(at), e.triple(at + 12));
+                    [0, 1, 2].map(|i| hi[i] + rng.spread(spread[i]))
+                };
+                let (high, size_high) = (jitter(&mut rng, 56), jitter(&mut rng, 104));
+                // And its detail number, which the draw sets the level against
+                // (`0x100015eb`–`0x10001612`).
+                let detail = detail_number(&mut details, self.effect.header.gate);
+                if !shown || level as f32 > detail {
+                    continue;
+                }
+                let local = lerp3_axis(e.triple(44), high, shaped(age, e.triple(80)));
+                let size = lerp3_axis(e.triple(92), size_high, shaped(age, e.triple(128)));
+                let mut sprite = self.quad(e, &self.frame, local, size, alpha, age_ms, phase);
+                sprite.centre.z -= fall * out_for * out_for;
+                out.push(sprite);
+            }
         }
     }
 
-    /// A type-8 stream's particles, each fading +4 + (+8 − +4) × age^+12 (`0x10012322`),
-    /// its age running 0 to 1 over its life.
+    /// A type-8 stream's particles, each fading +4 + (+8 − +4) × age^+12 (`0x10012322`).
+    ///
+    /// **A particle's age counts emissions** (`0x1001209e`–`0x10012147`): the slots the ring
+    /// has stepped on since it left, over the ring's +36, plus the time since the last
+    /// emission over the interval × +36. So it lives +36 emissions, however the interval moved
+    /// across the window in between.
     ///
     /// It sits at lerp(+88, its own +100) from where it left and is lerp(+136, its own +148)
     /// in size, each axis by its age raised to that axis's exponent — +124..+132 for the
@@ -1299,17 +1652,25 @@ impl Instance {
     /// the block's jittered as it left.
     ///
     /// STAND-IN: docs/11-effects.md#bolts-streams-and-fades--read-and-measured -- both are
-    /// taken in metres times the instance's scale, and its age in seconds since it
-    /// left. The frame only turns them: a control-point frame's axes, which size a type 3,
+    /// taken in metres times the instance's scale. The frame only turns them: a
+    /// control-point frame's axes, which size a type 3,
     /// 4 or 9 sprite, do not, and the shipped streams read as metres either way — a muzzle
     /// puff 0.2 to 0.5, a missile's trail 3 long, a chimney's plume 10 to 30 across. *Seen*:
     /// on the recording of Mission 02 the Large Factory's plume stands about 29 m over the
     /// chimney and is about 31 m across at its widest, where its points' 2.6-long axes had
     /// made it 130 and 78.
-    fn stream(&self, index: usize, e: &Emitter, seconds: f32, out: &mut Vec<Sprite>) {
+    fn stream(&self, index: usize, e: &Emitter, seconds: f32, level: u32, out: &mut Vec<Sprite>) {
         let Some(stream) = self.streams.iter().find(|s| s.emitter == index) else { return };
-        for q in &stream.ring {
-            let age = ((seconds - q.born) / q.life.max(f32::EPSILON)).clamp(0.0, 1.0);
+        let ring = word(e, 36).max(1) as f32;
+        let turn = stream.interval.max(SHORTEST_INTERVAL) * ring;
+        let newest = ((seconds - stream.last) / turn).max(0.0);
+        for (slots, q) in stream.ring.iter().rev().enumerate() {
+            let Some(q) = q else { continue };
+            // Passed over while the level is more than its detail number (`0x100120cc`).
+            if level as f32 > q.detail {
+                continue;
+            }
+            let age = (slots as f32 / ring + newest).min(1.0);
             let local = lerp3_axis(e.triple(88), q.high, shaped(age, e.triple(124)));
             let size = lerp3_axis(e.triple(136), q.size_high, shaped(age, e.triple(172)));
             let alpha = fade(e.f(4), e.f(8), e.f(12), age);
@@ -1683,6 +2044,161 @@ mod tests {
         assert_eq!(out[0].dome, Some(Dome { segments: 16, rings: 6, projected: false }));
     }
 
+    /// The level the shade answers (`Terrain.dll:0x10047fe0`): from the sphere's size on the
+    /// screen in pixels, on the robot's arm or the building's by the owner's class.
+    #[test]
+    fn a_level_is_cut_from_the_spheres_size_in_pixels_on_the_owners_arm() {
+        let robot: Vec<u32> =
+            [3.9, 4.0, 7.9, 8.0, 29.9, 30.0, 69.9, 70.0, 900.0].map(|s| level(Arm::Robot, s)).to_vec();
+        assert_eq!(robot, [LEVEL_HIDDEN, 3, 3, 2, 2, 1, 1, 0, 0]);
+        let building: Vec<u32> =
+            [9.9, 10.0, 39.9, 40.0, 79.9, 80.0, 119.9, 120.0].map(|s| level(Arm::Building, s)).to_vec();
+        assert_eq!(building, [LEVEL_HIDDEN, 3, 3, 2, 2, 1, 1, 0]);
+
+        // 1024 pixels across 1.7 rad is 602 to the radian. A sphere of 3 seen from 5 off
+        // subtends atan2(3, 4); with the eye inside it the size is the viewport's width.
+        let lens = Lens::default();
+        assert!((lens.pixels_per_radian - 1024.0 / 1.7).abs() < 1e-3);
+        let size = seen_size(lens, Vec3::new(5.0, 0.0, 0.0), (Vec3::ZERO, 3.0));
+        assert!((size - lens.pixels_per_radian * 3.0_f32.atan2(4.0)).abs() < 1e-3, "{size}");
+        assert_eq!(seen_size(lens, Vec3::new(1.0, 0.0, 0.0), (Vec3::ZERO, 3.0)), 1024.0);
+    }
+
+    /// An instance's sphere is its drawing emitters' merged, each inside its window answering
+    /// one about the origin with a radius from its block (`Effect.dll:0x10010515`,
+    /// `0x10001068`); and its level is the shade's for that sphere.
+    #[test]
+    fn an_instances_level_is_asked_with_the_sphere_about_its_drawing_emitters() {
+        // A sprite sized (1, 2, 2) → (3, 4, 0) and placed (1, 0, 0) → (0, 5, 0): 5 + 5.
+        let sprite = moded(3, SPRITE_FACING, Vec3::X, Vec3::ZERO);
+        let floats =
+            [(100, 1.0), (104, 2.0), (108, 2.0), (112, 3.0), (116, 4.0), (120, 0.0), (40, 1.0), (56, 5.0)];
+        let sprite =
+            floats.into_iter().fold(sprite, |e, (at, v): (usize, f32)| with_word(e, at, v.to_bits()));
+        // `tree_light_33a`'s smoke as a burst: 100 + 80 + 4 + |(20, 20, 60)| = 250.3.
+        let smoke = [
+            (20, 0.0),
+            (24, 0.5),
+            (28, 1.0),
+            (8, 1.0),
+            (52 + 12, 100.0),
+            (68, 20.0),
+            (72, 20.0),
+            (76, 60.0),
+            (92, 12.0),
+            (96, 12.0),
+            (100, 12.0),
+            (104, 80.0),
+            (108, 80.0),
+            (112, 80.0),
+            (116, 4.0),
+            (120, 4.0),
+            (124, 4.0),
+        ];
+        let smoke = with_word(with_word(block(7, 208, &smoke, "smoke"), 36, 1), 40, 1);
+        let light = block(1, 224, &[(8, 0.0), (12, 1.0)], "");
+        let at = Vec3::new(10.0, 20.0, 30.0);
+        let frame = Frame::along(at, Vec3::X, 1.0);
+        let mut fx =
+            Instance::new(effect(TIME_MANUAL, 0.0, 0, vec![sprite, smoke, light]), frame, 10.0, 0.0, None, 1);
+        fx.value = 0.25;
+        let (centre, radius) = fx.sphere(0.0).unwrap();
+        assert!((centre - at).length() < 1e-4 && (radius - 250.332).abs() < 1e-2, "{centre:?} {radius}");
+        // Past the burst's window the sprite's is the whole of it.
+        fx.value = 0.75;
+        assert!((fx.sphere(0.0).unwrap().1 - 10.0).abs() < 1e-4);
+        // The merged radius is times the longest axis of the instance's matrix: a frame whose
+        // axes are 2, 3 and 40 long at a scale of 0.5 makes it 10 × 40 × 0.5.
+        let long = Frame { origin: at, axes: [Vec3::X * 2.0, Vec3::Y * 3.0, Vec3::Z * 40.0], points: true };
+        let mut tall = fx.clone();
+        (tall.frame, tall.scale) = (long, 0.5);
+        assert!((tall.sphere(0.0).unwrap().1 - 200.0).abs() < 1e-3);
+
+        // 10 m of sphere 500 m off is 12 pixels at 602 to the radian: 2 on a robot, 3 on a
+        // building; and from 1000 m a building's is under its 10 and is not drawn.
+        let lens = Lens::default();
+        let eye = at + Vec3::Y * 500.0;
+        assert_eq!(fx.level(0.0, eye, lens), 2);
+        fx.arm = Arm::Building;
+        assert_eq!(fx.level(0.0, eye, lens), 3);
+        assert_eq!(fx.level(0.0, at + Vec3::Y * 1000.0, lens), LEVEL_HIDDEN);
+        let mut out = Vec::new();
+        fx.sprites_at(0.0, Some(eye), true, LEVEL_HIDDEN, &mut out);
+        assert!(out.is_empty(), "nothing of an instance is drawn at 8");
+
+        // A light and a sound answer no sphere, and an instance with none is not drawn.
+        let lamp = block(1, 224, &[(8, 0.0), (12, 1.0)], "");
+        let dark = Instance::new(effect(TIME_MANUAL, 0.0, 0, vec![lamp]), frame, 10.0, 0.0, None, 1);
+        assert_eq!((dark.sphere(0.0), dark.level(0.0, eye, lens)), (None, LEVEL_HIDDEN));
+    }
+
+    /// The level passes a burst's and a stream's particle over while it is more than the
+    /// particle's detail number (`Effect.dll:0x100015eb`, `0x100120cc`), a uniform over its
+    /// settings group's span: 0..3 in groups 0 and 1, 2..5.5 in group 2, 3..8.5 in group 3.
+    #[test]
+    fn a_level_thins_a_bursts_and_a_streams_particles_by_their_detail_numbers() {
+        let frame = Frame::along(Vec3::ZERO, Vec3::X, 1.0);
+        let kept = |gate: u32, level: u32| {
+            let floats = [(20, 0.0), (24, 1.0), (28, 1.0), (8, 1.0), (12, 1.0), (16, 1.0), (92, 1.0)];
+            let burst = with_word(with_word(block(7, 208, &floats, "fire"), 36, 30), 40, 30);
+            let mut whole = effect(TIME_MANUAL, 0.0, 0, vec![burst]);
+            Rc::get_mut(&mut whole).unwrap().header.gate = gate;
+            let mut fx = Instance::new(whole, frame, 10.0, 0.0, None, 11);
+            fx.value = 0.5;
+            let mut out = Vec::new();
+            fx.sprites_at(0.0, None, true, level, &mut out);
+            out.len() as f32 / 900.0
+        };
+        let near = |share: f32, want: f32| (share - want).abs() < 0.05;
+        // Group 0, "Smoke" 0x001: a third gone at each level.
+        assert_eq!(kept(0x001, 0), 1.0);
+        assert!(near(kept(0x001, 1), 2.0 / 3.0) && near(kept(0x001, 2), 1.0 / 3.0), "{}", kept(0x001, 1));
+        assert_eq!(kept(0x107, 3), 0.0, "group 1 has the same span");
+        // Group 2 loses two in seven at level 3 alone, and group 3 nothing at any.
+        assert_eq!(kept(0x20d, 2), 1.0);
+        assert!(near(kept(0x20d, 3), 5.0 / 7.0), "{}", kept(0x20d, 3));
+        assert_eq!(kept(0x311, 3), 1.0);
+
+        // A stream's particle draws its number as it leaves and keeps it.
+        let floats = [(16, 0.0), (20, 1.0), (24, 0.01), (28, 0.01), (4, 1.0), (8, 1.0), (136, 1.0)];
+        let stream = with_word(block(8, 248, &floats, "smoke"), 36, 300);
+        let mut fx = Instance::new(effect(TIME_MANUAL, 0.0, 0, vec![stream]), frame, 10.0, 0.0, None, 5);
+        fx.value = 0.5;
+        for ms in (0..=4000).step_by(50) {
+            fx.update(f64::from(ms));
+        }
+        let drawn = |level: u32| {
+            let mut out = Vec::new();
+            fx.sprites_at(4000.0, None, true, level, &mut out);
+            out.len() as f32 / 300.0
+        };
+        assert_eq!(drawn(0), 1.0);
+        assert!(near(drawn(1), 2.0 / 3.0) && near(drawn(2), 1.0 / 3.0), "{} {}", drawn(1), drawn(2));
+        assert_eq!(drawn(3), 0.0);
+    }
+
+    /// A type-9 dome's detail is its level's (`Terrain.dll:0x1009a750`, `0x1009a780`), and
+    /// over 3 the block is not drawn (`Effect.dll:0x100138f1`).
+    #[test]
+    fn a_domes_detail_is_its_instances_level_s_and_over_3_it_is_not_drawn() {
+        let size = Vec3::new(0.3, 0.4, 0.4);
+        let dome = with_word(moded(9, SPRITE_TURNED, Vec3::X, size), DOME_SHAPE_AT, 1);
+        let frame = Frame::along(Vec3::ZERO, Vec3::X, 1.0);
+        let mut fx = Instance::new(effect(TIME_MANUAL, 0.0, 0, vec![dome]), frame, 10.0, 0.0, None, 1);
+        fx.value = 0.5;
+        let detail = |level: u32| {
+            let mut out = Vec::new();
+            fx.sprites_at(0.0, None, true, level, &mut out);
+            out.first().and_then(|s| s.dome).map(|d| (d.segments, d.rings))
+        };
+        assert_eq!(
+            [0, 1, 2, 3, 4].map(detail),
+            [Some((16, 6)), Some((12, 5)), Some((10, 4)), Some((8, 3)), None]
+        );
+        assert_eq!(DOME_DETAIL[0], [(8, 3), (6, 3), (5, 2), (4, 1)]);
+        assert_eq!(DOME_DETAIL[2], [(24, 9), (20, 8), (16, 6), (10, 4)]);
+    }
+
     /// A light 3 over a big floor triangle draws the template's square, half-side
     /// sqrt(5² − 3²) = 4, about its foot, (u, v) 0.495 at the foot; near an edge the square is
     /// cut to the triangle, and past the range from the plane or an edge it draws nothing.
@@ -1946,6 +2462,9 @@ mod tests {
         );
         let mut out = Vec::new();
         fx.sprites(150.0, false, &mut out);
+        assert_eq!(out.len(), 2, "the second group of two leaves a quarter through the window");
+        out.clear();
+        fx.sprites(300.0, false, &mut out);
         assert_eq!(out.len(), 4, "two by two particles early in their life");
         assert!(out.iter().all(|s| s.alpha < 1.0 && s.alpha > 0.0));
         assert!(!fx.finished(1000.0) && fx.finished(1500.0));
@@ -2158,6 +2677,79 @@ mod tests {
         }
     }
 
+    /// A burst is +36 groups of +40 particles, and group *i* leaves (1 − +28) × *i* ÷ +36 of
+    /// the way through the window (`Effect.dll:0x1000118a`): four groups living half the
+    /// window leave at 0, 0.125, 0.25 and 0.375, each (progress − that) ÷ 0.5 old.
+    #[test]
+    fn a_bursts_groups_leave_one_after_another_and_a_type_7_group_is_gone_at_an_age_of_1() {
+        let floats = [
+            (20, 0.0),
+            (24, 1.0),
+            (28, 0.5),
+            (8, 1.0),
+            (12, 1.0),
+            (16, 1.0),
+            (56, 8.0),
+            (92, 1.0),
+            (104, 1.0),
+        ];
+        let burst = |kind| with_word(with_word(block(kind, 208, &floats, "fire"), 36, 4), 40, 2);
+        let frame = Frame::along(Vec3::ZERO, Vec3::X, 1.0);
+        let xs = |kind: u8, p: f32| {
+            let mut fx =
+                Instance::new(effect(TIME_MANUAL, 0.0, 0, vec![burst(kind)]), frame, 10.0, 0.0, None, 3);
+            fx.value = p;
+            let mut out = Vec::new();
+            fx.sprites(0.0, false, &mut out);
+            out.iter().map(|s| s.centre.x).collect::<Vec<f32>>()
+        };
+        let close = |got: &[f32], want: &[f32]| {
+            got.len() == want.len() && got.iter().zip(want).all(|(a, b)| (a - b).abs() < 1e-4)
+        };
+        assert_eq!(burst_spawn(0.5, 3, 4), 0.375);
+        assert!(close(&xs(7, 0.0), &[0.0, 0.0]), "only the first group is out: {:?}", xs(7, 0.0));
+        // At 0.25 three are: 0.5, 0.25 and 0 old, 8 × that along x, two particles each.
+        assert!(close(&xs(7, 0.25), &[4.0, 4.0, 2.0, 2.0, 0.0, 0.0]), "{:?}", xs(7, 0.25));
+        // At 0.6 the first group is 1.2 old and gone; the others are 0.95, 0.7 and 0.45.
+        assert!(close(&xs(7, 0.6), &[7.6, 7.6, 5.6, 5.6, 3.6, 3.6]), "{:?}", xs(7, 0.6));
+        assert!(xs(7, 0.9).is_empty(), "the last group, out at 0.375, is gone at 0.875");
+        // Type 10's groups are not dropped at 1: its debris flies on while the window is open.
+        let on = xs(10, 0.9);
+        assert_eq!(on.len(), 8);
+        assert!((on[0] - 8.0 * 1.8).abs() < 1e-4, "{on:?}");
+    }
+
+    /// A burst's +140 is a fall (`Effect.dll:0x1000120a`, `0x10001507`): each group drops by
+    /// +140 × gravity ÷ 2 × the square of the seconds it has been out, in the world's z.
+    #[test]
+    fn a_bursts_group_falls_by_its_block_s_140_times_half_gravity_times_its_seconds_out_squared() {
+        let floats = [
+            (20, 0.0),
+            (24, 1.0),
+            (28, 0.5),
+            (8, 1.0),
+            (12, 1.0),
+            (16, 1.0),
+            (92, 1.0),
+            (104, 1.0),
+            (BURST_FALL_AT, 1.5),
+        ];
+        let debris = with_word(with_word(block(10, 208, &floats, "gibs"), 36, 2), 40, 1);
+        let frame = Frame::along(Vec3::ZERO, Vec3::X, 1.0);
+        // A four-second effect: the second group leaves at 0.25 of it, a second in.
+        let mut fx = Instance::new(effect(TIME_ONCE, 4.0, 0, vec![debris]), frame, 10.0, 0.0, None, 3);
+        for ms in (0..=2000).step_by(100) {
+            fx.update(f64::from(ms));
+        }
+        let mut out = Vec::new();
+        fx.sprites(2000.0, false, &mut out);
+        let zs: Vec<f32> = out.iter().map(|s| s.centre.z).collect();
+        // 1.5 × 10 ÷ 2 = 7.5 a second squared. The first group has been out two seconds; the
+        // second one and the step of 0.1 s that brought it out, which its clock takes whole.
+        assert_eq!(zs.len(), 2);
+        assert!((zs[0] + 7.5 * 4.0).abs() < 1e-2 && (zs[1] + 7.5 * 1.21).abs() < 1e-2, "{zs:?}");
+    }
+
     /// `hero_laser_bullet`'s red bolt: 20 sprites at most, one per 50, 0.4 wide, fading 1 → 0.
     fn bolt() -> Emitter {
         let e =
@@ -2259,43 +2851,113 @@ mod tests {
             fx.value = t;
             fx
         };
+        // The stamp is set at 0.1 s, the first update whose clock is not 0, and the stream
+        // moves 25 along y over the 0.25 s after it: particles leave at 0.2 and 0.3, spaced
+        // along the path.
         let mut fx = start(0.0);
         let mut out = Vec::new();
         fx.update(0.0);
-        fx.sprites(0.0, false, &mut out);
-        assert_eq!(out.len(), 1, "the first particle leaves at once");
-        assert!((out[0].centre - Vec3::X).length() < 1e-5 && out[0].alpha == 1.0);
-        // 0.25 s on, moved 25 along y: particles left at 0.1 and 0.2, spaced along the path.
+        fx.update(100.0);
         fx.frame.origin = Vec3::new(0.0, 25.0, 0.0);
-        fx.update(250.0);
-        out.clear();
-        fx.sprites(250.0, false, &mut out);
-        assert_eq!(out.len(), 3);
+        fx.update(350.0);
+        fx.sprites(350.0, false, &mut out);
+        assert_eq!(out.len(), 2);
         let mut ys: Vec<f32> = out.iter().map(|s| s.centre.y).collect();
         ys.sort_by(f32::total_cmp);
-        assert!((ys[1] - 10.0).abs() < 1e-3 && (ys[2] - 20.0).abs() < 1e-3, "{ys:?}");
-        // The first lives 3 × 0.1 s: at 0.25 s it is 5/6 through, 1 + 2 × 5/6 along x.
-        let oldest = out.iter().find(|s| s.centre.y.abs() < 1e-3).unwrap();
-        assert!((oldest.centre.x - (1.0 + 2.0 * 5.0 / 6.0)).abs() < 1e-3, "{}", oldest.centre.x);
-        assert!((oldest.alpha - 1.0 / 6.0).abs() < 1e-3);
-        // Outside its window a stream draws nothing.
-        fx.value = 1.0;
-        out.clear();
-        fx.sprites(250.0, false, &mut out);
-        assert!(out.is_empty());
+        assert!((ys[0] - 10.0).abs() < 1e-3 && (ys[1] - 20.0).abs() < 1e-3, "{ys:?}");
+        // A particle's age counts emissions over the ring of 3: the first is one slot back
+        // and 0.05 s on from the last emission, 1/3 + 0.05/0.3 = 1/2 through, 1 + 2 × 1/2
+        // along x and half faded.
+        let oldest = out.iter().find(|s| (s.centre.y - 10.0).abs() < 1e-3).unwrap();
+        assert!((oldest.centre.x - 2.0).abs() < 1e-3, "{}", oldest.centre.x);
+        assert!((oldest.alpha - 0.5).abs() < 1e-3, "{}", oldest.alpha);
 
-        // Half through the window the interval is 0.15 s.
+        // Half through the window the interval the test adds is 0.15 s, lerp(0.1, 0.2) by the
+        // progress; the stamp then moves on by lerp(0.1, 0.2) by t itself, 0.45: 0.145 s.
         let mut fx = start(0.45);
-        let born = |fx: &Instance| fx.streams[0].ring.iter().map(|q| q.born).collect::<Vec<_>>();
+        let born = |fx: &Instance| fx.streams[0].ring.iter().flatten().map(|q| q.born).collect::<Vec<_>>();
         fx.update(0.0);
-        fx.update(140.0);
-        assert_eq!(born(&fx), [0.0]);
-        fx.update(160.0);
-        assert_eq!(born(&fx).len(), 2);
-        assert!((born(&fx)[1] - 0.15).abs() < 1e-5);
-        // Long after, the ring has gone by: nothing stale is left to show.
-        fx.update(5000.0);
-        assert!(born(&fx).is_empty(), "{:?}", born(&fx));
+        fx.update(100.0);
+        fx.update(240.0);
+        assert!(born(&fx).is_empty(), "0.14 s on from the stamp: {:?}", born(&fx));
+        fx.update(260.0);
+        assert_eq!(born(&fx).len(), 1);
+        assert!((born(&fx)[0] - 0.245).abs() < 1e-5);
+    }
+
+    /// The stamp of a stream's last emission starts at 0, and 0 is the stamp unset
+    /// (`Effect.dll:0x10011257`, `0x10011668`): the first update inside the window only
+    /// sets it, and the first particle leaves on the first update more than an interval
+    /// after that one -- never a ring's worth at once, however long ago the effect began.
+    #[test]
+    fn a_streams_first_particle_leaves_an_interval_after_its_first_update_inside_its_window() {
+        let frame = Frame::along(Vec3::ZERO, Vec3::X, 1.0);
+        let particles = |fx: &Instance| fx.streams[0].ring.iter().flatten().count();
+        // The window opens at 0.5 of a ten-second effect: an update at 3 s is outside it.
+        let late =
+            with_word(block(8, 248, &[(16, 0.5), (20, 1.0), (24, 0.1), (28, 0.1), (4, 1.0)], "s"), 36, 4);
+        let mut fx = Instance::new(effect(TIME_ONCE, 10.0, 0, vec![late]), frame, 10.0, 0.0, None, 1);
+        fx.update(3000.0);
+        assert_eq!((fx.streams[0].last, particles(&fx)), (0.0, 0), "outside its window");
+        // 6 s: the first update inside. The stamp is set and nothing leaves, though the
+        // window has been open a second.
+        fx.update(6000.0);
+        assert_eq!((fx.streams[0].last, particles(&fx)), (6.0, 0));
+        // An interval on, to the millisecond: the test is strict, so not yet.
+        fx.update(6100.0);
+        assert_eq!(particles(&fx), 0);
+        fx.update(6101.0);
+        assert_eq!(particles(&fx), 1);
+        assert!((fx.streams[0].last - 6.1).abs() < 1e-5);
+        // And it catches up: 0.35 s later three more have left.
+        fx.update(6451.0);
+        assert_eq!(particles(&fx), 4);
+
+        // A start that moves the clock back pulls the stamp back with it (`0x100116cc`), and
+        // the particles already out stay in the ring.
+        fx.start_ms = 6400.0;
+        fx.end_ms = 16400.0;
+        fx.mode = TIME_MANUAL;
+        fx.value = 0.75;
+        fx.update(6451.0);
+        assert!((fx.streams[0].last - 0.051).abs() < 1e-5, "{}", fx.streams[0].last);
+        assert_eq!(particles(&fx), 4);
+    }
+
+    /// Outside its window a stream makes no more particles and the ones it has out live
+    /// their turn of the ring: each interval the ring steps on to an empty slot
+    /// (`Effect.dll:0x10011cde`), the draw goes on while any is live (`0x1001203e`), and the
+    /// stamp goes back to 0 once none is (`0x10011655`).
+    #[test]
+    fn a_streams_particles_live_out_their_ring_after_its_window_shuts() {
+        let frame = Frame::along(Vec3::ZERO, Vec3::X, 1.0);
+        let e = with_word(
+            block(8, 248, &[(16, 0.0), (20, 0.5), (24, 0.1), (28, 0.1), (4, 1.0), (8, 1.0), (136, 1.0)], "s"),
+            36,
+            3,
+        );
+        let mut fx = Instance::new(effect(TIME_MANUAL, 0.0, 0, vec![e]), frame, 10.0, 0.0, None, 1);
+        fx.value = 0.25;
+        for ms in [0.0, 100.0, 450.0] {
+            fx.update(ms);
+        }
+        let drawn = |fx: &Instance, ms: f64| {
+            let mut out = Vec::new();
+            fx.sprites(ms, false, &mut out);
+            out.len()
+        };
+        assert_eq!(drawn(&fx, 450.0), 3, "left at 0.2, 0.3 and 0.4");
+        // The window shuts. The three are still drawn, and each interval takes the oldest.
+        fx.value = 0.75;
+        fx.update(460.0);
+        assert_eq!(drawn(&fx, 460.0), 3);
+        fx.update(560.0);
+        assert_eq!(drawn(&fx, 560.0), 2);
+        fx.update(760.0);
+        assert_eq!(drawn(&fx, 760.0), 0);
+        assert!(fx.streams[0].last != 0.0, "the stamp is cleared by the update after");
+        fx.update(770.0);
+        assert_eq!(fx.streams[0].last, 0.0);
     }
 
     /// Each stream particle draws its own far end and size as it leaves: a uniform in ±half
@@ -2329,19 +2991,22 @@ mod tests {
         let frame = Frame::along(Vec3::ZERO, Vec3::X, 1.0);
         let mut fx = Instance::new(effect(TIME_MANUAL, 0.0, 0, vec![plume]), frame, 10.0, 0.0, None, 7);
         fx.value = 0.5;
-        // Ten particles, 0.1 s apart; at 1 s each has aged by its place in the ring.
+        // A ring of ten, 0.1 s apart; at 1 s each has aged by its place in the ring. The
+        // draw goes from the newest back.
         for ms in (0..=1000).step_by(50) {
             fx.update(f64::from(ms));
         }
         let mut out = Vec::new();
         fx.sprites(1000.0, false, &mut out);
-        assert_eq!(out.len(), fx.streams[0].ring.len());
+        assert_eq!(out.len(), fx.streams[0].ring.iter().flatten().count());
         assert!(out.len() >= 8, "{}", out.len());
         // Each particle's place over its age is its own far end: x and y within ±10, z
         // within 100 ± 30. A particle only just out is left out, its age too near 0.
         let ends: Vec<Vec3> = fx.streams[0]
             .ring
             .iter()
+            .rev()
+            .flatten()
             .zip(&out)
             .map(|(q, s)| (1.0 - q.born, s.centre))
             .filter(|(age, _)| *age > 0.2)

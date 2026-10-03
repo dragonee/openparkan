@@ -136,3 +136,37 @@ def test_a_sprites_mode_and_direction_and_a_type_nines_dome():
     # A light and a sound have neither.
     light = effects.parse_effect(header(count=1) + block(1, o4=6)).emitters[0]
     assert light.sprite_mode is None and light.sprite_direction is None and light.dome is None
+
+
+def test_a_burst_is_groups_that_leave_one_after_another_and_fall():
+    body = block(7, o28=(0.5,), o36=4, o40=2, o140=(1.5,))
+    fx = effects.parse_effect(header(count=3) + body + block(10, o28=(0.25,), o36=1, o40=8)
+                              + block(8, o16=(0.01, 1.0), o24=(0.05, 0.02), o36=10))
+    burst, debris, stream = fx.emitters
+    assert burst.burst_groups == (4, 2) and burst.burst_life == 0.5
+    assert burst.burst_spawns == pytest.approx((0.0, 0.125, 0.25, 0.375))
+    assert burst.burst_fall == 1.5
+    assert debris.burst_spawns == (0.0,) and debris.burst_fall == 0.0
+    assert stream.burst_groups is None and stream.burst_spawns is None
+    # The stream's test adds its interval by the window's progress and its step by t.
+    assert stream.stream_window_and_step_differ
+    assert not burst.stream_window_and_step_differ
+
+
+def test_a_level_is_cut_from_pixels_and_thins_particles_by_their_settings_group():
+    robot = [effects.level(s) for s in (3.9, 4.0, 7.9, 8.0, 29.9, 30.0, 69.9, 70.0)]
+    assert robot == [effects.LEVEL_HIDDEN, 3, 3, 2, 2, 1, 1, 0]
+    building = [effects.level(s, building=True)
+                for s in (9.9, 10.0, 39.9, 40.0, 79.9, 80.0, 119.9, 120.0)]
+    assert building == [effects.LEVEL_HIDDEN, 3, 3, 2, 2, 1, 1, 0]
+    assert effects.level(500.0, robot_best_lod=False) == 1
+    # RENDER_QUALITY=2: 0..3 in groups 0 and 1, 2..5.5 in group 2, 3..8.5 in group 3.
+    assert effects.detail_span(0x001) == (0.0, 3.0)
+    assert effects.detail_span(0x20D) == (2.0, 5.5)
+    assert effects.detail_span(0x311) == (3.0, 8.5)
+    assert effects.detail_span(0x107, preset=2) == (0.0, 1.5)
+    kept = [effects.kept_at_level(0x001, n) for n in range(4)]
+    assert kept == pytest.approx([1.0, 2 / 3, 1 / 3, 0.0])
+    assert effects.kept_at_level(0x20D, 2) == 1.0
+    assert effects.kept_at_level(0x20D, 3) == pytest.approx(5 / 7)
+    assert effects.kept_at_level(0x311, 3) == 1.0

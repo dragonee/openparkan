@@ -393,6 +393,10 @@ pub struct Play {
     pub reskinned: Vec<usize>,
     /// Every building's load-group effects, and the value each door-driven one last showed.
     pub building_effects: Vec<(BuildingEffects, Vec<f32>)>,
+    /// The viewport the effects' levels are asked through (docs/11, "An instance's level"):
+    /// its width in pixels and its pixels to the radian. The window sets it as it draws; with
+    /// none it is 1024 across the game's 1.7 rad.
+    pub lens: parkan_sim::effects::Lens,
     /// The bot the player drives, while the hero is aboard it.
     pub driving: Option<Driving>,
     /// Command mode's camera, kept between visits (docs/40).
@@ -1231,6 +1235,7 @@ impl Play {
             added: Vec::new(),
             reskinned: Vec::new(),
             building_effects,
+            lens: parkan_sim::effects::Lens::default(),
             driving: None,
             command: crate::command::Camera::default(),
             outer: crate::camera::Outer::default(),
@@ -2212,6 +2217,11 @@ impl Play {
         self.lightning(now);
         let cues = self.fx.cues(now);
         self.cues.extend(cues);
+        // An effect on a building answers the building's world class, 3, and takes the
+        // building's arm of the level; trees and stones, which run their load groups as
+        // buildings do, answer scenery's 10 with the units, the rounds and the landscape.
+        let buildings: Vec<bool> = self.units.iter().map(|u| u.kind == KIND_BUILDING).collect();
+        self.fx.set_arms(|owner| owner.target().is_some_and(|t| buildings.get(t).copied().unwrap_or(false)));
         self.fx.tick(now);
         for e in &events {
             if let Event::Killed { target } = e
@@ -5105,9 +5115,15 @@ impl Play {
     /// which is what a test per frame here comes to; and the ray is the **sight ray's**
     /// query, which excludes no face class, so a lake surface hides what is behind it
     /// (docs/11, "How often the point is tested, and what the ray meets").
+    ///
+    /// Each instance is drawn at the **level** the shade answers for it through
+    /// [`Play::lens`] (docs/11, "An instance's level"): not at all once it is under 4 pixels
+    /// on the screen, or under 10 on a building, and with fewer of its bursts' and streams'
+    /// particles from 70 pixels down, or 120.
     pub fn sprites(&self, eye: Vec3) -> Vec<(usize, Sprite)> {
-        self.fx
-            .sprites(self.hero.time_ms, eye, |point| self.battle.combat.clear_line(&self.ground, eye, point))
+        self.fx.sprites_seen(self.hero.time_ms, eye, self.lens, |point| {
+            self.battle.combat.clear_line(&self.ground, eye, point)
+        })
     }
 }
 

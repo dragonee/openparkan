@@ -1871,3 +1871,49 @@ fn c03_m01s_volcano_smoke_rises_at_the_recordings_pace() {
         sprites.len()
     );
 }
+
+/// An effect's level is the shade's answer for the sphere about its drawing emitters, on the
+/// arm its owner's world class picks (docs/11, "An instance's level"): a building's effects
+/// on the building's, and a tree's, which runs its load group as a building does, on the
+/// robot's with everything else. `tree_light_33a`'s smoke answers a sphere of 100 + 80 + 4 +
+/// 66.3 = 250.3 m, which stands 70 pixels at 602 to the radian from 2157 m.
+#[test]
+#[ignore = "needs the game install"]
+fn c03_m01s_effects_take_their_level_from_their_owners_class_and_their_size_in_pixels() {
+    use parkan_formats::mission::{KIND_BUILDING, KIND_VEGETATION};
+    use parkan_sim::effects::{Arm, Lens};
+    use parkan_world::fx::Owner;
+
+    let mut play = campaign_play(gamedir::C03_MISSION_01);
+    play_for(&mut play, 2.0, |_| {});
+    for (owner, instance) in &play.fx.instances {
+        let building = owner.target().is_some_and(|t| play.units[t].kind == KIND_BUILDING);
+        assert_eq!(instance.arm == Arm::Building, building, "{owner:?}");
+    }
+    assert!(play.fx.instances.iter().any(|(_, i)| i.arm == Arm::Building), "the buildings' lamps");
+
+    let volcano = (0..play.units.len())
+        .find(|&t| {
+            play.units[t].kind == KIND_VEGETATION
+                && play.commander.paths[t].to_ascii_lowercase().ends_with("s_tree_33")
+        })
+        .expect("a volcano");
+    let now = play.hero.time_ms;
+    let i = play.fx.owned(Owner::Building(volcano, 1)).next().unwrap();
+    assert_eq!(i.arm, Arm::Robot);
+    let (centre, radius) = i.sphere(now).expect("its two streams' spheres");
+    assert!((radius - 250.332).abs() < 0.05, "{radius}");
+    let lens = Lens::default();
+    let from = |metres: f32| i.level(now, centre + glam::Vec3::X * metres, lens);
+    assert_eq!([from(300.0), from(2100.0), from(2200.0), from(5200.0)], [0, 0, 1, 2]);
+    // At level 1 a third of its puffs are passed over, give or take: it is in settings
+    // group 0, whose detail numbers run 0 to 3.
+    let drawn = |level: u32| {
+        let mut sprites = Vec::new();
+        i.sprites_at(now, None, true, level, &mut sprites);
+        sprites.len()
+    };
+    let whole = drawn(0);
+    assert!(whole >= 20 && drawn(3) == 0, "{whole} {}", drawn(3));
+    assert!(drawn(2) < drawn(1) && drawn(1) < whole, "{} of {whole}, then {}", drawn(1), drawn(2));
+}
