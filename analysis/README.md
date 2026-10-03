@@ -382,6 +382,35 @@ too. The arity settles each — a setter that pops one dword is not a getter
 called with none.
 
 
+## `stdcalls.py`, for a slot told by how it is called
+
+```
+uv run --group analysis python analysis/stdcalls.py 0xc 4     # the effect manager's draw
+uv run --group analysis python analysis/stdcalls.py 0x14 3    # the control: the listener's setter
+```
+
+Some interfaces take `this` on the stack. A call of the effect manager's draw is four
+pushes, the receiver last, before `call [vtable + 0xc]`, and a `__thiscall` slot at the same
+offset on another class never pushes its receiver. Of the **1221** indirect calls at `+0xc` in
+the install, **57** have the shape, and one is a manager's draw: `AniMesh.dll:0x100151ea`, the
+call that draws a unit's own effects
+([../docs/11-effects.md](../docs/11-effects.md#which-draw-reaches-a-units-own-manager--read-and-measured)).
+The control finds the listener's one activation, `World3D.dll:0x10013c34`, which a search
+from the stored pointer had published as absent.
+
+Two things it cannot see, both of which cost a wrong sentence:
+
+- **A module built without optimisation loads its receiver twice**, once to push and once
+  for the vtable. `Terrain.dll` answers for none of the 57; its callers are found by what
+  they push.
+- **A field is read through the interface a method was entered on.** The draw at
+  `0x10014b30` is a method of the interface at the mesh's `+4`, so its `[this+0x34]` is the
+  mesh's `+0x38`, the `QueryInterface(0x13)` answer, and not the `0x204` one at `+0x34`.
+  Read as the object's own offset, the call's receiver was published as "inferred to be an
+  effect manager" for a round. Find which vtable holds the routine, and where the
+  constructor installs that vtable, before reading any `[this + N]` in it.
+
+
 ## Message dispatch, and the constant that is never compared
 
 `MCMD_WALK_F` (19) was written up as having no handler anywhere, on the

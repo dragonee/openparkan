@@ -1384,12 +1384,17 @@ is a `0x88`-byte record whose `+8` is a Direct3D `DS3DBUFFER`.
 **Message `0x38e` is a mask**, one bit a field (`0x1000dad0`): `2` the factor
 (`+8` of the block → record `+0x5c`), `4` the position (`+0xc` → `+0xc`), `8` the
 velocity (`+0x18`), `0x80` the near distance (`+0x3c` → `flMinDistance`), `0x100`
-the far distance (`+0x40` → `flMaxDistance`) and `0x200` the mode (`+0x44` →
-`dwMode`). The emitter's block, laid out from `0x10013048`: `+8` the factor, `+0xc`
-the position, `+0x18` the owner's velocity (its interface `0x27`), `+0x3c` near,
-`+0x40` far, `+0x44` the emitter's float +80. *Measured*: +72 and +76 are 1.0 on
-516 of the 517 sound emitters (0.8 → 1.0 on the other), and +80 is 0 on all 517,
-`DS3DMODE_NORMAL`.
+the far distance (`+0x40` → `flMaxDistance`), and `0x200` the block's `+0x44` —
+which goes **not** to `dwMode`, at the record's `+0x44`, but to the record's `+0x54`,
+past the `DS3DBUFFER` (`0x1000dd4d`), where only the matching getter reads it
+(`0x1000de4b`). Three more bits carry the cone — `0x10` its two angles, `0x20` its
+orientation, `0x40` its outside volume (`0x1000dc28`–`0x1000dcd0`) — and the emitter's
+`0x38e` has none of them. The emitter's block, laid out from `0x10013048`: `+8` the
+factor, `+0xc` the position, `+0x18` the owner's velocity (its interface `0x27`),
+`+0x3c` near, `+0x40` far, `+0x44` the emitter's float +80. *Measured*: +72 and +76
+are 1.0 on 516 of the 517 sound emitters (0.8 → 1.0 on the other), and +80 is 0 on
+all 517 — which decides nothing: an earlier reading here had it as the buffer's mode,
+and no buffer's mode is ever set.
 
 **The factor is a rate.** The 3D sound's update (`0x1000e2c0`) multiplies the
 sample's own frequency by record `+0x5c` and hands it to the buffer's
@@ -1410,21 +1415,93 @@ Sound places the sound. **The object is made once**, by whoever asks first
   `0x1000a91f`, which nothing found sets), but it runs when a mission loads,
   after the object exists.
 
-So the game takes **the Direct3D Sound path** (*derived*). Its distance law is
-Direct3D Sound's own: whole within the minimum distance, and beyond it the gain
-falls as *min* ÷ (*min* + *R* × (*d* − *min*)), 6 dB a doubling for a rolloff *R*
-of 1, no further past the maximum distance (Microsoft's `DS3DBUFFER`
-documentation). *R* is the listener's: the listener object (vtable `0x10031728`,
-made by the 3D sound's slot 3, `0x1000c8c0`, for `Terrain.dll`'s camera at
-`0x10083bc2`) starts its distance, rolloff and Doppler factors at 1.0
-(`0x1000d123`–`0x1000d129`), and no call to its parameter slot (5, `0x1000d370`)
-is found. The listener's position and orientation come from its camera's
-matrix (`0x1000d4bc`), and both the listener and the buffers go to Direct3D
-Sound with y and z swapped (`0x1000d5df`, `0x1000e4a7`).
+So the game takes **the Direct3D Sound path** (*derived*), and what a sound does
+between the speakers is the work of Microsoft's mixer, a system file and not one of
+the game's. What the game's own files hold is everything it hands that mixer, and
+all of it is read:
 
-**Past the far distance** a one-shot is stopped (`0x1000e51b`–`0x1000e54a`: the
-distance above `flMaxDistance` sets `+0x37`, and a record not looping, `+0x7d`,
-is cleared); a loop plays on.
+**The device and the primary buffer** (`niCreate3DSound`, `0x1000c3e0`, under
+`services.dll`'s `0x120`). The default device — a chosen one wants flag `0x20000`
+(`0x1000c43c`) — at cooperative level 2, `DSSCL_PRIORITY` (`0x1000c489`). A primary
+buffer of flags `0x11`, `PRIMARYBUFFER | CTRL3D` (`0x1000c4c3`), set to PCM,
+**stereo**, 16 bits — 8 wants flag `0x10` — at **22050 Hz**, which is the flag
+`0x100`; without it, 44100 (`0x1000c4e6`–`0x1000c550`). The listener is asked of that
+buffer (`0x1000c571`). **Nothing sets the speaker configuration**: the 3D sound's code
+(`0x1000c000`–`0x1000f000`) makes 70 indirect calls through 20 slot offsets, and the
+four at `+0x24`, where `IDirectSound` keeps `SetSpeakerConfig`, are each a getter
+handed one address, a buffer's `GetStatus` (`0x1000cb46`, `0x1000e56a`, `0x1000e808`,
+`0x1000ec33`); the control is the same tally's `SetCooperativeLevel` at `+0x18` and
+`CreateSoundBuffer` at `+0xc`. `Ngi32.dll` is the one module of the install's
+twenty-one that names DirectSound at all. So the speakers are whatever the system's
+own setting says they are.
+
+**A sound's buffer** (`0x1000e150`, the one place a description is built for one).
+Its flags are **`0x70010`**: `CTRL3D`, `GETCURRENTPOSITION2`, `MUTE3DATMAXDISTANCE`
+and `LOCDEFER`, with `CTRLFREQUENCY` or-ed in where the record's `+0x7c` lets its rate
+move (`0x1000e1cf`, `0x1000e1f9`). Its 3D algorithm is entry 0, 1 or 2 of a table of
+three (`0x10036e40`), picked by the 3D sound's flags `0x100000` and `0x200000`
+(`0x1000c69b`–`0x1000c6c5`), and `0x120` has neither: entry 0,
+**`DS3DALG_NO_VIRTUALIZATION`** (`{C241333F-1C1B-11D2-94F5-00C04FC28ACA}`; the
+other two are the light and the full HRTF). The record's `DS3DBUFFER` is read back
+out of the new buffer (`GetAllParameters`, `0x1000e298`), so whatever the game never
+sets stays Direct3D Sound's own default: the cone, which only the three unused mask
+bits could narrow, and the mode. Each update the record's block, y and z swapped in
+its position, velocity and cone orientation (`0x1000e4a7`), is compared with what the
+buffer holds and, where it differs, set whole with `dwApply` 0, at once
+(`0x1000e720`–`0x1000e74e`). A buffer is played with `DSBPLAY_TERMINATEBY_DISTANCE`,
+and `LOOPING` where its record loops (`0x1000e8bf`).
+
+**The listener is the camera the frame is drawn through.** Every `CCamera` makes one
+of its own (`Terrain.dll:0x10083bc2`, kept at `+0x194`; vtable `0x10031728`, made by
+the 3D sound's slot 3, `0x1000c8c0`). `World3D.dll!stdRenderGame` asks the camera it
+is handed for interface `0x108`, which the listener answers (`0x1000d1d0`), and sets
+its flags to 1 (`0x10013c09`–`0x10013c34`), which makes it the current one and takes
+the flag off every other (`0x1000d3fb`–`0x1000d451`). That is the setter's one call —
+an earlier pass here found none — and its mask is 1, the flags alone: the rolloff and
+the Doppler factor, which the setter would take under `0x20` and `0x40`, stay the 1.0
+the listener was made with, and the distance factor has no mask at all
+(`0x1000d123`–`0x1000d129`, `0x1000d370`). Each frame (`0x1000d490`) its position is
+the camera matrix's fourth column, its velocity that position's change over the
+frame, its **front the first column, the camera's forward axis, and its top the
+third, the camera's up** (`0x1000d567`–`0x1000d5c9`; the columns are named in
+[03-terrain.md](03-terrain.md#the-reflection-camera--read)). All four go over with y
+and z swapped as the buffers' do (`0x1000d5df`), set at once where they differ
+(`0x1000ca06`), and `CommitDeferredSettings` is called every frame after them
+(`0x1000ca11`). The swap makes the game's right-handed world Direct3D Sound's
+left-handed one, so the listener's right is its front crossed with its top: the
+camera's right. With no camera current the 3D sound draws every buffer's minimum
+distance in to 0.0025 (`0x1000cd30`–`0x1000cd41`).
+
+**How loud** is then Direct3D Sound's own law (*documented*: Microsoft's `DS3DBUFFER`
+and `DSBUFFERDESC` pages): whole within the minimum distance, and beyond it the gain
+falls as *min* ÷ (*min* + *R* × (*d* − *min*)), 6 dB a doubling for the rolloff *R* of
+1 — and, the buffer being made with `MUTE3DATMAXDISTANCE`, **silent past the
+maximum**. The game does not leave that to the mixer:
+
+**Past the far distance nothing plays.** The update marks a record whose distance is
+above `flMaxDistance` (`0x1000e51b`, the record's `+0x83`). A one-shot is ended there
+and then (`+0x7d` clear: `0x1000e539`–`0x1000e54a`). A loop stays marked to play, and
+the pass that starts the buffers (`0x1000e7b0`) **stops a playing one that is past
+its far distance and keeps where it stood** (`GetCurrentPosition` into `+0x6c`, then
+`Stop`, `0x1000e817`–`0x1000e847`), and plays it on from there once it is inside
+again (`SetCurrentPosition`, `Play`, `0x1000e874`–`0x1000e8cf`). An earlier reading
+here had a loop play on, at its far level.
+
+**Between the speakers** (*documented*, not read). Microsoft describes
+`DS3DALG_NO_VIRTUALIZATION` as 3D output mapped onto ordinary left and right stereo
+panning: a sound 90° to the left comes out of the left speaker alone, one 90° to the
+right out of the right alone; the vertical axis is ignored but for the distance; the
+Doppler shift and the volume scaling still apply; no 3D filtering is done (the
+`guid3DAlgorithm` table of its `DSBUFFERDESC` page). The same page has the algorithm
+as the software mixer's alone — a buffer made with `LOCDEFER` is given a free 3D voice
+of the sound card first, and placed as the card places it — and has any speaker
+configuration but stereo or headphones processed as two speakers. With the cone left a
+whole sphere that is all of it. A sound behind the listener is as loud
+as one in front, and pans as its mirror image in front does; one straight overhead
+sits in the middle; one inside its minimum distance is whole and is still panned.
+**What is in no file of the game's is the curve between the middle and either side**
+— the mixer's own — and the size of the Doppler shift, which the listener's and each
+sound's velocities drive at a factor of 1.
 
 **The other path**, for the record (`0x1000e615`–`0x1000e6ff`): silent past the
 far distance, else `1000 × log2(min ÷ (min + R × (d − min)))` hundredths of a
@@ -1449,7 +1526,13 @@ established. One gate is read: before each tick an instance whose attach node
 (`AniMesh` record `+0x14` flags 1 or 4, or a stage `+0x1c` not 0 without header
 flag `0x8000`) counts as hidden is switched off unless its header has flag
 `0x10` (`0x10006170`–`0x10006211`), and `hero_breath` has not; that the hero's
-node 3 counts as hidden in the game's own view is not found.
+node 3 counts as hidden in the game's own view is not found. Two more are ruled out,
+as far as they are read. **No sound is head-relative**: a buffer's mode is never set.
+And the effect's flag `0x800` keeps it back only while its owner is not seen — the
+turret's own mesh draws its manager with the pass 1 while its sphere is inside the
+camera's planes and the draw's flag 1 is clear
+([below](#which-draw-reaches-a-units-own-manager--read-and-measured)); whether either
+fails on the hero's turret in its own view is not read.
 
 ### Bolts, streams and fades — *read*, and *measured*
 
@@ -1644,10 +1727,66 @@ is all that decides which lies over which.
 (`env_mineral`, additive `smoke_r2_add`) between the camera and the Large
 Factory, the engine drew the chimneys' black `fire_smoke` crisp through the
 nearer plume, because it drew every additive sprite first. Drawn far to near,
-the plume lies over the smoke. A type-9 dome's pieces are each an item of their own,
-made with the dome's one matrix (`Terrain.dll:0x10028c64`, `0x10028d88`); the engine
-files them under the dome's one distance and keeps them in their own order, and what
-distance each piece's item answers with is not read here.
+the plume lies over the smoke.
+
+**What a layer does with its items' order is its type** (*read*). The factory
+(`CreatePrimLayer`, `0x10031760`) jumps six ways on a descriptor's type word (table
+`0x10031ae6`) and builds one of five classes on one base (vtable `0x1009adbc`: the
+descriptor, the device and the camera). Slot 0 files an item and slot 3 draws the
+layer:
+
+| type | vtable | files an item (slot 0) | draws (slot 3) | layers |
+|---:|---|---|---|---|
+| 0 | `0x1009acfc` | appends it with a key: the shared vertex buffer its format draws through (item slot 1, `0x1002f8e0`), then its vertex and its index bytes (`0x10032030`) | **sorts by that key** and draws (`0x1003f120`; the compare is `0x10040650`): by buffer, not by distance | group 0's four; 9 and 11 of group 1 |
+| 1 | `0x1009ad5c` | inserts it by its distance (`0x1003e090`) | walks the list from its top, an item at a time (`0x1003dd10`): **far to near** | **5** |
+| 2 | `0x1009ad8c` | appends it (`0x10031ca0`) | walks the array from its start (`0x1003d990`): **as filed** | 0 to 4, 8, 10, 13 |
+| 3 | `0x1009ad2c` | type 1's | `CCamDistSortLayerVB::Render` (`0x1003e1d0`): type 1's order, through shared vertex buffers | 6, 7 |
+| 4 | — | the factory's panic, *"Illegal primitive sort type"*, and no layer | | |
+| 5 | `0x1009accc` | type 2's | type 2's, and **only while setting 26, `UseReflections`, is on** (`0x10032940`) | 12 |
+
+Type 3's class is built on type 1's — its case installs `0x1009ad5c` and then its own
+table over it (`0x10031952`, `0x1003195f`) — and type 5's on type 2's (`0x10031a8c`,
+`0x10031a99`), which is how the control comes back: the search that finds
+`CCamDistSortLayerVB` and its add finds the same add under type 1. Both adds pass over
+an item whose fade is 0 (`0x10031cba`, `0x1003e0a8`); type 0's does not ask.
+
+**So the see-through surfaces are drawn far to near too.** Layer 5 is type 1: every
+batch `CShade`'s mesh draw files see-through
+([07-objects.md](07-objects.md#what-a-blended-batch-writes-and-the-alpha-tests-reference--read))
+— a batch whose word carries `0x100`, which is every batch of 46 materials, the palm's
+leaves and the glass among them, and a doorway's fade — is an item of its own in one
+sorted list, drawn with the depth test and without the depth write, after the whole of
+group 0 and before every effect sprite. The water is not among them. A water batch
+goes to layer 1, or to layer 12 where `UseReflections` is on and `UseEMBMReflections`
+is off (`0x10044510`–`0x1004454b`), neither of them sorted, and it draws opaque
+([03-terrain.md](03-terrain.md#the-ground-draws-opaque--read-and-measured)): layer 12
+is the plain reflection's, which is why its type hangs on that setting.
+
+**The distance is to the item's first vertex** (*read*). Item slot 5 (`0x1003c340`,
+one routine for all four strided kinds of item) asks slot 6 for the position of the
+vertex the item's **first index** names — positions + index[0] × stride
+(`0x1003c4e0`, `0x1003cc20`) — takes it into the world by the item's own matrix where
+it has one (`g_FastProc` slots `0x18` and `0xb0`, by the word at the item's `+0x6e`),
+and answers how far that is from the camera's place, which the layer took off the
+camera's matrix as the camera was set (`0x10031ec0`, the layer's `+0xc4`). Not the
+item's middle. A mesh batch is filed by its first triangle's first corner, and a
+sprite by the corner (−½, ½) of the shade's unit quad, whose index list runs 0, 1, 2,
+2, 3, 0 (`0x10027cf9`–`0x10027d44`). A type-9 dome's pieces are each an item, made
+with the dome's one matrix and filed quads first and then the triangles of its cap
+(`0x10028b4b`–`0x10028d8d`), each by its own first vertex — on a quad the corner on
+its upper ring and its second segment (`0x10027861`), on every triangle the pole
+(`0x100274b6`) — so a dome's far side goes under its near one. The sprite's fog is
+taken from the same distance (`0x10028436`).
+
+**A tie goes to the item filed later.** The add's search probes the middle of what is
+left of the list (`0x1003e0fa`): a nearer item goes on below the probe, a farther one
+above it, and one exactly as far **takes the probe's place**, ahead of the item it
+tied with (`0x1003e135`); where the search closes on one item, the new one goes below
+it only if it is nearer (`0x1003e169`–`0x1003e193`). So two sprites on one matrix are
+drawn the second under the first, and a longer run of equals is left in no one order.
+
+**Layer 7 is for the camera's own unit**
+([below](#which-draw-reaches-a-units-own-manager--read-and-measured)).
 
 ## Which effects run: the settings switch — *read*, and *measured*
 
@@ -1739,18 +1878,18 @@ receiver from the field its constructor filled with `QueryInterface(0x13)` on a
 | `CLandscape`'s draw (`Terrain.dll:0x1001b7b0`, the call at `0x1001c93e`) | −2 | **1** (`0x1001c921`) |
 | `CAtmosphere`'s draw (`Terrain.dll:0x10070b90`, the call at `0x10070cec`) | −2 | **1** (`0x10070cd5`) |
 
-Each is the last thing its draw does, after the terrain and the objects it holds. **Nothing
-in the install passes a 0**: the only computed pass is a third call of the same shape,
-`AniMesh.dll:0x100151ea` in an object's draw, which passes 1 while the object's sphere
+Each is the last thing its draw does, after the terrain and the objects it holds, and each
+first tells the shade which layer the sprites go to (`CShade` slot 8 with 0, `0x1001c91e`,
+`0x10070cd2`). **Those two never pass a 0. The third caller does**: a call of the same
+shape, `AniMesh.dll:0x100151ea` in an object's draw, passes 1 while the object's sphere
 clears the camera's six planes (`0x10014c70`) and the draw's flag 1 is clear, else 0
-(`0x100151ce`), with the key −2 or −1 by the draw's flag 8 (`0x10014d0f`). Its receiver is
-the interface the object answers for under `0x204`, which the agent takes from its owner
-(`0x1000332c`, filed at `+0x168`) rather than its own manager under `0x13`; that this is an
-effect manager too is *inferred* from the call's shape and not read.
+(`0x100151c6`), with the key −2, or −1 by the draw's flag 8 (`0x10014d0f`) — and its
+receiver is the object's own manager
+([below](#which-draw-reaches-a-units-own-manager--read-and-measured)).
 
-So **a 0x800 effect draws in the scene pass with everything else**, and what the flag can
-cost it is only that an object outside the camera's planes, or drawn in a pass carrying
-flag 1, draws none of its lights, sounds, breath or beacons.
+So **a 0x800 effect in one of the world's two managers always draws, and one on an object
+draws only while the object is seen**: out of view the object draws none of its lights,
+looped sounds, breath or beacons.
 
 **`Terrain.dll:0x1001f178` is not one of them**, and there is no stack mismatch. That call
 belongs to a method of the interface `CLandscape` installs at its **`+4`** (the table at
@@ -1764,12 +1903,102 @@ or to post it a message: 1 and 28 at `0x1001f072`/`0x1001f0d2`, 4 at `0x1001fd48
 areal map's slot 3 takes the three arguments the call pushes — the object, and 2 to add it
 or 3 to remove it.
 
-*Also read*: an agent makes a manager of its own (`AniMesh.dll:0x100033ba`) and files it
-under `0x13` in its interface table at `+0x1e4` — the table `0x100012d0` indexes by
-`(id >> 8) × 48 + (id & 0xff)` — and that is the one a controller reaches at its `+0x3c`
-and drives with slots `0x10` to `0x44`. All ten sites in `AniMesh.dll` that touch the field
-only release it or post it a message, so **which draw reaches a unit's own manager is not
-established**.
+### Which draw reaches a unit's own manager — *read*, and *measured*
+
+**The mesh's own draw does.** An agent makes its manager (`AniMesh.dll:0x100033ba`), keeps
+it at `+0x174` and files it under `0x13` in its interface table at `+0x1e4`
+(`0x10003601`–`0x10003607`; the table `0x100012d0` indexes by `(id >> 8) × 48 + (id & 0xff)`):
+the one a controller reaches at its `+0x3c` and drives with slots `0x10` to `0x44`. The
+agent's animated mesh (`0x100068a0`, `0x2f0` bytes, made at `0x10003228`) asks its
+aggregate for eight interfaces as it is initialised (message 4, `0x10006fc0`), and the last
+two are `0x204` into its `+0x34` and **`0x13` into its `+0x38`** (`0x10007053`–`0x1000706d`).
+Its draw is slot 11 of the interface it answers `0x18` with, which sits at its **`+4`**
+(vtable `0x1002053c`; `0x10014b30`, `ret 0x10`: the mesh, the camera, the draw's flags and
+one word more), so the draw's `[this+0x34]` is the mesh's `+0x38`: **the receiver of the
+call at `0x100151ea` is the agent's own effect manager.** The earlier reading here took the
+offset in the object's coordinates, met `0x204` there and called the receiver inferred. It
+is the mistake [09-method.md](09-method.md#searches-that-do-not-discriminate-so-nobody-repeats-them)
+names: a field read through the wrong interface.
+
+**The control is the enumeration.** A manager's draw takes its `this` on the stack with
+three words more, so a call of it is four pushes, the receiver last, before
+`call [vtable + 0xc]`. Of the **1221** indirect calls at `+0xc` in the install's modules,
+**57** have that shape where the compiler loads the receiver once
+(`analysis/stdcalls.py 0xc 4`); read one by one, 56 hand property ids, buffers or flag
+words to other interfaces, and one hands a camera, a key and a pass to a manager,
+`AniMesh.dll:0x100151ea`. `Terrain.dll`, built unoptimised, loads a receiver twice and
+answers for none of the 57: its 185 calls at `+0xc` hold the two the table above has, the
+only two anywhere that push the key −2. All ten sites in `AniMesh.dll` that touch the
+agent's own `+0x174` release it or post it a message, and that stands: the draw goes
+through the mesh's copy.
+
+**What the call is given** (`0x10015188`–`0x100151ea`):
+
+| | |
+|---|---|
+| whether it is made | the camera draws the object's class — its interface `0x12` hands out a word of class bits, tested against the table at `0x10020ad0`, bit *class* for each (`0x10014cc6`); a camera that does not answer `0x12` draws every class — and the mesh holds a manager, and the draw's flag `0x10` is clear |
+| the layer | `CShade` slot 8 (`Terrain.dll:0x10042930`) with 1 where the mesh is drawn at its own-view level, the camera being one of the mesh's own (`0x10005f60`; [07-objects.md](07-objects.md#the-fifth-slot-is-what-the-units-own-view-draws)), else 0 |
+| the key | −2, every instance; −1 under the draw's flag 8 |
+| the pass | 1 where the mesh's sphere is inside all six of the camera's planes (`0x10014c3d`–`0x10014c70`) and the draw's flag 1 is clear; else **0** |
+
+The mesh draws once a frame (its byte `+0x1fe`, `0x10014b3e`): its own nodes, then its
+manager, then the meshes hung on it with the same camera and flags (`0x1001523e`,
+`0x10015270`).
+
+**Who calls the mesh's draw, and with which flags.** `CLandscape`'s draw is the same slot of
+the same interface (`Terrain.dll:0x1001b7b0`), and `CCamera::Render` calls it three times a
+frame: with flags `0x800`, then 0 — `0x120` through the reflection's camera — then `0x1000`
+(`0x10084655`, `0x1008477e`, `0x100847e8`). Under `0x800` or `0x1000` it only hands the call
+on to a list of objects of its own (`0x1001b7c7`). Otherwise it keeps a map of what to draw
+(`0x100a5980`). Every object of class 9 in the world — `BULL`, a round — goes into it unseen
+(`0x1001be21`–`0x1001bed2`); every object of every cell the draw walks goes in as seen as
+its cell is, and one in several cells is seen if any of them is (`0x1001c56f`–`0x1001c79f`).
+When the cells are done **every object of the map is drawn: a seen one with the flags the
+landscape was given, an unseen one with those flags and 1** (`0x1001c89d`–`0x1001c900`). A
+building's own draw (`CBuilding::Render`, `0x10058b90`, which its assertion names at
+`0x10058ee9`) hands its mesh its flags as they are, or with 3, or with `0x48`
+(`0x10058d4e`, `0x10059d16`); which of the three it is when is not read here.
+
+**So, for what is seen:**
+
+- **A unit's sprites are in the world's one list.** Slot 8 with 0 sets the group 1 and
+  layer 6 the render setup began with (`0x1004293f`–`0x10042958`), so a gun's flash, an
+  engine's glow and a damaged node's smoke are filed with the landscape's own sprites and
+  sorted with them far to near
+  ([Effect sprites are drawn far to near](#effect-sprites-are-drawn-far-to-near--read-and-seen)),
+  whichever manager they hang in. They are filed as the objects draw, ahead of the
+  landscape's own, which only a tie can show.
+- **The camera's own unit's are apart.** Slot 8 with 1 sets the layer to **7** and the
+  byte `+0x172c`, which the sprite's item reads to turn its **depth test off**
+  (`0x100282b0`–`0x100282e6`). Layer 7 is sorted as 6 is and runs after it, and its pass has
+  a near plane of 0.2 where the world's has 0.5 ([10-sky.md](10-sky.md#the-dome)). So what
+  hangs in the manager of the unit the camera rides is drawn over every sprite and every
+  surface of the world, however near the eye, and under the cockpit, whose layers 9 and
+  10 come after.
+- **`0x800` is "only while my owner is seen".** The pass is 0 for an object outside the
+  camera's planes and for one the landscape draws unseen. The manager's draw then returns
+  at once unless it holds a live instance without the flag — its flag 2, which each
+  instance's tick sets where the header's `0x800` is clear (`Effect.dll:0x1000635e`–
+  `0x10006376`) — and an instance with the flag is passed over (`0x10007d44`). An emitter
+  updates inside its instance's draw, a sound and a light as a sprite does, so an unseen
+  object's `0x800` effect does none of the three. A loop already playing is not stopped by
+  that: it stops being moved.
+- **A culled unit's other effects still draw**, as long as the landscape draws the unit at
+  all: one in a cell it walks, or a round anywhere. The mesh is not drawn — flag 1 is also
+  what keeps its nodes back (`0x10014cea`) — and its manager is, with the pass 0: a
+  chimney's smoke goes on rising in view over a building whose cell is not.
+
+*Measured*: `0x800` is on **198** of the 923 effects, which hold **147 of the 618** light
+emitters and **29 of the 517** sound emitters — all 29 loops, of the 106: the animals' calls
+and breath, three chassis' engine loops and `hero_breath` — with 246 type-3 sprites, 157
+type-9 domes, 88 type-4 glows, 33 streams and 11 bursts.
+
+Not read: which cells the landscape's draw walks, beyond that each is a box from −100 to
+500 tested against the camera (`0x1001bf8f`–`0x1001c1c1`); the sphere a mesh answers with,
+and what raises its radius (the mesh's `+0x150`, `0x10014b8e`); whether a mesh hung on
+another — a gun on a turret — counts the camera as its own; and what clears the instances'
+drawn bytes between the reflection's draw and the scene's (manager slot 20,
+`Effect.dll:0x10004d50`).
 
 ### Header flag `0x10000` has no reader — *read*, a controlled negative
 
@@ -2024,11 +2253,23 @@ Read one slot either way, none of the seven name witnesses agrees.
 
 - ~~**The sound server's slots**, what message `0x38e`'s +80 float is, and how
   near, far and volume become gain.~~ Answered: a sound world of `Ngi32.dll`'s
-  3D sound; +80 is the `DS3DBUFFER` mode, the "volume" is a playback rate, and
+  3D sound; ~~+80 is the `DS3DBUFFER` mode,~~ the "volume" is a playback rate, and
   Direct3D Sound's distance law applies
+  ([How a sound is heard](#how-a-sound-is-heard--read-and-measured)). Taken back in
+  part: +80 is kept past the `DS3DBUFFER`, where nothing reads it, and a sound past
+  its far distance is silent, a loop too.
+- **What silences the hero's breath** in its own view. Not a head-relative mode: no
+  buffer's mode is ever set. Not, as far as it is read, the pass its flag `0x800`
+  waits for, which a unit's own mesh passes while the unit is seen
   ([How a sound is heard](#how-a-sound-is-heard--read-and-measured)).
-- **What silences the hero's breath** in its own view.
-- **How Direct3D Sound pans** a sound about the listener.
+- ~~**How Direct3D Sound pans** a sound about the listener.~~ Answered as far as the
+  game's files go: every buffer asks for `DS3DALG_NO_VIRTUALIZATION`, which Microsoft
+  documents as plain left and right stereo panning, hard over at 90° and blind to
+  height; the cone is never set, the speaker configuration is never set, and the
+  listener is the camera the frame is drawn through, its front and top the camera's
+  forward and up ([How a sound is heard](#how-a-sound-is-heard--read-and-measured)).
+  What is left is the mixer's own curve between the middle and either side, which is
+  in no file of the game's.
 - ~~**What the eye the sprite draw is handed has been transformed by.** The emitter
   loop's context carries the instance's matrix at `+8` and a point at `+0x48`
   (`0x10008050`, `0x100080aa`), and the draw takes that point for the eye
@@ -2120,8 +2361,17 @@ Read one slot either way, none of the seven name witnesses agrees.
   and nothing anywhere passes 0; `0x1001f178` is a call on the areal map, not the
   manager, and takes the three arguments it pushes; draw flag 4 holds the sprite's
   **fog factor at 1**; and `0x10000` has no reader
-  ([above](#who-passes-the-draws-pass-argument--read)). Still open: which draw
-  reaches a **unit's own** manager, the one a controller drives at its `+0x3c`.
+  ([above](#who-passes-the-draws-pass-argument--read)). ~~Still open: which draw
+  reaches a **unit's own** manager, the one a controller drives at its `+0x3c`.~~
+  Answered: the unit's own mesh's, at `AniMesh.dll:0x100151ea` — the receiver once
+  taken for the `0x204` interface is the mesh's copy of the agent's manager — with the
+  pass 1 only while the unit is seen, so **something does pass a 0**, and `0x800` means
+  "only while my owner is seen"; its sprites go to the world's layer 6, or to layer 7
+  with the depth test off for the unit the camera rides
+  ([Which draw reaches a unit's own manager](#which-draw-reaches-a-units-own-manager--read-and-measured)).
+  Still open: what "seen" is measured by — which cells the landscape's draw walks, the
+  sphere a mesh answers with, and which flags `CBuilding::Render` adds when — and whether a
+  mesh hung on another, a gun on a turret, counts the camera as its own.
   ~~Who sets the manager's target point that bolts start from.~~ Answered: the
   gun, as it makes the round: the muzzle on the shooter's node 0
   ([29-weapons.md](29-weapons.md#a-beam-outlives-its-round--read-and-measured)).

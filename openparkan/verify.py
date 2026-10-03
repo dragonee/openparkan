@@ -3894,7 +3894,9 @@ def check_blend_depth(check, game: Path) -> None:
           f"0xe at 0x100302e1; layer 5 is an ambient alpha below 1.0 (0x1004555e), a see-through "
           f"item goes to the queue's second list (0x10032f3c); an instance draw with pass 0 skips "
           f"flag 0x800 (Effect.dll:0x10007d3a).  Measured: ambient alpha below 1 on "
-          f"{translucent}; the foliage {foliage} blends at flags 4 with 1.0, so it writes depth; "
+          f"{translucent}; the foliage {foliage} blends at flags 4 with 1.0, so by its "
+          f"material it writes depth -- and the palm's batches are filed see-through by their "
+          f"word all the same (check_draw_order); "
           f"TF2 alpha 0 on {alphas[0]} and 255 on {alphas[255]} texels")
 
     library = effects.EffectLibrary(game / "effects.rlb")
@@ -8572,11 +8574,13 @@ def check_sounds(check, game: Path) -> None:
             if e.is_sound:
                 rates[tuple(round(v, 3) for v in struct.unpack_from("<2f", e.body, 72))] += 1
                 ds3d_modes[struct.unpack_from("<f", e.body, 80)[0]] += 1
-    check("FXID: a sound's +72/+76 is a playback rate of 1, and +80 the DS3DBUFFER mode 0",
+    check("FXID: a sound's +72/+76 is a playback rate of 1, and its +80 is 0 on all 517",
           rates[(1.0, 1.0)] == 516 and rates[(0.8, 1.0)] == 1 and sum(rates.values()) == 517
           and ds3d_modes == Counter({0.0: 517}),
-          f"+72/+76 {dict(rates)}; +80 {dict(ds3d_modes)} (Ngi32.dll:0x1000e443 multiplies the "
-          f"sample's frequency by it; DS3DMODE_NORMAL is 0)")
+          f"+72/+76 {dict(rates)} (Ngi32.dll:0x1000e443 multiplies the sample's frequency by "
+          f"it); +80 {dict(ds3d_modes)}, which the sound's setter keeps at its record's +0x54, "
+          f"past the DS3DBUFFER, where nothing reads it (0x1000dd4d): the buffer's mode stays "
+          f"DirectSound's own default")
     breath_fx = library.get("hero_breath")
     check("FXID: hero_breath loops in time mode 2 with header flag 0x800 and without 0x10",
           breath_fx is not None and breath_fx.mode == 2 and breath_fx.flags & 0x800
@@ -8674,6 +8678,140 @@ def check_sounds(check, game: Path) -> None:
           f"73-78) steps {run} and the walk (33-44, 9-20) {walk}, (state, contact); the "
           f"nearest a foot comes to the 0.1 line: {run_near:.4f} at a run, {walk_near:.4f} "
           f"at a walk")
+
+
+def check_draw_order(check, game: Path) -> None:
+    """The render queue's sort types, the batch word's see-through bit, which draw reaches a
+    unit's own effect manager, and what the game hands Direct3D Sound.
+
+    docs/11-effects.md, "Effect sprites are drawn far to near", "Which draw reaches a unit's
+    own manager" and "How a sound is heard".
+    """
+    paths = {n: game / n for n in ("Terrain.dll", "AniMesh.dll", "Ngi32.dll", "services.dll",
+                                   "World3D.dll", "Effect.dll")}
+    if not all(p.exists() for p in paths.values()):
+        return
+    t_at, a_at, n_at, s_at, w_at, e_at = (_image_at(p.read_bytes()) for p in paths.values())
+
+    # The factory's jump table: a descriptor's type word picks one of five layer classes.
+    cases = struct.unpack("<6I", t_at(0x10031AE6, 24))
+    # Each case's last vtable store, and the slots that say what the class does with order.
+    vtables = {0: 0x1009ACFC, 1: 0x1009AD5C, 2: 0x1009AD8C, 3: 0x1009AD2C, 5: 0x1009ACCC}
+    slots = {t: (struct.unpack("<I", t_at(v, 4))[0], struct.unpack("<I", t_at(v + 12, 4))[0])
+             for t, v in vtables.items()}
+    walks = (t_at(0x1003DFC7, 3) == bytes.fromhex("8b0cc2")      # type 1: 8-byte entries, upward
+             and t_at(0x1003DC47, 3) == bytes.fromhex("8b0c82")  # type 2: 4-byte entries, upward
+             and t_at(0x1003E11B, 7) == bytes.fromhex("d945f8d864c804"))  # the search's compare
+    reflections = t_at(0x10032949, 15) == bytes.fromhex("b81a000000c1e0028b88ac6c0a1089")
+    first_vertex = t_at(0x1003C4E0, 44) == bytes.fromhex(
+        "558bec51894dfc8b45fc8b88900100008b550833c0668b04518b4dfc0faf81340100008b55fc8b8a30010000")
+    check("Terrain.dll: a layer of type 1 or 3 draws far to near, 2 and 5 as filed, 0 by buffer",
+          cases == (0x10031989, 0x10031836, 0x1003179C, 0x100318DB, 0x10031AC0, 0x10031A4E)
+          and slots == {0: (0x10032030, 0x1003F120), 1: (0x1003E090, 0x1003DD10),
+                        2: (0x10031CA0, 0x1003D990), 3: (0x1003E090, 0x1003E1D0),
+                        5: (0x10031CA0, 0x10032940)}
+          and walks and reflections and first_vertex,
+          f"CreatePrimLayer's table (0x10031ae6) {[hex(c) for c in cases]}, type 4 its panic; "
+          f"(add, render) by type { {t: (hex(a), hex(r)) for t, (a, r) in slots.items()} }: "
+          f"types 1 and 3 share the add that inserts by the item's distance (0x1003e090), "
+          f"types 2 and 5 the one that appends (0x10031ca0); type 5's render is type 2's behind "
+          f"setting 26, UseReflections (0x10032949); a mesh item's distance is to "
+          f"positions + index[0] * stride (0x1003c4e0)")
+
+    # The mesh draw's see-through test, and the batches it files.
+    tested = t_at(0x1004557D, 11) == bytes.fromhex("8b8530ffffff2500010000")
+    with_bit: Counter[str] = Counter()
+    every: Counter[str] = Counter()
+    for path in all_archives(game):
+        archive = NResArchive.open(path)
+        members = {e.name.lower(): e for e in archive}
+        for entry in list(archive):
+            if entry.tag != "MESH":
+                continue
+            inner = NResArchive(archive.read(entry), entry.name)
+            stream = next((e for e in inner if e.type_id == objmesh.STREAM_BATCH), None)
+            if stream is None:
+                continue
+            raw = inner.read(stream)
+            wea = members.get(entry.name.lower().rsplit(".", 1)[0] + ".wea")
+            wear = objmesh.read_wea(archive.read(wea)) if wea else []
+            for i in range(stream.element_count):
+                f = struct.unpack_from("<10H", raw, i * objmesh.BATCH_SIZE)
+                material = wear[f[2] & 0xFF].upper() if (f[2] & 0xFF) < len(wear) else "?"
+                every[material] += 1
+                if (f[0] | f[1] << 16) & objmesh.BATCH_SEE_THROUGH:
+                    with_bit[material] += 1
+    whole = all(with_bit[m] == every[m] for m in with_bit)
+    check("MESH: the batch word's 0x100 files 2953 batches see-through, by whole materials",
+          tested and sum(every.values()) == 15153 and sum(with_bit.values()) == 2953
+          and len(with_bit) == 46 and whole and with_bit["TF2"] == 704
+          and with_bit["B_A_BRIGE"] == 341 and with_bit["NH_GLS"] == 71,
+          f"CShade's mesh draw tests the word for 0x100 (Terrain.dll:0x1004557d): "
+          f"{sum(with_bit.values())} of {sum(every.values())} batches carry it, over "
+          f"{len(with_bit)} materials, every batch of each: {whole}; the palm's TF2 on "
+          f"{with_bit['TF2']}, {dict(with_bit.most_common(8))}")
+
+    # The mesh keeps its aggregate's effect manager, and draws it as its own draw ends.
+    kept = a_at(0x10007051, 28) == bytes.fromhex(
+        "8b038d4b3451ba040200008bcbff108b038d4b3851ba130000008bcb")
+    drawn = a_at(0x100151C6, 36) == bytes.fromhex(
+        "8b44243485c07411f6842498000000017507b901000000eb0233c98b46345157558b1050")
+    layer = t_at(0x1004294B, 13) == bytes.fromhex("837df8000f95c183c1068b55fc")
+    unseen = t_at(0x1001C8D7, 6) == bytes.fromhex("8b551083ca01")
+    flag2 = e_at(0x1000635E, 24) == bytes.fromhex(
+        "8b4e048b5110c1ea0bf6d2f6c201740e8b85a80000000c02")
+    library = effects.EffectLibrary(game / "effects.rlb")
+    gated = [fx for fx in library if fx.flags & effects.FX_SECOND_PASS]
+    kinds: Counter[int] = Counter(e.kind for fx in gated for e in fx.emitters)
+    sounds = [e for fx in library for e in fx.emitters if e.is_sound]
+    gated_sounds = [e for fx in gated for e in fx.emitters if e.is_sound]
+    lights = sum(e.kind == 1 for fx in library for e in fx.emitters)
+    check("AniMesh.dll: a mesh's draw draws its own effect manager, with pass 1 while it is seen",
+          kept and drawn and layer and unseen and flag2
+          and len(gated) == 198 and kinds[1] == 147 and lights == 618
+          and len(gated_sounds) == 29 and all(e.sound_loops for e in gated_sounds)
+          and len(sounds) == 517,
+          f"the mesh's init keeps QueryInterface(0x13) at its +0x38 (0x10007062), which its "
+          f"draw, entered on the interface at +4, reads as [this+0x34] and calls slot 3 of "
+          f"with the pass 1 only where its sphere cleared the planes and the draw's flag 1 is "
+          f"clear (0x100151c6); the shade's slot 8 picks the sprites' layer, 6 or 7 "
+          f"(Terrain.dll:0x1004294b); the landscape draws an object of no seen cell with "
+          f"flags | 1 (0x1001c8d7); a manager's flag 2 is a live instance without 0x800 "
+          f"(Effect.dll:0x10006364).  Measured: 0x800 on {len(gated)} effects, holding "
+          f"{kinds[1]} of the {lights} lights and {len(gated_sounds)} of the {len(sounds)} "
+          f"sounds, all of them loops: {all(e.sound_loops for e in gated_sounds)}")
+
+    # What the game hands Direct3D Sound.
+    made = s_at(0x10011914, 5) == bytes.fromhex("6820010000")
+    priority = n_at(0x1000C489, 5) == bytes.fromhex("6a025250ff")
+    primary = n_at(0x1000C4BB, 15) == bytes.fromhex("c7442438240000004883e01083c801")
+    rate = n_at(0x1000C50F, 25) == bytes.fromhex(
+        "8bc52500010000f7d81bc066c1e90325dea9ffff0544ac0000")
+    buffer = n_at(0x1000E1C3, 20) == bytes.fromhex("a190a503108b0c85406e0310c744242410000700")
+    algorithms = [struct.unpack("<I", n_at(0x10036E40 + 4 * i, 4))[0] for i in range(3)]
+    plain = n_at(algorithms[0], 16) == bytes.fromhex("3f3341c21b1cd21194f500c04fc28aca")
+    play = n_at(0x1000E8BF, 17) == bytes.fromhex("395d7c0f95c14983e1100bc150535357ff")
+    immediate = (n_at(0x1000E742, 15) == bytes.fromhex("8b0e538d9424900000005256ff5130")
+                 and n_at(0x1000C9FD, 12) == bytes.fromhex("8b16558d4424145056ff5228"))
+    past_block = n_at(0x1000DD4D, 15) == bytes.fromhex("8b7f448bc169c0880000008d443054")
+    front_top = (n_at(0x1000D567, 2) == bytes.fromhex("d900")
+                 and n_at(0x1000D58D, 3) == bytes.fromhex("d94008"))
+    listener = (w_at(0x10013C09, 5) == bytes.fromhex("ba08010000")
+                and w_at(0x10013C23, 20) == bytes.fromhex(
+                    "c744242050000000897c24248b08525750ff5114"))
+    check("Ngi32.dll: every sound is a plain-stereo 3D buffer, muted past its far distance",
+          made and priority and primary and rate and buffer and plain and play and immediate
+          and past_block and front_top and listener,
+          f"services.dll makes the 3D sound with flags 0x120 (0x10011914): the default device "
+          f"at DSSCL_PRIORITY (Ngi32.dll:0x1000c489), a primary buffer of flags 0x11 "
+          f"(0x1000c4c3) set to 22050 Hz, 16 bits, stereo (0x1000c50f); each sound a buffer of "
+          f"flags 0x70010 -- CTRL3D, GETCURRENTPOSITION2, MUTE3DATMAXDISTANCE, LOCDEFER -- and "
+          f"the algorithm table's entry 0 (0x1000e1c3), DS3DALG_NO_VIRTUALIZATION: {plain}; "
+          f"played with TERMINATEBY_DISTANCE and LOOPING by its record (0x1000e8bf); its "
+          f"DS3DBUFFER and the listener's block applied at once, dwApply 0 (0x1000e74e, "
+          f"0x1000ca06); the listener's front and top the camera matrix's first and third "
+          f"columns (0x1000d567, 0x1000d58d), made current by stdRenderGame through "
+          f"QueryInterface(0x108) and a set of the flags alone (World3D.dll:0x10013c34)")
 
 
 def check_actions(check, game: Path) -> None:
@@ -27302,7 +27440,8 @@ def run(game: Path) -> int:
         check_render_state, check_shade, check_blend_depth, check_minimap_agreement, check_arealmap,
         check_grid, check_missions, check_scale, check_objects, check_poses, check_lod,
         check_damage, check_blasts, check_node_stages, check_scenery_life,
-        check_effects, check_effect_timing, check_sprite_modes, check_sounds, check_music,
+        check_effects, check_effect_timing, check_sprite_modes, check_sounds, check_draw_order,
+        check_music,
         check_actions,
         check_footprints,
         check_rsli,

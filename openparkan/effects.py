@@ -153,7 +153,8 @@ FX_TIMES_LINEAR = 0x200
 #: with ``EMITTER_FLAG`` asks for the same test.
 FX_HIDE_OCCLUDED = 0x400
 #: Drawn only by a draw call whose pass argument is set (``0x10007d44``,
-#: ``0x10004061``); which call that is is not established.
+#: ``0x10004061``): the landscape's and the atmosphere's always, and an object's own
+#: manager only while the object is seen (``AniMesh.dll:0x100151c6``).
 FX_SECOND_PASS = 0x800
 FX_DRAW_TEST = FX_SECOND_PASS
 #: Every manager tick hands each emitter the manager's target point, which a

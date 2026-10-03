@@ -168,6 +168,12 @@ SUBOBJECT_COLLISION = SUBOBJECT_COCKPIT
 NO_PARENT = 0xFFFF
 
 BATCH_SIZE = 20
+#: Bit 8 of a batch's flags dword: ``CShade``'s mesh draw files the batch with the
+#: see-through surfaces, in the queue's sorted layer 5 with the depth write off
+#: (``Terrain.dll:0x1004557d``).  2953 of the 15153 shipped batches carry it: every
+#: batch of 46 materials, the palm's leaves and the glass among them.
+BATCH_SEE_THROUGH = 0x100
+
 #: Bit 1 of a batch's flags dword: its triangles are tested from **both** sides.
 #: ``AniMesh.dll:0x1001110c`` runs the plane test once as the segment lies and,
 #: failing, once with its ends swapped, so a round or a sight ray reaches the
