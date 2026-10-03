@@ -357,6 +357,7 @@ Four more ways to be wrong, all of which this cost:
 uv run --group analysis python analysis/slotcalls.py            # ILifeSystem slot 16
 uv run --group analysis python analysis/slotcalls.py 0x16 10    # the control: slot 10
 uv run --group analysis python analysis/slotcalls.py 0xb 27     # IAnimation slot 27
+uv run --group analysis python analysis/slotcalls.py --bare 23  # by arity: ICamera2 slot 23
 ```
 
 The blind spot above, searched for directly. An interface an object hands out by

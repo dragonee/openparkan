@@ -362,6 +362,20 @@ pieces come together, each from a different file:
   and a **cell** of it ([above](#a-material-picks-a-sub-image-as-well-as-a-texture)).
 - **How big.** The keyframe's first two floats, its extent across and up.
 
+- **What colour.** One for all four corners: the sprite's stream block gives its
+  diffuse as `CSun +0x95c` with a stride of 0 (`0x1007cd98`–`0x1007cdaa`), which
+  is property 5, **slot 17**, and its specular as the `0xff000000` at `+0x960`
+  (`0x1007cd7e`), no fog. The item is filed with flags `0xc` (`0x1007e69d`),
+  pre-transformed and unlit like the sky's quad, so that colour is all it has
+  beside its texture. *Measured*: slot 17 is black on 31 of the 576 keyframes
+  that lie inside a body's window and on 53 of the 80 that lie outside one;
+  the commonest of the rest are a mauve `(130, 115, 162)`, an orange
+  `(255, 74, 0)` and a pale `(255, 235, 210)`. Its alpha is the one the flare's
+  lift of the main light reads ([below](#the-lens-flare)), 255 on 197 of the 656
+  and 50 or less on 249; **whether that alpha reaches the sprite's blend is not
+  checked against a frame**, and the engine still draws a body in its texture's
+  own colours.
+
 The cell is the piece that is easy to miss and impossible to miss twice.
 `ENV_SUN_3` names `SUN1.0`, which holds **four** bodies; a quad taking the whole
 sheet draws all four at once, in a square, which is what this engine did until
@@ -494,6 +508,16 @@ gates also **brighten the sun's main light**, not its sprite, as this page
 used to say: the colour handed to the light manager (`0x1007eb9e`) is
 `lerp(c, 5c, gate1² × gate2 × slot 17's alpha / 255)` (`0x1007ea14`), so a
 sun on the view axis lights the scene at up to five times its colour.
+
+**Only a scene camera's own frame gets it.** `RenderFlare` returns at any
+camera type but 0 (`0x1007d558`), and the sun's draw returns at once in a
+camera of type 2, body and all (`0x1007d8f6`): the water's mirror has no flare
+and, as the install runs it, no body
+([below](#the-skys-first-draw-is-a-screen-wide-quad--read)). And with the
+camera's infrared on the draw puts the body up and then passes over the whole
+of the rest — the gates, the flare and the lift — handing the light manager
+the plain colour instead (`0x1007e7ee`–`0x1007e7f9`, `0x1007eba3`,
+[What the infrared does to a frame](#what-the-infrared-does-to-a-frame--read-and-seen)).
 
 ## Where the sun stands, and it is not in a file
 
@@ -703,6 +727,119 @@ alpha kept and red and blue 0: green = min(255, 2.31 (R + G + B)). Its **slot 7*
 camera's frame render sets bit 0 every frame from its own flag word's `0x20`
 (`0x10084514`–`0x1008456a`, [The scene colour](#the-scene-colour-is-added-to-every-material)).
 
+### What the infrared does to a frame — *read*, and *seen*
+
+**The flag lasts one camera's render.** `CCamera::Render` (`0x100844c0`) sends
+the state a block of mask 1 whose bit 0 is its own flag word's `0x20`
+(`0x10084514`–`0x1008456a`), sends it again after each of the three renders it
+nests (`0x100845c8`, `0x10084674`, `0x100846c7`), and before it returns sends
+the same block with the bit **clear** (`0x1008481a`–`0x10084851`). So the
+infrared is on for what that camera draws and for nothing drawn after it: the
+HUD, its model views, the next camera. The water's reflection is the one
+exception by design — the reflection draw gives the reflection camera the scene
+camera's flag word (`0x10083f0e`–`0x10083f20`), so the lake mirrors a green
+world.
+
+**Who asks.** The state's bit is read in nine places, all in `Terrain.dll`:
+
+| reader | at | what it does with the bit set |
+|---|---|---|
+| the shade's lighter, slot 8 | `0x1004e0ad` | filters the item's material and the scene colour, below |
+| the shade's indexed lighter, slot 3 | `0x1004c6bd` | the same, on the same four colours (`0x1004c6dd`–`0x1004c800`) |
+| the effect sprites' colour, slot 4 | `0x1004f8cc` | puts the sprite's diffuse through slot 5 (`0x1004f8ee`) |
+| the sky's draw | `0x10079786` | the fog colour and every dome colour through slot 5, below |
+| the sun's draw | `0x1007d923` | slot 17's colour through slot 5 (`0x1007d95f`), and no flare |
+| the snow's draw | `0x10075ae0` | its one colour through slot 5 (`0x10075b2b`) |
+| the rain's draw | `0x10076460` | the same (`0x100764ab`) |
+| the item renderer, twice | `0x1002f920`, `0x1002fe79` | keeps the item off the device-lighting road, which the shipped `UseDXLighting` 0 never takes anyway (`0x1002f8fd`, `0x1002fe50`) |
+
+The first three read the block where it lies, at the interface's `+0x6c` and
+`+0x3c`; the other six ask slot 7 for it. *Measured*: the install holds **414**
+calls through a slot 7 (`+0x1c`) and **658** through a slot 5 (`+0x14`); of the
+414, **six** read the answer's `+8` and mask bit 0 in the next five
+instructions, the six of the table; and of the 658, **six** pass a colour in
+`edx` to the state they have just tested — one each for the snow, the rain
+and the sun, two for the sky, and slot 4's on itself — beside one in the item
+renderer that is its vertex buffer's (`0x100302bc`). `0x1004f900` has no direct
+caller. The control is what the sweep was known to owe: it finds the three
+callers this page had already named — the sky, the sun and the item renderer —
+and three it had not, the snow, the rain and the item renderer's second. The
+three inlined copies of the filter are found by its constant instead:
+`0x1009b360`, the 0.33, is named at 27 sites — twelve in slot 3, twelve in
+slot 8 and three in slot 5 — and nowhere else in the module.
+
+**What goes through it.**
+
+- **Every lit item's material, and the scene colour.** Each lighter, before it
+  sums a light, turns four colours of its own copies into the filter's green,
+  in floats and **not held to 1**: the material block's diffuse (`+4`), its
+  specular (`+0x24`) and its ambient (`+0x14`), and the merged state's scene
+  colour (`+0x78`). Green becomes 7 × 0.33 × (R + G + B) and red and blue 0;
+  the alphas are left. So the lit sum is green alone — a light gives a surface
+  its **green** channel and nothing of its red or blue — and the floor under
+  it is 2.31 times the scene colour's sum: 1.09 for Mission 01's 40-of-255
+  grey, 2.39 for C02 M04's (86, 111, 67). A floor past 1 is kneed like any lit
+  component and what is over goes to the specular
+  ([The lit colour is the game's own](#the-lit-colour-is-the-games-own--read-and-measured)),
+  so **under the infrared no lit surface is darker than its texture's own
+  green**. That is every mesh batch, the landscape, the clouds and the water.
+- **The sky.** The fog colour, after its alpha is forced
+  (`0x10079afa`–`0x10079b21`), so the device's `FOGCOLOR`, the dome's rim and
+  the screen-wide quad are all the filtered colour; then each of the dome's
+  vertex colours in place (`0x10079b4f`–`0x10079bb6`), their alphas kept, the
+  rim's written after from the fog colour (`0x10079bb8`); and the sky's
+  constant white, the nebula's vertex colour, becomes `0xff00ff00`
+  (`0x100797a8`) — the same white through the same filter.
+- **The sprites.** An effect's sprite, the snow, the rain and a body's sprite
+  each carry one colour, and each goes through slot 5.
+
+**What does not.** A light's colour: no reader filters one, and the sun's two
+keep slot 19's and slot 21's. A texture: the `0xff00ff00` is a vertex colour
+and not a write mask, so a texel's red and blue are lost only by being
+multiplied by a diffuse that has none. The fog's range. And everything drawn
+outside the camera's render.
+
+**It brightens, by seven.** The filter is not a hue: 0.33 of the sum is the
+colour's mean and 7 the gain on it, so a stored colour whose mean is over 36
+of 255 comes out at full green, and a lit material at up to 6.93 times a white
+one's light. Night vision is what the name in `iron3d.dll` calls it.
+
+**No flare.** With the flag set the sun's draw skips from `0x1007e7ee` to
+`0x1007eba3`: both gates, the twelve ghosts and the lift of the main light.
+
+*Seen*, once. In C02 M04, on foot ("Let's Play - Parkan: Iron Strategy, Part
+4.5", C9kZR__WpIQ, 3:14.9 to 3:15.5), the HUD's infrared lamp goes white and
+the whole view goes green for seven tenths of a second:
+
+| | a second before | under the infrared |
+|---|---|---|
+| sky | (181, 214, 64) | (0, 253, 0) |
+| sunlit ground | (101, 111, 23) | (0, 252, 0), (0, 248, 0) |
+| a hill's shaded face | (44, 64, 26) | (1, 226, 1) |
+| the tanks far off | — | (1, 238, 1), dark shapes in it |
+
+Red and blue are 0 or 1 everywhere in the view; the ground keeps a faint
+mottling and the hill its texture's grain, a plant stands out darker; and the
+HUD is untouched — the radar's enemy dot stays (220, 46, 4), the weapon list's
+*OUT OF RANGE* red, the two model views their own greens. The sky's 2.31 × 459
+and the ground's lit sum are both far past the byte, which is the saturation;
+the hill, off the sun, is its texel's green on a diffuse of 1 plus the
+specular's share. The engine at the same hour of the same mission, 150 s in —
+sky (176, 210, 55), ground (101, 103, 33) — reads (0, 253, 0) and (0, 252, 0)
+with its switch on.
+
+*Measured*, how often: one frame every 3 s of all 19 recordings, **8107
+frames**, of which **4995** show the cockpit's indicator row (the figure or the
+palm lit, [35-hud.md](35-hud.md#the-indicators--read-and-seen)). The infrared's
+lamp is lit beside dark repair and camouflage lamps in **1**, that one, and it
+is the only frame whose view is green alone: seven others are more than 0.6
+green-only and none more than 0.66, five of them cockpit frames with the lamp
+dark and two with no cockpit — the one looked at, Part 10's at 9:33, is a room
+under a green light. The control is the reader's other lamps: repair lit on 48
+and camouflage on 48 of training mission 1's 49 cockpit frames, where the
+tutorial turns both on. A flip shorter than 3 s between two samples is not
+ruled out.
+
 ### Where the two lights point — *read*
 
 A `CLightSrc` record is **0x5c bytes**, in an array at the manager's `+0xc`
@@ -905,38 +1042,128 @@ back (`0x1007a1a6`): four corners at *z* = 1.0 written into the sky's own
 the depth write both off. It is filed into group 1 layer 0 like the rest of the
 sky and, being filed first, is drawn first within that pass.
 
-**It carries no colour of its own.** Its material block is the sky's `+0x484`,
-and the only fields anything ever writes in it are `+0x20` (1.0, the ambient
-alpha, `0x10078614`), `+0x48` and `+0x4c` (both 0, so no texture), `+0x58` (0)
-and `+0x5c` (a format id from `CShade`'s five-entry table at `+0xbfc`,
-`0x10046a98`). Its diffuse at `+4` and its ambient colour at `+0x14` are never
-written anywhere in `Terrain.dll` — a scan of every `[reg + 0x484..0x504]`
-operand and every `add`/`lea` by a constant in that span over the whole module
-returns the six sites above and the one `add ecx, 0x484` that pushes the block.
-So what it would put on the screen is the **scene colour** alone, which is
-what every material's emissive gets added
-([below](#the-scene-colour-is-added-to-every-material)).
+**It paints the fog colour** — *read*, and *seen*. The colour is in its vertex
+stream, not its material. The quad's stream block is the sky's `+0x1f4`,
+filled with the other four (`0x10079661`–`0x10079708`): the positions at
+`+0x254` with a stride of `0xc`, **the diffuse at the sky's `+0x70` with a
+stride of 0** (`0x10079698`), the specular at `+0x5c`, the `0xff000000` the
+unfogged layers share, and one pair of texture coordinates at `+0x64`. `+0x70`
+has one writer, the sky's draw itself (`0x10079b3f`), three instructions after
+it has made the same value the device's `FOGCOLOR` (`0x10079b33`): the
+horizon's colour in the camera's heading, its alpha forced to 255
+([Fog](#fog)), after the infrared has had it where that is on. The item's
+flags carry no `0x10`, so the shade never sees it and no material colour
+reaches it: a pre-transformed item is drawn in the diffuse it brings
+(`0x10030043` → `0x1002f2c0`).
+
+Its material block, the sky's `+0x484`, gives it what is left. The only fields
+anything writes in it are `+0x20` (1.0, the ambient alpha, `0x10078614`),
+`+0x48` and `+0x4c` (both 0, so no texture), `+0x58` (0) and `+0x5c`, the blend
+mode: `CShade`'s slot 3 asked with `edx` 0 (`0x100785f5`), index 0 of its
+translate table, **mode 0, opaque** — where the gradient's block beside it asks
+with 1 and gets `SRCALPHA`/`INVSRCALPHA` (`0x100785a2`). An earlier round
+derived the **scene colour** from that block having no colour written in it
+anywhere, and it does not: the block's colours never reach an unlit item, and
+the colour stream was not looked at.
+
+**It is all the clearing the frame gets** — *read*. `World3D.dll!stdRenderGame`
+(`0x10013bd0`) opens a frame with the render device's slot 10 and `edx` 0
+(`0x10013ca1`) and then its begin-scene (slot 12, `0x10013cac`), and slot 10
+(`Ngi32.dll:0x10007ca0`) is one `IDirect3DDevice7::Clear` with flags **2**,
+`D3DCLEAR_ZBUFFER`, a colour of 0 it does not use and z 1.0
+(`0x10007d24`–`0x10007d32`). `CCamera::Render` calls the same slot after its
+reflection draw. *Measured* over `Ngi32.dll`, the one module that holds the
+device: three calls through `+0x28`, of which that one is the device's `Clear`
+— the control, since the sweep does find it — and the other two are the
+DirectDraw object's as it shuts down (`0x100049a6`) and the sound listener's
+(`0x1000ca06`); and of its eleven calls through `+0x14`, three are a surface's
+blit, two the frame's presentation with `DDBLT_WAIT` alone (`0x10006e1b`,
+`0x10006f51`) and one a copy handed no effects block (`0x10008a58`), which a
+colour fill needs. So **the colour buffer is never cleared**, and the quad —
+opaque, over the whole viewport, first of the frame — is what stands where
+nothing else is drawn. That is also why the one view that draws over a
+finished frame has to skip it.
+
+*Seen*, with the frames converted by the video's own matrix. C02 M04's briefing
+at 43.5 s ("Part 4", Qqs8_i9IeUU, 16:12.5) looks down about 4° from a height
+of 158, by its waypoints, so the dome's rim, at eye height, stands some 67
+pixels above the middle of a 1400-pixel frame, and the far ground's edge 100
+pixels below the rim at the frame's left and 60 at its right. That band is
+**(106, 172, 22)**, row after row, and so is the sky above the rim; the file's
+horizon ahead is (107, 172, 25) and its scene colour **(86, 111, 67)**. C03
+M02's opening shot ("Part 6", -yNnsqudMzw, 0:49.7), about 12° down from a
+height of 100, is one red, (108, 1, 19), from the top of the picture through
+the rim to the fogged ground some 140 pixels under it — the shot is still
+fading in, at 0.66 of its (164, 1, 30) — where the scene colour would put
+(84, 54, 73).
 
 **The draw is gated** (`0x1007a325`): the sky asks the view (interface
-`0x12`, `ICamera2`) for its mode — slot 24, `0x10083010`, the field `+0x280`
+`0x12`, `ICamera2`) for its type — slot 24, `0x10083010`, the field `+0x280`
 that slot 23 sets and the view's constructor leaves 0 — and **skips the quad
-when the mode is 1**.
+when the type is 1**.
 
-**The scene's own camera is mode 0, so there the quad is drawn.** An earlier
-round inferred the opposite, that the world's view is the mode-1 one, because
+**A camera's type is its name** — *read*. This page called it a mode and could
+not find who set it. `CBufferingCamera`'s own word for it is *type* —
+*"Invalid camera type"* is the panic of its slot 30, `GetObjectMask`
+(`0x100830b0`), which hands out one of three masks by it — and it is set once,
+by the camera that owns the view. `CCamera::CCamera` (`0x100839c0`) keeps at
+its `+0x1a0` a number it makes of the name it is built with (`0x10083a54`–
+`0x10083aa6`): **2** for `REFLECTION_SHIFTED`, **1** for `REFLECTION`, **0**
+for any other name or none. Slot 14 of its game-object interface
+(`0x100852e0`), called with an argument that is not null, hands that number to
+its view's slot 23 (`0x10085365`) beside the render device and the prim buffer;
+who calls slot 14 is not read. So:
+
+| type | camera | the sky's quad | the weather | a body | its flare |
+|---:|---|---|---|---|---|
+| 0 | every scene camera | drawn | drawn | drawn | drawn |
+| 1 | `REFLECTION`, the water's mirror drawn into the frame | **skipped** (`0x1007a328`) | not drawn | drawn | not drawn |
+| 2 | `REFLECTION_SHIFTED`, the mirror drawn into a texture, which the install runs ([03-terrain.md](03-terrain.md#the-reflection-camera--read)) | drawn | not drawn | **not drawn** (`0x1007d8f6`) | not drawn |
+
+The weather's two draws and `RenderFlare` return at any type but 0
+(`0x100759d3`, `0x10076353`, `0x1007d558`), and `CShade` keeps the type of the
+camera it is drawing for at its `+0xbcc` (`0x10045f53`–`0x10045f65`), which is
+the 0 its water tests ask for
+([03-terrain.md](03-terrain.md#how-a-water-face-draws--read)).
+
+A type-2 camera looks straight up out of the water, so its own heading means
+nothing: the sky takes the fog colour's heading from the view it was handed as
+its parent instead (slot 31, `0x10083120`, the field the reflection draw sets
+through slot 32 at `0x10083f2e`; asked at `0x100797ca`–`0x10079812`). And
+every camera, whatever its type, runs the sky's `0x800` pass unless its flag
+word carries 8 (`0x100845eb`, `0x10084643`–`0x10084655`), which is how the
+mirror has a sky at all.
+
+*Measured*: the install holds **38** calls through a slot 23 (`+0x5c`). Slot 23
+of `ICamera2` takes its value in `edx` and nothing on the stack — it ends in a
+bare `ret` (`0x10083002`) — and **36** of the 38 push at least one argument
+first, 35 since the call before them and one, `World3D.dll:0x100075bb`, ahead
+of a branch it shares with a `+0x58` call: 13 are calls into `Ngi32.dll`'s
+`g_FastProc` table with a matrix in `edx` (five in `AniMesh.dll`, three each in
+`Terrain.dll` and `MisLoad.dll`, two in `Effect.dll`), ten are `World3D.dll`'s
+own, and the rest COM-style calls with `this` pushed. Of the two that push
+nothing, `Control.dll:0x10007cda` calls its own object from a jump table with
+only the vtable in `edx`, and `Terrain.dll:0x10085365` is the one
+(`analysis/slotcalls.py --bare 23`). It carries no constant because the value
+is a field. The earlier searches missed it twice over: the view is kept from a
+`QueryInterface` whose answer's address is made with an `add`, not the `lea`
+[`analysis/slotcalls.py`](../analysis/slotcalls.py) looks for (`0x10083acd`),
+and the call reads it at `+0x198` of the interface the method was entered on,
+where the constructor wrote `+0x19c` ([09-method.md](09-method.md#searches-that-do-not-discriminate-so-nobody-repeats-them)).
+The control is slot 24, the getter, on the same view: of the install's **65**
+calls through `+0x60` the same sweep by arity keeps **8**, all in
+`Terrain.dll` and all this getter — the sky's two, the snow's, the rain's, the
+sun's two, the flare's and `CShade`'s (`--bare 24`).
+
+**The scene's own camera is type 0, so there the quad is drawn.** An earlier
+round inferred the opposite, that the world's view is the type-1 one, because
 group 1 runs after group 0 and a screen-wide quad with the depth test off
-would paint over the finished scene. Two things say otherwise. `CCamera::Render`
-runs the world's `0x800` pass, the sky's, **and ends that render** before it
-draws the world at all, and it does so "for a camera of mode 0"
+would paint over the finished scene. `CCamera::Render` runs the sky's `0x800`
+pass **and ends that render** before it draws the world at all
 ([03-terrain.md](03-terrain.md#when-it-draws--read)): the quad is the first
-thing of the frame, and the world is drawn over it. And the rain's and the
-snow's draws return at any mode but 0 ([The weather](#the-weather--read-and-seen)),
-while the dust is *seen* in the cockpit, in the briefing and in command mode.
-So the quad is what stands below the dome's rim where no ground covers it.
-What it paints there stands as derived above, the scene colour, and is not
-checked against a frame. Slot 23's caller, which gives the other cameras their
-1 and 2, is not found: of the 38 calls through `+0x5c` in the install's
-modules none hands a constant in `edx`.
+thing of the frame, and the world is drawn over it. The `REFLECTION` camera is
+the one that cannot have it — its render comes after the scene's own sky pass,
+into the same frame (`0x1008468e`–`0x100846a9`), and a quad would wipe it.
 
 ### The three layers and their texture coordinates — *read*
 
@@ -995,9 +1222,11 @@ and the sky's four draws, in the order it queues them:
 The material blocks are filled from `sky.wea` by index, each a copy into its
 own 0x80-byte block: index 1 to `+0x284` (`0x1007828c`), index 2 to `+0x304`
 (`0x1007838e`), index 0 to `+0x384` (`0x10078496`). `+0x404` and `+0x484` take
-no slot; their texture handles come from the render device (`0x100785a2`,
-`0x100785f5`), so those two draws are untextured — the vertex-colour dome and
-a flat quad over the viewport.
+no slot: their texture fields are zeroed and only their blend modes asked for,
+of `CShade`'s translate table at index 1 and index 0 (`0x100785a2`,
+`0x100785f5`; an earlier reading here took those two calls for texture
+handles), so those two draws are untextured — the vertex-colour dome, blended
+on its alpha, and an opaque quad over the viewport.
 
 So **the nebula is drawn first and the coloured dome over it**, which is what
 makes the dome's alpha matter.
@@ -1649,23 +1878,50 @@ world hands it. With `0x800` it draws the objects of type 1, the sky; otherwise
 with `0x1000` those of types 2, 3 and 4. The scene camera runs the `0x800` pass
 before the world and the `0x1000` pass after it
 ([03-terrain.md](03-terrain.md#when-it-draws--read)), so **the weather is drawn
-after the whole world**. The reflection camera hands the world `0x120` and gets
-neither.
+after the whole world**. A reflection camera runs the `0x800` pass like any
+other, hands the world `0x120`, and is not handed the `0x1000` pass at all
+(`0x10084781`).
 
 **In which views.** The rain's and the snow's draws begin alike (`0x100759b5`,
 `0x10076335`): they ask the view for interface `0x12`, `ICamera2`, and return
-if its slot 24, the mode
-[the sky's first draw](#the-skys-first-draw-is-a-screen-wide-quad--read) asks
-for, is not 0. Nothing else gates them: the two draws and the particle system
-under them call the view, the render device, the shader's colour filter, the
-material manager and the game clock, and **nothing of the landscape, of a
-building or of the player's unit**. So the weather falls in every view a mode-0
-camera draws, and it falls indoors.
-*Seen*: the dust is in every frame of `CAMPAIGN.03`'s briefings ("Let's Play -
-Parkan: Iron Strategy, Part 5", PfAg6zSe-yM, from 0:55; "Part 6", -yNnsqudMzw,
-0:55), of the cockpit, of command mode ("Part 6.5", 9SBZOCWv_vE, 7:05) and of a
-bunker's guns (9:47), and over the black field of a doorway as the hero walks
-into the Small Bunker (Part 6, 28:15).
+if its slot 24, the camera's type
+([the sky's first draw](#the-skys-first-draw-is-a-screen-wide-quad--read)),
+is not 0 — which only the water's two mirrors are. Nothing else in them gates
+anything: the two draws and the particle system under them call the view, the
+render device, the shader's colour filter, the material manager and the game
+clock, and **nothing of the landscape, of a building or of the player's unit**.
+So the weather falls in every view a scene camera draws: *seen* in every frame
+of `CAMPAIGN.03`'s briefings ("Let's Play - Parkan: Iron Strategy, Part 5",
+PfAg6zSe-yM, from 0:55; "Part 6", -yNnsqudMzw, 0:55), of the cockpit, of
+command mode ("Part 6.5", 9SBZOCWv_vE, 7:05) and of a bunker's guns (9:47).
+
+**But not in a room** — *read*, and *seen*. The gate is not in the weather; it
+is on the pass. `CCamera::Render` clears its flag word's `0x200` before it
+draws the world (`0x10084732`) and hands the `0x1000` pass over only if the
+bit is still clear after it (`0x10084790`–`0x1008479e`); and a building's own
+draw sets it. `CBuilding::Render` (`0x10058b90`), for a camera inside its
+sphere, turns the camera into each of its rooms' frames and asks whether it
+stands in one ([24-motion.md](24-motion.md#a-building-is-drawn-cell-by-cell-through-its-portals--read)):
+the eye must lie in the room's level-0 box, corner to corner
+(`0x100592af`–`0x1005934f`), and the room's mesh must then say it holds it —
+interface `0x20` slot 7 (`AniMesh.dll:0x10010550`), which sends a line through
+the point across the room's triangles, counts the crossings to each side
+(`0x10010995`, `0x100109a5`) and answers whether either count is odd. With the
+camera in a room, and pass flags without `0x100` — any camera but a mirror —
+the building takes the view's flags, ORs in `0x200` and sets them
+(`0x100599dc`–`0x10059a06`). It is the one writer found: across the install,
+that is the only call through a slot 13 (`+0x34`) with an `or` of `0x200` in
+the ten instructions before it.
+
+So **neither rain nor snow is drawn while the camera stands in a room of a
+building**, any building, the pod room among them; at a doorway, in the
+exterior's cell, it still is. Nothing else stops for it: the particles are
+only moved by the draw, the rain's sound is set in the takt, and the lightning
+strikes and lights the hall through its doorways as before. *Seen* on
+`CAMPAIGN.03`'s Small Bunker (Part 6): at 28:16 the hero is on the threshold,
+the frame is the doorway's black and the dust is all over it; at 28:20 and at
+28:34, inside, there is none, nor in the frames between at two-second steps;
+at 28:42, outside again, it is back.
 
 ### One particle system, run two ways — *read*
 
@@ -1790,6 +2046,24 @@ with flags `0x102`, sets its volume to 0 and plays it (`0x10075e37`–
 (`0x100765e5`–`0x10076636`): silence at 0, −4.2 dB at 0.5, full at 1. The
 destructor stops and releases it (`0x100761a0`).
 
+**It is a loop, and it is nowhere** — *read*. The call goes to the 3D sound
+object itself, not to a sound world: the atmosphere keeps `niGet3DSound`'s
+answer at its `+0x164` (`0x1006efee`) and hands it to the rain's constructor,
+which calls its slot 7 (`Ngi32.dll:0x1000cab0`). That makes a plain sound, a
+`0x2c`-byte object with the vtable `0x1003175c` (`0x1000e980`), and the flags
+are its own:
+
+| flag | what it does |
+|---|---|
+| `0x100` | the buffer is made with `DSBCAPS_CTRLVOLUME`, and the volume slot does nothing without it (`0x1000e9db`, `0x1000eb7e`) |
+| `0x200`, `0x400` | `DSBCAPS_CTRLFREQUENCY` and `DSBCAPS_CTRLPAN`, by the same shift (`0x1000e9c9`–`0x1000e9e2`) |
+| `0x2` | kept with the others at the object's `+0xc` (`0x1000ea1e`), and handed to the buffer's `Play` as its flags, `DSBPLAY_LOOPING` (`0x1000eb15`–`0x1000eb25`) |
+
+The buffer's description comes out as `0x82` for the rain: static, its volume
+settable, and **no `DSBCAPS_CTRL3D`** — no flag of this object asks for one —
+so nothing places it and it is heard alike from everywhere. It plays on in a
+room, where the drops are not drawn.
+
 No recording of rain is at hand. *Measured*: 8 missions rain, all with
 `RAIN_DROP`, cell 21 of `EFFECT6.0`, and `atm_rain1.wav`.
 
@@ -1820,9 +2094,51 @@ longer gaps where gunfire hides the count.
 the corners its `IMesh2` hands out at start (`0x10071c9a`), x and y each
 `rand() ÷ 32767` of the box's extent. It is the whole map, not the camera's
 surroundings. `CLightning::Init`'s two panics, *"Root object is not a
-landscape"* and *"Landscape does not support IMesh2"*, are that request.
+landscape"* and *"Landscape does not support IMesh2"*, are that request. The
+corners are the first 96 bytes of `Land.msh`'s stream 2 as the landscape read
+them (`0x1001781c`): the point's x runs from corner 0 to corner 1, its y from
+corner 0 to corner 3, and **its z is corner 0's** (`0x1007211e`–`0x1007213d`).
+*Measured* on all 33 maps: corner 0 is (0, 0, the lowest vertex's z), corner 1
+that moved along x and corner 3 along y. So the strike is looked for from the
+map box's floor.
 
-**What a strike does** (`0x10071d70`): it asks the landscape for the ground at
+**The ground under it** — *read*, and *measured*. The strike asks the world,
+not the landscape: `IWorld` slot 8 (`0x10025b40`, the world from `0x10024ac0`)
+with 2 in the register, the z axis and neither direction bit, and a query
+whose first word is the static at `0x100a6f54` and whose other seven are 0
+(`0x10071d95`–`0x10071e32`). The static is zero in the file and `0xfff` once
+the initialiser `0x100723d0` has run — the OR of the twelve bit constants at
+`0x1009bb4c`, the same default the other modules build
+([24-motion.md](24-motion.md#finding-the-ground--read)). So: **all twelve
+classes, nothing required and nothing shut out.** Slot 8 starts the answer's
+gap at `FLT_MAX` (`0x10025b6e`) and walks the world's tree from its root
+(`0x10025ba0`), asking every object whose class the mask holds for interface
+`0x18` slot 7 and keeping an answer only where its squared gap to the point is
+the smaller (`0x10025c3b`–`0x10025c46`).
+
+The landscape's answer (`0x10021860`) has a turn of its own. A query that
+neither asks for nor shuts out world flag `0x200`, the liquid's surface, nor
+`0x400`, its bed (`0x100218de`–`0x1002197a`), is run **twice** — once with the
+surface shut out and once with the bed (`0x100219b3`, `0x10021a65`–`0x10021a7a`)
+— and the second is kept only where its gap is the smaller (`0x10021aaf`). Each
+run takes the **first** face of the cell's run, in the file's order, whose
+triangle holds the point and whose plane is not on edge, either side of the
+point (`0x10021cc6`–`0x100220fa`); the direction bits 4 and 8 are what would
+have refused one side (`0x10021ff6`, `0x1002201b`).
+
+*Measured* on the 33 maps, a 60 × 60 lattice over each box (`openparkan
+verify`): **every one of the 118800 points has a landscape face**, 111446 one
+and 7353 two, a liquid's sheet and its bed on all 7353; one more lies on the
+edge two dry faces share, at one height. No point has two dry faces at two
+heights, so "first in the run" never has to choose. From the floor the bed is
+never the farther — under the sheet on 7341 of the pairs and level with it on
+12, ten of them on maps 11 and FINAL, which lay a sheet flat on its bed — so
+**a strike over a lake or over lava is measured to the bed**: the effect stands 300 over the
+bottom, and its 600 reach up through the sheet. An object answers too, a
+building's deck or a warbot's back, and wins only where its face is nearer the
+map's floor than the ground's own — under the ground, that is.
+
+**What a strike does** (`0x10071d70`): it asks the world for the ground at
 the point, puts the effect **300 above it** in a frame of the world's own axes,
 its second axis turned back one time in two (`0x10071f8a`), starts it in time
 mode 1, switches it on, and sizes it **(40, 40, 600)** (`0x10072058`). Those
@@ -2016,35 +2332,78 @@ which is what the game does.
 - ~~Which of the flare's pair the engine calls texture 0~~ — slot 5; the column
   branches into the material blocks the constructor fills from slots 5 and 6
   ([The lens flare](#the-lens-flare)).
-- ~~What the sky's fourth draw puts on the screen~~ — the **scene colour**, and
-  usually nothing at all. Its material block `+0x484` has no texture and no
-  colour of its own: over the whole module the only fields written in it are
-  the ambient alpha at `+0x20`, the two texture fields at `+0x48` and `+0x4c`
-  (both 0) and a format id at `+0x5c`, so the only colour it can carry is the
-  scene colour every emissive gets. And the draw is skipped whenever the view's
-  mode (slot 24, `0x10083010`) is 1 (`0x1007a325`).
-  ~~Which views carry which mode~~ — the scene's own camera is mode 0, where
-  the quad is drawn, first of all and before the world; the earlier inference
-  had it the other way round
+- ~~What the sky's fourth draw puts on the screen~~ — ~~the scene colour~~ the
+  **fog colour**, over the whole viewport and opaque. Its material block
+  `+0x484` has no texture and no colour of its own, which an earlier round took
+  to leave it the scene colour; the item is unlit, and its colour is the one
+  its vertex stream carries, the sky's `+0x70`, written with the fog colour
+  every frame (`0x10079698`, `0x10079b3f`). The draw is skipped whenever the
+  view's type (slot 24, `0x10083010`) is 1 (`0x1007a325`).
+  ~~Which views carry which mode~~ — the scene's own camera is type 0, where
+  the quad is drawn, first of all and before the world; type 1 is the
+  `REFLECTION` camera, drawn into the frame after it, and type 2 the
+  `REFLECTION_SHIFTED` one
   ([The sky's first draw is a screen-wide quad](#the-skys-first-draw-is-a-screen-wide-quad--read)).
 - ~~**What lies below the dome's rim.**~~ The sky's screen-wide quad, drawn
-  before the dome and the world in every scene camera's frame. That it paints
-  the scene colour is derived and not checked against a frame; what the device
-  is cleared to under it is still not read.
+  before the dome and the world in every scene camera's frame.
+  ~~That it paints the scene colour is derived and not checked against a
+  frame; what the device is cleared to under it is still not read.~~ It paints
+  the **fog colour**, *seen* under the rim of C02 M04's briefing at
+  (106, 172, 22) against a scene colour of (86, 111, 67); and the device's
+  colour buffer is cleared to nothing at all — `Ngi32.dll`'s one `Clear` is the
+  depth's (`0x10007d32`, flags 2), so the quad is the frame's clear
+  ([The sky's first draw is a screen-wide quad](#the-skys-first-draw-is-a-screen-wide-quad--read)).
 - ~~What the three weather objects draw~~ — rain and snow are one particle
   system of up to a thousand points kept in the camera's box, 2 to 50 ahead,
   and drawn as screen-space quads over the finished world with the depth test
   off; lightning draws nothing and plays `env_lightning` at a point drawn over
   the whole map every 6 s and up to 60 more
   ([The weather](#the-weather--read-and-seen)).
-- **The flags the rain's sound is made with**, `0x102` (`0x10075f8c`): that it
-  loops is inferred from its being played once and never again.
-- **Which faces the lightning's ground query takes.** It is the landscape's
+- ~~**The flags the rain's sound is made with**, `0x102` (`0x10075f8c`): that it
+  loops is inferred from its being played once and never again.~~ **Read**:
+  the sound is the 3D sound object's plain kind (`Ngi32.dll:0x1000cab0`,
+  `0x1000e980`); `0x2` is the `DSBPLAY_LOOPING` its play hands the buffer
+  (`0x1000eb15`), `0x100` the `DSBCAPS_CTRLVOLUME` its volume slot waits for
+  (`0x1000eb7e`), and with no 3D capability asked the rain is heard alike from
+  everywhere ([Rain](#rain--read)).
+- ~~**Which faces the lightning's ground query takes.** It is the landscape's
   slot 8 with kind 2 and the default filter (`0x10071e19`); the filter's mask
-  at `0x100a6f54` is not read.
-- **Who gives a camera a mode other than 0.** `ICamera2`'s slot 23
+  at `0x100a6f54` is not read.~~ **Read**, and *measured*: it is the world's
+  slot 8, the mask is `0xfff` once its initialiser has run (`0x100723d0`), all
+  twelve classes with nothing shut out, and the point looks from the map box's
+  floor, so the answer is the face nearest that floor — the landscape's one
+  face on 111446 of 118800 lattice points and a liquid's **bed** on 7353 of
+  the rest ([Lightning](#lightning--read-measured-and-seen)).
+- ~~**Who gives a camera a mode other than 0.** `ICamera2`'s slot 23
   (`0x10082fd0`) is the only writer of `+0x280` besides the constructor, and
-  its caller is not found.
+  its caller is not found.~~ **Read**: `CCamera` itself, from slot 14 of its
+  game-object interface (`0x10085365`), with the type its constructor made of its name — 2
+  for `REFLECTION_SHIFTED`, 1 for `REFLECTION`, 0 otherwise (`0x10083a54`). Of
+  the install's 38 calls through `+0x5c` it is the one that passes a value in
+  `edx` and nothing on the stack
+  ([The sky's first draw is a screen-wide quad](#the-skys-first-draw-is-a-screen-wide-quad--read)).
+- ~~Whether the weather draws in a room~~ — it does not: a building's draw
+  sets the view's flag `0x200` while the camera stands in one of its rooms
+  (`0x100599f9`), and a view carrying it is not handed the weather's pass
+  (`0x10084790`); *seen* on C03 M02's Small Bunker
+  ([The weather](#the-weather--read-and-seen)).
+- ~~What the infrared changes in a frame~~ — every lit item's material and the
+  scene colour, the fog and the dome, and each sprite's one colour, all to
+  seven times their mean as green alone; no light, no texture and nothing of
+  the HUD; and it skips the lens flare. *Seen* once, for 0.7 s of Part 4.5
+  ([What the infrared does to a frame](#what-the-infrared-does-to-a-frame--read-and-seen)).
+- **Whether slot 17's alpha reaches a body's sprite.** The sprite's four
+  vertices carry slot 17's colour (`0x1007cd98`), alpha and all, and the alpha
+  is 50 of 255 or less on 249 of the 656 keyframes; what the device does with
+  it is not checked against a frame, and the engine draws a body in its
+  texture's own colours
+  ([The sun and the moon are drawn](#the-sun-and-the-moon-are-drawn)).
+- **The line a room's mesh is asked along.** The room test's second half
+  (`AniMesh.dll:0x10010550`) counts crossings along the direction at the mesh's
+  `+0x150`, whose writer is not read; the engine takes the room's own z.
+- **Camera flag 8.** A camera whose flag word carries it draws neither the
+  sky's pass nor the world (`0x100845eb`, `0x10084701`); what sets it is not
+  read.
 - **What flag bit 0 of a material's blend byte does.** It is set on `ENV_STARS`
   and on nothing else in the game, and it does not change the blend mode.
 - ~~Which field carries the opcode~~ — the word ahead of slot 0; the three

@@ -3174,6 +3174,32 @@ def check_sky(check, game: Path) -> None:
     check("sky.ske: keyframes carry a time of day", dated == parsed,
           f"{dated}/{parsed} files hold an hour 0-24 and a minute 0-59 in every keyframe "
           f"of every section")
+
+    # Slot 17 is the colour a body's sprite carries on all four vertices: its stream
+    # block's diffuse is CSun +0x95c, property 5, with a stride of 0
+    # (Terrain.dll:0x1007cd98).  It reads as one: a colour while a body is up, black
+    # while none is.  The alpha is the one the flare's lift of the main light reads.
+    tint = Counter()
+    for path in files:
+        atmosphere = sky.load(path)
+        for index in range(atmosphere.section_count):
+            spans = [(start.clock_seconds, stop.clock_seconds if stop is not None else 86400)
+                     for _body, start, stop in atmosphere.windows(index)]
+            for k in atmosphere.section_keyframes(index):
+                r, g, b, alpha = k.colour(sky.BODY_TINT_SLOT)
+                up = any(s <= k.clock_seconds <= e for s, e in spans)
+                tint["up" if up else "down"] += 1
+                tint["up black" if up else "down black"] += (r, g, b) == (0, 0, 0)
+                tint["opaque"] += alpha == 255
+                tint["faint"] += alpha <= 50
+    check("sky.ske: slot 17 is a body's own colour, black where none is up",
+          tint["up"] + tint["down"] == frames and tint["up black"] * 10 < tint["up"]
+          and tint["down black"] * 2 > tint["down"],
+          f"of the {tint['up']} keyframes inside a body's window {tint['up black']} are "
+          f"black, and of the {tint['down']} outside one {tint['down black']} -- the colour "
+          f"the body's sprite carries on its four vertices (Terrain.dll:0x1007cd98).  Its "
+          f"alpha is 255 on {tint['opaque']} of the {frames} and 50 or less on "
+          f"{tint['faint']}")
     check("sky.ske: keyframes run in time order", ordered == sections_seen,
           f"{ordered}/{sections_seen} sections are stored sorted by time, which the "
           f"engine's sort after loading (0x10067500) leaves alone")

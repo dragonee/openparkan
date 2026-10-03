@@ -208,8 +208,12 @@ impl Audio {
     /// and plays it as it is made, sets its volume from the rain's intensity every takt, and
     /// stops it as it goes (`Terrain.dll:0x10075e37`, `0x100765d0`, `0x100761a0`).
     ///
-    /// STAND-IN: docs/10-sky.md#rain--read -- the flags the sound is made with, `0x102`, are
-    /// not read: it is played as a loop, heard alike from everywhere.
+    /// It is a loop, heard alike from everywhere, by the flags it is made with, `0x102`
+    /// (docs/10, "Rain"): the 3D sound's slot 7 makes a plain buffer of them
+    /// (`Ngi32.dll:0x1000cab0`, `0x1000e980`) -- `0x100` asks for `DSBCAPS_CTRLVOLUME` and is
+    /// what its volume slot waits for (`0x1000eb7e`), `0x2` is the `DSBPLAY_LOOPING` its play
+    /// hands the buffer (`0x1000eb15`-`0x1000eb25`), and no flag of that object asks for
+    /// `DSBCAPS_CTRL3D`, so nothing places it.
     pub fn rain(&mut self, sound: Option<(String, f32)>) {
         let Some((name, decibels)) = sound else {
             if let Some((_, mut handle)) = self.rain.take() {

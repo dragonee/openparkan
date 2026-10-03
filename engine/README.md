@@ -152,6 +152,11 @@ starts at the file's closing time and plays its sections in turn:
   places, sizes and colours with only their alpha scaled by the gates — the
   first on the 15° cone about the camera the frame is drawn with, the second on
   how high the body stands;
+- the **infrared** (N) greens the world as the game's does (docs/10, "What the
+  infrared does to a frame"): every lit material and the scene colour, the fog
+  and the dome, and each sprite's colour go to seven times their mean as green
+  alone, the lens flare is left out, and the HUD stays as it is
+  (`--tap 60:SCAN_N`);
 - a vertex's lit colour is the game's own shade's (docs/10, "The lit colour
   is the game's own"): the lights on the material's diffuse plus its ambient
   (its self-light), **held up to the scene colour** rather than added to it,
@@ -168,11 +173,14 @@ starts at the file's closing time and plays its sections in turn:
   square or a diamond that shrinks with depth, falling at 4, a raindrop a streak
   from where it was a frame ago, falling at 60, its sound as loud as the rain is
   hard. On `CAMPAIGN.03` the snow is the red dust, in the briefing as in the
-  cockpit and under a roof (`--mission MISSIONS/CAMPAIGN/CAMPAIGN.03/Mission.02
-  --skip-briefing --ticks 3600`). The fifth slots draw with the scene here, so
-  the dust shows over a cockpit's own frame where the game draws that after it;
+  cockpit (`--mission MISSIONS/CAMPAIGN/CAMPAIGN.03/Mission.02
+  --skip-briefing --ticks 3600`), and gone while the camera stands in a room
+  of a building, as the game leaves it out there. The fifth slots draw with the
+  scene here, so the dust shows over a cockpit's own frame where the game draws
+  that after it;
 - **lightning** strikes a point anywhere on the map every 6 s and up to 60 more
-  by its intensity: `env_lightning`'s bolt, a streak 600 tall by its block's
+  by its intensity, standing on the face nearest the map box's floor there, a
+  lake's bed and not its sheet: `env_lightning`'s bolt, a streak 600 tall by its block's
   mode, seen through the fog, and its thunder (`--ticks 6 --look 335,689,60,902,788,300` on the same mission
   looks at the first bolt, `--ticks 8` is inside its flash). The flash is the
   effect's own light, (7, 7, 10) over a range of 4000, one of the frame's point
@@ -1389,8 +1397,8 @@ tick) play the hero at 60 ticks a second before a screenshot, or with
 every second. The view holds the heading the hero moves along; `--sway` lets it
 swing with the gait as the game's does. A captured bot stands by until it is
 ordered; `--capture-idle` leaves it with no order, as the game's capture does. F2
-hides the message box or shows it again; G, H and N switch the repair system,
-camouflage and infrared, and Y steps the auto-driver. The HUD keeps its layout's
+hides the message box or shows it again; G and H switch the repair system and
+camouflage, N the infrared the world is drawn through, and Y steps the auto-driver. The HUD keeps its layout's
 shape on a wide window, its panels on the window's corners; `--stretch-hud`
 stretches it as the game's does. `--face NAME,DISTANCE` stands the hero that far
 from the mission object whose path ends in NAME, facing it, before `--ticks`
@@ -1502,7 +1510,6 @@ a row here. A row leaves this table when research closes it.
 
 | milestone | what is unknown | stand-in | see |
 |---|---|---|---|
-| M1 | What the sky's screen-wide quad paints: it is drawn first of all in every scene camera's frame (mode 0; only mode 1 skips it, `0x1007a325`), and that it carries the scene colour is derived, not checked against a frame | never drawn; the frame is cleared to the fog colour instead | [10](../docs/10-sky.md#the-skys-first-draw-is-a-screen-wide-quad--read) |
 | M1 | Whose light list the cloud layer is lit with: the item takes the list the shade last gathered, the last drawn object's or cell's, point lights and all | the sun's two lights alone, which is what any list comes to: no point light's range reaches the cap but the lightning's, 4000 ± 200, and that only from a strike 5341 away on ground more than 80 above the eye, for under a hundredth of its colour | [10](../docs/10-sky.md#the-clouds-are-lit-and-fogged-on-a-range-of-their-own--read-and-measured) |
 | M1 | A light's direction in a scaled frame: the shade puts it there by the transpose of the frame's 3 × 3 and normalises nothing (`Ngi32.dll:0x10024260`), so an item drawn at scale *s* takes *s* times a directional light | a unit normal against a unit direction, whatever the scale; which shipped frames carry one is not measured | [10](../docs/10-sky.md#the-lit-colour-is-the-games-own--read-and-measured) |
 | M4 | Whether a target the hero's AI set before the player took over survives | none: nothing sets it while the player drives, so the plasma bolt and the missile fly straight | [29](../docs/29-weapons.md#not-established) |
@@ -1511,8 +1518,8 @@ a row here. A row leaves this table when research closes it.
 | M4 | When each of a burst's particles spawns | every particle of a type-7 or type-10 burst is as old as the emitter's progress through the window over +28, so they fly as one | [11](../docs/11-effects.md#a-channel-is-a-low-high-jitter-exponent-run--read-and-measured) |
 | M4 | How an effect sprite fogs: the game puts one factor on the sprite's four corners, linear in the squared distance its item is built with (`Terrain.dll:0x1004bf20`, `0x1003c340`) | the same squares, a pixel at a time, from the pixel's own distance; none on an effect whose header carries `0x2000`, as read | [11](../docs/11-effects.md#how-an-effect-sprite-is-coloured--read-and-measured) |
 | M5 | The weather's random draws: where a particle spawns and when and where a bolt strikes come off `Terrain.dll`'s one C-runtime `rand` state, seeded 1 and shared with every other caller in the module, and the snow's flutter off a generator seeded from the clock | the weather keeps states of its own of the same two generators | [10](../docs/10-sky.md#the-weather--read-and-seen) |
-| M5 | Which faces the lightning's ground query takes (the landscape's slot 8, kind 2, the default filter) | the landscape's top face under the strike, and the map box's floor where there is none | [10](../docs/10-sky.md#lightning--read-measured-and-seen) |
-| M5 | The flags the rain's background sound is made with, `0x102` | a loop, heard alike from everywhere, its volume the read one | [10](../docs/10-sky.md#rain--read) |
+| M5 | The line a room's mesh is asked along when a building asks whether the camera stands in one of its rooms (`AniMesh.dll:0x10010550`, the direction at the mesh's `+0x150`), which decides whether the rain and the snow are drawn | the room's own z: the camera is in a room inside its box with an odd count of its faces over or under it | [10](../docs/10-sky.md#the-weather--read-and-seen) |
+| M1 | Whether slot 17's alpha reaches a body's sprite: the sprite's four vertices carry slot 17's colour (`Terrain.dll:0x1007cd98`), which is read, and what the device does with its alpha is not checked against a frame | a body is drawn in its texture's own colours, and in slot 17's through the filter only under the infrared | [10](../docs/10-sky.md#the-sun-and-the-moon-are-drawn) |
 | M4 | The owner values of time modes 9–14, now that each is read: the spin over the top spin, and one minus the owner's life fraction (property `0x31`) | nothing sets either, so a mode-9-to-12 effect holds *t* at 0 and a mode-14 one reads its owner as undamaged; of the 923 only the 8 burning trees and wrecks are mode 14, and none is 9–13. A tree's load group makes its fire switched off (header flag `0x40`) for block entry 6, a machine's critical damage, to switch on, and entries 6 and 7 are not run (docs/13, "Critical damage"): nothing burns, and a shot tree never catches fire | [11](../docs/11-effects.md#how-an-effect-runs--read) |
 | M4 | How a sprite whose material says opaque blends | alpha-blended, so its fade shows | [07](../docs/07-objects.md#how-a-material-draws-is-in-the-archive-directory) |
 | M4 | Which lights an item is lit with: the game gathers a list for each object and each landscape cell, every light whose reach meets it, and its lighter walks all of it | one list a frame, the 64 lights whose reach comes nearest the eye, those that light everything first; each lights whatever stands inside its range. A unit's parts are agents with a light manager each and a round is one: an owner-only light on a unit's gun lights the whole unit, and one on a round nothing | [11](../docs/11-effects.md#what-a-light-does-to-a-surface--read-and-measured) |
@@ -1555,7 +1562,7 @@ a row here. A row leaves this table when research closes it.
 | M9 | A wingman's order queue, which its status line names | the running task names the order: none *no order*, standby *standing*, follow *following*, search *searching* (*capturing* for a capture), refit *refitting*, attack *attacking* | [31](../docs/31-packages.md#the-orders--measured) |
 | M9 | The driven unit record's `+0x10 ÷ +0x14` in the scale of the square about the target | the camera's focal length: the square's half-side is two thirds of the target's projected radius, then held as read | [35](../docs/35-hud.md#the-frame-around-the-target-in-the-world--read) |
 | M9 | What makes a unit of more than one part twice as bright in a panel's view as the one pair of lights its mesh is read to make | the two lights at twice their colour on a unit that carries a turret, at their own on a chassis alone: the hero's figure is 2.06, 1.98 and 2.03 times as far over its floor in the recording, the one-part dummy 0.136 against the read's 0.139 | [35](../docs/35-hud.md#what-mode-2-does-with-the-colour--read-measured-and-seen) |
-| M9 | The interface's `CState` and the landing warning the indicators show; the repair system, camouflage and infrared themselves | the figure is lit and the warning grey; G, H and N turn switches that only the indicators read | [35](../docs/35-hud.md#the-indicators--read-and-seen) |
+| M9 | The interface's `CState` and the landing warning the indicators show; the repair system and camouflage themselves | the figure is lit and the warning grey; G and H turn switches that only the indicators read | [35](../docs/35-hud.md#the-indicators--read-and-seen) |
 | M9 | What the camera view's property 0, which places the reticle's dot, is | the dot stays at the middle | [35](../docs/35-hud.md#the-reticle--read) |
 | M9 | The stage sets a sprite may pick, and how the 2D layer samples | every sprite the default; pages sampled nearest | [35](../docs/35-hud.md#how-the-radar-draws--read) |
 | M10 | When a generic device's or a radar's channels are played between its steps: only while one of two countdowns `IControl` slot 8 sets runs, and no caller is found | every tick, so a rotor and a dish turn smoothly | [28](../docs/28-chassis.md#what-a-devices-value-turns--read-and-measured) |

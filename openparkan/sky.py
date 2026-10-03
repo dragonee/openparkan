@@ -133,6 +133,10 @@ SUN_SECOND_LIGHT_SLOT = 21
 #: Its alpha scales how far the flare gates brighten the main light
 #: (``0x1007ea14``).
 SUN_BOOST_SLOT = 17
+#: The same slot's colour is the one all four vertices of a body's sprite carry: the
+#: sprite's stream block gives its diffuse as ``CSun +0x95c`` with a stride of 0
+#: (``0x1007cd98``).
+BODY_TINT_SLOT = SUN_BOOST_SLOT
 #: Read with the keyframe and never used: slot 0 is not copied into the event
 #: record at all, and slot 16 is copied and no consumer reads it
 #: (``0x100692d0``, ``0x1006a970``).  Slot 0 holds heap addresses.

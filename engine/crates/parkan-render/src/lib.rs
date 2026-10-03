@@ -602,17 +602,7 @@ impl Renderer {
         if let Some(text) = &self.text {
             text.resize(queue, (width, height));
         }
-        // STAND-IN: docs/10-sky.md#the-skys-first-draw-is-a-screen-wide-quad--read -- what
-        // stands below the dome's rim is the sky's own screen-wide quad, drawn first of all
-        // in a scene camera's frame; that it carries the scene colour is derived and not
-        // checked against a frame, so it is not drawn, and the frame is cleared to the fog
-        // colour, where the horizon meets it.
-        let [fr, fg, fb] = self.lighting.fog_colour;
-        let clear = if self.lighting.fog_end < f32::MAX {
-            wgpu::Color { r: f64::from(fr), g: f64::from(fg), b: f64::from(fb), a: 1.0 }
-        } else {
-            CLEAR
-        };
+        let clear = sky_quad(&self.lighting);
         let mut encoder = device.create_command_encoder(&Default::default());
         // The water's reflection first (`Terrain.dll:0x100844c0`): the dome, the ground and the
         // objects through the mirrored camera into the reflection's texture.
@@ -784,6 +774,25 @@ impl Renderer {
     }
 }
 
+/// What the frame is cleared to: the sky's screen-wide quad (docs/10, "The sky's first draw
+/// is a screen-wide quad"). The game never clears its colour buffer -- `Ngi32.dll`'s one
+/// `Clear` is the depth's (`0x10007d32`, flags 2) -- and the first thing a scene camera
+/// draws is a quad over its whole viewport, opaque, untextured and unlit, the depth test and
+/// write off, whose four vertices share the sky's constant at `+0x70`
+/// (`Terrain.dll:0x10079698`): the **fog colour**, the horizon's in the camera's heading,
+/// written there every frame (`0x10079b3f`) after the infrared has had it. So the clear is
+/// that quad, and what stands below the dome's rim where no ground covers it is the colour
+/// the rim and the fog already are. Without an atmosphere there is no sky to draw it, and
+/// the frame takes the viewer's own dark.
+fn sky_quad(lighting: &frame::Lighting) -> wgpu::Color {
+    let [r, g, b] = lighting.fog_colour;
+    if lighting.fog_end < f32::MAX {
+        wgpu::Color { r: f64::from(r), g: f64::from(g), b: f64::from(b), a: 1.0 }
+    } else {
+        CLEAR
+    }
+}
+
 fn pass_over<'e>(
     encoder: &'e mut wgpu::CommandEncoder,
     target: &wgpu::TextureView,
@@ -936,6 +945,25 @@ mod tests {
         let zs: Vec<f32> = v.iter().map(|p| p.position[2]).collect();
         assert_eq!(zs.iter().cloned().fold(f32::MAX, f32::min), 5.0);
         assert_eq!(zs.iter().cloned().fold(f32::MIN, f32::max), 9.0);
+    }
+
+    /// The sky's first draw paints the viewport in the fog colour, which is all the clearing
+    /// the game's frame gets: C02 M04's briefing at 43.5 s shows (106, 172, 22) below the
+    /// dome's rim where the file's horizon ahead is (107, 172, 25) and its scene colour
+    /// (86, 111, 67).
+    #[test]
+    fn the_frame_is_cleared_to_the_fog_colour_the_skys_quad_paints() {
+        let lighting = frame::Lighting {
+            fog_colour: [107.0 / 255.0, 172.0 / 255.0, 25.0 / 255.0],
+            scene_colour: [86.0 / 255.0, 111.0 / 255.0, 67.0 / 255.0],
+            fog_end: 498.5,
+            ..Default::default()
+        };
+        let c = sky_quad(&lighting);
+        let bytes = [c.r, c.g, c.b].map(|v| (v * 255.0).round() as u8);
+        assert_eq!((bytes, c.a), ([107, 172, 25], 1.0));
+        // A world with no atmosphere has no sky and no quad.
+        assert_eq!(sky_quad(&frame::Lighting::default()), CLEAR);
     }
 
     #[test]

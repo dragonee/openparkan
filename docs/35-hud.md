@@ -648,7 +648,14 @@ Eight slots share one draw (`0x1003f270`), given a slot and a state 0, 1 or 2:
 
 - **Infrared.** The camera class (`Control.dll:0x10023a00`) sets the view's flag
   `0x20` on state `0x1000`, clears it on `0x2000` and flips it on `0x4000`.
-  That last is `CIS_INFRARED_INV`, which `hero.tbl` sends on N.
+  That last is `CIS_INFRARED_INV`, which `hero.tbl` sends on N. The flag is what
+  `CCamera::Render` hands the shader component for the length of its own
+  render, and off again before the HUD is drawn: the world goes to seven times
+  its mean as green alone, and the HUD and its model views stay as they are
+  ([10-sky.md](10-sky.md#what-the-infrared-does-to-a-frame--read-and-seen)).
+  *Seen* once: the lamp is white from 3:14.9 to 3:15.5 of "Let's Play - Parkan:
+  Iron Strategy, Part 4.5" (C9kZR__WpIQ), the view green under it — 1 of the
+  4995 cockpit frames sampled, one every 3 s, across the 19 recordings.
 - **The mode.** The `CState` is the game object's `+0x20`, and its mode is the
   front of its stack ([30-turrets.md](30-turrets.md)).
 - **The warning.**

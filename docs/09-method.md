@@ -145,6 +145,18 @@ find.
   searches from the request instead — every `call [reg + slot]` on a pointer that may
   be the interface asked for — and its control is a slot whose callers are known
   ([07-objects.md](07-objects.md#who-picks-an-object-meshs-material-track--read)).
+- **Asking who calls a slot by its constant, or by the one way a pointer is kept.**
+  `ICamera2`'s slot 23 had 38 candidate calls and "no caller" for two rounds. The
+  search for a constant in `edx` could not see a value read out of a field; and
+  `analysis/slotcalls.py` could not see the receiver, which is kept from a
+  `QueryInterface` whose answer's address is made with an `add` rather than a `lea`
+  (`Terrain.dll:0x10083acd`, the module is not optimised) and is read back at
+  `+0x198` of the interface the method was entered on, not the `+0x19c` the
+  constructor wrote. What separated the one call from the 37 was the slot's own
+  **arity**: it takes its value in a register and ends in a bare `ret`, and 36 of
+  the 38 push an argument first (`analysis/slotcalls.py --bare 23`). The control is
+  the slot beside it, whose eight callers the same sweep returns and nothing else
+  ([10-sky.md](10-sky.md#the-skys-first-draw-is-a-screen-wide-quad--read)).
 - **Reading a static's bytes out of the file.** A static whose bytes are zero in the
   file is not thereby zero: a static initialiser may write it before anything reads
   it. Three request records read as "all zero" are `{0xfff, 0, 1, 2}` once their

@@ -26,6 +26,16 @@ and a unit record's bind once (`iron3d.dll:0x10074d99`).
     uv run --group analysis python analysis/slotcalls.py            # ILifeSystem slot 16
     uv run --group analysis python analysis/slotcalls.py 0x16 10    # the control
 
+Neither pass sees a receiver kept some other way, and the field finder wants a `lea`: an
+unoptimised module makes the address with an `add`, and a method reads the field at the offset
+of the interface it was entered on.  `ICamera2`'s slot 23 had "no caller" for both reasons.
+What found it was the slot's own arity -- it takes its value in a register and ends in a bare
+`ret` -- so `--bare` lists the calls at a slot's offset that push nothing since the call
+before them:
+
+    uv run --group analysis python analysis/slotcalls.py --bare 23  # 3 of 38, ICamera2's one
+    uv run --group analysis python analysis/slotcalls.py --bare 24  # the control: 8 of 65
+
 See ../docs/09-method.md.  This recovers which calls the engine makes; no code is copied out
 of it.
 """
@@ -78,7 +88,35 @@ def fields(functions, interface: int) -> set[str]:
     return found
 
 
+def bare(slot: int) -> int:
+    """Every call at `slot`'s offset that pushes nothing since the call before it.
+
+    A push ahead of a branch that the call shares is not seen: read what is listed.
+    """
+    call = re.compile(r"call dword ptr \[e.. \+ " + f"{4 * slot:#x}" + r"\]$")
+    total, kept = 0, []
+    for name, module in cov.load().items():
+        for at, lines in listing(module):
+            for i, line in enumerate(lines):
+                if not call.search(line):
+                    continue
+                total += 1
+                pushes = 0
+                for back in reversed(lines[:i]):
+                    body = back.split("  ", 1)[1]
+                    if body.startswith(("call ", "ret")):
+                        break
+                    pushes += body.startswith("push ")
+                if not pushes:
+                    kept.append(f"  {name:13s} {line}   in {at:#x}")
+    print(f"{total} calls at +{4 * slot:#x} in all, {len(kept)} of them with nothing pushed:")
+    print("\n".join(kept))
+    return 0
+
+
 def main(argv: list[str]) -> int:
+    if len(argv) > 2 and argv[1] == "--bare":
+        return bare(int(argv[2], 0))
     interface = int(argv[1], 0) if len(argv) > 1 else 0x16
     slot = int(argv[2], 0) if len(argv) > 2 else 16
     offset = f"{4 * slot:#x}"
