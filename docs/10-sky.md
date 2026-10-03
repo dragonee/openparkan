@@ -1024,7 +1024,24 @@ The cloud layer is the one sky draw filed **lit** — item flags `0x14`
   first, `0x1008477e`, and the queue's second drawable with pass flags
   `0x1000` after it, `0x100847e8`). That list is the last drawn object's or
   cell's, with the sun's two lights in it; *which* object's it is, and so
-  which point lights ride along, is **not read**;
+  which point lights ride along, is **not read** — and *measured*, it does
+  not matter to what is drawn. The lighter passes over a vertex past a
+  light's range (`Ngi32.dll:0x100165bb`), and the cap's nearest vertices stand
+  5000 over the eye, the apex, and 4580 over it 5341 out, the first ring.
+  Of the 618 light blocks the largest range is 300 (`r_lightray_w`) and no
+  other block's passes 162.5 with its header's scale; an instance's frame
+  stretches it, and of the lights standing on C03 M02 at briefing time 61.8 s
+  the largest comes to 214, `mineglow`'s 7 through a drill frame 30.6 long.
+  **Only the lightning's comes near**: `env_lightning`'s 100 ± 5
+  through a bolt frame 40 wide is 4000 ± 200 as the flash starts, on a light
+  standing 300 over the ground it strikes
+  ([Lightning](#lightning--read-measured-and-seen)). That reaches the apex
+  only from ground 500 above the eye at the eye's own place, where the eye
+  could not be, and a first-ring vertex only from a strike 5341 away on
+  ground more than 80 above the eye, and there it gives the square of what is
+  left of its range: under a hundredth of its colour for 300 of relief. The
+  clouds' material has no specular either, power 0 on all three, so no
+  highlight reaches them;
 - its **fog** is its own record's: from 5000 — the dome's height less the
   drop, `0x10077c43` — to a third of the sphere's radius, 11380.7
   (`0x10077c73`), toward the frame's fog colour, the horizon ahead. The
@@ -1189,6 +1206,53 @@ and its length (`0x1004e7b1`–`0x1004e8ea`). Then:
    specular sum (`0x1001616f`–`0x100161e9`): exponents 4, 8, 16 and 32 for
    the shipped powers 3, 4, 5 and 6. With the lighting off, or nothing to
    light, the diffuse sum is the material's diffuse itself (`0x1004ee3a`).
+   **A point light leaves a highlight the same way** (`Ngi32.dll:0x100166b5`–
+   `0x10016750`, read through): with *L* the vector from the vertex to the
+   light and *n* its normal, the routine forms 2 (*n* · *L*) *n* − *L*, the way
+   to the light mirrored in the normal, takes it against the vertex's unit
+   vector to the eye, passes over a vertex it is not above 0 on (`0x10016705`),
+   divides by the length of *L* (`0x10016715`), squares it `power − 1` times
+   (`0x10016719`–`0x10016727`) and multiplies by the light's falloff
+   (`0x1001672c`) before the light's colour times the material's specular is
+   added in (`0x1001674a`). So a point light's highlight fades with its range
+   as its diffuse does, and a directional light's does not fade.
+   **Which lights leave one.** The shade asks a highlight of a light only
+   where the item wants one and the light's active word `+0x4c` has bit 1
+   clear (`0x1004ec03`–`0x1004ec38` for a point light, `0x1004ed81`–`0x1004edb7`
+   for a directional one), and a light carrying the bit is passed over
+   altogether on an item that takes no diffuse (`0x1004ea78`–`0x1004ea97`).
+   The bit is `D3DLIGHT_NO_SPECULAR`; the light manager's slot 18
+   (`0x10080a60`) clears it for a non-zero argument (`0x10080ab8`) and sets it
+   for 0 (`0x10080aea`), and a light is made with the word 0 (`0x1008076a`).
+   **`CSun`'s constructor calls slot 18 with 0 on its second light and on no
+   other** (`0x1007d023`–`0x1007d03b`, between the second light's flags at
+   `0x1007d020` and the two switches at `0x1007d056` and `0x1007d071`), and
+   `Effect.dll` never calls it — its light emitter's calls on the manager are
+   slots 12, 13, 6, 11, 8, 9, 3 and 4 (`0x1000f694`–`0x1000fbb8`), and the
+   module holds no call through `+0x48` at all, where the same sweep finds 91
+   through `+0x18` and `+0x34`
+   ([11-effects.md](11-effects.md#what-a-light-does-to-a-surface--read-and-measured)).
+   So **the sun's first light and every effect's light leave a highlight, and
+   the counter light lights a diffuse and nothing else.**
+   **A light's direction goes into the item's frame unnormalised.** Where the
+   frame's kind word (`+0x6a`) is 1 the direction is used as the record holds
+   it (`0x1004ed1d`); otherwise it goes through `g_FastProc`'s `+0x8c`
+   (`0x1004ed7b`), which multiplies it by the transpose of the frame's 3 × 3
+   and does nothing else (`Ngi32.dll:0x10024260`, x87, and `0x1001ba50`,
+   3DNow!, both read; `0x1001f910`, `0x1001ca90` and `0x1001ca00` fill the
+   same slot for the other processors and were not): the inverse of a
+   rotation, and on a frame scaled by *s* a vector *s* long. The directional
+   routine takes its cosine against that vector as it stands
+   (`0x1001612c`–`0x10016143`), so **an item drawn in a frame scaled by *s*
+   takes *s* times a directional light**, on its diffuse and on its highlight.
+   A point light's position goes through the frame's inverse on a frame of
+   kind 4 or 8 — `+0x9c`, `Ngi32.dll:0x100154e0`: the frame's translation
+   taken off, the same transpose, and a factor an axis from the frame's
+   `+0x5c` — through `0x1002e0c0` on kind 2, and as it stands on kind 1 (the
+   table at `0x1004f6cf`); its range is multiplied by the frame's `+0x5c`
+   (`0x1004ead5`) and the range's reciprocal by its `+0x50` (`0x1004ec5f`).
+   Kinds 3, 5, 6 and 7 convert no position at all, and whether an item is
+   ever lit in one is not read.
 2. **The ambient and the floor**: `g_FastProc`'s `+0x50` with the sum, the
    material's ambient and the state block's colour (`0x1004f225`–`0x1004f23d`).
    All four builds of it — x87 `Ngi32.dll:0x100248a0`, 3DNow! `0x1001bdd0`,
@@ -1214,9 +1278,16 @@ and its length (`0x1004e7b1`–`0x1004e8ea`). Then:
    stream or their product, by the record's mode (`0x1004f0b8`, the table at
    `0x1004f6ef`); the specular's is the fog factor ([Fog](#fog)).
 
-The two colours are packed to bytes (`+0x54`) into streams the shade gives
-the item (`0x1004e246`–`0x1004e3a1`), so the colour is a **vertex's** and the
-device carries it across the face.
+The two colours are packed to bytes (`+0x54`, called at `0x1004f69f`) into
+streams the shade gives the item (`0x1004e246`–`0x1004e3a1`), so the colour is
+a **vertex's** and the device carries it across the face. The packing
+multiplies each component by 255 (`Ngi32.dll:0x10037230`, four of them) and
+converts it to a whole number by the processor's rounding, to the nearest and
+a tie to the even one. The SSE builds then hold it to 0..255 (`cvtps2pi`,
+`packssdw`, `packuswb`; `0x1001d940` and `0x1001d8f0`), and the x87 build
+keeps the low byte of what `fistp` stored (`0x100247e0`), which is the same
+byte for everything the knees let through: the diffuse is held at 1 and the
+specular's knee ends at 1.
 
 A lit vertex is therefore never darker than the scene colour and never
 brighter for it; a light past 1 whitens what it falls on, by up to 0.8 of a
@@ -1241,10 +1312,40 @@ matrix, mean colours over the same areas:
 | C03 M02 briefing 29 s | sky | (158, 8, 21) | (102, 20, 20) | (161, 9, 22) |
 | C03 M02 cockpit, 79 s in | sky | (169, 38, 41) | (129, 62, 53) | (157, 39, 53) |
 
-**Not followed here**: the engine shades a point light's diffuse and not its
-highlight; it gathers one list of point lights a frame
-([11-effects.md](11-effects.md#what-a-light-does-to-a-surface--read-and-measured));
-and it does not round a vertex's two colours to bytes.
+**The counter light's highlight was this engine's, not the game's** —
+*measured*. C03 M02's sun has just risen through its briefing: at 54 s the
+first light is (0.74, 0.03, 0.11) travelling north along the ground and the
+second (0.79, 0.46, 0.82) travelling south, over a scene colour of
+(160, 42, 62). The engine took a highlight from both, and on every material
+with a specular the second's came out lavender on whatever faced north with
+the eye in its mirror. Without it, and with the point lights' highlights the
+shade does take, against the recording ("Let's Play - Parkan: Iron Strategy,
+Part 6", -yNnsqudMzw, 1:31.6, 1:36.7 and 1:44.5), mean colours over the same
+areas:
+
+| frame | area | recording | before | after |
+|---|---|---|---|---|
+| briefing 54 s | the slope Enemy 1's Medium Mine turns to the camera | (139, 13, 23) | (191, 44, 74) | (142, 17, 27) |
+| | its tower | (97, 11, 41) | (116, 21, 58) | (102, 13, 44) |
+| | the cracked ground before it | (84, 8, 10) | (86, 10, 12) | (86, 10, 12) |
+| briefing 61.8 s | Enemy 2's Large Factory, first mast, its north face | (94, 23, 43) | (192, 78, 138) | (99, 26, 47) |
+| | the face the camera looks at | (142, 15, 26) | (168, 15, 27) | (168, 15, 26) |
+| | its south face | (224, 90, 47) | (150, 15, 25) | (230, 89, 44) |
+| briefing 48.9 s | Enemy 1's Large Factory, first mast, its north-west face | (103, 25, 46) | (180, 70, 122) | (105, 28, 51) |
+| | its south face | (236, 116, 51) | (140, 14, 24) | (236, 95, 44) |
+
+The mine's slope is the face an earlier round's queue called the Outpost's;
+the building is `mmine01.dat`, and 25 of its mesh `fr_m_mine`'s 305 batches
+wear a skin whose specular is (255, 245, 239) at power 3, `B_PLT_02` and
+`B_PLT_06` among them, where 236 carry (10, 10, 10) or (11, 11, 11). Which
+batch the slope is was not picked out. The masts' own skin is `B_PLT_01`, with
+the same specular, and what turns their sun side yellow is not the sun
+([11-effects.md](11-effects.md#what-a-light-does-to-a-surface--read-and-measured)).
+
+**Not followed here**: the engine gathers one list of point lights a frame
+([11-effects.md](11-effects.md#what-a-light-does-to-a-surface--read-and-measured)),
+and it normalises a light's direction where the game does not, so an object
+drawn in a scaled frame takes the light a unit one would.
 
 ### Fog
 
@@ -1835,21 +1936,31 @@ which is what the game does.
 - ~~How the files' colours meet the textures~~ — as stored values, every
   multiply, add and blend
   ([The frame holds what the files hold](#the-frame-holds-what-the-files-hold--read-and-measured)).
-- **Whose light list the clouds are lit with.** The item takes the list the
-  shade last gathered, which is the last drawn object's or landscape cell's;
-  the sun's two lights are in every list, and which point lights ride along
-  is not read.
-- **Whether a light's direction is put into an item's frame as a unit
-  vector.** The directional routine does not normalise it
-  (`Ngi32.dll:0x10016070`), and the shade turns it through the item's matrix
-  when the item's frame is not the world's (`0x1004ed3f`–`0x1004ed7b`); what
-  a scaled frame does to its length is not read.
-- **One face of C03 M02's Outpost.** At briefing time 54 s ("Part 6",
-  -yNnsqudMzw, 1:36.7) the slope it turns to the camera is a plain red in the
-  recording, (136, 14, 24), and lavender in the engine, (188, 42, 71): lit by
-  the second light here and, by its colour, by the first or by neither there.
-  The ground and the sky of the same frame agree, so it is the light's
-  direction on that face, or which light reaches it, and it is not read.
+- ~~**Whose light list the clouds are lit with.**~~ — the last drawn
+  object's or cell's, and *which* that is stays unread; what is *measured* is
+  that no point light in any list lights them. The lighter passes over a
+  vertex past a light's range, the cap's nearest vertices stand 5000 and 4580
+  over the eye, the largest of the 618 blocks' ranges is 300, and the one
+  light a frame stretches that far, the lightning's 4000 ± 200, reaches a
+  first-ring vertex only from ground more than 80 above the eye 5341 away,
+  for under a hundredth of its colour
+  ([The clouds are lit](#the-clouds-are-lit-and-fogged-on-a-range-of-their-own--read-and-measured)).
+- ~~**Whether a light's direction is put into an item's frame as a unit
+  vector.**~~ — it is not: the shade multiplies it by the transpose of the
+  frame's 3 × 3 (`g_FastProc`'s `+0x8c`, `Ngi32.dll:0x10024260`) and neither
+  it nor the directional routine normalises the result, so a frame scaled by
+  *s* takes *s* times the light
+  ([The lit colour is the game's own](#the-lit-colour-is-the-games-own--read-and-measured)).
+  Still open: which shipped frames carry a scale, and so which objects the
+  engine, which normalises, lights otherwise.
+- ~~**One face of C03 M02's Outpost.**~~ — the building is Enemy 1's Medium
+  Mine, and the lavender was the **second light's highlight** on its skin's
+  specular, which the game does not take: `CSun`'s constructor flags the
+  counter light `D3DLIGHT_NO_SPECULAR` through the manager's slot 18
+  (`0x1007d03b`, `0x10080aea`), and the shade asks no highlight of a light
+  that carries it. Without it the engine's slope reads (142, 17, 27) against
+  the recording's (139, 13, 23), where it read (191, 44, 74)
+  ([The lit colour is the game's own](#the-lit-colour-is-the-games-own--read-and-measured)).
 - ~~Where the sun's lights point~~ — the light manager's slot 9
   (`0x10080550`) writes the record's `+0x24`, and `CSun` calls it twice every
   takt with the body's travel and its negation; the only other writer of the

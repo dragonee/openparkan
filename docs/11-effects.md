@@ -1081,7 +1081,15 @@ and the attenuation as they are.
   object, `0x10014dd0`) the shade walks the registered light managers (slot 22,
   `0x100472b0`, over the registry slot 10 fills, `0x10046de0`), passing over one with no
   light on, and one whose lights are all owner-only unless the object is its owner
-  (`0x1004761c`–`0x10047631`). Of each manager it keeps (`0x100479c0`) a light that is on
+  (`0x1004761c`–`0x10047631`). **One more manager is passed over, under bit 1 of the draw's
+  mode**: one whose registered object — the registry's third array, `shade+0x18c8` —
+  answers class 7 (`0x10047633`–`0x10047653`). The mesh's render sets that bit where the
+  agent's byte `+0x200` is set or its own argument carries `0x400`
+  (`AniMesh.dll:0x10014d9d`–`0x10014daf`), and the byte is set as the agent is attached to
+  a node of its parent whose record carries bit 0 at `+0xc` (`0x10007300`–`0x10007367`).
+  Which object answers class 7 and which nodes carry the bit are **not read**: no agent's
+  kind is 7 ([26-damage.md](26-damage.md#the-hit-test--read-and-measured)).
+  Of each manager it keeps (`0x100479c0`) a light that is on
   (`+0x4c` bit 0); an owner-only one (`0x80000000`) only when the object drawn is the
   manager's owner (`0x10047a52`); one whose `0x04000000` agrees with bit 2 of the draw's
   mode (`0x10047a66`–`0x10047a81`: a light carrying it lights only a draw carrying the bit,
@@ -1150,9 +1158,18 @@ directional). The point light's, read from `0x100164f0`:
 - the vertex's diffuse sum takes **material diffuse × light colour × cos θ × falloff**
   (`0x10016762`–`0x1001678a`), and, where the item wants a specular and the light is not
   flagged against one (`+0x4c` bit 1, which the manager's slot 18 sets and clears,
-  `0x10080a60`), its specular sum takes the material's specular the same way, on a power of
-  the cosine between the light's reflection and the vertex's own vector to the eye
-  (`0x100166b5`–`0x10016750`).
+  `0x10080a60`), its specular sum takes **material specular × light colour × falloff × sᵏ**
+  (`0x100166b5`–`0x10016750`, read through): s is the way to the light mirrored in the
+  normal, 2 (n · L) n − L over the length of L, against the vertex's unit vector to the eye;
+  a vertex it is not above 0 on takes none (`0x10016705`); and it is squared `power − 1`
+  times (`0x10016719`–`0x10016727`), so k is 4, 8, 16 and 32 at the shipped powers 3 to 6.
+  **No effect's light is flagged against a highlight**: a light is made with the word 0
+  (`0x1008076a`), slot 18 is what sets the bit, and `Effect.dll` never calls it. Its light
+  emitter calls the manager's slots 12, 13, 6, 11, 8, 9, 3 and 4 (`0x1000f694`–`0x1000fbb8`),
+  and a sweep of the whole module for a call through `+0x48` finds **none**, where the same
+  sweep finds 91 through `+0x18` and `+0x34`, the emitter's at `0x1000f6a2`, `0x1000f6b1` and
+  `0x1000f730` among them. The one light that is flagged is the sun's second
+  ([10-sky.md](10-sky.md#the-lit-colour-is-the-games-own--read-and-measured)).
 
 That is the lighting `D3DLIGHT2` describes, which the record's layout already said. The
 range and its reciprocal are put into the item's own units first (`0x1004ead5`,
@@ -1200,11 +1217,40 @@ its upper platform and the face of its tower toward the drill — over the red s
 and nothing of the ground does. `mineglow` is what hangs there: a kind 7, blue (0, 0, 0.9),
 (0, 1, 1), its range the block's 7 times the length of the drill's frame, 30.6. Lit by
 this reading the engine's frame shows the same three surfaces violet, where before it
-showed none; the red rock about the mine shows nothing of it in either. At 1:44.5 Enemy 2's Large Factory's masts are lavender on one side and yellow on
-the other, the yellow its `f_smalllight_y` lamps', which are kind 6 and light their owner
-alone. At 0:52.2 one flash whitens the rock and the mine together for two frames; that it
-is `env_lightning`'s light, (7, 7, 10) and a kind 7, taken through the knee into the
-specular, is *inferred*.
+showed none; the red rock about the mine shows nothing of it in either. At 0:52.2 one flash
+whitens the rock and the mine together for two frames; that it is `env_lightning`'s light,
+(7, 7, 10) and a kind 7, taken through the knee into the specular, is *inferred*.
+
+**The masts of a Large Factory are yellow where a chimney's flame is mirrored** — *measured*
+and *seen*. On the same briefing, at 1:44.5 (briefing time 61.8 s), each mast of Enemy 2's
+Large Factory is lavender on its north face, red where the camera looks at it and
+yellow-orange on its south face, and at 1:31.6 (48.9 s) Enemy 1's are yellow down their
+south faces from the west, where five seconds on, from the south-south-west, the middle one
+is red all round: the yellow moves with the eye, so it is a highlight. Two things make it:
+
+- **the skin.** A mast is an eight-sided prism of 16 triangles wearing `B_PLT_01`: diffuse
+  (208, 203, 191), no ambient, and a specular of **(255, 245, 239) at power 3**. Of the
+  factory's 438 batches 118 wear a `B_PLT` skin with that specular (`_01`, `_02`, `_03` and
+  `_06`), 210 a skin of (10, 10, 10) or (11, 11, 11), and 103 one with none. Its texture
+  `PLT_01.0` is a white panel beside a red one, so a white face shows a light's own colour;
+- **the lights.** The load group hangs `smoke_fr_02` on each chimney's three control points
+  ([13-control.md](13-control.md#a-buildings-load-group--read-and-measured)), and its second
+  emitter is a light of kind 6: (2, 2, 0.5) with a jitter of (1, 1, 0.2), attenuation
+  (0, 1, 0), and a range of 15 through a frame whose first axis is the point's own vector —
+  3.73 long on `Smoke_w` and 2.6 on the other two, so 56 over the middle chimney and 39 over
+  its neighbours, at the chimneys' tops, 30.7 apart. A top vertex of one mast is 28 from the next
+  one's flame, and takes its colour on the specular at 11/39 or 28/56 of it where the eye
+  stands in the mirror; the bottom vertices are out of range, and the device carries the two
+  down the face.
+
+The lavender is the sun's second light on the diffuse, and only there; the engine had taken
+its highlight too, and no point light's. With both put right its masts read, left to right
+across the first one at 61.8 s, (99, 26, 47), (168, 15, 26) and (230, 89, 44) against the
+recording's (94, 23, 43), (142, 15, 26) and (224, 90, 47), where it had (192, 78, 138),
+(168, 15, 27) and (150, 15, 25)
+([10-sky.md](10-sky.md#the-lit-colour-is-the-games-own--read-and-measured)). The factory's
+`f_smalllight_y` lamps, which an earlier reading here gave the yellow to, have a range of
+3.5 and stand 2.5 over the ground: they reach no mast.
 
 **Direct3D's lights are built, and not reached.** `RenderVB`'s other branch — taken when
 `UseDXLighting` is not 0, the camera's infrared is off (bit 0 of the block the shader
@@ -1686,10 +1732,12 @@ specular = 0, 0, 0, fog             x 255
                  1 - (d^2 - near^2) x k         between
 ```
 
-so an effect sprite fogs **linearly in the squared distance**, which the engine does not
-follow — its sprites take the same linear-in-distance fog as its other pipelines. Effect
-draw flag 4 — header flag `0x2000`, which only `env_lightning` carries — forces the factor
-to 1, so that effect never fogs. One branch is left over: with the shader's own `+0x3c`
+so an effect sprite fogs **linearly in the squared distance**, as every lit item does
+([10-sky.md](10-sky.md#fog)): half way to a fog ending at 500 it keeps three quarters of
+itself, where a fog linear in the distance keeps half. The engine follows it now, a pixel at
+a time; the game's factor is one for the sprite, from the distance its item is built with.
+Effect draw flag 4 — header flag `0x2000`, which only `env_lightning` carries — forces the
+factor to 1, so that effect never fogs. One branch is left over: with the shader's own `+0x3c`
 bit 0 set the diffuse is replaced by green alone at `(r + g + b) × 0.33 × 7` held at 255 (`0x1004f900`),
 a monochrome mode nothing found switches on.
 
@@ -2340,10 +2388,29 @@ Read one slot either way, none of the seven name witnesses agrees.
   takes the lights on its vertices**, the lamps' and `mineglow`'s among them, which is what
   stands C03 M02's mine violet
   ([above](#what-a-light-does-to-a-surface--read-and-measured)).
-- **What the lighter's other routines do.** The directional light's (`g_FastProc`'s `+0xc8`)
-  is read only as far as its call, and the point light's specular only in outline. How a
-  landscape cell is bounded for its gather, and the order the light managers register in —
-  which decides the eight the Direct3D builder would take — are not read either.
+- ~~**What the lighter's other routines do.** The directional light's (`g_FastProc`'s `+0xc8`)
+  is read only as far as its call, and the point light's specular only in outline.~~
+  Answered: the directional routine takes the cosine against the direction as the shade
+  hands it over, unnormalised, and its highlight as the mirrored travel against the way to
+  the eye squared `power − 1` times (`Ngi32.dll:0x10016070`–`0x10016220`); the point light's
+  highlight is the same mirror on the way to the light, times its falloff
+  (`0x100166b5`–`0x10016750`); the two colours go out as bytes, × 255 and rounded to the
+  nearest (`+0x54`, `0x1001d940`); and the sun's second light is the one light flagged
+  against a highlight
+  ([above](#what-a-light-does-to-a-surface--read-and-measured),
+  [10-sky.md](10-sky.md#the-lit-colour-is-the-games-own--read-and-measured)).
+  Still open: how a landscape cell is bounded for its gather, and the order the light
+  managers register in — which decides the eight the Direct3D builder would take.
+- **Which manager the gather passes over under bit 1 of the draw's mode.** One whose
+  registered object answers class 7 (`0x10047633`–`0x10047653`), for an agent attached to a
+  parent's node whose record carries bit 0 at `+0xc`, or a draw whose argument carries
+  `0x400`. What answers class 7 — no agent's kind is — and which nodes carry the bit are not
+  read; if it is the sun's, a part hung inside a building takes no sunlight
+  ([above](#what-a-light-does-to-a-surface--read-and-measured)).
+- ~~**What lights the masts of C03 M02's Large Factory lavender.**~~ — the sun's second
+  light, on their diffuse alone; the yellow-orange of their other side is the highlight of
+  the chimneys' own `smoke_fr_02` lights on `B_PLT_01`'s specular, which the engine did not
+  take ([above](#what-a-light-does-to-a-surface--read-and-measured)).
 - ~~**A light's colour and range jitter** (+96, +120): which stream each is drawn from,
   how often, one draw or one a channel, and whether the result is held to a bound.~~
   Answered: five draws on every update of a light that is on — alpha, blue, green and the
