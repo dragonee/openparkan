@@ -945,8 +945,12 @@ the group**. The sky takes kind 0 (`0x10028508`), the mesh draw kind 1
 A view then draws in two rounds (`0x10081c70`): it runs the pass list's group 0
 (`0x10081ca6`), resets pool 0 (`0x10081cab`), runs group 1 (`0x10081cd5`) and
 resets pool 1 (`0x10081ce8`). So group 1 is drawn **after** everything in group
-0, and within a group the passes run in order and each pass draws its own
-items in the order they were filed.
+0, and within a group the passes run in order. What a pass does with its own
+items is its type: a type-2 or type-5 pass draws them in the order they were
+filed, a type-1 or type-3 pass far to near, and a type-0 pass by the vertex
+buffer they share
+([11-effects.md](11-effects.md#effect-sprites-are-drawn-far-to-near--read-and-seen)).
+The sky's pass is type 2, so its five draws go down as it files them.
 
 **The reset touches no render state at all** — *read*, with a control. Slot 1
 of the manager (`0x100332b0`, `ret 4`) runs from `0x100332b0` to `0x100336ea`
@@ -990,15 +994,15 @@ byte 1 on the first and 0 on the rest. Group 1 is the interesting one:
 | layer | type | near | far | z range | filed by |
 |---:|---:|---:|---:|---|---|
 | 0 | 2 | **700** | **50000** | **1.0 – 1.0** | the sky, all five draws |
-| 1–4 | 2 | 0.5 | 700 | 0.1 – 0.99 | |
+| 1–4 | 2 | 0.5 | 700 | 0.1 – 0.99 | layer 1: a water batch, unless `UseReflections` is on with `UseEMBMReflections` off (`0x1004453b`) |
 | 5 | 1 | 0.5 | 700 | 0.1 – 0.99 | a see-through surface (`0x100455b2`) |
-| 6 | 3 | 0.5 | 700 | 0.1 – 0.99 | |
-| 7 | 3 | 0.2 | 700 | 0.1 – 0.99 | |
+| 6 | 3 | 0.5 | 700 | 0.1 – 0.99 | every effect sprite but the camera's own unit's |
+| 7 | 3 | 0.2 | 700 | 0.1 – 0.99 | the sprites of the unit the camera rides (`CShade` slot 8, `0x1004294b`) |
 | 8 | 2 | 0.5 | 700 | 0.1 – 0.99 | |
 | 9 | 0 | **0.05** | **10** | **0.0 – 0.1** | a fifth slot, ordinary node |
 | 10 | 2 | **0.05** | **10** | **0.0 – 0.1** | a fifth slot, the cockpit |
 | 11 | 0 | 0.5 | 700 | 0.1 – 0.99 | |
-| 12 | 5 | 0.5 | 700 | 0.1 – 0.99 | |
+| 12 | 5 | 0.5 | 700 | 0.1 – 0.99 | a water batch with `UseReflections` on and `UseEMBMReflections` off (`0x1004452f`); the layer is drawn only while `UseReflections` is on |
 | 13 | 2 | 0.5 | 700 | 0.1 – 0.99 | |
 
 So the depth buffer is cut into three: the first-person passes own 0.0 to 0.1,

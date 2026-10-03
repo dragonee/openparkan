@@ -37,6 +37,7 @@
 - Visuals
   - [x] Factory chimney animation is too fast and yellow instead of black smoke
     - 2026-09-30: its streams also run at half pace now, and each puff takes its own far end and size, as C03 M01's volcano was measured against Part 5 of the let's play (see Campaign 03)
+    - 2026-10-03: the half pace is taken back, here and on every load group's streams (see Campaign 03): measured again, the recording's volcano runs at the pace its block gives, and nothing read slows a building's stream. Not looked at again in play: whether the chimney still reads as too fast
   - [x] Interior icons - computer, charging station - should be glowing green, are grey now
   - [x] Lights in Factory do not lie on normals of the building, see (factory-lights.png)
   - [x] The interiors of Factory lie beneath a black color. Until you step in you don't see the next segment
@@ -212,6 +213,7 @@ Parts 3 and 4 again, is the small light of the recording.
     - Measured frame by frame at 60 fps (4:19.4–4:24.4): the recording's smoke rises at about 0.63 of the engine's speed against its own puffs' width, and its flame beats at 5.3 Hz where the engine's 0.08 s interval beat at 12.5 Hz
     - The engine plays a stream's clock, emission and ageing as `Effect.dll` reads; what slows the game's is not read (queued)
     - Fixed 2026-09-30 as a stand-in: the streams of every load group's effects and of a lode's plume run at half pace; the construction sphere's and every gun's and round's keep theirs
+    - **Taken back 2026-10-03.** Every effect manager is handed the one game clock on every pass (`World3D.dll:0x10006ce1`, `AniMesh.dll:0x100015ba`), and the recording measured again does not show the half pace: with the whole plume in view (19:25.1–19:26.7) the smoke is seen to 390 px over the crater and its billows rise 260–300 px/s, 1.40 s to cross it, where the engine measured the same way crosses its own in 1.41 s at the read pace and 3.06 s at half. The 0.63 above was taken in the near view, where the flame's slower puffs share the strip. The half pace is removed. Not measured again: the flame's 5.3 Hz
   - [x] The plume climbs one smooth cone where the recording's billows in separate puffs (4:19–4:24)
     - The spawn gives each particle its own far end and size, a uniform in ±half of the block's jitter (`Effect.dll:0x10011e81`–`0x10011f7f`), which the engine left out, so every puff took one line
     - Fixed 2026-09-30: each stream particle draws its own far ends as it leaves; the volcano's smoke ends 100 ± 30 m up and ± 10 m aside

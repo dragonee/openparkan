@@ -177,7 +177,9 @@ pub const LIGHT_ATTENUATION_AT: usize = 124;
 pub const LIGHT_OWNER_ONLY: u32 = 0x8000_0000;
 pub const LIGHT_NOT_EMULATED: u32 = 0x2000_0000;
 /// How long an instance keeps what its last update drew: the manager updates one once 100 ms
-/// have passed since its last update (`Effect.dll:0x100081a7`–`0x100081bc`).
+/// have passed since its last update (`Effect.dll:0x100081a7`–`0x100081bc`) -- while nobody
+/// draws it. A drawn instance's flag `0x40` lets every pass through (`0x1000817a`,
+/// `0x10007de5`; docs/11, "Who hands a manager its time").
 pub const UPDATE_INTERVAL_MS: f64 = 100.0;
 /// What a range that is not above 0 becomes (`Effect.dll:0x1000fb7b`–`0x1000fb8c`).
 pub const LIGHT_LEAST_RANGE: f32 = 0.01;
@@ -1058,6 +1060,10 @@ impl Instance {
     /// passed since its last (`0x100081a7`); this engine updates every instance on every
     /// tick, so the lights keep that interval themselves, and a light holds what it drew
     /// until the next.
+    ///
+    /// STAND-IN: docs/11-effects.md#a-lights-jitter-is-five-draws-an-update--read-and-measured
+    /// -- that interval is an undrawn effect's; the game redraws on every pass while the
+    /// effect is drawn, and no recording has been measured for a lamp's flicker.
     ///
     /// STAND-IN: docs/11-effects.md#the-generator--read-and-measured -- the game draws the
     /// alpha, blue, green and range from the light emitters' module-wide state `0x10024c80`

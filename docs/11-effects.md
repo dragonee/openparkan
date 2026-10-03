@@ -1241,10 +1241,16 @@ the emitter or in the manager. The range's draw is added to the lerped range bef
 frame's stretch multiplies it (`0x1000faf7`, `0x1000fb13`), and the floor of 0.01 comes last.
 
 **How often.** The update is the instance's, which the manager runs once 100 ms have passed
-since its last, or on every tick within 50 ms of a command to it (`0x1000817a`–`0x100081bc`,
-[above](#how-an-effect-runs--read)). So a jittered light **steps ten times a second** and
-holds each value between steps: it flickers, it does not shimmer. The draw is not per
-instance or per window — a light that stays on redraws for as long as it is on.
+since its last, or on every tick up to a deadline 50 ms on from its draw
+(`0x1000817a`–`0x100081bc`,
+[Who hands a manager its time](#who-hands-a-manager-its-time--read-and-seen)). This page
+had the first half alone, and a jittered light stepping ten times a second. That is the
+pace of an effect **nobody is drawing**: the instance's draw sets the flag that opens the
+gate (`0x10007de5`), so a light whose effect is drawn redraws its five on **every pass**,
+and shimmers; only an unseen one holds each value for 100 ms. The draw is not per instance
+or per window — a light that stays on redraws for as long as it is on. *Not seen*: no
+recording has been measured for a lamp's flicker rate, and the engine still holds each draw
+for 100 ms (engine README, *Stand-ins*).
 
 *Measured* over the 618 light blocks: **107** carry a colour jitter and **58** a range jitter
 — 111 carry either and 54 both — and the alpha's spread is 0 on every one, as the colour's
@@ -2750,8 +2756,9 @@ Read one slot either way, none of the seven name witnesses agrees.
   how often, one draw or one a channel, and whether the result is held to a bound.~~
   Answered: five draws on every update of a light that is on — alpha, blue, green and the
   range from the light emitters' state `Effect.dll:0x10024c80`, the red through the wrapper
-  from the bursts' `0x10023688` — each a uniform in ± half of its spread, redrawn every
-  100 ms, added to the lerped value and not held to anything but the range's floor of 0.01
+  from the bursts' `0x10023688` — each a uniform in ± half of its spread, redrawn on every
+  update, which is every pass while the effect is drawn and every 100 ms while it is not,
+  added to the lerped value and not held to anything but the range's floor of 0.01
   where it is not above 0; 111 of the 618 blocks carry a jitter, 22 of them of the kind the
   landscape's emulation draws
   ([A light's jitter is five draws an update](#a-lights-jitter-is-five-draws-an-update--read-and-measured)).

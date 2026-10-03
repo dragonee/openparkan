@@ -1250,9 +1250,15 @@ depth states or the reference, so those come from elsewhere:
 
 *Measured*: the ambient alpha is below 1.0 on one material of 905, `FIRESTORM`
 (its fade-in), and every foliage material — `FTREE1`, `HTREE1`, `GRASS`,
-`ELKA`, `TF2` — carries 1.0. So **a tree's leaves are an ordinary item: they
-blend `SRCALPHA/INVSRCALPHA`, drop their alpha-0 texels and write depth**, and a
-leaf drawn first hides the leaves behind it where its texels are not clear.
+`ELKA`, `TF2` — carries 1.0. So **by its material a tree's leaves are an
+ordinary item: they blend `SRCALPHA/INVSRCALPHA`, drop their alpha-0 texels and
+write depth**, and a leaf drawn first hides the leaves behind it where its texels
+are not clear. **The palm's are not ordinary all the same** — corrected
+2026-10-03: the test's other arm is the batch word, and all 704 `TF2` batches
+carry `0x100`, as every batch of 46 materials does, so a palm's leaves are filed
+see-through in layer 5, write no depth, and lie over one another by the layer's
+far-to-near order
+([11-effects.md](11-effects.md#effect-sprites-are-drawn-far-to-near--read-and-seen)).
 `TF2`, the palm's texture, has an alpha of 0 on 30,413 of its 65,536 texels and
 255 on 21,113; `FTREE1` and `HTREE1` are 4-bit, 0 on 38% and 50%.
 
@@ -1274,8 +1280,12 @@ as well, and 1430 more are two-sided `0x102` ones — are the ones tested;
 ([10-sky.md](10-sky.md#the-dome)), so group 1's layers 6 and 7 are type 3, and
 every effect sprite is filed in layer 6
 ([11-effects.md](11-effects.md#effect-sprites-are-drawn-far-to-near--read-and-seen)),
-whose items are drawn far to near; what a type-1, 2 or 5 layer does with its
-items' order — the see-through surfaces' layer 5 among them — is not read.
+whose items are drawn far to near; ~~what a type-1, 2 or 5 layer does with its
+items' order — the see-through surfaces' layer 5 among them — is not read~~ —
+**read**: type 1, the see-through surfaces' layer 5, draws far to near as type 3
+does, by each item's first vertex; types 2 and 5 draw as filed, and type 0 by
+shared vertex buffer
+([11-effects.md](11-effects.md#effect-sprites-are-drawn-far-to-near--read-and-seen)).
 
 ### The class byte is the ground's surface id
 
