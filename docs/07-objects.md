@@ -1656,8 +1656,10 @@ one it holds at `+0xa4` (`Control.dll:0x1001a92d`–`0x1001a95d`).
   node's wear base with the batch's material byte (`0x100135c8`–`0x100135ce`).
   So on a building's floor, a bridge's deck or another machine it is that
   batch's material, fetched through that object's own manager (`0x100059e3`).
-- What the building's own slot 3 answers (`Terrain.dll:0x10056c10`) was not
-  read.
+- **A building hands the face on to its mesh.** Its own slot 3
+  (`Terrain.dll:0x10056c10`, table `0x1009b4ec`) is a call of slot 3 on the
+  interface it keeps at `+0x1c` (`0x10056c2d`), so a floor answers as a mesh
+  does.
 - It is the word the ground contact reads the surface from
   (`Control.dll:0x1001aaee`,
   [above](#the-class-byte-is-the-grounds-surface-id)), so a machine wears the
