@@ -1091,7 +1091,11 @@ and that group picks the step by surface
      `AniMesh.dll`, all in the agent mesh's message handler (`0x10006fc0`,
      slot 2 of the vtable at `0x1002057c`):
      - message 4 with a non-zero argument, the attach's second pass
-       (`0x100070bd`);
+       (`0x100070bd`). The argument is the game clock's word
+       (`World3D.dll:0x10032a38`), and an object is given such a pass twice,
+       by `CreateObject` (`0x10007e6e`) and by `AddObjectToGame`
+       (`0x100080a9`)
+       ([35-hud.md](35-hud.md#what-mode-2-does-with-the-colour--read-measured-and-seen));
      - the `0x80000020` part load, after the merge `0x1000a460`, when the load
        record's `+0x40` is set (`0x10007254`–`0x10007261`), as the unit's
        parts are assembled
@@ -1105,7 +1109,10 @@ and that group picks the step by surface
        branches there. **Only the designer sends it**, below.
 
      It first runs the pose walk (`0x10008b30`), so the nodes' boxes are taken
-     at the frames the mesh holds then. The mesh's constructor (`0x100068a0`)
+     at the frames the mesh holds then. The same routine joins every part's
+     header box at the mesh's `+0x54` and stands the cylinder at `+0x134` in
+     it, whose radius a unit's record keeps
+     ([40-command-mode.md](40-command-mode.md#r-the-unit-records-0x98--read-and-measured)). The mesh's constructor (`0x100068a0`)
      leaves both frames and the blend between them at 0 (`+0x1e4`, `+0x1e8`,
      `+0x1f4`) and sets the two bytes the walk tests (`+0x1fc`, `+0x1fd`), so
      at the attach and through the assembly the nodes stand at **frame 0**,

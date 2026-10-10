@@ -961,7 +961,11 @@ every step and kills inside the sphere four times a second:
 
 **The sphere** is `CBuilding`'s construction sphere (`Terrain.dll:0x1005bd70`):
 built round the building's outer contours ("Illegal placement" without them),
-with 15 more radius on a mine (`0x1005c50c`).
+with 15 more radius on a mine (`0x1005c50c`). Its exact shape — the box's
+upper corner starting at `FLT_MIN`, so that it ends at 0 where the ring lies
+below it, and the radius taken at z 0 — and its other use, as the building's
+shield bubble, are in
+[24-motion.md](24-motion.md#collision-between-objects--read).
 
 So a **new building**, made the moment the builder arrives but hidden, and placed in
 the landscape only by its code-0 state, shows the sign from the start; after 5 s it sends everyone out for 30 s, the sign still up
