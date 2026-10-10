@@ -114,16 +114,16 @@ pub const VIEW_LIGHT_COLOUR: f32 = 0.25;
 /// The second light travels the other way at this share of the first's colour (`0x10005a7d`).
 pub const VIEW_COUNTER_SHARE: f32 = 0.35;
 
-/// How many times over a unit that carries a turret is lit by them, against a unit that is
-/// its chassis alone.
-///
-/// STAND-IN: docs/35-hud.md#the-unit-in-the-middle--read-and-seen -- the read finds one pair of
-/// lights on a unit's mesh, and the recordings show that much on a unit of one part and twice
-/// it on one of two or more. Measured: Mission 01's dummy, a chassis alone, is 0.136 over its
-/// node's green in the recording and 0.139 here at one pair; C03 M02's hero, a chassis and a
-/// turret, is lit 2.06, 1.98 and 2.03 times what one pair gives (the median green, and blue's
-/// ninetieth and ninety-ninth percentiles). What makes the second pair is not read.
-pub const VIEW_LIGHT_PAIRS_WITH_A_TURRET: f32 = 2.0;
+/// How many pairs of them a shown object holds: one for each time its mesh was attached. The
+/// mesh makes its eight lights whenever message 4 reaches it with an argument that is not 0
+/// (`AniMesh.dll:0x10006ff1`-`0x100070f7`), keeping no count of the sets it has made, and
+/// that argument is the game clock (`World3D.dll:0x10032a38`). `CreateObject` attaches what it
+/// makes with it (`0x10007e65`-`0x10007e6e`) and `AddObjectToGame` attaches it again
+/// (`0x1000809f`-`0x100080a9`), and both scheme builders call the one and then the other
+/// (`ArealMap.dll:0x1001556a`, `0x10015dd0`; `Behavior.dll:0x1001df80`). So every unit and
+/// building a mission places or a factory builds carries two pairs, on at the same colours and
+/// the same way, whatever its parts (docs/35, "The unit in the middle").
+pub const VIEW_LIGHT_PAIRS: f32 = 2.0;
 
 /// The two lights of a unit standing at `turn`, lit `pairs` times over.
 pub fn view_lights(turn: Quat, pairs: f32) -> [ViewLight; 2] {
@@ -453,18 +453,11 @@ fn panel(
     let space = ink.painter.space;
     let [px0, py0] = space.pixel([rect[0], rect[1]], pin);
     let [px1, py1] = space.pixel([rect[2], rect[3]], pin);
-    // The shown object's turn, which its two lights turn with, and how many parts it is: the
-    // hero is its chassis and its turret.
-    let (turn, parts) = match shown {
-        Some(t) => play
-            .battle
-            .combat
-            .targets
-            .get(t)
-            .map_or((Quat::IDENTITY, 1), |target| (target.rotation(), target.parts.len())),
-        None => (play.hero.walker.drawn_turn(play.hero.time_ms), 2),
+    // The shown object's turn, which its lights turn with.
+    let turn = match shown {
+        Some(t) => play.battle.combat.targets.get(t).map_or(Quat::IDENTITY, |target| target.rotation()),
+        None => play.hero.walker.drawn_turn(play.hero.time_ms),
     };
-    let pairs = if parts > 1 { VIEW_LIGHT_PAIRS_WITH_A_TURRET } else { 1.0 };
     let direction = if own {
         // The object's y column, as it is drawn.
         let unit = play.driven();
@@ -498,7 +491,7 @@ fn panel(
         near: CAMERA_NEAR,
         far: CAMERA_FAR,
         unit: shown,
-        lights: view_lights(turn, pairs),
+        lights: view_lights(turn, VIEW_LIGHT_PAIRS),
     };
 
     // 7–10, over the view.
@@ -714,9 +707,16 @@ mod tests {
         // world's +x: the light still comes from its right, its back and above.
         let [a, _] = view_lights(Quat::from_rotation_z(std::f32::consts::FRAC_PI_2), 1.0);
         assert!(a.travel.abs_diff_eq(Vec3::new(-1.0, -1.0, -1.0), 1e-5), "{:?}", a.travel);
-        // A unit with a turret has both at twice that.
-        let [a, b] = view_lights(Quat::IDENTITY, VIEW_LIGHT_PAIRS_WITH_A_TURRET);
+        // An object in the game was attached twice and holds two pairs: both at twice that.
+        let [a, b] = view_lights(Quat::IDENTITY, VIEW_LIGHT_PAIRS);
         assert!((a.colour - 0.5).abs() < 1e-6 && (b.colour - 0.175).abs() < 1e-6);
+        // Mission 01's dummy shows the player its aim face, which looks along the unit's +y: the
+        // counter light alone reaches it, on the face's green of 198 over a node's 0.5. One pair
+        // would leave it 145; the recording's is 162.
+        let face = Vec3::Y;
+        let lit: f32 = [a, b].iter().map(|l| l.colour * (-face.dot(l.travel)).max(0.0)).sum();
+        assert_eq!((255.0 * (0.5 + 198.0 / 255.0 * lit)).round(), 162.0);
+        assert_eq!((255.0 * (0.5 + 198.0 / 255.0 * lit / VIEW_LIGHT_PAIRS)).round(), 145.0);
     }
 
     #[test]

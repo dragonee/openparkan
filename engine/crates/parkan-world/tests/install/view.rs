@@ -259,10 +259,10 @@ fn mission_01s_cockpit_names_its_units_lists_its_guns_and_frames_its_target_as_r
     assert_eq!((drawn.views[0].unit, drawn.views[1].unit), (Some(helic), None));
     assert_eq!(drawn.views[0].viewport, [9.0, 315.0, 128.0, 128.0]);
     assert_eq!(drawn.views[1].viewport, [503.0, 315.0, 128.0, 128.0]);
-    // Each view carries its unit's own two lights (docs/35, "The unit in the middle"): the
-    // first travels (-1, 1, -1) in the unit's own frame, the vector as it is, and the second
-    // the other way at 0.35 of its colour. The helicopter and the hero both carry a turret,
-    // and are lit twice over.
+    // Each view carries its unit's own lights (docs/35, "The unit in the middle"): the first
+    // travels (-1, 1, -1) in the unit's own frame, the vector as it is, and the second the
+    // other way at 0.35 of its colour. Every unit in the game was attached twice, by
+    // `CreateObject` and by `AddObjectToGame`, and its mesh made a pair each time: two pairs.
     for v in &drawn.views {
         let [a, b] = v.lights;
         assert!((a.colour - 0.5).abs() < 1e-6 && (b.colour - 0.175).abs() < 1e-6, "{:?}", v.lights);
@@ -273,13 +273,23 @@ fn mission_01s_cockpit_names_its_units_lists_its_guns_and_frames_its_target_as_r
     assert!(drawn.views[1].lights[0].travel.abs_diff_eq(turn * Vec3::new(-1.0, 1.0, -1.0), 1e-5));
     let turn = play.battle.combat.targets[helic].rotation();
     assert!(drawn.views[0].lights[0].travel.abs_diff_eq(turn * Vec3::new(-1.0, 1.0, -1.0), 1e-5));
-    // A dummy is its chassis alone, and has the one pair: 0.25 and 0.0875.
+    // A dummy is its chassis alone, and has the two pairs like any unit: its parts do not
+    // count. Its aim face looks along its +y, at the hero coming from the west, and takes the
+    // counter lights alone: 0.175 on the face's green of 198 over a node's 0.5 is the
+    // recording's 162, where one pair would leave 145.
     assert_eq!(play.battle.combat.targets[dummies[0]].parts.len(), 1);
     play.targets.set(Some(dummies[0]));
     let dummy = cockpit.draw(&play, Space::new(640.0, 480.0), &font, &menu, view_proj);
     let [a, b] = dummy.views[0].lights;
     assert_eq!(dummy.views[0].unit, Some(dummies[0]));
-    assert!((a.colour - 0.25).abs() < 1e-6 && (b.colour - 0.0875).abs() < 1e-6, "{a:?} {b:?}");
+    assert!((a.colour - 0.5).abs() < 1e-6 && (b.colour - 0.175).abs() < 1e-6, "{a:?} {b:?}");
+    let target = &play.battle.combat.targets[dummies[0]];
+    let face = target.rotation() * Vec3::Y;
+    let start = m.objects.iter().find(|o| o.path.to_ascii_lowercase().ends_with("tut1_p.dat")).unwrap();
+    let to_start = (Vec3::from_array(start.position) - target.position).with_z(0.0).normalize();
+    assert!(face.dot(to_start) > 0.95, "the aim face looks back at the hero's start: {face}, {to_start}");
+    let lit: f32 = [a, b].iter().map(|l| l.colour * (-face.dot(l.travel)).max(0.0)).sum();
+    assert_eq!((255.0 * (0.5 + 198.0 / 255.0 * lit)).round(), 162.0);
     play.targets.set(Some(helic));
     // 20 s on the box is gone.
     play.hero.time_ms += 20_001.0;

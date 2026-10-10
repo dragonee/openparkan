@@ -942,7 +942,7 @@ field of view (*guess*). Each frame (`0x100418a3`–`0x10041cc0`):
   its maximum (node `+0x124`), and the two quads are the mesh's `+0x21c` and
   `+0x22c`, set by its constructor (`0x10006b7a`).
 - Afterwards it restores the camera's colour and mode.
-- It has the shade gather the mesh's own two view lights and no other
+- It has the shade gather the mesh's own view lights and no other
   ([below](#what-mode-2-does-with-the-colour--read-measured-and-seen)).
 
 So an intact part is green (0, 0.5, 0) and a destroyed one red (0.5, 0, 0), before
@@ -1011,85 +1011,201 @@ rgb = knee( max( self-light + diffuse × Σ light colour × (−n · d),  scene 
 | `0x400` | the light gather's flag 2 (`0x10014daa`) |
 
 **Which lights reach the draw.** The mesh begins its batches through the
-shade's slot 13 (`Terrain.dll:0x100478c0`) with those gather flags:
+shade's slot 13 (`Terrain.dll:0x100478c0`) with those gather flags, **once for
+the whole draw** (`AniMesh.dll:0x10014dd0`), not once a part:
 - **1**: the object's own light manager alone, its interface `0xe`
-  (`0x100472e2`–`0x1004759b`). Without it the list is every registered manager
-  that lights more than its owner, and the object's own.
+  (`0x100472e2`–`0x1004759b`). The list is that one manager: the query goes to
+  the drawn object, which is the agent's one mesh with every part merged into
+  it, and no parent's or part's manager is walked. Without the flag the list is
+  every registered manager that lights more than its owner, and the object's
+  own.
 - **2**: a manager whose owner answers kind 7 is passed over
-  (`0x10047633`–`0x10047651`).
+  (`0x10047633`–`0x10047651`). **Kind 7 is the sky** (*read*,
+  [below](#the-sky-is-the-one-object-of-kind-7--read)).
 - **4**: only lights flagged `0x4000000`, where without it only the lights not
   flagged so (`0x10047a66`–`0x10047a81`); and no point light (`0x10047af7`).
 
 So `0x7f0`, gather flags 7, takes **the unit's own lights flagged `0x4000000`
 and nothing else**: not the sun's two, not an effect's.
 
-**The two lights.** A mesh whose agent is of kind 2, 3 or 4 makes eight
-directional lights on its own manager when it is set up (message 4's second
-phase, `AniMesh.dll:0x100070c9`–`0x1000718a`):
+**The two lights, made twice.** A mesh whose agent is of kind 2, 3 or 4 makes
+eight directional lights on its own manager each time it is set up
+(`AniMesh.dll:0x100070c9`–`0x1000718a`):
 - **Six** along ±x, ±y and ±z (the table at `0x10025ef8`, filled at
-  `0x10007d70`), flagged `0x80000000` and off. A draw without `0x200` asks an
-  object its own answers for six colours, and with them turns the six on
-  (`0x1000b480`); every draw turns them off after (`0x10015153`–`0x1001517f`).
-  A `0x200` draw skips the asking (`0x10014db2`), and its flag 4 would pass
-  them over anyway. What that object is was not read.
+  `0x10007d70`), flagged `0x80000000` and off. A draw without `0x200` asks the
+  agent's parent for six colours, through that object's interface `0x20`, and
+  with them turns the six on (`0x1000b480`: the parent is `IGameObject` slot 3,
+  `0x1000b4a0`). An agent with no parent, or one whose slot 16 answers −1, asks
+  nothing and its six stay off (`0x1000b4b4`–`0x1000b4bf`). Every draw turns
+  them off after (`0x10015153`–`0x1001517f`). A `0x200` draw skips the asking
+  (`0x10014db2`), and its flag 4 would pass them over anyway.
 - **Two** flagged `0x84000000` and on, their directions (−1, 1, −1) and
   (1, −1, 1), set in space 0, which stores a vector as it is
   ([10-sky.md](10-sky.md#where-the-two-lights-point--read)).
 - All eight are flagged against a specular (manager slot 18 with 0,
   `0x10007187`).
 
-The same setup then calls `IAnimation` slot 28 on the mesh (`0x10005a00`, called
-at `0x1000723b`) with a direction, a colour and a share: (−1, 1, −1),
-**(0.25, 0.25, 0.25, 1)** and **0.35**. The first of the two takes the direction
-and the colour; the second takes the direction negated and 0.35 of the colour
-(`0x10005a7d`–`0x10005b26`). No other call was found: of the calls at `+0x70`,
-`iron3d.dll`'s 18, `Terrain.dll`'s 9, `World3D.dll`'s 3, `Behavior.dll`'s 2 and
-`MisLoad.dll`'s 1 pass other arguments (`Net.dll`, `Ngi32.dll` and
+The same set-up then calls `IAnimation` slot 28 on the mesh (`0x10005a00`, called
+at `0x1000723b`) with a space, a direction, a colour and a share: 0,
+(−1, 1, −1), **(0.25, 0.25, 0.25, 1)** and **0.35**. The first of the two takes
+the direction and the colour; the second takes the direction negated and 0.35 of
+the colour (`0x10005a7d`–`0x10005b26`). No other call was found: of the calls at
+`+0x70`, `iron3d.dll`'s 18, `Terrain.dll`'s 9, `World3D.dll`'s 3, `Behavior.dll`'s
+2 and `MisLoad.dll`'s 1 pass other arguments (`Net.dll`, `Ngi32.dll` and
 `services.dll` have one each, not read), the control is that sweep finding
 `AniMesh.dll`'s own; and the HUD's routine asks no object for interface `0xe`.
+`push 0x84000000` is in one module of the install, once: this set-up.
+
+**The set-up runs once for each time the object is attached, and an object in
+the game was attached twice** (*read*). That is the second pair.
+
+1. **What starts it.** The mesh's handler takes message 4 two ways
+   (`0x10006fed`–`0x10006ff3`). With an argument of 0 it asks its aggregate
+   for its interfaces. With any other it works its bounds out, asks the agent's
+   kind and makes the eight lights. It keeps no mark of having done so, and a
+   new light takes a record of its own unless one was freed (`Terrain.dll`'s
+   manager slot 12, `0x100806b0`: a record flagged `0x40000000`, else a new
+   one).
+2. **Who sends it.** Message 4 comes from the agent's `IGameObject` slot 14,
+   which hands its one argument on to each of its components
+   (`0x10001a80`–`0x10001b8b`; the mesh's through slot 2 of its interface
+   `0x18`, a thunk onto the handler, `0x100075b0`). A building's object hands
+   its own slot 14 on to its agent (`Terrain.dll:0x10058670`).
+3. **The argument is the game clock.** Each caller passes either 0 or
+   `World3D.dll`'s `0x10032a38`, the low word of the clock in milliseconds
+   (`SetGameTime`, `0x10005144`; the queue reads `timeGetTime` into it,
+   `0x10005250`–`0x1000529d`). So the "second pass" of an attach is the pass
+   made with the clock, and it is told from the first only by not being 0.
+4. **`CreateObject` attaches once and `AddObjectToGame` again.**
+   - `CreateObject` (`0x10007cb0`), once it has loaded the object, calls slot
+     14 with 0 (`0x10007d1a`) and then with the clock
+     (`0x10007e65`–`0x10007e6e`); every branch between the two meets at the
+     second.
+   - `AddObjectToGame` (`0x10007ea0`) calls it with the clock once more
+     (`0x1000809f`–`0x100080a9`), on every path past its two refusals, a null
+     object and a player number of 8 or more.
+   - `AddNewObjectToGame` (`0x10008310`), which makes and adds in one, calls it
+     with 0 and with the clock, once each (`0x100083e6`, `0x10008580`).
+5. **Both scheme builders use the pair.** `ArealMap.dll`'s
+   `CreateObjectFromScheme` calls `CreateObject` for the root (`0x1001556a`),
+   loads the sub-items, and calls `AddObjectToGame` (`0x10015dd0`);
+   `Behavior.dll`'s twin does the same (`0x1001d71a`, `0x1001df80`). The one
+   other module that imports `AddObjectToGame` is `Control.dll`, which adds
+   what its guns emit (`0x1002a58f`), class 9. `iron3d.dll` has six
+   calls of `AddNewObjectToGame`: the sky, class 7; the scenery, class 10, twice;
+   a camera, class 5; and class 11 ([22-settings.md](22-settings.md)). The
+   sixth, `0x100a2322`, was not read here.
+
+So **every unit and building a mission places or a factory builds holds
+sixteen lights: two pairs flagged `0x84000000`, both on, pointing the same two
+ways at the same two colours.** The handles the mesh keeps are the second
+set's; the first pair is left on with nothing to turn it off. The count goes by
+attaches, not by parts: a chassis alone has two pairs, and so has a unit of
+three parts or six.
+
+- A model made by `CreateObject` alone has one pair: a model view's
+  (`iron3d.dll:0x1009deda`, `0x1009e12c`,
+  [37-designer.md](37-designer.md#the-previews--read-and-seen)) and the
+  placement ghost's (`0x10057f68`, [32-builder.md](32-builder.md)). `iron3d.dll`
+  does not import `AddObjectToGame`. Neither draw takes the pair anyway: both
+  draw with `0x5f0`, whose gather passes over a light flagged `0x4000000`.
+- An object attached in the one millisecond in 49.7 days when the clock's low
+  word is 0 would take that pass as a first pass (*derived*).
+- All 148 unit models the missions place have a `BTLU` root, kind 4
+  (*measured*).
 
 **They turn with the unit.** The gather takes each record through the manager's
 slot 7 in space 2 (`Terrain.dll:0x10047ab0`), which copies it and turns the
 copy's direction through the placement of the manager's owner
 (`0x100802f0`, `g_FastProc` `+0x1c` at `0x100803e4`). So (−1, 1, −1) is in the
-unit's own frame: the first light falls on what looks to the unit's right, its
-back and up, **0.25 × (n · (1, −1, 1))** on a white diffuse, at most
+unit's own frame: the first light of a pair falls on what looks to the unit's
+right, its back and up, **0.25 × (n · (1, −1, 1))** on a white diffuse, at most
 0.25 × √3 = 0.43; the second on the opposite faces at 0.35 of that. The own
 panel's camera stands behind the unit, on the lit side.
 
-**A whole node's vertex** is therefore
+**A whole node's vertex** is therefore, with the two pairs,
 
 ```
-r = max(diffuse.r × lit, scene.r)        lit = 0.25 × max(0,  n · (1, −1, 1))
-g = 0.5 + diffuse.g × lit                    + 0.0875 × max(0, −n · (1, −1, 1))
+r = max(diffuse.r × lit, scene.r)        lit = 0.5 × max(0,  n · (1, −1, 1))
+g = 0.5 + diffuse.g × lit                    + 0.175 × max(0, −n · (1, −1, 1))
 b = max(diffuse.b × lit, scene.b)
 ```
 
 with n in the unit's frame, and green past 1 whitening the vertex through the
 specular.
 
-*Measured*, at the recordings' own resolution, against the engine drawing this:
+*Measured*, at the recordings' own resolution:
 
 | recording | what | recording | as read |
 |---|---|---|---|
 | Part 6 (`-yNnsqudMzw`), 1:52.5, the hero's own panel | a patch of its back the light does not reach, under a scene colour of (156, 40, 59), the keyframes' at 02:25 of the day | (151, 127, 57) | (154, 127, 58) |
-| *Line of Fire* (`9wNogdbFvec`), 143 s, a dummy, a chassis alone (`l_targ` as read) | its face, under (40, 40, 40) | (39, 162, 40) | (40, 163, 40) |
-| Part 6, 1:52.5, the hero, a chassis and a turret | the figure's median green, and blue's 75th percentile | 219, 151 | 173, 80 with one pair of lights; 210, 154 with two |
+| *Line of Fire* (`9wNogdbFvec`), 143 s, the dummy `l_targ.dat`, a chassis alone | its aim face, under (40, 40, 40): the median over the board | (40, 162, 41) | (40, 162, 40) with two pairs; (40, 145, 40) with one |
+| Part 6, 1:52.5, the hero, a chassis and a turret | the figure's median green, and blue's 75th percentile | 219, 151 | 210, 154 with two pairs; 173, 80 with one |
 
 - The first row is the floor: an addend would make the green 167.
-- The dummy's green over its node's 0.5 is 0.136 in the recording and 0.139 as
-  read. A damaged part of it at (140, 59, 38) is the same light on a node at
+- **The dummy has two pairs like any unit** (*measured*). It is a flat board,
+  half its area two faces that look along its own +y and −y.
+  - **Which face is seen.** The three `l_targ.dat` of Mission 01 are turned
+    1.54 to 1.91 rad, so their +y looks back at the hero's start, to within 12°
+    of the line. The player shoots from that side, and the target panel's
+    camera stands on it. The +y face wears `R_AIM`, the rings.
+  - **What it shows.** Only the counter lights reach a face looking along +y.
+    On `R_AIM`'s diffuse green of 198 that is 0.5 + 0.776 × 0.0875 = 0.568,
+    **145**, for one pair, and 0.5 + 0.776 × 0.175 = 0.636, **162**, for two.
+    The recording's board is a flat 162.
+  - **Why it once read as one pair.** The back face wears `R_RL_06`, whose
+    diffuse green is 140, and the main light reaches it: 0.5 + 0.549 × 0.25 =
+    0.637, also 162. An earlier pass here matched the 162 with one pair and
+    took the dummy for the odd one out. It was the back face's figure: the two
+    products, 0.136 and 0.137, are a third of a byte's step apart.
+- A damaged part of the dummy at (140, 59, 38) is the same light on a node at
   about a sixth of its life (*derived*).
-- **A unit of more than one part is lit twice as strongly as read.** The hero's
-  figure is 2.06, 1.98 and 2.03 times as far over its floor as one pair of
-  lights puts it (the median green, and blue's ninetieth and ninety-ninth
-  percentiles); *seen* the same on Mission 01's spider `tut1_e1`, a chassis and
+- **The hero, a spider and a driven warbot agree** (*seen*). The hero's figure
+  is 2.06, 1.98 and 2.03 times as far over its floor as one pair of lights
+  would put it (the median green, and blue's ninetieth and ninety-ninth
+  percentiles). The same holds on Mission 01's spider `tut1_e1`, a chassis and
   a turret, at 240 s, and on the driven warbot of Part 6 at 48:05, whose
   lightest faces are (155, 252, 156) under a scene colour of (91, 63, 114).
-  What makes the second pair is not read: one agent's setup makes one.
+  That was once put down to their having more than one part. The parts have
+  nothing to do with it: each was attached twice.
 
 *Seen*, Part 6 at 48:05: the figures are mint under the night's violet, red and
 blue held at the scene colour's 91 and 114 and green over its node's 127.
+
+### The sky is the one object of kind 7 — *read*
+
+Gather flag 2 passes over a manager whose registered object answers 7 at its
+slot 11 (`Terrain.dll:0x10047643`–`0x10047653`). **That object is the
+atmosphere, and its manager holds the sun's two lights.**
+
+- **The atmosphere answers 7.** `0x1006faa0` is `return 7`, and it is slot 11
+  of the vtable `CAtmosphere`'s constructors install (`0x1009bab0`, at
+  `0x1006ed70` and `0x1006f731`). `World3D.dll`'s class table agrees: class 7
+  loads through `CreateAtmosphere`
+  ([22-settings.md](22-settings.md)).
+- **It is the only one.** Over the install's modules, a routine whose whole
+  body is `return 7`, in the release shape and the debug one, is held in a
+  table at two places: this slot 11, and slot 0 of a `Behavior.dll` vtable
+  (`0x10035c50`, at `0x10059c60`). The control is `return 1`, which the same
+  sweep finds at the landscape's slot 11 (`0x1001f140`,
+  [30-turrets.md](30-turrets.md#what-the-outer-cameras-line-meets--read)). An agent's kind is stored, 4, 9, 2 or 10 by its
+  record's tag, or its parent's (`AniMesh.dll:0x10003174`–`0x100031c5`), and no
+  tag gives 7.
+- **It owns a light manager.** `CAtmosphere::CAtmosphere`, named by its own
+  panic string, makes a `CLightManager` with itself as the owner
+  (`0x1006f057`–`0x1006f062`) and keeps it at `+0x174`. A manager with an owner
+  hands every query on to it (`0x1007ffe0`), so its interface 6 is the
+  atmosphere, and that is what the shade's registry files beside it
+  (`0x10046f92`, the third array).
+- **The sun's lights are on it.** The constructor hands that manager to the
+  routine that builds the sky's parts (`0x1006f197`–`0x1006f1ba`), which makes
+  the sun (`0x10069e95`); the sun keeps it at `+8` (`0x1007c7fc`) and makes its
+  two directional lights on it (`0x1007cf12`, `0x1007cf2c`).
+
+So **a draw whose gather carries flag 2 takes no sunlight**: a panel's view
+(`0x7f0`), the placement ghost (`0x5f0`,
+[32-builder.md](32-builder.md)), and a part hung on a node of its parent that
+carries the bit ([11-effects.md](11-effects.md#what-a-light-does-to-a-surface--read-and-measured)).
 
 ### Name and status — *read*, and *seen*
 
@@ -1302,12 +1418,24 @@ hit, and prints *"SSW-1 Warrior"* above a falling distance.
   none, and the shade lights it with the unit's own two lights and holds it up
   to the scene colour; the dummy's 162 is its node's 127 and 0.136 of light
   ([What mode 2 does with the colour](#what-mode-2-does-with-the-colour--read-measured-and-seen)).
-- What makes a unit of more than one part twice as bright as the one pair of
+- ~~What makes a unit of more than one part twice as bright as the one pair of
   lights the read finds: the hero's figure is 2.06, 1.98 and 2.03 times as far
-  over its floor, and the one-part dummy is as read.
-- That the sky's light manager's owner answers kind 7, which is what gather
+  over its floor, and the one-part dummy is as read.~~ **Read**, and
+  **measured**: a second attach, not a second part. The mesh makes its eight
+  lights every time message 4 reaches it with the game clock
+  (`AniMesh.dll:0x10006ff1`), and `CreateObject` and `AddObjectToGame` each
+  send it once (`World3D.dll:0x10007e6e`, `0x100080a9`), so every unit a scheme
+  builds holds two pairs, whatever its parts. The premise fell with it: the
+  one-part dummy has two pairs too. Its aim face under two is the recording's
+  162, and the earlier match was its back face under one, 162 by coincidence
+  ([The two lights, made twice](#what-mode-2-does-with-the-colour--read-measured-and-seen)).
+- ~~That the sky's light manager's owner answers kind 7, which is what gather
   flag 2 passes over: the test is read (`Terrain.dll:0x1004764b`), the
-  atmosphere's kind is not.
+  atmosphere's kind is not.~~ **Read**: `CAtmosphere`'s slot 11 is `return 7`
+  (`Terrain.dll:0x1006faa0`), it makes the light manager it owns
+  (`0x1006f062`), and the sun's two lights are made on that manager
+  (`0x1007cf12`), in
+  [The sky is the one object of kind 7](#the-sky-is-the-one-object-of-kind-7--read).
 - What the shade's phase `+0x1928` sets on the device (2 where the device
   answers for it, `Terrain.dll:0x1004115b`).
 - The panel camera's three figures (300, 0.5, 1.2) as far, near and field; and

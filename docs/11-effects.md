@@ -1318,8 +1318,11 @@ and the attenuation as they are.
   agent's byte `+0x200` is set or its own argument carries `0x400`
   (`AniMesh.dll:0x10014d9d`–`0x10014daf`), and the byte is set as the agent is attached to
   a node of its parent whose record carries bit 0 at `+0xc` (`0x10007300`–`0x10007367`).
-  Which object answers class 7 and which nodes carry the bit are **not read**: no agent's
-  kind is 7 ([26-damage.md](26-damage.md#the-hit-test--read-and-measured)).
+  **Class 7 is the atmosphere** (*read*): its slot 11 is `return 7` (`0x1006faa0`), it makes
+  the light manager it owns (`0x1006f062`), and the sun's two lights are made on that manager
+  (`0x1007cf12`), so the manager passed over is the sky's
+  ([35-hud.md](35-hud.md#the-sky-is-the-one-object-of-kind-7--read)). Which nodes carry the
+  bit is **not read**.
   Of each manager it keeps (`0x100479c0`) a light that is on
   (`+0x4c` bit 0); an owner-only one (`0x80000000`) only when the object drawn is the
   manager's owner (`0x10047a52`); one whose `0x04000000` agrees with bit 2 of the draw's
@@ -2742,12 +2745,15 @@ Read one slot either way, none of the seven name witnesses agrees.
   [10-sky.md](10-sky.md#the-lit-colour-is-the-games-own--read-and-measured)).
   Still open: how a landscape cell is bounded for its gather, and the order the light
   managers register in — which decides the eight the Direct3D builder would take.
-- **Which manager the gather passes over under bit 1 of the draw's mode.** One whose
+- ~~**Which manager the gather passes over under bit 1 of the draw's mode.** One whose
   registered object answers class 7 (`0x10047633`–`0x10047653`), for an agent attached to a
   parent's node whose record carries bit 0 at `+0xc`, or a draw whose argument carries
-  `0x400`. What answers class 7 — no agent's kind is — and which nodes carry the bit are not
-  read; if it is the sun's, a part hung inside a building takes no sunlight
-  ([above](#what-a-light-does-to-a-surface--read-and-measured)).
+  `0x400`. What answers class 7 — no agent's kind is~~ — **read**: the sky's. The atmosphere
+  answers 7 at slot 11 (`Terrain.dll:0x1006faa0`), owns a light manager (`0x1006f062`), and
+  the sun's two lights are made on it (`0x1007cf12`)
+  ([35-hud.md](35-hud.md#the-sky-is-the-one-object-of-kind-7--read)). So an agent attached
+  under such a node, and a draw carrying `0x400`, take no sunlight. Still open: which nodes
+  carry the bit.
 - ~~**What lights the masts of C03 M02's Large Factory lavender.**~~ — the sun's second
   light, on their diffuse alone; the yellow-orange of their other side is the highlight of
   the chimneys' own `smoke_fr_02` lights on `B_PLT_01`'s specular, which the engine did not

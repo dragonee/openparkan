@@ -247,8 +247,10 @@ lights not flagged `0x4000000` of the model's own manager and of every manager
 that lights more than its owner, and passes over a manager whose owner is of
 kind 7. The model's own six such lights are on only where the object its own
 answers gives them colours (`AniMesh.dll:0x1000b480`), and the sun's two do
-not reach it if the sky is of kind 7. Both are *inferred*: the recordings show
-no shading at all, and neither that object nor the sky's kind is read. What is
+not reach it: the sky is of kind 7 (*read*,
+[35-hud.md](35-hud.md#the-sky-is-the-one-object-of-kind-7--read)). The object
+asked is the agent's parent, and a model with none asks nothing
+(`0x1000b4b4`); the recordings show no shading at all. What is
 left is a point light that lights everything in its range, an explosion's or
 a gun's flash, where one stands near.
 

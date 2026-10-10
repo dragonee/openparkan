@@ -28508,6 +28508,160 @@ def check_record_bound(check, game: Path) -> None:
           f"{[hex(va) for va in stores]}")
 
 
+#: docs/35, "The two lights": a view light's travel in the unit's own frame, its grey, and the
+#: counter light's share of it (AniMesh.dll:0x100071bf-0x1000721f).
+VIEW_LIGHT = ((-1.0, 1.0, -1.0), 0.25, 0.35)
+#: Mission 01's recording, 143 s: the green of the dummy's face in the target panel.
+DUMMY_GREEN_SEEN = 162
+
+
+def check_view_light_pairs(check, game: Path) -> None:
+    """A mesh makes its two view lights every time it is attached with the game clock, and
+    `CreateObject` and `AddObjectToGame` each attach an object once: two pairs on every unit a
+    scheme builds, the one-part dummy among them (docs/35, "The two lights")."""
+    asm = assembly.Assembly(game)
+    library = materials.MaterialLibrary(game / "Material.lib")
+    tags = {e.name.lower(): e.tag for e in NResArchive.open(game / "objects.rlb").entries}
+    placed = [o for folder in gamedir.missions(game)
+              for o in mission.load(folder / "data.tma").objects if o.kind == mission.KIND_UNIT]
+    roots = Counter(
+        tags.get(objects.load_unit(asm.unit_file(path)).components[0].ref.member.lower())
+        for path in {o.path for o in placed})
+
+    # The dummy: a flat board whose two faces look along its own +y and -y.
+    first = mission.load(game / "MISSIONS/CAMPAIGN/CAMPAIGN.00/Mission.01/data.tma")
+    hero = next(o for o in first.objects if o.path.lower().endswith("tut1_p.dat"))
+    dummies = [o for o in first.objects if o.path.lower().endswith("l_targ.dat")]
+    facing = []
+    for o in dummies:
+        forward = (-math.sin(o.rotation), math.cos(o.rotation))
+        away = (hero.position[0] - o.position[0], hero.position[1] - o.position[1])
+        facing.append((forward[0] * away[0] + forward[1] * away[1]) / math.hypot(*away))
+    [part] = asm.parts(mission.KIND_UNIT, dummies[0].path)
+    board = asm.mesh(part.ref)
+    points = board.posed_positions()
+    travel, grey, share = VIEW_LIGHT
+    faces: dict[int, Counter] = {1: Counter(), -1: Counter()}
+    total = 0.0
+    for t, corners in enumerate(board.triangles):
+        if board.node_of_triangle(t, 0) is None:
+            continue
+        a, b, c = (points[v] for v in corners)
+        u, w = [b[k] - a[k] for k in range(3)], [c[k] - a[k] for k in range(3)]
+        n = (u[1] * w[2] - u[2] * w[1], u[2] * w[0] - u[0] * w[2], u[0] * w[1] - u[1] * w[0])
+        area = math.sqrt(sum(x * x for x in n)) / 2
+        total += area
+        if area > 1e-9 and abs(n[1]) / (2 * area) > 0.999:
+            name = board.texture_names[board.material_of_triangle(t)]
+            faces[1 if n[1] > 0 else -1][name] += area
+
+    def green(side: int, pairs: int) -> tuple[str, int, int]:
+        """The face's material, its diffuse green and the byte a whole node's face shows."""
+        name = faces[side].most_common(1)[0][0]
+        diffuse = library.get(name).entries[0].colour[1]
+        dot = side * travel[1]              # the face's normal on the first light's travel
+        lit = grey * max(0.0, -dot) + grey * share * max(0.0, dot)
+        return name, diffuse, round(255 * (0.5 + diffuse / 255 * lit * pairs))
+
+    front = (green(1, 1), green(1, 2))
+    back = (green(-1, 1), green(-1, 2))
+    flat = sum(sum(c.values()) for c in faces.values()) / total
+    check("Mission 01: the dummy's aim face, turned to the hero, is the recording's 162 under "
+          "two pairs of view lights",
+          dict(roots) == {"BTLU": 148}
+          and len(dummies) == 3 and all(f > 0.95 for f in facing)
+          and front == (("R_AIM", 198, 145), ("R_AIM", 198, DUMMY_GREEN_SEEN))
+          and back == (("R_RL_06", 140, DUMMY_GREEN_SEEN), ("R_RL_06", 140, 198))
+          and flat > 0.45,
+          f"the roots of the {sum(roots.values())} unit models placed: {dict(roots)}; the three "
+          f"l_targ.dat's +y against the way to the hero's start: {[round(f, 3) for f in facing]}; "
+          f"the board's two flat faces are {flat:.2f} of its area; +y (material, diffuse green, "
+          f"byte) at one pair and at two: {front}; -y: {back}; the recording's {DUMMY_GREEN_SEEN} "
+          f"is the aim face at two pairs, and the back at one by coincidence")
+
+    paths = {name: game / name for name in ("AniMesh.dll", "World3D.dll", "Terrain.dll",
+                                            "ArealMap.dll", "Behavior.dll")}
+    if not all(p.exists() for p in paths.values()):
+        return
+    raw = {name: p.read_bytes() for name, p in paths.items()}
+    images = {name: _image_at(data) for name, data in raw.items()}
+
+    def imported(name: str, thunk: int) -> str:
+        at = images[name]
+        if at(thunk, 2) != b"\xff\x25":
+            return ""
+        slot = struct.unpack("<I", at(thunk + 2, 4))[0]
+        entry = _image_base(raw[name]) + struct.unpack("<I", at(slot, 4))[0] + 2
+        return at(entry, 32).split(b"\0")[0].decode(errors="replace")
+
+    def called(name: str, site: int) -> str:
+        at = images[name]
+        if at(site, 1) != b"\xe8":
+            return ""
+        return imported(name, (site + 5 + struct.unpack("<i", at(site + 1, 4))[0]) & 0xFFFFFFFF)
+
+    sites = {
+        "AniMesh.dll": [
+            # the agent's attach hands message 4 and its argument to the mesh's interface 0x18,
+            # whose slot 2 is the mesh's handler
+            (0x10001AA0, b"\x57"), (0x10001AB4, b"\xba\x04\x00\x00\x00"),
+            (0x10001AB9, b"\xff\x50\x08"), (0x100075B0, b"\x83\xe9\x04"),
+            (0x100075B3, b"\xe9\x08\xfa\xff\xff"),
+            # an argument that is not 0: the bounds, the kind, eight lights, the last two
+            # flagged 0x84000000, and the colours in space 0
+            (0x10006FF1, b"\x85\xc0"), (0x10006FF3, b"\x0f\x85\xc2\x00\x00\x00"),
+            (0x100070BD, b"\xe8\x4e\x24\x00\x00"), (0x100070CE, b"\xff\x50\x2c"),
+            (0x10007105, b"\x6a\x03"), (0x1000710A, b"\xff\x51\x30"),
+            (0x1000713A, b"\x68\x00\x00\x00\x84"), (0x10007230, b"\x6a\x00"),
+            (0x1000723B, b"\xff\x52\x70"),
+        ],
+        "World3D.dll": [
+            # the clock's low dword; CreateObject attaches with 0 and then with the clock
+            (0x10005144, b"\xa3\x38\x2a\x03\x10"), (0x10007D17, b"\x6a\x00"),
+            (0x10007D1A, b"\xff\x51\x38"), (0x10007E65, b"\xa1\x38\x2a\x03\x10"),
+            (0x10007E6E, b"\xff\x52\x38"),
+            # AddObjectToGame attaches with the clock again
+            (0x1000809F, b"\xa1\x38\x2a\x03\x10"), (0x100080A9, b"\xff\x52\x38"),
+            # AddNewObjectToGame: 0, then the clock, once
+            (0x100083E3, b"\x6a\x00"), (0x100083E6, b"\xff\x52\x38"),
+            (0x10008576, b"\xa1\x38\x2a\x03\x10"), (0x10008580, b"\xff\x52\x38"),
+        ],
+        "Terrain.dll": [
+            # a new light takes a record marked free, else a new one
+            (0x100806F0, b"\x81\x7d\xe8\x00\x00\x00\x40"),
+            # a building hands its attach on to its agent
+            (0x10058686, b"\xff\x50\x38"), (0x10058689, b"\x83\x7d\x0c\x00"),
+            # the flag-1 gather: the drawn object's own manager and no other
+            (0x100472F4, b"\xba\x0e\x00\x00\x00"),
+            # the flag-2 gather: a manager whose registered object answers 7 is passed over
+            (0x10046F92, b"\xba\x06\x00\x00\x00"), (0x1004764B, b"\xff\x52\x2c"),
+            (0x1004764E, b"\x83\xf8\x07"),
+            # the atmosphere answers 7, makes a light manager it owns, and the sun's two
+            # lights are made on the manager the sun is handed
+            (0x1006FAA7, b"\xb8\x07\x00\x00\x00"), (0x1006F05D, b"\x50"),
+            (0x1006F062, b"\xe8\xd9\x09\x01\x00"), (0x1007C7FC, b"\x8b\x45\x14"),
+            (0x1007C7FF, b"\x89\x42\x08"), (0x1007CF12, b"\x6a\x03"),
+            # a manager with an owner hands a query on to it
+            (0x1007FFF5, b"\x8b\x4d\x08"), (0x1008000A, b"\xff\x10"),
+        ],
+    }
+    builders = {name: (called(name, create), called(name, add))
+                for name, create, add in (("ArealMap.dll", 0x1001556A, 0x10015DD0),
+                                          ("Behavior.dll", 0x1001D71A, 0x1001DF80))}
+    slot_11 = struct.unpack("<I", images["Terrain.dll"](0x1009BAB0 + 4 * 11, 4))[0]
+    pushes = {p.name: n for p in sorted(game.glob("*.dll"))
+              if (n := p.read_bytes().count(b"\x68\x00\x00\x00\x84"))}
+    check("World3D.dll: CreateObject and AddObjectToGame each attach an object with the clock, "
+          "and the mesh makes eight lights each time",
+          all(images[name](va, len(code)) == code for name, rows in sites.items()
+              for va, code in rows)
+          and all(pair == ("CreateObject", "AddObjectToGame") for pair in builders.values())
+          and slot_11 == 0x1006FAA0 and pushes == {"AniMesh.dll": 1},
+          f"{sum(len(rows) for rows in sites.values())} sites in {len(sites)} modules; the two "
+          f"scheme builders call {builders}; slot 11 of the atmosphere's vtable 0x1009bab0 is "
+          f"{slot_11:#x}, `return 7`; `push 0x84000000` in the install's modules: {pushes}")
+
+
 def run(game: Path) -> int:
     """Run every check against ``game``.  Returns a process exit code."""
     results: list[tuple[str, bool, str]] = []
@@ -28580,7 +28734,7 @@ def run(game: Path) -> int:
         check_varset_types, check_profiles, check_walker,
         check_frame_scale, check_room_test,
         check_planner,
-        check_record_bound,
+        check_record_bound, check_view_light_pairs,
     )
     for fn in checks:
         fn(check, game)

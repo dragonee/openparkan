@@ -577,9 +577,9 @@ fn previews(
             let [a, b] = p.lights.map(|d| p.model.transform_vector3(d).normalize_or(glam::Vec3::NEG_Z));
             // A building being placed takes no directional light: the recordings show it one
             // flat colour, and its draw's gather passes over the lights of a manager whose
-            // owner is of kind 7, which the sky's is inferred to be. What reaches it is a point
-            // light that lights everything in its range, an explosion's or a gun's flash
-            // (docs/32, "How it is drawn").
+            // owner is of kind 7, which the sky's is (docs/35, "The sky is the one object of
+            // kind 7"). What reaches it is a point light that lights everything in its range,
+            // an explosion's or a gun's flash (docs/32, "How it is drawn").
             let (colour, points) = match p.paint {
                 Some(_) => ([0.0; 3], world.map(|l| l.points).unwrap_or_default()),
                 None => ([parkan_world::cockpit::designer::PREVIEW_LIGHT_COLOUR; 3], Default::default()),
