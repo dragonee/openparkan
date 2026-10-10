@@ -694,6 +694,7 @@ mod tests {
             aim: at,
             shield: None,
             agent_sphere: (at + Vec3::Z, 1.5),
+            construction: None,
             devices: Vec::new(),
             gear: Vec::new(),
         }

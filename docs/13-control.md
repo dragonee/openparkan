@@ -807,7 +807,14 @@ turret's hang on its (*derived*, [29-weapons.md](29-weapons.md)).
 them in the controller's timed list, which the time driver serves whatever the owner
 is ([28-chassis.md](28-chassis.md#every-component-is-stepped-not-only-a-device--read-and-measured)).
 That is what turns a mine's rotors, the Main Teleport's rings and the energy
-bridge's hub, and what raises a tower's gun mast out of the ground. A reader has
+bridge's hub, and what raises a tower's gun mast out of the ground — once: the
+mast's record says open and bounce, and the tower's behaviour sends its item
+open-and-stop within its first eighth of a second
+([28-chassis.md](28-chassis.md#what-stops-a-towers-mast-at-the-top--read-and-seen)).
+A building's own controller plays a node from its channel's first frame, not
+from the mesh's rest pose, which is why a control pod waits with its canopy up
+([24-motion.md](24-motion.md#a-pods-canopy-and-a-mover-too-tall-for-it--measured-and-a-stand-in)).
+A reader has
 to draw such a building **node by node** to show it: a building with no damage
 table — the bridges, the generators, the small Main Teleport and the ruins — has
 no other reason to be drawn that way, and drawn whole its played nodes stand

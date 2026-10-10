@@ -759,6 +759,7 @@ fn hero_target(
         aim: hero.walker.body.position,
         shield,
         agent_sphere: (hero.walker.body.position, 0.0),
+        construction: None,
         devices,
         gear,
     };
@@ -923,6 +924,22 @@ struct Sweep {
 /// through the building's own pass (docs/24, "Walking into a building"), and an open door's
 /// faces let it by.
 ///
+/// **A mover standing on a building meets that building and no other** (`stands_on`). The
+/// face it stands on makes it the building's child, and its collision object then leaves the
+/// world's manager for the building's own (message 21's event 6, `Control.dll:0x1001f585`,
+/// `0x1001fe40`). The world's pass pairs its own members, and lists a mover as a building's
+/// visitor only out of such a pair (`0x1001c1da`-`0x1001c24f`, `0x1001c500`), so a mover that
+/// is no longer one of them is listed with nobody: it is handed to the building it stands on,
+/// with no swept test (`0x1001c1ae`), and to the units that building's pass holds. Another
+/// building, a tree and a stone carry no contact record, pair with nothing by themselves
+/// (`0x1001c1e9`-`0x1001c1f5`) and are never brought into that pass. So a mover on one half
+/// of a bridge is not paired with the other, whose end cap faces it, and once its centre is
+/// over the far deck that cap is behind it. *Measured* on C02 Mission 04's energy bridge,
+/// whose cap is a wall to a mover: paired with every building and pushed out as its agent's
+/// sphere, which rests on the deck, the hero stops 183.8 m along, 1.7 short of the join; on
+/// its own half alone it crosses, and so it does as its node sphere, which rides 0.59 over the
+/// deck and the cap (docs/24, "The cap where two halves meet").
+///
 /// **The push is shared by mass squared** (`Control.dll:0x1001e0db`): with a contact record on
 /// both sides, the mover takes P x m_obstacle^2 / (m_obstacle^2 + m_mover^2) of what the pair
 /// makes, so the lighter side gives way. A building, a tree and a stone have no record, carry
@@ -939,6 +956,7 @@ fn collision_push(
     agent: Sweep,
     pair: Sweep,
     mover: Option<usize>,
+    stands_on: Option<usize>,
     mover_mass: f32,
     keeps_floors: bool,
 ) -> Vec3 {
@@ -947,13 +965,20 @@ fn collision_push(
         if !obstacle.present || mover == Some(i) {
             continue;
         }
-        if parkan_sim::hit::swept_spheres(
-            (agent.from, agent.to + total),
-            agent.radius,
-            (obstacle.centre, obstacle.centre),
-            obstacle.radius,
-        )
-        .is_none()
+        // On a building: that building whatever the spheres say, the units as ever, and
+        // nothing else that has no contact record of its own.
+        let own = stands_on == Some(i);
+        if stands_on.is_some() && !own && obstacle.mass <= 0.0 {
+            continue;
+        }
+        if !own
+            && parkan_sim::hit::swept_spheres(
+                (agent.from, agent.to + total),
+                agent.radius,
+                (obstacle.centre, obstacle.centre),
+                obstacle.radius,
+            )
+            .is_none()
         {
             continue;
         }
@@ -1122,6 +1147,19 @@ impl Play {
                 designation,
             });
         }
+        let mut buildings: Vec<Building> = (0..battle.combat.targets.len())
+            .filter_map(|t| Building::load(&mut assembly, mission, battle.objects[t], t))
+            .collect();
+        for b in &mut buildings {
+            if let Some(part) = battle.combat.targets.get(b.target).and_then(|t| t.parts.get(b.part)) {
+                b.place_zone(part);
+            }
+            // A building stands as its items hold it, not as its mesh rests ([`Building::pose`]),
+            // and its faces below are taken from there.
+            if let Some(target) = battle.combat.targets.get_mut(b.target) {
+                b.pose(&mut target.parts, |_| false);
+            }
+        }
         // Every target's faces, for the ground a building gives and the collision pass.
         let mut ground = Ground::new(land);
         ground.cuts = crate::basement::footings(&mut assembly, mission, &ground.land)
@@ -1164,14 +1202,6 @@ impl Play {
             })
             .collect();
         let target_count = battle.combat.targets.len();
-        let mut buildings: Vec<Building> = (0..target_count)
-            .filter_map(|t| Building::load(&mut assembly, mission, battle.objects[t], t))
-            .collect();
-        for b in &mut buildings {
-            if let Some(part) = battle.combat.targets.get(b.target).and_then(|t| t.parts.get(b.part)) {
-                b.place_zone(part);
-            }
-        }
         let factories: Vec<Factory> = (0..target_count)
             .filter_map(|t| Factory::load(&mut assembly, mission, battle.objects[t], t))
             .collect();
@@ -4056,7 +4086,9 @@ impl Play {
     fn shield_flash(&mut self, t: usize, point: Vec3, now: f64) {
         let Some(target) = self.battle.combat.target(t) else { return };
         let Some(shield) = target.shield.as_ref().filter(|s| !s.effect.is_empty()) else { return };
-        let (name, centre, radius) = (shield.effect.clone(), target.centre, target.radius);
+        // The bubble the sector pick took the hit's direction from (`Control.dll:0x1002c5cf`):
+        // a building's construction sphere, a unit's agent sphere.
+        let (name, (centre, radius)) = (shield.effect.clone(), target.bubble_sphere());
         let slot = self.shield_flashes.entry(t).or_insert(0);
         let owner = Owner::Shield(t, *slot);
         *slot = (*slot + 1) % SHIELD_FLASHES;
@@ -4070,7 +4102,7 @@ impl Play {
         let centres: Vec<(usize, Vec3)> = self
             .shield_flashes
             .keys()
-            .filter_map(|&t| Some((t, self.battle.combat.target(t)?.centre)))
+            .filter_map(|&t| Some((t, self.battle.combat.target(t)?.bubble_sphere().0)))
             .collect();
         for (t, centre) in centres {
             for k in 0..SHIELD_FLASHES {
@@ -4293,6 +4325,7 @@ impl Play {
                 Sweep { from: from.0, to: robot.collision_centre(), radius: robot.collision.1 },
                 Sweep { from: from.1, to: robot.pair_centre(), radius: robot.pair.1 },
                 Some(*t),
+                robot.walker.ground.and_then(|h| h.solid).map(|s| s.0),
                 mass,
                 keeps_floors,
             );
@@ -4774,6 +4807,7 @@ impl Play {
             Sweep { from: from.0, to: self.hero.collision_centre(), radius: self.hero.collision.1 },
             Sweep { from: from.1, to: self.hero.pair_centre(), radius: self.hero.pair.1 },
             None,
+            self.hero.walker.ground.and_then(|h| h.solid).map(|s| s.0),
             mass,
             self.hero.walker.keeps_floors(),
         );
@@ -5375,7 +5409,8 @@ mod tests {
         let solids = [doorway()];
         let at = Vec3::new(6.0, 0.0, 5.0);
         let sweep = |radius| Sweep { from: at, to: at, radius };
-        let pushed = |pair: f32| collision_push(&solids, sweep(13.72), sweep(pair), None, 40_000.0, false);
+        let pushed =
+            |pair: f32| collision_push(&solids, sweep(13.72), sweep(pair), None, None, 40_000.0, false);
         assert_eq!(solid::pair_radius(9.59, true), 7.5);
         assert_eq!(pushed(solid::pair_radius(9.59, true)), Vec3::ZERO, "the held node sphere passes");
         let agent = pushed(13.72);
@@ -5389,7 +5424,49 @@ mod tests {
         let far = Vec3::new(70.0, 0.0, 15.0);
         let clear = Sweep { from: far, to: far, radius: 13.72 };
         let inside = Sweep { from: Vec3::new(3.0, 20.0, 5.0), to: Vec3::new(3.0, 20.0, 5.0), radius: 7.5 };
-        assert_eq!(collision_push(&solids, clear, inside, None, 40_000.0, false), Vec3::ZERO);
-        assert!(collision_push(&solids, inside, inside, None, 40_000.0, false).x > 1.0);
+        assert_eq!(collision_push(&solids, clear, inside, None, None, 40_000.0, false), Vec3::ZERO);
+        assert!(collision_push(&solids, inside, inside, None, None, 40_000.0, false).x > 1.0);
+    }
+
+    /// `Control.dll:0x1001f585`, `0x1001c1da`-`0x1001c24f`: a mover standing on a building has
+    /// left the world's collision manager for that building's, and the world's pass, which is
+    /// what lists a mover with a building, pairs its own members alone. So on a building a
+    /// mover meets that building, with no swept test, and no other building, tree or stone;
+    /// the units it still meets, which that building's pass holds.
+    #[test]
+    fn a_mover_standing_on_a_building_is_paired_with_that_building_alone() {
+        // Two walls 2 apart, both facing the mover at x = 3: either pushes it out to x = 7.5.
+        let (near, mut far) = (doorway(), doorway());
+        far.faces.iter_mut().for_each(|f| {
+            for v in [&mut f.a, &mut f.b, &mut f.c] {
+                v.x += 2.0;
+            }
+        });
+        let mut unit = doorway();
+        unit.mass = 40_000.0;
+        unit.faces.iter_mut().for_each(|f| {
+            for v in [&mut f.a, &mut f.b, &mut f.c] {
+                v.x += 2.0;
+            }
+        });
+        let at = Vec3::new(3.0, 20.0, 5.0);
+        let sweep = Sweep { from: at, to: at, radius: 7.5 };
+        let pushed = |solids: &[Solid], on| collision_push(solids, sweep, sweep, None, on, 40_000.0, false).x;
+        let both = [near.clone(), far.clone()];
+        // On the landscape it meets both: the farther wall has the last word, 4.5 + 2.
+        assert!((pushed(&both, None) - 6.5).abs() < 1e-3, "{}", pushed(&both, None));
+        // On the near one it meets the near one alone, and on the far one the far one alone.
+        assert!((pushed(&both, Some(0)) - 4.5).abs() < 1e-3, "{}", pushed(&both, Some(0)));
+        assert!((pushed(&both, Some(1)) - 6.5).abs() < 1e-3, "{}", pushed(&both, Some(1)));
+        // The building it stands on needs no meeting of spheres: it is the pass's own context.
+        let mut small = near.clone();
+        small.radius = 0.5;
+        small.centre = Vec3::new(0.0, -300.0, 0.0);
+        assert_eq!(pushed(std::slice::from_ref(&small), None), 0.0, "out of its sphere, on the landscape");
+        assert!((pushed(std::slice::from_ref(&small), Some(0)) - 4.5).abs() < 1e-3);
+        // A unit is a member or a visitor of that pass like the mover: it is met as ever, by
+        // half the push where the two weigh the same.
+        let with_unit = [near, unit];
+        assert!((pushed(&with_unit, Some(0)) - (4.5 + 1.0)).abs() < 1e-3, "{}", pushed(&with_unit, Some(0)));
     }
 }

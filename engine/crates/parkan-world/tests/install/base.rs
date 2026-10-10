@@ -377,7 +377,14 @@ fn a_shot_at_mission_02s_factory_door_passes_the_black_doorway_in_front_of_it_an
     // `o01` and one in the hall (docs/24, "The doorways are black quads"). A round passes
     // them, as a walker does, and strikes the door.
     let door = door_centre(&play, t, part_index, node);
-    let muzzle = Vec3::new(door.x, door.y + 40.0, door.z);
+    // Fired from inside the factory's bubble, so that the shot meets no shield on its way: the
+    // bubble is the building's construction sphere, 118.8 about its ground plan's middle
+    // (docs/24, "A building's second is its construction sphere"), which reaches 36.5 m out in
+    // front of this door.
+    let muzzle = Vec3::new(door.x, door.y + 30.0, door.z);
+    let (bubble, reach) = play.battle.combat.targets[t].bubble_sphere();
+    assert!((reach - 118.82).abs() < 0.01, "the Large Factory's construction sphere: {reach}");
+    assert!(muzzle.distance(bubble) < reach && (muzzle + Vec3::Y * 10.0).distance(bubble) > reach);
     let (strike, struck, _) =
         play.battle.combat.first_hit(&play.ground, None, muzzle, door, 0.0).expect("a line to the door");
     assert_eq!((strike.node, struck), (Some(node), Some(t)), "the round reaches the door");

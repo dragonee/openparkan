@@ -137,21 +137,26 @@ fn items(controller: &Controller, class: i32) -> Vec<Item> {
         .collect()
 }
 
-/// An item as it starts, with the one switch word in the install this does not play as read.
+/// An item of class `class` as its owner's behaviour leaves it within its first place tick.
 ///
-/// STAND-IN: docs/28-chassis.md#every-component-is-stepped-not-only-a-device--read-and-measured
-/// -- an item whose word **bounces** is started as one that opens and stops. The word 9 is
-/// *read* from the record's `+0x18` (`0x10021d86`) and bit 8 is *read* to hold the progress at
-/// an end and swap the low bits (`0x10020ae4`), so as the file stands both towers raise their
-/// gun mast over five seconds and stow it over the next five, for ever. Nothing found switches
-/// the word off: the component factory files every class in the controller's timed list
-/// (`Control.dll:0x1002d70a`), `CBuilding` looks for classes 12 and 13 and no other
-/// (`Terrain.dll:0x100583a2`), and neither record names a section-5 group at `+0x10` or
-/// `+0x14`. *Measured*: the two class-29 records are the only ones of the install's 1066 whose
-/// word bounces. In the game a tower's mast comes up as it is built and stays up.
-pub fn started(mut item: Item) -> Item {
-    if item.state & parkan_sim::device::BOUNCE != 0 {
-        item.switch(item.state & parkan_sim::device::CLOSING == 0);
+/// **A class-29 item is switched to open, whatever word its record gave it.** `MBehaviour`'s
+/// place set files its control system's items by class into lists of its own, class 29 among
+/// them (`Behavior.dll:0x100187e1`, the list at the set's `+0x70`), and the first time its
+/// tick runs -- on its own timer, 64 to 128 ms in, and before the takt returns for a neutral
+/// clan -- it sends each of them switch word **1** through `IItemManager` slot 6 and latches
+/// (`+0xad`, `0x1001982b`-`0x1001985e`). The fire control asks the same again every takt
+/// through the latched setter (`0x100199b0`, called at `0x10024211` with 1), which sends
+/// nothing while the latch holds; the setter's other arm sends 2, and nothing calls it with 0.
+///
+/// So the word 9 the two towers' records carry -- open and **bouncing** (`0x10020ae4`) -- is
+/// replaced by 1, open with no end mode, five seconds before the progress first reaches an
+/// end: the mast comes up once, holds, and the word clears (docs/28, "What stops a tower's
+/// mast at the top"). The 64 to 128 ms the word stays 9 move the progress exactly as 1 does,
+/// so the item is started on 1 here. *Measured*: the install's class-29 records are those two,
+/// and they are the only records of its 1066 whose word bounces.
+pub fn started(mut item: Item, class: i32) -> Item {
+    if class == parkan_formats::control::MAST_TYPE {
+        item.switch(true);
     }
     item
 }
@@ -182,7 +187,7 @@ pub fn running_items(controller: &Controller) -> Vec<Item> {
         .iter()
         .enumerate()
         .filter(|&(i, c)| c.type_id != DOOR_TYPE && Some(i) != first_computer && !c.entries.is_empty())
-        .map(|(i, c)| started(Item::new(i, c, &controller.channels)))
+        .map(|(i, c)| started(Item::new(i, c, &controller.channels), c.type_id))
         .collect()
 }
 
@@ -300,6 +305,19 @@ impl Building {
     /// Pose the building's own part where its items have their channels now, as the placement
     /// poses a building at rest ([`crate::battle::Battle::load`]), and carry every part that
     /// hangs on one of its nodes along with it.
+    ///
+    /// **A building never stands at its mesh's rest pose where an item plays a node.** A
+    /// channel plays its node between its own two frames, and from an item's first step the
+    /// node is at the channel's first: a door and the first computer are filed with word 2
+    /// (`Terrain.dll:0x10058532`, `0x100585a1`), which holds the progress at 0, clears the word
+    /// and still sends every channel that 0 (`Control.dll:0x10020a87`-`0x10020b93`). *Measured*
+    /// over `fortif.rlb`'s 21 control pods: 16 play frames 1 to 3 where the mesh rests at
+    /// frame 0, and on each the node -- the pod's glass canopy, 12 faces flagged `0x20` on 15
+    /// of them -- rests **down** on the pod's floor, hangs 5.5 to 5.8 m **up** at the shut end
+    /// and is down again at the open one. So a pod waits with its canopy up, and "opening" for
+    /// whoever stands in its zone lowers it over them. The play poses every building once as
+    /// it loads for that, before its faces are taken: a mover's pair does not pass `0x20`
+    /// ([`parkan_sim::solid`]), and a canopy left down at rest is a glass box round the pod.
     pub fn pose(&self, parts: &mut [Part], posed_elsewhere: impl Fn(usize) -> bool) {
         let Some(own) = parts.get(self.part) else { return };
         let (mesh, count) = (own.mesh.clone(), mesh_nodes(own));
@@ -615,5 +633,67 @@ mod tests {
         // And a deep one along y.
         let (a, b, _) = capsule(&corners(Vec3::ZERO, Vec3::new(1.0, 8.0, 2.0)));
         assert!(a.distance(Vec3::new(0.5, 8.0, 1.0)) < 1e-4 && b.distance(Vec3::new(0.5, 0.0, 1.0)) < 1e-4);
+    }
+
+    /// `Behavior.dll:0x1001982b`-`0x1001985e`: the place set's first tick sends every class-29
+    /// item switch word 1, so a mast whose record says 9, open and bouncing, comes up over its
+    /// five seconds and stops. The class decides it, not the word: an item of another class
+    /// carrying the same word is sent nothing and bounces as `Control.dll:0x10020ae4` reads.
+    #[test]
+    fn a_class_29_item_is_switched_to_open_and_another_class_keeps_the_word_its_record_gives() {
+        use parkan_formats::control::{Channel, Component, EFFICIENCY_TYPE, MAST_TYPE};
+        use parkan_sim::device::{BOUNCE, OPENING};
+
+        // The Small Tower's mast channel: frames 1 to 4 at 0.2 a second.
+        let channel = Channel {
+            node: 13,
+            first: 1.0,
+            last: 4.0,
+            initial: 0.0,
+            origin: -1,
+            point: -1,
+            rate: 0.2,
+            span: 1.0,
+            flags: 0,
+        };
+        let record = |class: i32, word: Option<i32>| Component {
+            type_id: class,
+            resource: Default::default(),
+            index: word,
+            entries: vec![0],
+            label: String::new(),
+            values: [0.0; 16],
+            power: 0.0,
+            node: 13,
+            mass: 0.0,
+            flags: 0,
+            group: -1,
+            weights: [1.0, 1.0],
+        };
+        let item =
+            |class: i32, word: Option<i32>| started(Item::new(0, &record(class, word), &[channel]), class);
+        let run = |mut item: Item, until_ms: f64| {
+            let mut t = 0.0;
+            while t < until_ms {
+                item.tick(t, &Motion::default(), true);
+                t += 1000.0 / 60.0;
+            }
+            item
+        };
+
+        let mast = item(MAST_TYPE, Some(OPENING | BOUNCE));
+        assert_eq!(mast.state, OPENING, "word 9 is replaced by 1");
+        let up = run(mast, 6000.0);
+        assert!(up.stopped() && up.now[0] == 1.0, "up after five seconds and stopped: {:?}", up.now);
+        let later = run(up, 30_000.0);
+        assert_eq!(later.now[0], 1.0, "and it stays up");
+        // Whatever the record says: the default 5, open and wrapping, is replaced as well.
+        assert_eq!(item(MAST_TYPE, None).state, OPENING);
+
+        // The same word on a class the place set sends nothing: it bounces, down again by 10 s.
+        let other = item(EFFICIENCY_TYPE, Some(OPENING | BOUNCE));
+        assert_eq!(other.state, OPENING | BOUNCE);
+        let down = run(other, 10_200.0);
+        assert!(down.now[0] < 0.05, "ten seconds on it is back at its start: {:?}", down.now);
     }
 }

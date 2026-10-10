@@ -28762,6 +28762,282 @@ def check_light_spaces(check, game: Path) -> None:
           f"other's transpose")
 
 
+#: The component class only the two towers' gun masts carry (docs/28).
+MAST_TYPE = 29
+#: What `CBuilding::GetConstructionSphere` adds to the ring's reach, and to a mine's
+#: (Terrain.dll:0x1009b6b8, 0x1009b498).
+CONSTRUCTION_MARGIN, CONSTRUCTION_MINE = 5.0, 15.0
+#: The smallest positive float, where the construction sphere's box starts its upper corner
+#: (Terrain.dll:0x1005bdf9).
+FLT_MIN = 1.1754943508222875e-38
+
+
+def construction_sphere(ring, mine: bool = False) -> tuple[tuple[float, float, float], float]:
+    """A building's construction sphere in its own frame (Terrain.dll:0x1005bd70): the middle
+    of the box round its outer ring, whose upper corner starts at ``FLT_MIN``, and the farthest
+    point's distance from there with the point's z taken as 0, plus 5, plus 15 on a mine."""
+    lo = [min(p[k] for p in ring) for k in range(3)]
+    hi = [max(max(p[k] for p in ring), FLT_MIN) for k in range(3)]
+    centre = tuple((lo[k] + hi[k]) / 2 for k in range(3))
+    reach = max(math.dist((p[0], p[1], 0.0), centre) for p in ring)
+    return centre, reach + CONSTRUCTION_MARGIN + (CONSTRUCTION_MINE if mine else 0.0)
+
+
+def check_building_parts_and_spheres(check, game: Path) -> None:
+    """A tower's mast, a bridge's join cap, a control pod's canopy and a building's
+    construction sphere (docs/28, "What stops a tower's mast at the top"; docs/24, "The cap
+    where two halves meet", "A pod's canopy" and "Collision between objects")."""
+    try:
+        fortif = NResArchive.open(game / "fortif.rlb")
+    except (OSError, NotAnNResArchive):
+        return
+    members = {e.name.lower(): e for e in fortif}
+
+    def posed(m, node, frame=None):
+        """Node ``node``'s level-0 vertices in model space, its own pose at ``frame``."""
+        slot = m.slots[m.nodes[node].slot_index[0]]
+        pose = m.local_pose(node) if frame is None else m.pose_at(node, frame)
+        parent = m.nodes[node].parent
+        while parent != objmesh.NO_PARENT and parent < len(m.nodes):
+            pose = objmesh.compose(m.local_pose(parent), pose)
+            parent = m.nodes[parent].parent
+        tris = range(slot.first_triangle, slot.first_triangle + slot.triangle_count)
+        return [objmesh.apply(pose, m.positions[v]) for t in tris for v in m.triangles[t]]
+
+    # 1. The mast: the two class-29 records, their word 9, and what word 1 does to them.
+    masts = {}
+    for name, e in members.items():
+        if not name.endswith(".ctl"):
+            continue
+        ctrl = control.parse(fortif.read(e))
+        for k in ctrl.components:
+            if k.type_id == MAST_TYPE:
+                masts[name] = (k, ctrl.channels)
+    stepped = {}
+    for name, (k, channels) in masts.items():
+        ends = []
+        for word in (1, k.state):
+            item = control.Item(k, channels)
+            item.state = word
+            seen = []
+            for ms in range(0, 30001, 50):
+                item.tick(float(ms))
+                if ms in (6000, 10200, 30000):
+                    seen.append(round(min(item.now), 2))
+            ends.append((seen, item.state))
+        stepped[name] = ends
+    check("fortif.rlb: a tower's mast sent word 1 is up in 5 s and stays; on its own 9 it bounces",
+          sorted(masts) == ["fr_b_tower.ctl", "fr_m_tower.ctl"]
+          and all(k.state == 9 for k, _ in masts.values())
+          and all(ends[0] == ([1.0, 1.0, 1.0], 0) and ends[1][0][1] < 0.05 and ends[1][1] & 8
+                  for ends in stepped.values()),
+          f"class 29 on {sorted(masts)}, word {[k.state for k, _ in masts.values()]}; channel "
+          f"values at 6, 10.2 and 30 s, then the word, under 1 and under the file's own: {stepped}")
+
+    # 2. The bridges' join caps, and the glass.
+    caps, glass = {}, Counter()
+    for stem in ("fr_b_brige", "fr_e_brige", "fr_l_brige", "fr_m_brige"):
+        m = objmesh.parse(fortif.read(members[stem + ".msh"]), stem)
+        far, found = None, []
+        for n, node in enumerate(m.nodes):
+            index = node.slot_index[0]
+            if index == objmesh.NO_SLOT or index >= len(m.slots):
+                continue
+            slot = m.slots[index]
+            pts = posed(m, n)
+            for i in range(slot.triangle_count):
+                a, b, c = pts[3 * i:3 * i + 3]
+                top = max(a[1], b[1], c[1])
+                if far is None or top > far + 0.05:
+                    far, found = top, []
+                if all(abs(v[1] - far) < 0.05 for v in (a, b, c)):
+                    t = slot.first_triangle + i
+                    batches = m.batches[slot.first_batch:slot.first_batch + slot.batch_count]
+                    batch = next(bt for bt in batches if bt.triangles[0] <= t < sum(bt.triangles))
+                    u = [b[k] - a[k] for k in range(3)]
+                    w = [c[k] - a[k] for k in range(3)]
+                    facing = u[2] * w[0] - u[0] * w[2]
+                    found.append((m.face_flags[t], batch.flags, node.flags, facing > 0,
+                                  round(max(a[2], b[2], c[2]), 2)))
+        caps[stem] = found
+    for name, e in members.items():
+        if not name.endswith(".msh"):
+            continue
+        m = objmesh.parse(fortif.read(e), name)
+        for node in m.nodes:
+            index = node.slot_index[0]
+            if index == objmesh.NO_SLOT or index >= len(m.slots):
+                continue
+            slot = m.slots[index]
+            for bt in m.batches[slot.first_batch:slot.first_batch + slot.batch_count]:
+                first, count = bt.triangles
+                glass[bt.flags] += sum(m.face_flags[t] == 0x20 for t in range(first, first + count))
+    glass = {k: v for k, v in glass.items() if v}
+    check("fortif.rlb: each bridge's join cap is six faces facing +y, flagged 4 or, on one, 0x20",
+          all(len(v) == 6 and all(f[3] for f in v) for v in caps.values())
+          and {s: {f[0] for f in v} for s, v in caps.items()}
+          == {"fr_b_brige": {4}, "fr_e_brige": {0x20}, "fr_l_brige": {4}, "fr_m_brige": {4}}
+          and {f[1] for f in caps["fr_e_brige"]} == {0x100}
+          and {f[2] for f in caps["fr_e_brige"]} == {0x10}
+          and max(f[4] for f in caps["fr_e_brige"]) == 9.04
+          and glass == {0x100: 26, 0x102: 234},
+          f"(triangle word, batch word, node word, facing +y, top z) on the energy bridge "
+          f"{sorted(set(caps['fr_e_brige']))}; the level-0 faces flagged 0x20 alone by batch "
+          f"word: { {hex(k): v for k, v in glass.items()} } -- the bridge's 26 and the pods' 234")
+
+    # 3. The pods: where the canopy rests, and where the item's two ends put it.
+    pods = {}
+    for name, e in members.items():
+        if not name.endswith(".ctl") or name[:-4] + ".msh" not in members:
+            continue
+        ctrl = control.parse(fortif.read(e))
+        pod = next((k for k in ctrl.components
+                    if k.type_id == control.COMPUTER_TYPE and k.entries), None)
+        if pod is None:
+            continue
+        m = objmesh.parse(fortif.read(members[name[:-4] + ".msh"]), name)
+        ch = ctrl.channels[pod.entries[0]]
+        index = m.nodes[ch.node].slot_index[0]
+        if index == objmesh.NO_SLOT or index >= len(m.slots):
+            continue
+        low = [round(min(p[2] for p in posed(m, ch.node, f)), 2)
+               for f in (None, ch.frame(0.0), ch.frame(1.0))]
+        pods[name[:-4]] = (low[0] == low[2], round(low[1] - low[2], 2))
+    lifts = sorted(lift for rests_open, lift in pods.values() if rests_open)
+    check("fortif.rlb: 16 of 21 control pods rest with the canopy down and wait with it up",
+          len(pods) == 21 and len(lifts) == 16
+          and all(5.5 <= v <= 5.85 for v in lifts[:15]) and lifts[15] == 8.68
+          and pods["fr_l_gener"] == (False, 5.76) and pods["fr_m_mtp"] == (False, -8.76)
+          and all(pods[s][1] == 0.0 for s in ("fr_b_plant", "fr_l_plant", "fr_m_plant")),
+          f"how far over its open end the shut end holds the pod's node, where the mesh rests at "
+          f"the open end: {lifts}; fr_l_gener rests shut, {pods['fr_l_gener'][1]} over its open "
+          f"end; fr_m_mtp rests shut and opens {-pods['fr_m_mtp'][1]} upward; the three "
+          f"factories' does not move")
+
+    # 4. The construction sphere against the mesh's own.
+    spheres = {}
+    for name, e in members.items():
+        if not name.endswith(".bas") or name[:-4] + ".msh" not in members:
+            continue
+        stem = name[:-4]
+        outer = objects.parse_base(fortif.read(e), name)[1].points
+        centre, radius = construction_sphere(outer, "mine" in stem)
+        volume = objmesh.parse(fortif.read(members[stem + ".msh"]), stem).volume
+        spheres[stem] = (tuple(round(v, 2) for v in centre), round(radius, 2),
+                         round(radius - volume.radius, 2),
+                         round(math.dist(centre, volume.centre), 2))
+    wider = {s: v for s, v in spheres.items() if v[2] > 0}
+    others = sorted(set(spheres) - set(wider))
+    more = sorted(v[2] for v in wider.values())
+    apart = sorted(v[3] for v in wider.values())
+    check("fortif.rlb: a building's construction sphere is wider than its mesh's on 23 of 30",
+          len(spheres) == 30 and len(wider) == 23
+          and (more[0], more[-1]) == (10.79, 31.82) and (apart[0], apart[-1]) == (1.06, 40.64)
+          and spheres["fr_m_tower"][:2] == ((0.0, 5.27, 2.73), 46.71)
+          and spheres["fr_b_plant"][1] == 118.82
+          and [spheres[s][1] for s in ("fr_b_brige", "fr_l_brige", "fr_m_brige", "fr_e_brige")]
+          == [39.36, 39.36, 39.36, 74.63]
+          and others == ["fr_b_brige", "fr_e_brige", "fr_l_brige", "fr_l_mtp", "fr_l_ruin",
+                         "fr_m_brige", "fr_m_mtp"],
+          f"the Small Tower's {spheres['fr_m_tower'][:2]}, the Large Factory's "
+          f"{spheres['fr_b_plant'][1]}; wider by {min(v[2] for v in wider.values())} to "
+          f"{max(v[2] for v in wider.values())} and {min(v[3] for v in wider.values())} to "
+          f"{max(v[3] for v in wider.values())} from the mesh's centre on the 23; the other "
+          f"seven {others}")
+
+    paths = [game / name for name in ("Behavior.dll", "Control.dll", "Terrain.dll")]
+    if not all(p.exists() for p in paths):
+        return
+    beh, ctl, ter = (_image_at(p.read_bytes()) for p in paths)
+
+    def calls(at, va: int) -> int:
+        """Where the ``call rel32`` at ``va`` goes."""
+        return (va + 5 + struct.unpack("<i", at(va + 1, 4))[0]) & 0xFFFFFFFF
+
+    def dword(at, va: int) -> int:
+        return struct.unpack("<I", at(va, 4))[0]
+
+    mast_sites = [
+        # the place set asks IItemManager slot 9 for class 29, twice
+        (beh, 0x100187E1, b"\x6a\x1d\x6a\x00\x50\x8b\x08\xff\x51\x24"),
+        (beh, 0x10018808, b"\x6a\x1d"),
+        # its tick: unless the latch +0xad is 1, set it and send every one of them word 1
+        (beh, 0x1001982F, b"\x80\xbd\xad\x00\x00\x00\x01"),
+        (beh, 0x1001983F, b"\xc6\x85\xad\x00\x00\x00\x01"),
+        (beh, 0x10019855, b"\x6a\x01\x8b\x14\xb2\x8b\x08\x52\x50\xff\x51\x18"),
+        # the setter: skipped when the latch equals the argument; the word is 1 or 2
+        (beh, 0x100199B9, b"\x38\x87\xad\x00\x00\x00"),
+        (beh, 0x100199D0, b"\xf6\xd8\x1b\xc0\x55\x83\xc0\x02"),
+        # the constructor's latch, and the fight module's push of 1
+        (beh, 0x100037BC, b"\x88\x9f\xad\x00\x00\x00"), (beh, 0x10024202, b"\x6a\x01"),
+    ]
+    check("Behavior.dll, Control.dll: a class-29 item is the base item, sent word 1 once",
+          all(at(va, len(code)) == code for at, va, code in mast_sites)
+          and calls(beh, 0x10024211) == 0x100199B0
+          and ctl(0x1002D864 + MAST_TYPE - 1, 1) == b"\x0d"
+          and dword(ctl, 0x1002D82C + 4 * 13) == 0x1002D6EC
+          and ctl(0x1002D6EC, 5) == b"\x68\xa4\x00\x00\x00",
+          "the factory's table gives class 29 its default case, the 0xa4-byte base item "
+          "(0x1002d6ec); MBehaviour's place set files the class in a list of its own "
+          "(0x100187e1), its tick sends the list word 1 behind a latch at +0xad (0x1001982f), "
+          "and the fight module calls the latched setter with 1 (0x10024211 -> 0x100199b0)")
+
+    pair_sites = [
+        # the pair's first filter: both node words and the batch's required one pushed as 0
+        (ctl, 0x1001DB53, b"\x6a\x00\x0b\xd1\x6a\x00\x6a\x00\x0b\xd0\x6a\x00\x52"),
+        # its triangle masks: 4 for the segment, 4 more for the push-out
+        (ctl, 0x1001DBAD, b"\xc7\x84\x24\xc8\x00\x00\x00\x04\x00\x00\x00"),
+        (ctl, 0x1001DBCE, b"\x83\xce\x04"),
+        # the pass: a pair with a contact record on neither side is dropped
+        (ctl, 0x1001C1E9, b"\x8b\x4f\x04\x85\xc9\x75\x07\x8b\x4e\x04\x85\xc9"),
+        # an entry joins the first ancestor that answers 0x203, into its +0x1c
+        (ctl, 0x1001FE54, b"\x8d\x7b\x1c\x8b\x06\x57\xba\x03\x02\x00\x00"),
+    ]
+    check("Control.dll: a mover is in one collision manager, and the pair's filters name no node",
+          all(at(va, len(code)) == code for at, va, code in pair_sites)
+          and calls(ctl, 0x1001C1B2) == 0x1001D630
+          and calls(ctl, 0x1001F587) == 0x1001FEA0 and calls(ctl, 0x1001F58E) == 0x1001FE40,
+          "message 21's event 6 leaves the manager and joins the first ancestor's (0x1001f585 -> "
+          "0x1001fea0, 0x1001fe40); the pass drops a pair with no contact record on either side "
+          "(0x1001c1e9) and hands a member to its manager's own context (0x1001c1b2); the pair's "
+          "triangle mask is 4 (0x1001dbad, 0x1001dbce) and its node words are 0 (0x1001db53)")
+
+    sphere_sites = [
+        # slot 12: the owner asked for interface 0x17; its slot 15, or interface 0x18 slot 9
+        (ctl, 0x1002C507, b"\x8b\x46\xf4\x8d\x4e\xf4\x8d\x54\x24\x08\xc7\x44\x24\x08\x00\x00\x00"
+                          b"\x00\x52\xba\x17\x00\x00\x00\xff\x10"),
+        (ctl, 0x1002C532, b"\xff\x51\x3c"),
+        (ctl, 0x1002C537, b"\x8b\x46\x18\x8b\x54\x24\x10\x52\x57\x8b\x08\x50\xff\x51\x24"),
+        # its callers, each with 2: the collision object, the blast's shield step, the sector pick
+        (ctl, 0x1001FFB3, b"\x8b\x01\x8d\x54\x24\x14\x52\xba\x02\x00\x00\x00\xff\x50\x30"),
+        (ctl, 0x1000FF62, b"\x8b\x01\x52\xba\x02\x00\x00\x00\xff\x50\x30"),
+        (ctl, 0x1002C5A5, b"\xba\x02\x00\x00\x00"), (ctl, 0x1002C5CF, b"\xff\x50\x30"),
+        # a round's sweep: a building's second sphere, a unit's first; then the mesh either way
+        (ctl, 0x1001D6C4, b"\x8b\x08\x33\xf6\x83\xf9\x03\x75\x05\x8b\x70\x34\xeb\x08"
+                          b"\x83\xf9\x04\x75\x03\x8d\x70\x18"),
+        (ctl, 0x1001D982, b"\x8b\x03\xf6\x40\x10\x02\x75\x34"),
+        # the construction sphere: FLT_MIN and FLT_MAX, a point's z as 0, + 5, and "mine" + 15
+        (ter, 0x1005BDF9, b"\xc7\x85\x5c\xfe\xff\xff\x00\x00\x80\x00"),
+        (ter, 0x1005BE17, b"\xc7\x85\x50\xfe\xff\xff\xff\xff\x7f\x7f"),
+        (ter, 0x1005C3BD, b"\xc7\x85\x28\xfe\xff\xff\x00\x00\x00\x00"),
+        (ter, 0x1005C469, b"\xd9\x45\x90\xd8\x05\xb8\xb6\x09\x10"),
+        (ter, 0x1005C4F1, b"\x68\x08\x29\x0a\x10"),
+        (ter, 0x1005C509, b"\xd9\x45\x90\xd8\x05\x98\xb4\x09\x10"),
+    ]
+    constants = (struct.unpack("<f", ter(0x1009B6B8, 4))[0],
+                 struct.unpack("<f", ter(0x1009B498, 4))[0], ter(0x100A2908, 5))
+    check("Control.dll, Terrain.dll: slot 12 hands out a building's construction sphere",
+          all(at(va, len(code)) == code for at, va, code in sphere_sites)
+          and dword(ctl, 0x1003B4FC + 4 * 12) == 0x1002C500
+          and dword(ter, 0x1009B52C + 4 * 15) == 0x1005C540
+          and constants == (CONSTRUCTION_MARGIN, CONSTRUCTION_MINE, b"mine\0"),
+          "interface 0x204 slot 12 (0x1002c500) asks the owner for IBuilding, 0x17, and calls its "
+          "slot 15 (Terrain.dll:0x1005c540), else interface 0x18 slot 9; the collision object "
+          "(0x1001ffb3), a blast's shield step (0x1000ff6a) and the sector pick (0x1002c5cf) ask "
+          "it with 2; a round is swept against a kind-3 object's second sphere and a kind-4 "
+          f"object's first (0x1001d6c4); the sphere's margins and its word are {constants}")
+
+
 def run(game: Path) -> int:
     """Run every check against ``game``.  Returns a process exit code."""
     results: list[tuple[str, bool, str]] = []
@@ -28835,6 +29111,7 @@ def run(game: Path) -> int:
         check_frame_scale, check_room_test,
         check_planner,
         check_record_bound, check_view_light_pairs, check_light_spaces,
+        check_building_parts_and_spheres,
     )
     for fn in checks:
         fn(check, game)

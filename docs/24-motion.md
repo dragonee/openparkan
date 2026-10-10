@@ -1671,7 +1671,7 @@ of them with a world normal z above 0.173648:
 - **Without the deck there is no crossing.** The only ground between the banks
   is the water at −1.73 over a bed that falls to −28.7.
 
-#### The cap where two halves meet — *measured*, and a stand-in
+#### The cap where two halves meet — *measured*, and *read*
 
 Every bridge is placed this way. Across all 29 missions there are **9 bridge
 pairs**, and on all nine the second half stands π from the first, straight on
@@ -1688,15 +1688,95 @@ Bridge BS-52/30* — flags them **`0x20`**, which is the bit its additive
 floor and energy at once. A round passes both, the round query's triangle mask
 being `0x24` ([07-objects.md](07-objects.md#the-flags-word)).
 
-**STAND-IN.** The read of the collision's own filters gives them a triangle
-mask of **4** — `0x1001dbad` for the segment and `0x1001dbce` for the push-out,
-[below](#collision-between-objects--read) — and nothing that drops `0x20`. Taken
-as read, the energy bridge's cap is a wall: the hero walks 183.8 m of the 185.5
-to the join and stops dead, half way over the gorge, while Mission 01's
-`m_bridge` lets it straight through. The engine passes `0x20` here as it passes
-4, so that all four bridges cross. What the game does instead — a batch flag the
-mesh's batch word does not carry, or a filter this page has not found — is not
-established.
+**Nothing drops the face, and nothing has to.** A mover's pair with a building
+takes a triangle mask of 4 (`0x1001dbad` for the segment, `0x1001dbce` for the
+push-out, [below](#collision-between-objects--read)), and a cap flagged `0x20`
+is a wall to it. But a mover on the deck does not reach the cap, and it is never
+paired with the half whose cap faces it. Either is enough.
+
+- **The cap lies under the mover** (*measured*). On `fr_e_brige` the six faces
+  reach from z 7.54 up to the deck's own 8.14, and stand over it only as the two
+  kerbs, 0.18 from 7.92 out from the middle and 0.90 from 11.88 out. The pair
+  pushes out a unit's **node sphere** about the centre the ground contact holds
+  an agent sphere's radius over the ground
+  ([below](#collision-between-objects--read)): the hero's 1.59 about a centre
+  2.18 up clears the deck by 0.59, a small wheeled warrior's 2.59 about 3.25 by
+  0.66.
+- **On a half, a mover is that half's alone.** The face under its centre makes it
+  the half's child ([Finding the ground](#finding-the-ground--read), step 7),
+  and its collision object leaves the world's manager for the half's own
+  ([Walking into a building](#walking-into-a-building--read-and-measured)). The
+  world's pass pairs its own members, and it is such a pair that lists a mover
+  as a building's visitor; a pair of the two halves has no contact record on
+  either side and is dropped (`0x1001c1e9`–`0x1001c1f5`). So the far half's pass
+  never holds a mover that stands on the near one
+  ([Collision between objects](#collision-between-objects--read)).
+- **Its own half's cap faces away.** The cap looks down the span, +y, and the
+  mover comes at it from behind. The segment stop wants a move against the
+  normal (`0x1001dd42`) and the push-out passes over a face whose plane lies
+  behind the centre (`AniMesh.dll:0x1000e900`).
+- **By the time it is the far half's, that cap is behind it.** The held face is
+  the one under the centre, so the mover changes hands as its centre crosses
+  the join, where the far half's cap stands, facing back the way it came.
+- **Neither word could have hidden it** (*measured*). The cap's batch word is
+  `0x100`, with no 8 for the batch mask to take (`0x1001db25`), and all three of
+  the pair's filters carry 0 in both node words (`0x1001db53`–`0x1001db5d`,
+  `0x1001db84`–`0x1001db98`, `0x1001dbea`–`0x1001dbf3`), so the node's own
+  `0x0010` is not asked.
+
+**Where the wall came from** (*measured* on openparkan's engine, the hero walked
+up C02 Mission 04's bridge with the cap a wall to it):
+
+| the sphere the pair pushes out | the hero is paired with | |
+|---|---|---|
+| the agent's, 2.18, which rests on the deck | every building its sphere meets | stops 183.8 m along, 1.7 short of the join |
+| the agent's | the half it stands on | crosses |
+| the node sphere, 1.59, as read | every building its sphere meets | crosses |
+| the node sphere | the half it stands on | crosses |
+
+The first row is the engine this was raised on, 2026-09-20: it pushed out the
+agent's sphere, which the read of 2026-10-01 replaced with the node sphere, and
+it paired a mover with every building, which this read replaces. So all four
+bridges cross as read, twice over, and the three that flag their cap 4 need the
+flag for nothing a mover does.
+
+#### A pod's canopy and a mover too tall for it — *measured*, and a stand-in
+
+The other faces flagged `0x20` are glass. Of the 260 level-0 faces that carry
+the bit alone, 26 are the energy bridge's and **234 are `B_COMP_3G`**, in
+two-sided batches whose word is `0x102`. They are a control pod's canopy: on 18
+of the 21 buildings with a pod they are on the node its **first computer**
+plays, and on the three factories on the node before it.
+
+- **A pod waits with its canopy up** (*measured*, *read*, and *seen*). The item
+  plays the node between its channel's two frames, and from its first step the
+  node is at the first of them: the filing's word 2 holds the progress at 0 and
+  the update still sends every channel that 0 (`Control.dll:0x10020a87`–
+  `0x10020b93`). On **16 of the 21** pods the mesh's own rest pose has the canopy
+  **down** on the pod's floor, which is where the item's open end puts it, and
+  the shut end hangs it up: by 5.5 to 5.8 m on fifteen and by 8.7 on
+  `fr_l_angar`. `fr_l_gener` rests up and comes down 5.8 the same; `fr_m_mtp`
+  alone goes the other way, 8.8 up as it opens; and the three factories' pod
+  node does not move. So "opening" for whoever stands in the zone
+  ([27-ownership.md](27-ownership.md#capture--read)) lowers the canopy over
+  them. The recording has it so: the Light Tower's pad lies bare as the hero
+  comes down to it, and a red pane closes round the view within a second of
+  stepping on ("Let's Play - Parkan: Iron Strategy, Part 4", 21:45.1–21:46.4).
+- **Read, the canopy is a wall to a mover**, like the bridge's cap, from its
+  front. Standing inside it a mover is behind every face. Coming to it, the hero
+  passes under: the pair's sphere, its node sphere of 1.59 about a centre 2.18
+  over the ground, tops out at 3.77.
+- **A small wheeled warrior's tops out at 5.84** — 2.59 about a centre 3.25 up —
+  and on the Small Tower the way down passes beside the hanging canopy. Played
+  as read on the engine, the warrior sent to take C02 M04's plateau tower gets
+  to 6.2 m from the pod, 7.6 m over its floor, is turned back by the canopy's
+  side and goes round again for good.
+
+**STAND-IN.** Whether the game keeps such a unit out of a pod is not established:
+no recording looked at shows a warbot at one, and the read stops at the faces.
+The engine lets every mover through a face flagged `0x20` in a two-sided batch —
+the 234 canopy faces and nothing else — and holds the bridge's `0x100` cap to
+the read.
 
 ### Collision between objects — *read*
 
@@ -1745,10 +1825,61 @@ established.
     answers the sphere over the exterior nodes' boxes
     ([Finding the ground](#finding-the-ground--read)) — the sphere whose centre
     the ground contact holds the body about.
-  - **A building's second** is its device manager's: interface `0x204` slot 12
-    with 2 (`0x1001ffb3`–`0x1001fffa`, `0x1002c500`). What that slot answers is
-    not read here; it is the sphere a round is swept against
-    (`0x1001d6cd`).
+  - **A building's second is its construction sphere** (*read* 2026-10-10). The
+    fill asks its device manager, interface `0x204`, slot 12 with 2
+    (`0x1001ffb3`–`0x1001fffa`, `0x1002c500`), and copies the four floats it
+    writes; message `0x1c` moves a unit's second sphere's end and leaves a
+    building's alone (`0x10020086`). Slot 12 is one routine with two answers.
+    - **Through its pointer, a sphere.** It asks the control system's owner for
+      interface `0x17`, `IBuilding` (`0x1002c507`–`0x1002c51f`). A building
+      answers, and its slot 15 is handed the space and the pointer
+      (`0x1002c532`): `Terrain.dll:0x1005c540`, which its own panic names
+      `CBuilding::GetConstructionSphere`. Anything else falls to interface
+      `0x18` slot 9, the control's `+0x24` (`0x1002c537`–`0x1002c543`): the
+      agent's sphere, the same one its first sphere is.
+    - **In `al`, whether a shield's bubble is up**: both shield devices present,
+      switched on and whole (`0x1002c546`–`0x1002c581`,
+      [26-damage.md](26-damage.md#shields-a-generator-a-deflector-six-sectors--read-and-measured)).
+      The sphere is written either way, shield or none, and the collision
+      object does not look at the answer.
+    - **The construction sphere**, in the building's own frame
+      (`Terrain.dll:0x1005bd70`, kept at `IBuilding + 0xe0` and worked out
+      while its radius reads 0): the outer ring of the ground plan as
+      `IBasement` slot 3 hands it out unplaced (`0x10057eaf`); the centre the
+      middle of the box round its points; the radius the farthest point's
+      distance from that centre **with the point's own z taken as 0**
+      (`0x1005c3bd`), + 5 (`0x1005c46c`), and + 15 more where the name the
+      object's interface `0x24` hands out, lower-cased, holds `mine`
+      (`0x1005c480`–`0x1005c50c`). **The box's upper corner starts at
+      `FLT_MIN`**, the smallest positive float, where its lower starts at
+      `FLT_MAX` (`0x1005bdf9`–`0x1005be2b`), so on an axis the whole ring lies
+      below 0 the box ends at 0. *Measured*: that is z on 17 of the 30 plans
+      and no other axis on any — a ring drawn under the model's origin, at
+      −12.16 on three bridges and −29.39 on `fr_l_ruin`, puts the centre half
+      way up to it. Asked with 2, the centre goes through the building's
+      matrix and the radius is kept (`0x1005c56b`–`0x1005c5dd`).
+    - *Measured*, over the 30 ground plans of `fortif.rlb` against each mesh's
+      own header sphere: the construction sphere is the **wider on 23**, by
+      10.8 to 31.8, and sits on the ground plan where the header's sits in the
+      body, 1.1 to 40.6 away on those 23 — the Small Tower's 46.7 about
+      (0, 5.3, 2.7) against 33.6 about (0, 5.3, −3.8), the Large Factory's 118.8
+      against 107.2. The other seven are the four bridges, `fr_l_ruin` and the
+      two main teleports. A bridge half's ring is its abutment's, y −44.8 to
+      2.6 on three and ±63.1 on the energy bridge, so its sphere, 39.4 on the
+      three and 74.6 on the fourth, stands at the bank and holds little of the
+      span, whose decks run out to y 37 to 186.
+    - **Which name `mine` is looked for in** was not followed past the agent:
+      `CBuilding` answers interfaces up to `0x18` itself and hands any other to
+      its agent (`0x10057cf6`). The three mines' records are `fr_b_mine`,
+      `fr_l_mine` and `fr_m_mine`.
+
+    A round is swept against this sphere, and against a unit's first
+    (`0x1001d6c4`–`0x1001d6da`): what the touch finds is the round's **bubble
+    contact**, flag 4 in its contact record, kept in order of distance
+    (`0x1001d703`–`0x1001d97f`). The mesh test follows whatever the touch found
+    (`0x1001d982`–`0x1001d990`), so the sphere gates nothing; whether there is
+    a bubble to meet is asked later, when the round answers its contacts
+    ([26-damage.md](26-damage.md#a-round-meets-a-bubble--read)).
 - **What the pass skips.** It passes over an entry whose flags carry 1
   (`0x1001c1e3`), and one whose first sphere's radius is still below 0
   (`0x1001c15a`).
@@ -1763,25 +1894,49 @@ established.
   which finds `AniMesh.dll:0x10001850` sending a message to the collision
   object the agent keeps at `+0x154`. So **no entry is ever skipped** in the
   shipped game.
-- **Which pairs go on.** It takes every pair j < i once. A pair goes on only
-  when one side has a contact record (`0x1001c1e9`) and the swept spheres touch
-  within the frame (`0x1001e9f0`). The spheres swept are the **first** ones,
-  the agents' (`0x1001c203`, `0x1001c206`). A unit against a tree, a stone, a
-  building or another unit qualifies; two pieces of scenery never do.
+- **Which pairs go on.** A manager keeps its **members** (`+0x20`, eight bytes
+  each: the entry and its contact record; the count at `+0x24`) and, for the
+  length of one pass, its **visitors** (`+0x30`, `+0x34`). The pass takes each
+  member against every member before it, and each visitor against every member
+  (`0x1001c1b7`–`0x1001c256`). A pair goes on only when one side has a contact
+  record (`0x1001c1e9`) and the swept spheres touch within the frame
+  (`0x1001e9f0`). The spheres swept are the **first** ones, the agents'
+  (`0x1001c203`, `0x1001c206`). A unit against a tree, a stone, a building or
+  another unit qualifies; two pieces of scenery never do, nor two buildings.
+- **A mover standing on a building meets that building and no other**
+  (*read* 2026-10-10). An object is a member of one manager, the first
+  ancestor's that answers `0x203`: on becoming a child it leaves the one it was
+  in (`0x1001fea0`, the manager's slot 6 with its id) and joins that
+  (`0x1001fe40`, slot 5), and a unit on a building's face is the building's
+  child. It is then no member of the world's manager, and the world's pass is
+  what lists a mover as some building's visitor, out of a pair of its own
+  members (`0x1001c222`–`0x1001c244`). So a mover on a building is handed to
+  that building, the context of the pass it is a member of, with no swept test
+  (`0x1001c1ae`), and to that pass's other members and visitors — units and
+  rounds. Another building, a tree or a stone is never brought into it: none has
+  a contact record, and a pair of two without one is dropped. It is one of the
+  two things that carry a mover over a bridge's join
+  ([The cap where two halves meet](#the-cap-where-two-halves-meet--measured-and-read)).
 - **Nothing takes a unit out of the pair with the building it stands in**
   (*read* 2026-10-01). From the top of the pass (`0x1001c040`) the gates are
   the manager's own context entry's skip flag (`0x1001c04d`), each entry's skip
   flag and radius, the contact record and the swept test. A building's own pass
   hands every member and visitor with a contact record to the pair against the
   building with no swept test at all (`0x1001c1ae`–`0x1001c1b2`). Inside the
-  dispatcher the one exclusion is a round against the object that fired it
-  (`0x1001d6a9`–`0x1001d6c1`). No child relation, property or door is asked
+  dispatcher the one exclusion is a round against the **unit** that fired it:
+  the owner's id and kind 4 both (`0x1001d6a9`–`0x1001d6c1`), so a building's
+  own round is not taken out here. No child relation, property or door is asked
   before the push-out, which asks the door only face by face.
-- **Handlers.** A pair with a handler of its own (`+0x40` slot 7) goes to it;
-  `+0x40` is the **manager the object joined**, which the attach fills from
-  interface `0x203` (`0x1001f600`) and without which it would not have
-  registered at all, so the pass always has one to hand the pair to
-  (`0x1001c222`). What that manager's slot 7 then does is not read.
+- **Handlers.** A pair one of whose entries has a handler (`+0x40`, slot 7)
+  goes to it, the later entry's first (`0x1001c222`–`0x1001c244`); a pair of two
+  with none goes straight to the resolve (`0x1001c246`). `+0x40` is **the
+  object's own manager**, not the one it joined: the attach asks the object's
+  owner for interface `0x203` (`0x1001f600`), and where it answers makes the
+  object that manager's context (slot 4, `0x1001f616`). A building's agent
+  answers and a unit's does not, so the handler is a building's alone, and its
+  slot 7 lists the other entry as a visitor (`0x1001c500`,
+  [Walking into a building](#walking-into-a-building--read-and-measured)). The
+  manager an object joined is its `+0x1c` (`0x1001fe54`).
   A pair with no round goes to `0x1001daf0`, with **the larger sphere as the
   obstacle A and the smaller as the mover B** (`0x1001d647`), measured by the
   first spheres' radii. A must answer interface `0x25`, or the pair ends
@@ -3919,18 +4074,46 @@ patrol runs past it.
   ([34-progression.md](34-progression.md#the-medusas--read-and-measured)).
 - Whether the walker's clear (`0x1003c540`) also empties the points the Wizard
   already holds. `ClearWizardPath` is logged at `0x10040e3b`.
-- **What lets a mover past a face flagged `0x20`.** The collision's own two
+- ~~**What lets a mover past a face flagged `0x20`.** The collision's own two
   filters take a triangle mask of 4 (`0x1001dbad`, `0x1001dbce`), and a round's
   takes `0x24`. The shipped data needs `0x20` passed: `fr_e_brige` flags its
   join cap with it where the other three bridges flag theirs 4, and its halves
-  abut like theirs, so as read the energy bridge cannot be crossed
-  ([The cap where two halves meet](#the-cap-where-two-halves-meet--measured-and-a-stand-in)).
-  The batch word is the obvious other candidate — the query excludes batches
-  flagged 8, and the energy batches carry `0x100` and no 8 — so either a third
-  filter or ~~a flag set on the loaded batch~~ is doing it. The batch word is
-  now read to be the file's own dword, set by nothing at load
-  ([The ground inside a building](#the-ground-inside-a-building--read-in-part-and-measured)),
-  so it is not the word. The engine passes `0x20` as a stand-in.
+  abut like theirs, so as read the energy bridge cannot be crossed. The batch
+  word is the obvious other candidate — the query excludes batches flagged 8,
+  and the energy batches carry `0x100` and no 8 — so either a third filter or a
+  flag set on the loaded batch is doing it.~~ — **read** 2026-10-10: nothing
+  lets it past, and nothing has to, twice over. The cap ends at the deck's
+  surface and the sphere a pair pushes out, a unit's node sphere, rides over
+  it: the hero's clears the deck by 0.59. And a mover standing on a building is
+  a member of that building's collision manager and of no other, so on one half
+  of a bridge it is never paired with the other, whose cap is the one that faces
+  it; its own half's cap faces away, and a face stops and pushes only from its
+  front (`Control.dll:0x1001fe40`, `0x1001c1b7`–`0x1001c256`, `0x1001dd42`;
+  `AniMesh.dll:0x1000e900`). The batch word and the node word are both ruled
+  out: the cap's batch carries `0x100` and no 8, and the pair's three filters
+  carry 0 in both node words
+  ([The cap where two halves meet](#the-cap-where-two-halves-meet--measured-and-read)).
+  The 183.8 m the hero walked before it stopped was the engine of 2026-09-20,
+  which pushed out the agent's sphere and paired a mover with every building;
+  either read alone takes it over. The engine no longer passes the bridge's
+  `0x20`.
+- **Whether a control pod's glass canopy keeps out a unit too tall to pass under
+  it.** The canopy's faces are the other `0x20`, 234 of them, and read they are
+  a wall to a mover as the bridge's cap is. A pod waits with its canopy 5.5 to
+  5.8 m up, the hero passes under at 3.77, and a small wheeled warrior at 5.84
+  does not, turned back on a Small Tower's way down. No recording looked at
+  shows a warbot at a pod. The engine lets every mover through those 234 faces
+  as a stand-in
+  ([A pod's canopy and a mover too tall for it](#a-pods-canopy-and-a-mover-too-tall-for-it--measured-and-a-stand-in)).
+- ~~What a building's second sphere is: the one its collision object takes from
+  its device manager's slot 12 and a round is swept against.~~ — **read**
+  2026-10-10: its **construction sphere**, in the world. Slot 12
+  (`Control.dll:0x1002c500`) asks the control's owner for `IBuilding` and hands
+  a building's slot 15 the question (`Terrain.dll:0x1005c540`,
+  `CBuilding::GetConstructionSphere`); anything else gets its agent's sphere;
+  and the same call answers in `al` whether a shield's bubble is up. The
+  round's sweep against it makes the bubble contact and gates nothing
+  ([Collision between objects](#collision-between-objects--read)).
 
 - ~~How interface `0x25` slot 3 turns an object's level-0 triangles into a
   push, and what slot 2 does with its 0.5~~ — **read**: the push accumulates

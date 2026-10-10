@@ -376,6 +376,25 @@ impl Battle {
             Vec3::new(agent_centre[0] as f32, agent_centre[1] as f32, agent_centre[2] as f32),
             agent_radius * scale,
         );
+        // A building's construction sphere, placed: its centre through the building's matrix and
+        // its radius as it is (`Terrain.dll:0x1005c56b`-`0x1005c5dd`). The 15 a mine's gets
+        // more is told from a name holding `mine`, the one its agent's interface `0x24` hands
+        // out (`0x1005c480`-`0x1005c507`); the root record's is taken for it, `fr_*_mine` on
+        // the three mines.
+        let construction = (object.kind == mission::KIND_BUILDING)
+            .then(|| crate::basement::plan(assembly, &object.path))
+            .flatten()
+            .and_then(|(_, outer)| {
+                let mine = assembly_parts
+                    .iter()
+                    .find(|p| p.host == -1)
+                    .is_some_and(|root| root.record.to_ascii_lowercase().contains("mine"));
+                crate::construction::construction_sphere(&outer, mine)
+            })
+            .map(|(centre, radius)| {
+                let c = place.apply((centre * scale).to_array().map(f64::from));
+                (Vec3::new(c[0] as f32, c[1] as f32, c[2] as f32), radius)
+            });
         let assembled = matches!(object.kind, mission::KIND_UNIT | mission::KIND_BUILDING);
         let shield = if assembled {
             crate::shields::load(assembly, object.kind, &object.path, object_ratio)
@@ -397,6 +416,7 @@ impl Battle {
             aim,
             shield,
             agent_sphere,
+            construction,
             devices,
             gear,
         });

@@ -188,7 +188,8 @@ time, starts the next step at the old step's end, and runs the **update**
   every one runs in 5. Across the install's 1066 components only 30 set the
   word at all: the 24 class-25 records set 0, the hero turret's four class-24
   arms set 33, and **the two towers' class-29 masts set 9**, open and
-  bouncing ([below](#every-component-is-stepped-not-only-a-device--read-and-measured)).
+  bouncing, which their behaviour replaces with 1 before it can bounce
+  ([below](#what-stops-a-towers-mast-at-the-top--read-and-seen)).
 - **Byte 0 clear.** The progress moves by **0.45 × rate** (`0x1003c488`) while
   the word's low bits are 1, back by it while they are 2 (`0x10020a28`). Then
   the word's bits `0xc` pick what an end does: **4 wraps** the progress once
@@ -248,13 +249,15 @@ default case (`0x1002d6ec`), class 8 the radar (`0x1002d5b8`), class 5 the engin
 carry `0x10020900` in slot 11.
 
 So a class its owner never looks at still turns what it names. *Measured*: twelve
-classes name section-2 channels across the install, and two of them are steered by
-nobody — **class 26**, a building's efficiency, on nine records, and **class 29** on
-two. Class 26's nine are the three mines' rotors, the Main Teleport's twenty-eight
-rings and `fr_e_brige`'s hub; class 29's two are the Small and Large Towers' gun
-masts. `CBuilding` files classes 12 and 13 and no other
+classes name section-2 channels across the install, and two of them are filed by
+neither a building nor a robot — **class 26**, a building's efficiency, on nine
+records, and **class 29** on two. Class 26's nine are the three mines' rotors, the
+Main Teleport's twenty-eight rings and `fr_e_brige`'s hub; class 29's two are the
+Small and Large Towers' gun masts. `CBuilding` files classes 12 and 13 and no other
 (`Terrain.dll:0x100583a2`), and a robot's own device list is classes 3 and 8, so a
-reader who files components the way their owners do steps neither.
+reader who files components the way their owners do steps neither. Class 29 does
+have a keeper, in a third place: the behaviour's place set switches it once
+([below](#what-stops-a-towers-mast-at-the-top--read-and-seen)).
 
 **When the picture moves between steps** — *read*, and not established.
 Channels are played at the start of each step (`0x1002d29e`), where the phase
@@ -294,6 +297,92 @@ holds, and not until a swing has finished once it moves.
 
 `openparkan.control.Item` is this update, driver and playback, and `openparkan
 verify` steps it over the shipped records.
+
+### What stops a tower's mast at the top — *read*, and *seen*
+
+Both towers' class-29 records carry switch word 9, open and bouncing. Left to
+itself the item would raise the mast over five seconds and stow it over the next
+five, for ever. **The tower's behaviour replaces the word before the progress first
+reaches an end**, and nothing afterwards sends the mast down.
+
+- **Class 29 is the base item and no other.** The factory's byte table
+  (`Control.dll:0x1002d864`) gives class 29 case 13, the default (`0x1002d6ec`):
+  the 0xa4-byte item with vtable `0x1003c448`, whose slot 11 is the update above.
+  There is no step of its own to read the word another way.
+- **`MBehaviour`'s place set files it.** The set (`MBehaviour + 0x3d0`,
+  [27-ownership.md](27-ownership.md#who-stands-in-a-place--read)) binds its control
+  system's items into five lists by class, asking `IItemManager` slot 9 for the
+  next item of a class (`Behavior.dll:0x100186b0`): class 26 into the list at the
+  set's `+0x48`, 25 at `+0x5c`, **29 at `+0x70`** (`0x100187e1`, `0x10018808`), 10
+  at `+0x84` and 15 at `+0x98`. A list is five dwords, its count at `+4` and its
+  items at `+0xc`.
+- **Nothing else in the install asks for the class.** Across the 21 modules a 29
+  is pushed three times, and two of the pushes are handed to a call at slot 9
+  within six instructions: these two. The third is a landscape query's
+  (`Terrain.dll:0x10011ba1`). An immediate of 29 in a compare, a move or a subtract
+  is at 82 more sites; `Control.dll`'s two compares of a class are bounds, the
+  factory's and slot 10's (`0x1002d4c2`, `0x1002eadd`), and the others were not
+  read one by one — 47 are stores into a stack slot. The control is the same
+  search for 25 and for 15, which finds the pushes beside these (`0x1001879c`,
+  `0x100187c4`; `0x10018869`, `0x10018892`), and for 15 two askers more, in
+  `ArealMap.dll` and `iron3d.dll`.
+- **The set's first tick sends the list 1.** The tick (`0x10018ac0`) ends on a
+  latch byte at the set's `+0xad`: unless it is already 1 it is set, and every item
+  of the class-29 list is sent switch word **1** through `IItemManager` slot 6
+  (`0x1001982b`–`0x1001985e`). The constructor leaves the latch 0 (`0x100037bc`).
+  The tick runs from the behaviour's takt on the set's own timer, every 64–128 ms,
+  and before the takt returns for a neutral clan
+  ([31-packages.md](31-packages.md#which-objects-run-a-behaviour--read)), so every
+  tower's mast is sent it within an eighth of a second.
+- **Word 1 opens and stops.** Slot 6 sets property `0x600`
+  (`Control.dll:0x1002ed30`), which the device manager hands to the item's own
+  slot 3 (`0x1002c31d`, `0x10021090`): a new word is stored and the step restarted
+  (`+0x9c` = 3, `+0xa0` = 0). With 1 the low bits open and the end bits are neither
+  4 nor 8, so at 1 the progress is held and the word cleared. Up to there the
+  progress moves under 9 exactly as it does under 1, so the swap changes nothing
+  drawn: the mast is up after five seconds and stays.
+- **The fire control asks again every takt, to no effect.** The fight module
+  (`Behavior.dll:0x10023ff0`) calls the set's setter for the list with 1 before it
+  looks at a turret (`0x10024202`–`0x10024211`, `0x100199b0`). The setter sends
+  only when its argument differs from the latch, which the first tick has set.
+- **Nothing stows it.** The setter's other arm sends 2, close and stop, for an
+  argument of 0, and no caller passes one: the fight module's is its one direct
+  call and nothing takes its address. The latch is written at three sites — the
+  constructor, the tick and the setter. `Control.dll` sets property `0x600` itself
+  at three sites, for classes `0x18` and `0xf` (`0x10007c7d`, `0x10031ab2`,
+  `0x10012c87`), and writes a 2 into an item's word in one place, the item's own
+  reading of a state sent to it (slot 15, `0x1002089e`).
+
+The set's three siblings are the same shape, each a list, a latch and two words:
+class 25 at `+0xac` with `0x20` and 0 (`0x10019950`), class 10 at `+0xae` with
+`0x1000` and `0x2000`, the camouflage (`0x10019a10`), and class 15 at `+0xaf` with
+`0x20` and 0, the repair system (`0x10019a80`,
+[26-damage.md](26-damage.md#repair-a-units-own-repair-unit-switched-on-and-off--read-and-measured)).
+
+**Against the recording** — *seen*, and a reading corrected. "Let's Play - Parkan:
+Iron Strategy, Part 4" keeps the valley's Light Tower in the target panel from
+20:42, its mast up. The turret is shot off at 21:30.75 and the mast stands on
+without it. An earlier note had the mast "sunk to a stub by 21:36", stowed once the
+turret was lost. **It is not stowed.** The panel's silhouette turns as the hero
+moves round the tower, and by 21:36 the hero has run round to the entrance, from
+where the hull's own drum stands in front of the mast and hides its lower two
+thirds.
+
+- **On the mesh** (*measured*): `fr_m_tower`'s raised mast and what stands on it
+  reach z 12.9 in the model, 3.5 over the hull's highest point at 9.4, and stand at
+  y 12.9 to 20.8 behind a drum whose top lies at y 4.0 to 14.5; the plate round
+  them is at 2.7. Stowed, their top is at 2.5, in a pit under the three hatch
+  leaves, which slide over it flat at z 5.2 to 7.5: a stowed mast shows nothing
+  over the hull from anywhere.
+- **On the recording** (*measured*): the silhouette's highest point stands 60 and
+  61 px over its base line on a plate 243 and 247 px wide at 21:32.0 and 21:32.5,
+  the turret gone and the mast in full view, and 65 and 64 px on a plate 256 and
+  240 px wide at 21:37.0 and 21:37.5, the "stub". With the turret on it reads 74
+  to 77 px at 21:27 to 21:30. The top of the mast has not moved.
+- **It comes back out from behind the drum** between 21:44.0 and 21:44.5, the hero
+  walking through the tower, and goes behind it again between 21:52.1 and 21:52.3.
+  The item lifts the mast over the last third of its stroke, 1.67 s at the
+  channel's 0.2 a second, so neither is the item's doing.
 
 ### The belt is a material a channel plays — *measured*, and *read*
 
@@ -761,3 +850,13 @@ is not a category but three state bits, which the loaded tree reads and writes
     the channel's span, which the held wheels and rollers play;
   - what a control system of agent kind 10 is: its tick skips the states and
     the devices both (`0x1000c294`).
+- ~~What stops a tower's gun mast at the top, its record's switch word being 9,
+  open and bouncing~~ — answered: the tower's own behaviour. `MBehaviour`'s place
+  set files class-29 items in a list of their own (`Behavior.dll:0x100187e1`) and
+  its first tick sends each of them word 1, open and stop
+  (`0x1001982b`–`0x1001985e`); the fire control asks for the same every takt
+  through a latched setter whose stowing arm no caller reaches (`0x100199b0`,
+  `0x10024211`). The mast seen "sunk to a stub" once its turret was lost is
+  standing behind the tower's own drum
+  ([What stops a tower's mast at the top](#what-stops-a-towers-mast-at-the-top--read-and-seen)).
+  Open: what the stowing arm was written for.

@@ -816,9 +816,11 @@ on the hero's cannon shell and laser bolt (*measured*).
     it, not the gun (`0x1002a3ed`,
     [29-weapons.md](29-weapons.md#the-rounds-start)), so a turret's round never
     strikes its own robot;
-  - a unit's **bubble**, its bounding sphere, gives a contact, kept in order of
-    distance;
-  - then the round's segment is run through the object's mesh.
+  - a unit's or a building's **bubble** gives a contact, kept in order of
+    distance: a unit's agent sphere, a building's construction sphere
+    ([Shields](#shields-a-generator-a-deflector-six-sectors--read-and-measured));
+  - then the round's segment is run through the object's mesh, whatever the
+    sphere gave (`0x1001d982`–`0x1001d990`), unless the object's flags carry 2.
 
   No clan is consulted here, and none later: the one object a hit spares is the
   object that fired it, by its id
@@ -1085,10 +1087,41 @@ sectors, and a **deflector** (class 21, `i_def`) decides how much of each stops
 damage. The bubble exists only while **both are present, switched on and not
 destroyed** (`0x1002c500`).
 
+**The bubble is a unit's agent sphere and a building's construction sphere** —
+*read*, and *measured*. `0x1002c500`, the device manager's slot 12, answers
+twice in one call: in `al` whether the bubble is up, as above
+(`0x1002c546`–`0x1002c581`), and through the pointer it is handed a **sphere**,
+in the space it is asked for. It asks the control system's owner for interface
+`0x17`, `IBuilding`: a building's slot 15 gives its construction sphere
+(`0x1002c532`, `Terrain.dll:0x1005c540`), and anything else falls to interface
+`0x18` slot 9, the agent's sphere (`0x1002c537`). The sphere is written whether
+or not there is a shield. Four callers take it, each with 2, the world:
+
+- the **collision object**, which keeps it as a building's second sphere and
+  ignores `al` (`0x1001ffb3`); it is that sphere a round is swept against for
+  its bubble contact, where a unit's is its first
+  ([below](#a-round-meets-a-bubble--read));
+- a **blast's shield step**, for the sphere it must cross from outside
+  (`0x1000ff6a`), which also ignores `al`;
+- the **sector pick**, which gives up when `al` is 0 and otherwise takes the
+  hit's direction from the sphere's centre and stands the flash there, sized by
+  its radius (`0x1002c5cf`,
+  [What a shield hit draws](#what-a-shield-hit-draws--read-and-measured));
+- a building's **action-5 effects**, which stand in the sphere's frame
+  (`0x10002e6f`, [32-builder.md](32-builder.md#the-construction-sphere--read-and-measured)).
+
+A building's construction sphere is the box round its ground plan's outer ring
+and the farthest corner + 5
+([24-motion.md](24-motion.md#collision-between-objects--read)): wider than the
+mesh's own sphere on 23 of the 30 `fortif.rlb` plans, by 10.8 to 31.8, and
+centred on the ground. The Large Factory's is 118.8, so a shot at its front
+door from 40 m out starts outside the bubble, 36.5 from the door, and one from
+30 m starts inside it and meets no shield (*measured* on Mission 02's).
+
 **Which sector.** A hit on the object that names no node of its own carries
 its sector with it — what a round striking the bubble looks like; any other
-hit is given one if its sphere crosses the bubble, the object's bounding
-sphere, from outside: `r < d < r + R` (`0x1000ff00`). A blast that goes off
+hit is given one if its sphere crosses the bubble's
+from outside: `r < d < r + R` (`0x1000ff00`). A blast that goes off
 inside the bubble meets no shield. The sector is the hit's
 dominant axis after the object's matrix is applied (`0x1002c590`):
 
@@ -1197,9 +1230,17 @@ every value 2 of it (`0x100257b0`).
 
 ### A round meets a bubble — *read*
 
-- **Which objects.** The pair resolve (`Control.dll:0x1001d630`) gives a bubble
-  for a kind-4 object by its swept world bounding sphere and for a kind-3 one by
-  its sphere; the round's owner gives none.
+- **Which objects.** The pair resolve (`Control.dll:0x1001d630`) sweeps the
+  round against a kind-4 object's **first** sphere, the agent's as it moved this
+  frame, and against a kind-3 object's **second**, a building's construction
+  sphere (`0x1001d6c4`–`0x1001d6da`,
+  [above](#shields-a-generator-a-deflector-six-sectors--read-and-measured)); any
+  other kind has no bubble. The unit that fired the round gives no contact at
+  all, bubble or face (`0x1001d6a9`–`0x1001d6c1`); a building that fired it is
+  not taken out there, and its round starts inside its own sphere. The sweep
+  asks nothing about a shield: every unit and building the round's sphere
+  touches gives a contact, and it is the round's answer that finds a sector or
+  none.
 - **The touch** (`0x1001e9f0`), with *S* the bubble's radius plus the round's: a
   round whose start lies within *S* of the object's start makes **no contact**, so
   a shot from inside a bubble meets no shield; otherwise the first *t* ≤ 1 at which
@@ -1509,6 +1550,15 @@ shield, battery and ammunition (`Behavior.dll:0x10018100`, `0x10019372`,
   `tur_deflector*` load effects loop.
 - ~~Which of ±x, ±y is a model's front.~~ Answered: +y, sector 0
   ([Shields](#shields-a-generator-a-deflector-six-sectors--read-and-measured)).
+- ~~Whether `Control.dll:0x1002c500` is the test that a bubble is up, as this
+  page has it, or the source of a building's second sphere, as
+  [24-motion.md](24-motion.md#collision-between-objects--read) has it.~~
+  Answered 2026-10-10: both, in one call — the bubble's state in `al` and its
+  sphere through a pointer, a building's construction sphere and anything
+  else's agent sphere
+  ([Shields](#shields-a-generator-a-deflector-six-sectors--read-and-measured)).
+  The engine took its own bound of an object's node spheres for every bubble;
+  it takes these two now.
 - ~~How a collision object's start and end differ when the pass runs.~~
   Answered: the agent's centre before and after its control system's tick
   ([The hit test](#the-hit-test--read-and-measured)).

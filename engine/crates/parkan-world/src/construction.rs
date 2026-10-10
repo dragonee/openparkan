@@ -285,6 +285,35 @@ impl Plan {
     }
 }
 
+/// A building's construction sphere in its own frame, from its ground plan's outer ring
+/// (`CBuilding::GetConstructionSphere`, `Terrain.dll:0x1005bd70`, the routine's own name in
+/// its panics; `IBuilding` slot 15 hands it out, `0x1005c540`, in the world when asked with 2:
+/// the centre through the building's matrix and the radius as it is).
+///
+/// - **The centre** is the middle of the box round the ring's points. The box's lower corner
+///   starts at `FLT_MAX` and its upper at `FLT_MIN`, the smallest positive float and not the
+///   most negative (`0x1005bdf9`-`0x1005be2b`), so an axis the whole ring lies below 0 on has
+///   its upper end at 0. *Measured*: that is z on 17 of `fortif.rlb`'s 30 plans and no other
+///   axis; a bridge's ring lies at z = -12.16 throughout, and its centre stands at -6.08.
+/// - **The radius** is the farthest point's distance from that centre with the point's own z
+///   taken as 0 (`0x1005c3bd`), so the centre's height counts and the ring's does not; then
+///   + 5 (`0x1005c46c`), and + 15 more where the object's name holds `mine` (`0x1005c4f1`).
+///
+/// The device manager's slot 12 answers it for a building (`Control.dll:0x1002c500`), which
+/// makes it the second sphere a building's collision object keeps and its shield's bubble
+/// ([`parkan_sim::combat::Target::bubble_sphere`]), the frame its construction effects stand
+/// in and the sphere its kill takes (docs/32, "The construction sphere").
+pub fn construction_sphere(outer: &[[f32; 3]], mine: bool) -> Option<(Vec3, f32)> {
+    if outer.is_empty() {
+        return None;
+    }
+    let lo = outer.iter().fold(Vec3::splat(f32::MAX), |m, &p| m.min(Vec3::from_array(p)));
+    let hi = outer.iter().fold(Vec3::splat(f32::MIN_POSITIVE), |m, &p| m.max(Vec3::from_array(p)));
+    let centre = (lo + hi) / 2.0;
+    let reach = outer.iter().map(|p| Vec3::new(p[0], p[1], 0.0).distance(centre)).fold(0.0, f32::max);
+    Some((centre, reach + CONTOUR_MARGIN + if mine { MINE_SPHERE_EXTRA } else { 0.0 }))
+}
+
 /// A point of the model's frame placed at `at` turned `yaw` about z, across the ground.
 pub(crate) fn placed(p: [f32; 2], at: Vec3, yaw: f32) -> [f32; 2] {
     let (s, c) = yaw.sin_cos();
@@ -1034,7 +1063,13 @@ impl Play {
             if let Some(part) = self.battle.combat.targets.get(t).and_then(|x| x.parts.get(b.part)) {
                 b.place_zone(part);
             }
+            // As its items hold it from their first step, and its faces from there
+            // ([`Building::pose`]).
+            if let Some(target) = self.battle.combat.targets.get_mut(t) {
+                b.pose(&mut target.parts, |_| false);
+            }
             self.buildings.push(b);
+            self.rebuild_solid(t);
         }
         if let Some(f) = Factory::load(&mut self.assembly, &one, 0, t) {
             self.factories.push(f);
@@ -1354,6 +1389,29 @@ mod tests {
         assert_eq!(mid, [0.0, 0.0]);
         assert!((r - (116.0_f32.sqrt() + 5.0)).abs() < 1e-4);
         assert_eq!(placed([1.0, 0.0], Vec3::new(5.0, 5.0, 0.0), std::f32::consts::FRAC_PI_2), [5.0, 6.0]);
+    }
+
+    /// `Terrain.dll:0x1005bd70`: the box's upper corner starts at the smallest positive float,
+    /// so a ring drawn below the origin has its centre half way up to it; the farthest point is
+    /// measured with its own z as 0; and the radius gains 5, and 15 more on a mine.
+    #[test]
+    fn a_construction_sphere_is_its_rings_box_whose_top_starts_at_nothing_and_the_farthest_corner_and_5() {
+        let ring = |z: f32| vec![[-10.0, -4.0, z], [10.0, -4.0, z], [10.0, 4.0, z], [-10.0, 4.0, z]];
+        // On the origin's plane: the ground plan's middle and its corner's reach.
+        let (centre, r) = construction_sphere(&ring(0.0), false).unwrap();
+        assert!(centre.distance(Vec3::ZERO) < 1e-6 && (r - (116.0_f32.sqrt() + 5.0)).abs() < 1e-4);
+        // Drawn 12 under the origin, as a bridge's is: the centre 6 under it, and that 6 in the
+        // reach, since the corner is taken at z 0.
+        let (centre, r) = construction_sphere(&ring(-12.0), false).unwrap();
+        assert!(centre.distance(Vec3::new(0.0, 0.0, -6.0)) < 1e-6, "{centre}");
+        assert!((r - (152.0_f32.sqrt() + 5.0)).abs() < 1e-4, "{r}");
+        // Drawn 12 over it: the box is the ring's own, and the centre's height counts whole.
+        let (centre, r) = construction_sphere(&ring(12.0), false).unwrap();
+        assert!(centre.distance(Vec3::new(0.0, 0.0, 12.0)) < 1e-6, "{centre}");
+        assert!((r - (260.0_f32.sqrt() + 5.0)).abs() < 1e-4, "{r}");
+        // A mine's is 15 wider, and nothing has one without a ring.
+        assert!((construction_sphere(&ring(0.0), true).unwrap().1 - (116.0_f32.sqrt() + 20.0)).abs() < 1e-4);
+        assert_eq!(construction_sphere(&[], false), None);
     }
 
     #[test]

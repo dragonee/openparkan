@@ -114,8 +114,10 @@ impl Shield {
         }
     }
 
-    /// Whether the bubble is up (`0x1002c500`): both devices on and neither destroyed. Power
-    /// is not asked; an unpowered deflector stops nothing.
+    /// Whether the bubble is up (`0x1002c500`, the answer in `al`): both devices on and
+    /// neither destroyed. Power is not asked; an unpowered deflector stops nothing. The same
+    /// call writes the bubble's sphere out, which is the target's to give
+    /// ([`crate::combat::Target::bubble_sphere`]).
     pub fn up(&self) -> bool {
         self.shield_condition > 0.0 && self.deflector_condition > 0.0
     }

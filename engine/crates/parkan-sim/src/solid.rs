@@ -29,9 +29,10 @@ pub const FLOOR_FACE: u16 = 0x2;
 /// halfword, where the other 14520 hold `0xFFFF`. The query passes `0x200` too unless the
 /// mover's flags carry 4, and no shipped batch carries `0x200`.
 pub const COLLISION_SKIPS_BATCH: u32 = 0x8;
-/// A triangle flagged `0x20` is see-through -- a building's console glass and the energy
-/// bridge's additive `B_A_BRIGE` ([07](../../../docs/07-objects.md#the-flags-word)) -- and
-/// lets a mover through as one flagged 4 does. See [`passes`].
+/// A triangle flagged `0x20` is see-through to a round and to the outer camera's line -- a
+/// building's console glass and the energy bridge's additive `B_A_BRIGE`
+/// ([07](../../../docs/07-objects.md#the-flags-word)) -- and **a wall to a mover**: neither of
+/// the pair's two filters names the bit. See [`passes`].
 pub const SEE_THROUGH_FACE: u16 = 0x20;
 /// A push is held to this many radii (`AniMesh.dll:0x1000df50`, `0x10020970`).
 pub const PUSH_RADII: f32 = 4.0;
@@ -391,22 +392,33 @@ pub const HIDDEN_EDGE: f32 = 1e-5;
 /// slot 5 (`Control.dll:0x1001f670`, from `0x10007bd0`): 8 unless the word carries 4, the bit a
 /// walker's every state has and a flyer's none (docs/24, "The ground inside a building").
 ///
-/// STAND-IN: docs/24-motion.md#standing-on-a-bridge--read-and-measured -- a triangle flagged
-/// `0x20` passes here too, which the read of the collision's filters does not give (their
-/// triangle mask is 4, `0x1001dbad`, `0x1001dbce`): the round query's is `0x24` and takes both.
-/// The shipped data asks for it. **All four** bridges in `fortif.rlb` are placed as two halves
-/// π apart whose decks meet, so the end cap each half carries at the join stands in the way of
-/// anything crossing; three of them flag that cap **4** and the fourth, `fr_e_brige`, flags it
-/// **`0x20`**, the bit its energy material carries throughout. Without this the hero crosses
-/// C00 Mission 01's `m_bridge` and stops dead in the middle of C02 Mission 04's.
+/// **A triangle flagged `0x20` does not pass** ([`SEE_THROUGH_FACE`]): the pair's triangle mask
+/// is 4 (`0x1001dbad`, `0x1001dbce`) where a round's is `0x24`, and of the 31 filters the
+/// install fills none hands the push-out that bit (docs/07, "Who fills a face query's
+/// filter"). What lets a mover over the energy bridge's join, whose cap carries the bit, is
+/// not a filter. The cap ends at the deck's surface, under the node sphere the pair pushes
+/// out; and a mover standing on a building is in that building's own collision manager and is
+/// paired with it alone, so the far half's cap is never asked while it faces the mover
+/// (docs/24, "The cap where two halves meet"; `collision_push` in `parkan-world`).
+///
+/// STAND-IN: docs/24-motion.md#a-pods-canopy-and-a-mover-too-tall-for-it--measured-and-a-stand-in
+/// -- a face flagged `0x20` in a **two-sided** batch passes all the same: the 234 `B_COMP_3G`
+/// faces, batch word `0x102`, every one of them a control pod's glass canopy. Read, the canopy
+/// is a wall like the bridge's cap, and it hangs 5.5 to 5.8 m over the pod's floor while the
+/// pod waits; the hero, 3.77 m tall as the pair measures it, walks in under it, and a small
+/// wheeled warrior, 5.84 m, meets it coming down a Small Tower's ramp and is turned back.
+/// Whether the game keeps such a unit out of a pod is not established -- no recording looked
+/// at shows a warbot at one -- so the canopy lets every mover by.
 ///
 /// STAND-IN: docs/24-motion.md#the-ground-inside-a-building--read-in-part-and-measured -- the
 /// segment's filter keeps the floors whatever the mover's flags, and this passes them for it
 /// as the push-out's does.
 fn passes(face: &SolidFace, keeps_floors: bool) -> bool {
     let floors = if keeps_floors { 0 } else { FLOOR_FACE };
-    face.triangle_flags & (COLLISION_SKIPS_FACE | floors | SEE_THROUGH_FACE) != 0
+    let canopy = face.triangle_flags & SEE_THROUGH_FACE != 0 && face.batch_flags & BATCH_TWO_SIDED != 0;
+    face.triangle_flags & (COLLISION_SKIPS_FACE | floors) != 0
         || face.batch_flags & COLLISION_SKIPS_BATCH != 0
+        || canopy
 }
 
 /// Whether a straight move from `start` to `end` runs into a shut face of `obstacle` — a wall
@@ -718,10 +730,22 @@ mod tests {
             push(Vec3::new(-3.0, 0.0, 0.0), Vec3::new(1.0, 0.0, 0.0), 2.0, &leaves, false),
             Vec3::ZERO
         );
-        // And so does a see-through face: the end cap the energy bridge carries where its two
-        // halves meet is flagged 0x20 where the other three bridges flag theirs 4.
+        // A see-through face does not: the pair's triangle mask is 4 where a round's is 0x24
+        // (`Control.dll:0x1001dbad`, `0x1001dbce`), so console glass and the end cap the energy
+        // bridge carries where its halves meet are walls to a mover that is paired with them.
         let mut glass = wall.clone();
         glass.faces.iter_mut().for_each(|f| f.triangle_flags = SEE_THROUGH_FACE);
+        let p = push(Vec3::new(-3.0, 0.0, 0.0), Vec3::new(1.0, 0.0, 0.0), 2.0, &glass, false);
+        assert!((p.x - -4.0).abs() < 1e-4, "glass stops a mover as a wall does: {p}");
+        assert!(blocked(Vec3::new(-3.0, 0.0, 0.0), Vec3::new(1.0, 0.0, 0.0), &glass));
+        // And only from its front: a mover behind the plane is neither stopped nor pushed
+        // (`0x1001dd42`, `AniMesh.dll:0x1000e900`), which is how a half's own cap lets it by.
+        assert_eq!(push(Vec3::new(3.0, 0.0, 0.0), Vec3::new(1.0, 0.0, 0.0), 2.0, &glass, false), Vec3::ZERO);
+        // The bridge's own batch word, 0x100, changes nothing; a control pod's canopy, the
+        // two-sided 0x102, is the one glass that lets a mover by (a stand-in, see `passes`).
+        glass.faces.iter_mut().for_each(|f| f.batch_flags = 0x100);
+        assert!(blocked(Vec3::new(-3.0, 0.0, 0.0), Vec3::new(1.0, 0.0, 0.0), &glass));
+        glass.faces.iter_mut().for_each(|f| f.batch_flags = 0x102);
         assert_eq!(push(Vec3::new(-3.0, 0.0, 0.0), Vec3::new(1.0, 0.0, 0.0), 2.0, &glass, false), Vec3::ZERO);
         assert!(!blocked(Vec3::new(-3.0, 0.0, 0.0), Vec3::new(1.0, 0.0, 0.0), &glass));
         assert!(blocked(Vec3::new(-3.0, 0.0, 0.0), Vec3::new(1.0, 0.0, 0.0), &wall), "a wall still stops");

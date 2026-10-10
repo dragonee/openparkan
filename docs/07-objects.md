@@ -918,9 +918,11 @@ carry 8, and its door test takes 16 — *read*,
 `Control.dll:0x1001dbce`, `AniMesh.dll:0x1000dbba`
 ([24-motion.md](24-motion.md#collision-between-objects--read)). So a floor does
 not push a walker standing on it. The collision's triangle mask is 4 where a
-round's is `0x24`, and the shipped bridges need `0x20` passed there too, which
-is a stand-in and not a read
-([24-motion.md](24-motion.md#the-cap-where-two-halves-meet--measured-and-a-stand-in)).
+round's is `0x24`, so a face flagged `0x20` is a wall to a mover that is paired
+with it. The energy bridge's join cap carries the bit and is crossed all the
+same: it lies under a mover on the deck, and a mover on one half is never
+paired with the other
+([24-motion.md](24-motion.md#the-cap-where-two-halves-meet--measured-and-read)).
 
 **Flag 2 is a walkable surface, and a chosen one** (*measured*). All 6166 faces
 lie in a **level-0** slot — 4562 in the first variant's, 1480 in the second's,
@@ -1067,9 +1069,12 @@ discriminate ([09-method.md](09-method.md#searches-that-do-not-discriminate-so-n
 **The engine** agrees on all of them: a round's and the outer camera's line
 pass `0x24` (`parkan_sim::hit::ROUND_SKIPS_FACE`), the sights pass nothing
 (`SIGHT_SKIPS_FACE`), and the push-out passes 4, and 2 unless the mover keeps
-floors (`parkan_sim::solid`). Its `0x20` there is still a stand-in
-([24-motion.md](24-motion.md#the-cap-where-two-halves-meet--measured-and-a-stand-in)):
-no filter in the install hands the push-out that bit.
+floors (`parkan_sim::solid`). It no longer passes the bridge's `0x20`, which
+no filter in the install hands the push-out and which the pair's own sphere
+and the pass's own membership each make unnecessary
+([24-motion.md](24-motion.md#the-cap-where-two-halves-meet--measured-and-read));
+what it still passes is a control pod's glass canopy, a stand-in
+([24-motion.md](24-motion.md#a-pods-canopy-and-a-mover-too-tall-for-it--measured-and-a-stand-in)).
 
 ### Indices are batch-relative
 

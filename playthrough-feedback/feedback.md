@@ -128,9 +128,10 @@ already match the recording.
     - docs/27 ("Capture", "What the modes show") reads it: standing on the pod of one's own tower switches the view to state 6, the tower's manual control, unless its turret is gone
     - The engine captures the tower and leaves the hero on foot in the pod room: it has no mode 6
     - Fixed 2026-09-30: the pod opens mode 6; the tower is driven from its turret's camera and cockpit with `M1.TBL`, its guns fire at the button, and Esc hands them back; a tower whose turret is gone opens nothing
-  - [ ] The valley's Light Tower keeps its gun mast up after its turret is shot off
+  - [x] The valley's Light Tower keeps its gun mast up after its turret is shot off
     - In the recording the target panel's silhouette shows the mast up through the 40 s of the hero's attack from 20:42, the turret red from 21:27, and the mast sunk to a stub by 21:36
     - The engine raises every tower's mast once and keeps it up (a stand-in; queued)
+    - Read 2026-10-10, and the note above corrected: the mast does not sink. The silhouette turns with the hero, who by 21:36 has run round to the entrance, and the tower's own drum stands in front of the mast there and hides its lower two thirds; its top is at the same height at 21:32 and at 21:37 (60–61 px and 64–65 px over the base line on a plate 240–256 px wide), where a stowed mast shows nothing over the hull. The game does what the engine did: the tower's behaviour sends the mast's item open-and-stop within its first eighth of a second, and nothing sends it down (docs/28, "What stops a tower's mast at the top")
   - [ ] Unexplained: the hero dies in the valley Light Tower's pod room (21:53.5)
     - At full life, walking up to the pod of the tower whose turret it has shot off, it is lost in one white flash and the mission fails; on the reload it captures the same tower (26:04)
     - The engine: nothing harms a hero standing there. What killed it is not read (queued)

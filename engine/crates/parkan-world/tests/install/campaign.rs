@@ -891,7 +891,12 @@ fn mission_01s_relations_drift_within_their_bands_and_only_a_hit_moves_one() {
 /// Mission 01's `m_bridge` ("Standing on a bridge"). Each half carries a flat end cap at the
 /// join, and on this one alone that cap is flagged `0x20`, the bit its additive `B_A_BRIGE`
 /// material carries, where the other three bridges flag theirs 4. Both are see-through to a
-/// round, and the collision passes both here, so the hero walks the whole span.
+/// round. A mover's pair passes 4 and not `0x20`, and the hero walks the whole span all the
+/// same, for two reasons either of which is enough: the cap ends at the deck's surface and the
+/// node sphere its pair pushes out rides 0.59 over it; and standing on the near half it is in
+/// that half's collision manager and is paired with it alone, whose cap faces away, and by
+/// the time it stands on the far half that half's cap is behind it (docs/24, "The cap where
+/// two halves meet").
 #[test]
 #[ignore = "needs the game install"]
 fn c02_m04s_energy_bridge_halves_meet_and_the_hero_walks_over_the_join() {
@@ -1200,7 +1205,8 @@ fn c02_m04s_tower_raises_its_gun_mast_out_of_the_ground_and_leaves_it_up() {
     let carried = z(&play, 1, 0) - turret;
     assert!((carried - up).abs() < 0.1, "and the turret rides it: {carried}");
 
-    // It holds there: the word bounces as read, and `buildings::started` stops it at the top.
+    // It holds there: the record's word bounces, and the place set's first tick has replaced it
+    // with 1, open and stop (`Behavior.dll:0x1001982b`, `buildings::started`).
     let held = z(&play, 0, 13);
     while play.hero.time_ms < 20_000.0 {
         play.update_input();
@@ -1208,6 +1214,65 @@ fn c02_m04s_tower_raises_its_gun_mast_out_of_the_ground_and_leaves_it_up() {
     }
     assert!((z(&play, 0, 13) - held).abs() < 0.2, "the mast stays up: {}", z(&play, 0, 13));
     eprintln!("the mast rises {up:.2} m and holds");
+}
+
+/// A building's bubble is its **construction sphere**, not its agent's. The device manager's
+/// slot 12 (`Control.dll:0x1002c500`) asks the control system's owner for `IBuilding` and hands
+/// a building's slot 15 the question (`Terrain.dll:0x1005c540`,
+/// `CBuilding::GetConstructionSphere`); the collision object keeps the answer as a building's
+/// second sphere and a round is swept against that one (`Control.dll:0x1001ffb3`,
+/// `0x1001d6cd`). On the Small Tower it is 46.71 about the middle of the box round its ground
+/// plan's outer ring, (0, 5.27, 2.73) in the model: the ring's ten points, each taken at z 0,
+/// lie up to 41.71 from there and the routine adds 5 (docs/24, "A building's second is its
+/// construction sphere"). Its agent's sphere, the parts' header spheres joined, is another.
+#[test]
+#[ignore = "needs the game install"]
+fn c02_m04s_light_towers_bubble_is_its_construction_sphere_and_a_round_stops_on_it() {
+    use glam::Vec3;
+    use parkan_formats::mission;
+    use parkan_sim::combat::Event;
+
+    let game = gamedir::find(None).expect("a Parkan install: set PARKAN_DIR");
+    let dir = gamedir::resolve(&game, gamedir::C02_MISSION_04).unwrap();
+    let m = mission::parse(&std::fs::read(dir.join("data.tma")).unwrap(), "Mission.04").unwrap();
+    let mut play = campaign_play(gamedir::C02_MISSION_04);
+    let tower = object_target(&play, &m, "mtow01.dat");
+    let placed = m.objects.iter().find(|o| o.path.to_ascii_lowercase().ends_with("mtow01.dat")).unwrap();
+    let (sin, cos) = placed.rotation.sin_cos();
+    let model = Vec3::new(0.0, 5.27, 2.73);
+    let expected = Vec3::from_array(placed.position)
+        + Vec3::new(cos * model.x - sin * model.y, sin * model.x + cos * model.y, model.z);
+
+    let target = &play.battle.combat.targets[tower];
+    let (centre, radius) = target.bubble_sphere();
+    assert!((radius - 46.71).abs() < 0.01, "the ring's reach and 5: {radius}");
+    assert!(centre.distance(expected) < 0.05, "about the ground plan's middle: {centre} against {expected}");
+    let (agent, agent_radius) = target.agent_sphere;
+    assert!(agent.distance(centre) > 1.0 && (agent_radius - radius).abs() > 1.0, "not the agent's");
+    assert!(target.shield.is_some(), "the tower carries a shield");
+
+    // A laser bolt from 70 m straight over the centre stops on the bubble, 46.71 up, well over
+    // the tower's hull and its raised mast.
+    let laser = play.hero.robot.rounds[2].expect("the battle laser's round");
+    let muzzle = centre + Vec3::Z * 70.0;
+    play.battle.combat.fire(laser, None, muzzle, -Vec3::Z, Vec3::ZERO, 1.0, None).unwrap();
+    let mut flash = None;
+    for _ in 0..120 {
+        for e in play.tick(1000.0 / 60.0, [0.0; 2]) {
+            if let Event::ShieldHit { target: t, point } = e
+                && t == tower
+            {
+                flash.get_or_insert(point);
+            }
+        }
+    }
+    let point = flash.expect("the round meets the tower's bubble");
+    assert!(
+        (point.distance(centre) - radius).abs() < 0.2,
+        "on the sphere: {} from its centre",
+        point.distance(centre)
+    );
+    eprintln!("bubble {radius:.2} about {centre}; the agent's sphere {agent_radius:.2} about {agent}");
 }
 
 /// C02 Mission 04's Light Towers, taken at their pods by the hero on foot. The pod's opening

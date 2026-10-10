@@ -7217,7 +7217,7 @@ read = true
 module = "Control.dll"
 at = "0x1002c500"
 kind = "function"
-name = "IDeviceManager slot 12: shield bubble works only with a fight shield (+0x5cc) and a deflector (+0x5d0), both on and intact"
+name = "IDeviceManager slot 12: al = shield bubble up (a fight shield +0x5cc and a deflector +0x5d0, both on and intact); and writes the bubble's sphere, IBuilding slot 15 for a building, else interface 0x18 slot 9"
 doc = "docs/26-damage.md"
 read = true
 
@@ -8090,7 +8090,7 @@ read = true
 module = "Behavior.dll"
 at = "0x100199b0"
 kind = "function"
-name = "device manager: every class-29 component to state 1 or 2"
+name = "place set: every class-29 item to word 1 (open) or 2 (close), latched at +0xad; its one caller, the fight module, passes 1"
 doc = "docs/26-damage.md"
 read = true
 
@@ -10763,7 +10763,7 @@ read = true
 module = "Terrain.dll"
 at = "0x1005bd70"
 kind = "function"
-name = "CBuilding construction sphere from the outer contours (Illegal placement otherwise)"
+name = "CBuilding construction sphere from the outer contours: box middle (upper corner from FLT_MIN), farthest point with z as 0, + 5, + 15 on a mine"
 doc = "docs/32-builder.md"
 read = true
 

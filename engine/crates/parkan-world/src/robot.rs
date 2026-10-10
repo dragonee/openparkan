@@ -376,7 +376,7 @@ pub fn devices(controller: &Controller) -> Vec<Item> {
             matches!(k.type_id, SIMPLE_TYPE | RADAR_TYPE | EFFICIENCY_TYPE | MAST_TYPE)
                 && !k.entries.is_empty()
         })
-        .map(|(i, k)| crate::buildings::started(Item::new(i, k, &controller.channels)))
+        .map(|(i, k)| crate::buildings::started(Item::new(i, k, &controller.channels), k.type_id))
         .collect()
 }
 

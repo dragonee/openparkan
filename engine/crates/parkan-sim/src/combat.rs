@@ -202,12 +202,19 @@ pub struct Target {
     /// is always handed a node and asks that node's own sphere ([`Target::slot_sphere`],
     /// docs/29, "The part the AI aims at"); this is what one handed none falls back on.
     pub aim: Vec3,
-    /// Its fight shield and deflector, where it has both; the bubble is its bounding sphere.
+    /// Its fight shield and deflector, where it has both; the bubble is
+    /// [`Target::bubble_sphere`].
     pub shield: Option<Shield>,
     /// The agent's own sphere in the world, its centre and radius: its parts' stream-2 header
     /// spheres joined (`AniMesh.dll:0x10009510`), which interface `0x18` slot 9 hands out
     /// (`0x10014580`). The world's object pick asks for it (docs/42, "The object pick").
     pub agent_sphere: (Vec3, f32),
+    /// A building's **construction sphere** in the world, `None` on anything else: the box
+    /// round its ground plan's outer ring and the farthest corner + 5
+    /// (`CBuilding::GetConstructionSphere`, `Terrain.dll:0x1005bd70`, `IBuilding` slot 15).
+    /// It is the second sphere a building's collision object keeps
+    /// (`Control.dll:0x1001ffb3`), and so a building's bubble ([`Target::bubble_sphere`]).
+    pub construction: Option<(Vec3, f32)>,
     /// Its device manager's components in its own order: the root's, then each fitted part's,
     /// an internal part standing in the slot it was fitted to.
     pub devices: Vec<Device>,
@@ -296,6 +303,23 @@ impl Target {
     /// Its shield's bubble while it is up.
     fn bubble(&self) -> Option<&Shield> {
         self.shield.as_ref().filter(|s| self.alive && s.up())
+    }
+
+    /// The sphere its bubble is, a centre and a radius in the world: what its device manager's
+    /// slot 12 writes out when it is asked with 2 (`Control.dll:0x1002c500`). The routine asks
+    /// the control system's owner for `IBuilding`, interface `0x17`; a building answers and
+    /// its slot 15 gives the **construction sphere** (`Terrain.dll:0x1005c540`), and anything
+    /// else falls to interface `0x18` slot 9, the **agent's sphere** (`0x1002c537`). The same
+    /// call answers in `al` whether the bubble is up ([`Shield::up`]), and the sphere is
+    /// written either way.
+    ///
+    /// Three things ask it: the collision object, which keeps it as a building's second
+    /// sphere and sweeps a round against that one where it sweeps a unit's first, its agent
+    /// sphere (`0x1001ffb3`, `0x1001d6cd`); a blast's shield step, for the bubble it must
+    /// cross from outside (`0x1000ff6a`); and the sector pick, for the centre the sector is
+    /// told from and the flash stands at, sized by its radius (`0x1002c5cf`).
+    pub fn bubble_sphere(&self) -> (Vec3, f32) {
+        self.construction.unwrap_or(self.agent_sphere)
     }
 }
 
@@ -778,7 +802,7 @@ impl Combat {
             let mut stopped = None;
             for (t, point, _) in self.bubble_contacts(&r, k.radius, nearest) {
                 let Some(target) = self.target_mut(t) else { continue };
-                let (centre, rotation) = (target.centre, target.rotation());
+                let (centre, rotation) = (target.bubble_sphere().0, target.rotation());
                 let Some(shield) = target.shield.as_mut() else { continue };
                 let s = Shield::sector_of(centre, rotation, point);
                 let strength = shield.strength(s);
@@ -851,8 +875,8 @@ impl Combat {
             .every()
             .filter(|&(t, target)| t != skip && target.bubble().is_some())
             .filter_map(|(t, target)| {
-                let (point, d2) =
-                    crate::shield::contact(r.previous, r.position, radius, target.centre, target.radius)?;
+                let (centre, bubble) = target.bubble_sphere();
+                let (point, d2) = crate::shield::contact(r.previous, r.position, radius, centre, bubble)?;
                 (d2 < within).then_some((t, point, d2))
             })
             .collect();
@@ -877,7 +901,7 @@ impl Combat {
         if target.bubble().is_none() {
             return damage;
         }
-        let (centre, rotation, r) = (target.centre, target.rotation(), target.radius);
+        let ((centre, r), rotation) = (target.bubble_sphere(), target.rotation());
         let d = (point - centre).length();
         let Some(s) =
             carried.or_else(|| (r < d && d < r + radius).then(|| Shield::sector_of(centre, rotation, point)))
@@ -1154,6 +1178,7 @@ mod tests {
             aim: at,
             shield: None,
             agent_sphere: (at + Vec3::Z, 1.5),
+            construction: None,
             devices: Vec::new(),
             gear: Vec::new(),
         }
@@ -1294,6 +1319,40 @@ mod tests {
         let events = c.tick(1.0 / 60.0, &g);
         assert!(!events.iter().any(|e| matches!(e, Event::ShieldHit { .. })));
         assert_eq!(damage_of(&events), vec![250.0]);
+    }
+
+    /// `Control.dll:0x1002c500`, `0x1001d6cd`: a unit's bubble is its agent's sphere and a
+    /// building's its construction sphere, which the round is swept against in the agent
+    /// sphere's place.
+    #[test]
+    fn a_buildings_bubble_is_its_construction_sphere_and_a_units_its_agents() {
+        let g = floor();
+        let bullet = RoundKind { name: "bb_t_01".into(), hit_points: 99.0, ..laser() };
+        let mut unit = shielded_post();
+        // The bounding sphere the pass tests first is another matter, and does not decide it.
+        unit.centre = Vec3::new(20.0, 30.0, 40.0);
+        unit.radius = 60.0;
+        assert_eq!(unit.bubble_sphere(), (Vec3::new(20.0, 30.0, 1.0), 1.5));
+        let mut building = shielded_post();
+        building.construction = Some((Vec3::new(20.0, 30.0, 0.0), 10.0));
+        assert_eq!(building.bubble_sphere(), (Vec3::new(20.0, 30.0, 0.0), 10.0));
+
+        let ended = |target: Target| {
+            let mut c = Combat { kinds: vec![bullet.clone()], targets: vec![target], ..Default::default() };
+            c.fire(0, None, Vec3::new(20.0, 5.0, 1.0), Vec3::Y, Vec3::ZERO, 1.0, None);
+            let events = c.tick(1.0 / 60.0, &g);
+            assert_eq!(events.iter().filter(|e| matches!(e, Event::ShieldHit { target: 0, .. })).count(), 1);
+            events
+                .iter()
+                .find_map(|e| if let Event::Ended { round, .. } = e { Some(round.position) } else { None })
+                .expect("the round stops on the bubble")
+        };
+        // The unit's bubble is 1.5 about its agent sphere's centre: met at y 28.5.
+        assert!((ended(unit).y - 28.5).abs() < 1e-3);
+        // The building's is 10 about its ground plan's middle, a metre under the round's line:
+        // met √(10² − 1²) short of it.
+        let at = ended(building);
+        assert!((at.y - (30.0 - 99.0_f32.sqrt())).abs() < 0.02, "{at}");
     }
 
     #[test]
