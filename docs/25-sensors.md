@@ -543,8 +543,16 @@ which clears it.
 
 - **The ray** runs from the camera through the middle of its view, the mean of
   its four corner points (`0x100912d7`). It starts at the unit's `+0x98` along
-  that line and ends at the sensor range. When the range does not reach past
-  the start, nothing happens (`0x100914e2`).
+  that line (`0x1009135e`) and ends at the sensor range, the unit's property
+  `0x50`, or 1 where that is not above 0 (`0x100913ea`–`0x10091413`). When the
+  range does not reach past the start, nothing happens (`0x100914e2`), and the
+  target is left as it was.
+  - **`+0x98` is the radius of the unit's bounding cylinder** (*read*): half
+    the diagonal of the end face of the box its mesh joins from all its parts,
+    **1.449 m on Mission 01's hero** and 8.868 on the L-2f
+    ([40-command-mode.md](40-command-mode.md#r-the-unit-records-0x98--read-and-measured)).
+    So the ray starts just outside the unit's own body, and a thing nearer the
+    eye than that along the line is not a first choice.
 - **The candidates** are the listed objects, less the current target, whose
   bounding spheres lie inside the camera's six frustum planes (`0x10091610`).
 - **First choice** (`0x10091780`): the candidate nearest the ray's start that
@@ -553,7 +561,8 @@ which clears it.
     building (kind 3) and 0.6 for anything else;
   - its centre lies ahead, within the ray's length;
   - its centre is farther from the unit than that radius plus the unit's
-    `+0x94`.
+    `+0x94` (`0x100917a2`, `0x1009185e`–`0x1009186d`), the unit's node
+    sphere's radius. The unit's place there is the record's `+4`.
 - **Otherwise** the candidate whose centre projects nearest the middle of the
   screen (`0x100919a0`).
 - **The result becomes the target**, or none. The current target is never a
@@ -787,7 +796,15 @@ offsets above.
     clans' units get a marker~~ — **read**: the clan's units' radar contacts,
     rebuilt on each pass of the run loop
     ([35-hud.md](35-hud.md#the-panel-in-the-cockpit--read-and-seen)).
-- What the unit record's `+0x98` is: the right button's ray's start.
+- ~~What the unit record's `+0x98` is: the right button's ray's start.~~
+  **Read**, and **measured**: the radius of the unit's bounding cylinder, the
+  seventh float interface `0x18` slot 12 hands the record's bind
+  (`iron3d.dll:0x1007e5c8`–`0x1007e5d6`). The mesh stands the cylinder along
+  the longest side of the box it joins from every part's header box, and its
+  radius is half the diagonal of the face across (`AniMesh.dll:0x10009941`–
+  `0x10009e47`): 1.449 on Mission 01's hero, 6.649 on Mission 04's HQ, 8.868 on
+  the L-2f
+  ([40-command-mode.md](40-command-mode.md#r-the-unit-records-0x98--read-and-measured)).
   ~~Its `+0x94`, the margin~~ — **read**: the radius the sphere interface
   `0x20` slot 3 answers as the record is bound, the unit's node sphere
   (`0x1007e5f2`–`0x1007e60e`), 11.84 on the L-2f; leaving and the game frame

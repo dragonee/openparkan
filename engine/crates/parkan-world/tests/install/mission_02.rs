@@ -315,6 +315,19 @@ fn hover(play: &mut parkan_world::play::Play, t: usize, at: glam::Vec3, seconds:
     }
 }
 
+/// The L-2f's record's `+0x98`, its agent's bounding cylinder's radius (docs/40, "r, the unit
+/// record's `+0x98`"): its six parts' boxes joined are 17.581 by 15.373 by 8.847, so the cylinder
+/// lies along x and is half the diagonal of 15.373 by 8.847 across, 8.868 -- not its chassis
+/// mesh's own authored cylinder, 11.677 about z.
+#[test]
+#[ignore = "needs the game install"]
+fn mission_02s_l_2fs_record_keeps_the_radius_of_the_cylinder_about_its_joined_boxs_longest_side() {
+    let (play, _, t) = boarded_warbot();
+    let r = play.record_bound(Some(t));
+    assert!((r - 8.868).abs() < 2e-3, "{r}");
+    assert_eq!(r, play.driven().cylinder, "the driven unit's");
+}
+
 /// Aboard, the hero's behaviour still reports it to the routes, from where the game frame puts
 /// its object every frame: the boarded bot's place, its y lowered by the bot's node sphere's
 /// radius, 11.84 on the L-2f (`iron3d.dll:0x1005ead6`–`0x1005eb39`, docs/39, "What becomes of

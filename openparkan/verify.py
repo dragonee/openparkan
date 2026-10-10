@@ -26287,8 +26287,9 @@ def check_hq_command_mode(check, game: Path) -> None:
           f"chassis {root} size {profiles.CHASSIS_SIZE[root[2]]} {kind} on {table_name}, turret "
           f"{turret} component type {part.type_id} word {part.flags:#x}; the hero {apart:.1f} m "
           f"away; neutral HQs {sorted(neutral_hqs)}; r_b_03 cylinder r {volume.axis_radius:.3f} "
-          f"and sphere r {volume.radius:.3f}, so 8 r {8 * volume.axis_radius:.1f} or "
-          f"{8 * volume.radius:.1f}; message 15 {h01.text_id if h01 else None} (info system), "
+          f"and sphere r {volume.radius:.3f}, neither of them the record's r, which is its "
+          f"joined box's cylinder's (check_record_bound); message 15 "
+          f"{h01.text_id if h01 else None} (info system), "
           f"10 {by_index[10].text_id}: the camera 'only moves in sync with the warbot'")
 
 
@@ -28299,6 +28300,214 @@ def check_planner(check, game: Path) -> None:
           f"({', '.join(c[0] for c in bare[:7])}) and the eighth {bare[7][0]}, a {bare[7][2]}")
 
 
+#: docs/40, "r, the unit record's +0x98": path -> (parts, the joined box's three sides, the
+#: side its cylinder lies along, the cylinder's radius).
+RECORD_BOUNDS = {
+    "UNITS\\UNITS\\HERO\\tut1_p.dat": (2, (1.502, 2.478, 3.372), "z", 1.449),
+    "UNITS\\UNITS\\HQ\\tut4_hq.dat": (4, (8.948, 13.111, 9.837), "y", 6.649),
+    "UNITS\\bld_unit_-2147483647.dat": (6, (17.581, 15.373, 8.847), "x", 8.868),
+}
+#: Mission 04's command view of its HQ (docs/40): the tilt the camera is made with and its
+#: field; the y of the HQ's top on a 960 x 720 frame for each candidate r -- the chassis
+#: header's cylinder, the record's, the chassis sphere and the chassis box's half-diagonal --
+#: and where the recording's frame has it once the view has settled.
+HQ_VIEW_TILT, HQ_VIEW_FIELD = 1.0, 1.04
+HQ_VIEW_TOPS = {4.832: 439, 6.649: 337, 7.653: 295, 8.144: 277}
+HQ_TOP_SEEN = 345
+#: The box's eight corners as AniMesh.dll:0x1000c3b0 writes them and every header holds them:
+#: for each, which of x, y and z is the greater end.
+BOX_CORNERS = ((0, 0, 0), (1, 0, 0), (1, 1, 0), (0, 1, 0),
+               (0, 1, 1), (0, 0, 1), (1, 0, 1), (1, 1, 1))
+
+
+def check_record_bound(check, game: Path) -> None:
+    """A unit record's ``+0x98`` is the radius of its agent's bounding cylinder, which the mesh
+    works out of the box it joins from its parts' header boxes (docs/40, "r, the unit record's
+    ``+0x98``")."""
+    # Every header's own cylinder has the routine's shape about one side of its own box.
+    headers = ordered = 0
+    sides = Counter()
+    for library in sorted(game.glob("*.rlb")) + sorted(game.glob("*.lib")):
+        try:
+            archive = NResArchive.open(library)
+        except (ValueError, struct.error):
+            continue
+        for entry in archive.entries:
+            if not entry.name.lower().endswith(".msh"):
+                continue
+            try:
+                volume = objmesh.parse(archive.read(entry), entry.name).volume
+            except (ValueError, struct.error):
+                continue
+            if volume is None:
+                continue
+            headers += 1
+            low, high = volume.minimum, volume.maximum
+            ordered += all(abs(c[k] - (high if up else low)[k]) < 1e-4
+                           for c, ends in zip(volume.corners, BOX_CORNERS, strict=True)
+                           for k, up in enumerate(ends))
+            by_length = sorted(range(3), key=lambda k: low[k] - high[k])
+            for axis in range(3):
+                far, near, radius = objmesh.box_cylinder(low, high, axis)
+                ends = min(math.dist(far, volume.axis_high) + math.dist(near, volume.axis_low),
+                           math.dist(far, volume.axis_low) + math.dist(near, volume.axis_high))
+                if abs(radius - volume.axis_radius) < 5e-3 and ends < 5e-3:
+                    sides[("longest", "middle", "shortest")[by_length.index(axis)]] += 1
+                    break
+            else:
+                sides["none"] += 1
+    check("every mesh header's cylinder stands in its own box, about the longest side or the "
+          "shortest",
+          headers == 435 and ordered == headers
+          and sides == {"longest": 163, "shortest": 272},
+          f"{headers} headers, {ordered} with the eight corners in the order AniMesh.dll:"
+          f"0x1000c3b0 writes; the authored cylinder runs between two end faces' middles, half "
+          f"an end face's diagonal across, about its box's {dict(sides)}")
+
+    asm = assembly.Assembly(game)
+    models = {o.path for folder in gamedir.missions(game)
+              for o in mission.load(folder / "data.tma").objects if o.kind == mission.KIND_UNIT}
+    along = Counter()
+    authored = mounted = solo = 0
+    radii = []
+    for path in sorted(models):
+        parts = asm.parts(mission.KIND_UNIT, path)
+        box = asm.joined_box(parts)
+        if box is None:
+            continue
+        far, near, radius = objmesh.box_cylinder(*box)
+        along["xyz"[max(range(3), key=lambda k: abs(far[k] - near[k]))]] += 1
+        radii.append(radius)
+        authored += abs(radius - asm.mesh(parts[0].ref).volume.axis_radius) < 1e-3
+        solo += len(parts) == 1
+        # The mount's own pose in place of the first node's rotation at the socket's place.
+        low, high = [math.inf] * 3, [-math.inf] * 3
+        for part in parts:
+            volume = asm.mesh(part.ref).volume
+            for corner in volume.corners if volume else ():
+                at = objmesh.apply(part.pose, corner) if part.host >= 0 else corner
+                low = [min(a, b) for a, b in zip(low, at, strict=True)]
+                high = [max(a, b) for a, b in zip(high, at, strict=True)]
+        mounted += abs(objmesh.box_cylinder(low, high)[2] - radius) < 1e-4
+    seen = {}
+    for path in RECORD_BOUNDS:
+        parts = asm.parts(mission.KIND_UNIT, path)
+        low, high = asm.joined_box(parts)
+        far, near, radius = objmesh.box_cylinder(low, high)
+        axis = "xyz"[max(range(3), key=lambda k: abs(far[k] - near[k]))]
+        seen[path] = (len(parts), tuple(round(high[k] - low[k], 3) for k in range(3)), axis,
+                      round(radius, 3))
+    hq = seen["UNITS\\UNITS\\HQ\\tut4_hq.dat"][3]
+    check("UNITS: a record's +0x98 is its joined box's cylinder: 1.449 on the hero, 6.649 on "
+          "Mission 04's HQ",
+          all(a[0] == w[0] and a[2] == w[2] and abs(a[3] - w[3]) < 2e-3
+              and all(abs(x - y) < 2e-3 for x, y in zip(a[1], w[1], strict=True))
+              for a, w in ((seen[p], RECORD_BOUNDS[p]) for p in RECORD_BOUNDS))
+          and len(radii) == 148 and dict(along) == {"x": 14, "y": 84, "z": 50}
+          and authored == 10 and mounted == 148 and solo == 7
+          and abs(min(radii) - 1.449) < 2e-3 and abs(max(radii) - 41.898) < 2e-3,
+          f"(parts, the joined box's sides, the cylinder's side, r): {seen}; 8 r on the HQ "
+          f"{8 * hq:.1f} m; over the {len(radii)} unit models the missions place the cylinder "
+          f"lies along {dict(along)}, r runs {min(radii):.3f} to {max(radii):.3f}, is the "
+          f"chassis header's own cylinder's on {authored} ({solo} models are one part), and is "
+          f"the same with each mount's pose for its first node's rotation on {mounted}")
+
+    # Mission 04's HQ in its command view, as the read's rules place the camera (docs/40, "The
+    # camera rides with the HQ"): facing north at the tilt it is made with, 8 r back along its
+    # look, and lifted to 36 over the ground under it; a field of 1.04 rad across 960 pixels.
+    fourth = game / "MISSIONS/CAMPAIGN/CAMPAIGN.00/Mission.04"
+    placed = next(o for o in mission.load(fourth / "data.tma").objects
+                  if o.path.lower().endswith("tut4_hq.dat"))
+    land = landmesh.load(game / "DATA" / "MAPS" / "Tut_4" / "Land.msh")
+    drawn = []
+    for part in asm.parts(mission.KIND_UNIT, placed.path):
+        model = asm.mesh(part.ref)
+        used = {v for t in range(len(model.triangles)) if model.node_of_triangle(t, 0) is not None
+                for v in model.triangles[t]}
+        posed = model.posed_positions()
+        drawn += [objmesh.apply(part.pose, posed[v]) for v in used]
+    c, s_ = math.cos(placed.rotation), math.sin(placed.rotation)
+    at = placed.position
+    world = [(at[0] + c * x - s_ * y, at[1] + s_ * x + c * y, at[2] + z) for x, y, z in drawn]
+    tilt, focal = HQ_VIEW_TILT, 480 / math.tan(HQ_VIEW_FIELD / 2)
+    look, up = (0.0, math.sin(tilt), -math.cos(tilt)), (0.0, math.cos(tilt), math.sin(tilt))
+    tops = {}
+    for r in HQ_VIEW_TOPS:
+        eye = [at[k] - 8 * r * look[k] for k in range(3)]
+        under = land.height_at(eye[0], eye[1])
+        eye[2] = max(eye[2], under + 36.0)
+        ys = []
+        for point in world:
+            rel = [point[k] - eye[k] for k in range(3)]
+            depth = sum(a * b for a, b in zip(rel, look, strict=True))
+            ys.append(360 - focal * sum(a * b for a, b in zip(rel, up, strict=True)) / depth)
+        tops[r] = (round(under, 1), round(eye[2] - under, 1), round(min(ys)))
+    check("Mission 04: 8 r back and 36 over its ground, the command camera shows the HQ's top "
+          "at y 337 of 720, the recording's 345",
+          all(abs(tops[r][2] - want) <= 1 and tops[r][1] == 36.0
+              for r, want in HQ_VIEW_TOPS.items())
+          and abs(tops[6.649][2] - HQ_TOP_SEEN) <= 8,
+          f"r: (the ground under the camera, the camera over it, the y of the HQ's highest "
+          f"drawn vertex): {tops}; the recording's painted hull settles with its top at y "
+          f"{HQ_TOP_SEEN} from 79.33 s and does not move through 80.73 s")
+
+    paths = {name: game / name for name in ("AniMesh.dll", "iron3d.dll", "World3D.dll",
+                                            "ArealMap.dll")}
+    if not all(p.exists() for p in paths.values()):
+        return
+    images = {name: _image_at(p.read_bytes()) for name, p in paths.items()}
+    sites = {
+        "AniMesh.dll": [
+            # part 0 loads as the mesh is made; its header's cylinder is copied and the bounds
+            # are marked stale
+            (0x10016B6D, b"\xba\x20\x00\x00\x80"), (0x1000A87B, b"\x85\xff"),
+            (0x1000A899, b"\x8d\xbd\x34\x01\x00\x00"),
+            (0x1000A9F9, b"\xc6\x85\x02\x02\x00\x00\x01"),
+            # the bounds are worked out at the attach's second pass and after a hung part
+            (0x100070BD, b"\xe8\x4e\x24\x00\x00"), (0x10007254, b"\x8b\x46\x40"),
+            (0x10007261, b"\xe8\xaa\x22\x00\x00"), (0x1000951E, b"\x8a\x85\x02\x02\x00\x00"),
+            # a hung part's corners: its first node's matrix with its parent's place
+            (0x100099BA, b"\xe8\x21\x1f\x00\x00"), (0x10009A12, b"\xff\x50\x18"),
+            # the longest side, and the radius into +0x14c
+            (0x10009AE0, b"\xd8\xd2"), (0x10009AED, b"\xd8\xd9"), (0x10009C00, b"\xd8\xd9"),
+            (0x10009E47, b"\xd9\x9d\x4c\x01\x00\x00"),
+            # interface 0x18 slot 12 hands the seven floats out, the radius last
+            (0x100146B0, b"\x8d\xb0\x30\x01\x00\x00"), (0x100146CB, b"\x8b\x4e\x18"),
+        ],
+        "iron3d.dll": [
+            # the game's message 1 makes a unit's record and binds it
+            (0x1006052C, b"\xe8\xbf\xcd\x01\x00"), (0x1007D354, b"\xff\x52\x0c"),
+            # the bind asks slot 12 with 2 and keeps the seventh float
+            (0x1007E5C8, b"\xff\x51\x30"), (0x1007E5CB, b"\x8b\x44\x24\x2c"),
+            (0x1007E5D6, b"\x89\x86\x98\x00\x00\x00"),
+            # its three readers: the outer camera, an HQ's camera at 8 of it, the right button
+            (0x100387C5, b"\xd9\x81\x98\x00\x00\x00"), (0x100382E9, b"\xd9\x80\x98\x00\x00\x00"),
+            (0x100382EF, b"\xd8\x0d\x00\x5d\x0e\x10"), (0x1009135E, b"\xd9\x82\x98\x00\x00\x00"),
+            # and the right button's margin, +0x94
+            (0x100917A2, b"\x8b\x80\x94\x00\x00\x00"),
+        ],
+        # AddObjectToGame: the attach's second pass, then the game's message 1
+        "World3D.dll": [(0x100080A9, b"\xff\x52\x38"), (0x100082EA, b"\x6a\x01")],
+        # CreateObjectFromScheme: the sub-items load, then the object is added to the game
+        "ArealMap.dll": [(0x100158D6, b"\xe8\xb5\xf2\xff\xff"),
+                         (0x10015DD0, b"\xe8\x13\x6b\x01\x00")],
+    }
+    eight = struct.unpack("<f", images["iron3d.dll"](0x100E5D00, 4))[0]
+    text = images["iron3d.dll"](0x10001000, 0xC8000)
+    stores, at = [], text.find(b"\x89\x86\x98\x00\x00\x00")
+    while at >= 0:
+        stores.append(0x10001000 + at)
+        at = text.find(b"\x89\x86\x98\x00\x00\x00", at + 1)
+    check("AniMesh.dll, iron3d.dll: the bound is worked out before a record is bound, and kept "
+          "at +0x98",
+          all(images[name](va, len(code)) == code for name, rows in sites.items()
+              for va, code in rows)
+          and eight == 8.0 and stores == [0x1007E5D6],
+          f"{sum(len(rows) for rows in sites.values())} sites in {len(sites)} modules; the HQ "
+          f"camera's multiple {eight}; `mov [esi + 0x98], eax` in iron3d.dll at "
+          f"{[hex(va) for va in stores]}")
+
+
 def run(game: Path) -> int:
     """Run every check against ``game``.  Returns a process exit code."""
     results: list[tuple[str, bool, str]] = []
@@ -28371,6 +28580,7 @@ def run(game: Path) -> int:
         check_varset_types, check_profiles, check_walker,
         check_frame_scale, check_room_test,
         check_planner,
+        check_record_bound,
     )
     for fn in checks:
         fn(check, game)

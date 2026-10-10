@@ -1777,9 +1777,10 @@ impl Play {
     /// One of `iron3d.dll`'s commands (`0x10071cd0`), the player looking from `view`.
     /// Returns whether it was one this answers.
     ///
-    /// STAND-IN: docs/25-sensors.md#the-players-target--read-and-measured -- the unit
-    /// record's `+0x98` and `+0x94`, where the right button's ray starts and the margin
-    /// its pick keeps from the unit, are not read: both are 0.
+    /// The right button's ray starts the driven unit's record's `+0x98` along the view's
+    /// middle ([`Play::record_bound`], `0x1009135e`), and its first choice keeps the record's
+    /// `+0x94` clear of the unit, its node sphere's radius (`0x100917a2`; docs/25, "The
+    /// player's target").
     pub fn command(&mut self, command: &str, view: &View) -> bool {
         let world = self.contacts();
         // Every pick is on the unit the player drives, its place and its sensor range
@@ -1791,8 +1792,9 @@ impl Play {
             CMD_JAMES_SELECT_ENEMY => self.targets.select_nearest(unit, &world, |c| c.hostile),
             CMD_JAMES_SELECT_FRIEND => self.targets.select_nearest(unit, &world, |c| c.friend),
             CMD_JAMES_AIM_TARGET => {
-                let range = self.driven().radar.range;
-                self.targets.aim(unit, view.eye, view.look, 0.0, 0.0, range, &world, |c, r| {
+                let driven = self.driven();
+                let (start, margin, range) = (driven.cylinder, driven.bound.1, driven.radar.range);
+                self.targets.aim(unit, view.eye, view.look, start, margin, range, &world, |c, r| {
                     on_screen(view.view_proj, c, r)
                 })
             }
@@ -2659,17 +2661,21 @@ impl Play {
         self.command.ride(crate::command::Follow { at: target.position, reach });
     }
 
-    /// How far back the command camera settles from HQ unit `t`: 8 × its record's `+0x98`.
-    ///
-    /// STAND-IN: docs/40-command-mode.md#not-established -- which bound `+0x98` is was not
-    /// traced: the chassis mesh's authored sphere's radius, which on Mission 04's HQ gives the
-    /// 61 m the recording favours, else the unit's whole bound.
+    /// How far back the command camera settles from HQ unit `t`: 8 × its record's `+0x98`
+    /// (`0x100382e2`, [`Play::record_bound`]), 53.2 m on Mission 04's HQ.
     pub fn ride_reach(&self, t: usize) -> Option<f32> {
-        let whole = self.battle.combat.targets.get(t)?.radius;
-        let chassis = self.robots.iter().find(|(rt, _)| *rt == t).and_then(|(_, r)| {
-            r.parts.get(r.chassis_part).and_then(|p| p.mesh.mesh.sphere).map(|(_, radius)| radius)
-        });
-        Some(crate::command::REACH_TIMES * chassis.unwrap_or(whole))
+        self.machine(t).map(|_| crate::command::REACH_TIMES * self.record_bound(Some(t)))
+    }
+
+    /// The float a unit's record keeps at `+0x98` from its bind (`iron3d.dll:0x1007e5c8`-
+    /// `0x1007e5d6`), `unit`'s or the hero's: the radius of its agent's bounding cylinder
+    /// ([`crate::robot::agent_cylinder`]), half the diagonal of its joined box's end face --
+    /// 1.449 m on Mission 01's hero, 6.649 on Mission 04's HQ. Three things read it: the outer
+    /// camera stands off by it (`0x10038799`), an HQ's command camera rides 8 of it behind
+    /// (`0x100382e2`) and the right button's ray starts it out along the view (`0x1009135e`;
+    /// docs/40, "r, the unit record's `+0x98`").
+    pub fn record_bound(&self, unit: Option<usize>) -> f32 {
+        unit.and_then(|t| self.machine(t)).unwrap_or(&self.hero.robot).cylinder
     }
 
     /// The driven unit let go (`0x10074ff0` with 0), back to its AI: its held keys dropped and
@@ -2928,7 +2934,7 @@ impl Play {
                 .first_hit(&self.ground, unit, from, to, 0.0)
                 .map(|(s, _, _)| (s.point, s.normal))
         };
-        self.outer.place(&own, self.outer_bound(unit), meets)
+        self.outer.place(&own, self.record_bound(unit), meets)
     }
 
     /// The driven unit's own eye, or command mode's camera: what the right button picks along.
@@ -2975,25 +2981,6 @@ impl Play {
         let flyer = self.driven().flyer;
         self.outer_mode = self.mode();
         self.outer.press(unit, flyer, self.hero.time_ms);
-    }
-
-    /// The bound the outer camera stands off by, the unit record's `+0x98` (`0x1007e5d6`).
-    ///
-    /// STAND-IN: docs/40-command-mode.md#not-established -- which bound the record's `+0x98`
-    /// is: the half-diagonal of the chassis mesh's authored box, as the multi-part branch of
-    /// `AniMesh.dll:0x10009d0f` works a radius out of a box (1.47 m on Mission 01's hero, which
-    /// its recording's outer views favour), else the unit's collision radius.
-    pub fn outer_bound(&self, unit: Option<usize>) -> f32 {
-        let robot = unit
-            .and_then(|t| self.robots.iter().find(|(rt, _)| *rt == t))
-            .map_or(&self.hero.robot, |(_, r)| r);
-        robot.chassis.mesh.corners.map_or(robot.collision.1, |corners| {
-            let (lo, hi) =
-                corners.iter().fold((Vec3::splat(f32::MAX), Vec3::splat(f32::MIN)), |(lo, hi), c| {
-                    (lo.min(Vec3::from_array(*c)), hi.max(Vec3::from_array(*c)))
-                });
-            (hi - lo).length() / 2.0
-        })
     }
 
     /// A game frame's views (`0x1007d6e0`, `0x10038720`): the zoom of every unit of the player's

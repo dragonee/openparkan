@@ -549,8 +549,11 @@ fn mission_01s_outer_camera_stands_at_its_four_places_about_the_hero_and_goes_ba
         }
     };
     tick(&mut play, 1);
-    let r = play.outer_bound(None);
-    assert!((r - 1.473).abs() < 2e-3, "the hero's chassis box's half-diagonal: {r}");
+    // r, the hero's record's `+0x98`: its agent's bounding cylinder's radius, half the diagonal
+    // of the end face of the chassis's and the turret's boxes joined, 1.502 by 2.478 across and
+    // 3.372 tall (docs/40, "r, the unit record's `+0x98`").
+    let r = play.record_bound(None);
+    assert!((r - 1.449).abs() < 2e-3, "half of the hypotenuse of 1.502 and 2.478: {r}");
     for (k, &(angle, back)) in PLACES.iter().enumerate() {
         press_command(&mut play, CMD_JAMES_OUTER_CAMERA);
         tick(&mut play, 30);
@@ -585,6 +588,66 @@ fn mission_01s_outer_camera_stands_at_its_four_places_about_the_hero_and_goes_ba
     tick(&mut play, 1);
     play.modes.pop();
     assert!(!play.outer.on());
+}
+
+/// The right button's pick on Mission 01's hero takes its two figures off the hero's record
+/// (docs/25, "The player's target"): the ray starts `+0x98` out along the view, the hero's
+/// bounding cylinder's 1.449, and its first choice keeps `+0x94`, the hero's node sphere's
+/// radius, clear of the hero.
+#[test]
+#[ignore = "needs the game install"]
+fn mission_01s_right_button_starts_its_ray_the_heros_bound_out_and_keeps_its_node_sphere_clear() {
+    use glam::{Mat4, Vec3};
+    use parkan_formats::controls::CMD_JAMES_AIM_TARGET;
+
+    let (mut play, _) = mission_01_play();
+    play.tick(1000.0 / 60.0, [0.0; 2]);
+    let (r, margin) = (play.record_bound(None), play.hero.bound.1);
+    assert!((r - 1.449).abs() < 2e-3 && margin > 0.5, "{r} and {margin}");
+    let eye = play.own_eye();
+    let view = parkan_world::play::View {
+        eye: eye.position,
+        look: eye.forward,
+        view_proj: Mat4::perspective_rh(1.0, 4.0 / 3.0, 0.1, 2000.0)
+            * Mat4::look_to_rh(eye.position, eye.forward, eye.up),
+        shift: false,
+    };
+    // Two of the mission's units listed and put by hand: one half a metre past the ray's start
+    // and 0.2 off it, one 50 m down the line.
+    let units: Vec<usize> = play.robots.iter().map(|(t, _)| *t).collect();
+    assert!(units.len() >= 2, "{units:?}");
+    let (near, far) = (units[0], units[1]);
+    play.targets.listed = vec![near, far];
+    let side = eye.forward.cross(eye.up).normalize();
+    let hero = play.hero.walker.body.position;
+    let put = |play: &mut parkan_world::play::Play, t: usize, centre: Vec3, radius: f32| {
+        let target = &mut play.battle.combat.targets[t];
+        (target.position, target.centre, target.radius) = (centre, centre, radius);
+    };
+    let at = eye.position + eye.forward * (r + 0.5) + side * 0.2;
+    put(&mut play, near, at, 2.0);
+    put(&mut play, far, eye.position + eye.forward * 50.0, 4.0);
+    let apart = at.distance(hero);
+    assert!(apart > 0.6 * 2.0 && apart <= 0.6 * 2.0 + margin, "{apart} against {margin}");
+    // The ray passes through the near one's sphere, ahead of its start; it stands inside the
+    // margin, so the far one is the first choice.
+    play.targets.current = None;
+    play.command(CMD_JAMES_AIM_TARGET, &view);
+    assert_eq!(play.targets.current, Some(far));
+    // Out of the margin, the near one is taken: 0.6 of a 0.5 m sphere and the margin fall short.
+    put(&mut play, near, at, 0.5);
+    assert!(apart > 0.6 * 0.5 + margin, "{apart}");
+    play.targets.current = None;
+    play.command(CMD_JAMES_AIM_TARGET, &view);
+    assert_eq!(play.targets.current, Some(near));
+    // A sensor range that does not reach past the ray's start: nothing happens, and the target
+    // is kept (`0x100914e2`). From the eye itself the pick would run and take the far one.
+    play.hero.radar.range = r - 0.1;
+    play.command(CMD_JAMES_AIM_TARGET, &view);
+    assert_eq!(play.targets.current, Some(near));
+    play.hero.radar.range = r + 0.1;
+    play.command(CMD_JAMES_AIM_TARGET, &view);
+    assert_eq!(play.targets.current, Some(far), "the pick runs, and the far one is nearest the middle");
 }
 
 #[test]

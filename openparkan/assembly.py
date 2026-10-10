@@ -147,3 +147,41 @@ class Assembly:
                 out.append(Part(ref, pose, slot_of.get(parent, -1) if parent >= 0 else -1,
                                 component.attach_node if parent >= 0 else -1))
         return out
+
+    def joined_box(self, parts: list[Part]) -> tuple[tuple[float, ...], tuple[float, ...]] | None:
+        """The box an agent joins from its parts' header boxes: its least and greatest corner.
+
+        ``AniMesh.dll:0x10009510`` takes the eight corners of every part's
+        stream-2 header box (``0x10009941``-``0x10009ac0``).  The agent's own
+        mesh, part 0, gives them as they are.  A hung part's go through a
+        matrix made of two nodes of the merged model: the rotation of the
+        part's first own node -- its node 1, since its node 0 is left out of
+        the merge -- and the place of that node's parent, the socket
+        (``0x10009967``-``0x100099ba``, ``0x10009a12``).  The box is then the
+        least and the greatest of them along each axis (``0x1000c3b0``).
+        """
+        low, high = [float("inf")] * 3, [float("-inf")] * 3
+        for part in parts:
+            mesh = self.mesh(part.ref)
+            if mesh is None or mesh.volume is None:
+                continue
+            carried = None
+            if part.host >= 0:
+                first = mesh.world_pose(1) if len(mesh.nodes) > 1 else objmesh.IDENTITY_POSE
+                carried = (part.pose[0], objmesh.compose(part.pose, first)[1])
+            for corner in mesh.volume.corners:
+                at = objmesh.apply(carried, corner) if carried else corner
+                low = [min(a, b) for a, b in zip(low, at, strict=True)]
+                high = [max(a, b) for a, b in zip(high, at, strict=True)]
+        return (tuple(low), tuple(high)) if low[0] <= high[0] else None
+
+    def cylinder(self, parts: list[Part]):
+        """An agent's bounding cylinder: its far end, its near end and its radius, or ``None``.
+
+        The cylinder of :meth:`joined_box` (:func:`openparkan.mesh.box_cylinder`),
+        which interface ``0x18`` slot 12 hands out (``AniMesh.dll:0x100146a0``).
+        A unit's record keeps the radius at ``+0x98`` as it is bound
+        (``iron3d.dll:0x1007e5d6``).
+        """
+        box = self.joined_box(parts)
+        return objmesh.box_cylinder(*box) if box else None

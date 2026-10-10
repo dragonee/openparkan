@@ -1526,10 +1526,13 @@ fn enter_aboard_mission_04s_hq_opens_its_command_view_whose_camera_rides_with_it
     press_enter(&mut play);
     assert_eq!(play.mode(), Mode::HqCommand(hq), "Enter does nothing in mode 3");
 
-    // The camera backs off a metre a frame to 8 r, 61.2 m on this HQ's chassis sphere, and sits
-    // d back along its look.
+    // The camera backs off a metre a frame to 8 r, and sits d back along its look. r is the HQ's
+    // record's `+0x98`, its agent's bounding cylinder's radius: its four parts' boxes joined are
+    // 8.948 by 13.111 by 9.837, the cylinder lies along y, and half the diagonal of 8.948 by
+    // 9.837 is 6.649, so 53.2 m.
     let reach = play.ride_reach(hq).unwrap();
-    assert!((reach - REACH_TIMES * 7.653).abs() < 0.01, "{reach}");
+    assert!((play.record_bound(Some(hq)) - 6.649).abs() < 2e-3, "{}", play.record_bound(Some(hq)));
+    assert!((reach - REACH_TIMES * 6.649).abs() < 0.02, "{reach}");
     command_frames(&mut play, 30, |_| {});
     assert_eq!(play.command.distance, 30.0);
     command_frames(&mut play, (reach as usize) + 10, |_| {});

@@ -332,4 +332,38 @@ mod tests {
         list.aim(Vec3::ZERO, eye, Vec3::Y, 0.0, 0.0, 300.0, &world, nothing);
         assert_eq!(list.current, None, "nothing on screen clears it");
     }
+
+    #[test]
+    fn the_right_buttons_ray_starts_out_along_the_view_and_its_first_choice_keeps_clear_of_the_unit() {
+        // docs/25, "The player's target": the ray starts the record's `+0x98` out
+        // (`iron3d.dll:0x1009135e`), and a first choice's centre is farther from the unit than
+        // its shrunken radius plus the record's `+0x94` (`0x100917a2`).
+        let world = vec![unit(2.0, 6.0, false, false), unit(0.5, 100.0, false, false)];
+        let eye = Vec3::new(0.0, 0.0, 3.0);
+        let visible = |c: Vec3, _r: f32| (c.y > 0.0).then(|| [(c.x - eye.x) / c.y, (c.z - eye.z) / c.y]);
+        let fresh = || {
+            let mut list = TargetList::default();
+            list.takt(Vec3::ZERO, 300.0, &[0, 1], &world);
+            list.set(None);
+            list
+        };
+        let mut list = fresh();
+        list.aim(Vec3::ZERO, eye, Vec3::Y, 0.0, 0.0, 300.0, &world, visible);
+        assert_eq!(list.current, Some(0), "from the eye itself, the near one the ray passes through");
+        // Started 8 m out, the near one's centre lies behind the start.
+        let mut list = fresh();
+        list.aim(Vec3::ZERO, eye, Vec3::Y, 8.0, 0.0, 300.0, &world, visible);
+        assert_eq!(list.current, Some(1));
+        // Its centre is 7 from the unit and its sphere 2.4 at 0.6: a margin of 4.6 or more
+        // passes it over.
+        let mut list = fresh();
+        list.aim(Vec3::ZERO, eye, Vec3::Y, 0.0, 4.5, 300.0, &world, visible);
+        assert_eq!(list.current, Some(0));
+        let mut list = fresh();
+        list.aim(Vec3::ZERO, eye, Vec3::Y, 0.0, 4.7, 300.0, &world, visible);
+        assert_eq!(list.current, Some(1));
+        // A range that does not reach past the start: nothing happens, and the target stays.
+        assert!(!list.aim(Vec3::ZERO, eye, Vec3::Y, 8.0, 0.0, 8.0, &world, visible));
+        assert_eq!(list.current, Some(1));
+    }
 }

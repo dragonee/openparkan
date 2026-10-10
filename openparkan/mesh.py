@@ -390,6 +390,34 @@ class BoundingVolume:
         return tuple(max(c[a] for c in self.corners) for a in range(3))
 
 
+def box_cylinder(
+    minimum: tuple[float, float, float], maximum: tuple[float, float, float],
+    axis: int | None = None,
+) -> tuple[tuple[float, float, float], tuple[float, float, float], float]:
+    """The cylinder an agent's mesh stands in its box: far end, near end, radius.
+
+    ``AniMesh.dll:0x10009510`` works an agent's bounding cylinder out of the
+    box it has joined from its parts' header boxes (``0x10009ac6``-``0x10009e47``):
+    the axis is the box's longest side -- z unless x or y is strictly longer,
+    and x over y where those two tie -- the two ends are the middles of the
+    box's end faces, and the radius is half an end face's diagonal.  ``axis``
+    asks for the cylinder about another side, which is how the authored
+    cylinder of a stream-2 header is recognised: it has this shape on every
+    shipped mesh, about the longest side or the shortest.
+    """
+    side = [maximum[k] - minimum[k] for k in range(3)]
+    if axis is None:
+        if side[2] >= side[0] and side[2] >= side[1]:
+            axis = 2
+        else:
+            axis = 0 if side[0] >= side[1] else 1
+    middle = [(minimum[k] + maximum[k]) / 2 for k in range(3)]
+    far, near = list(middle), list(middle)
+    far[axis], near[axis] = maximum[axis], minimum[axis]
+    across = [side[k] for k in range(3) if k != axis]
+    return tuple(far), tuple(near), math.hypot(*across) / 2
+
+
 @dataclass
 class Slot:
     """A run of triangles and batches that a node can select."""

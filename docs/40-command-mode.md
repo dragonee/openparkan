@@ -916,21 +916,141 @@ the keys, and the move (`0x100375b0`).
   higher than Z + d cos τ − 36, the camera is lifted, and the HQ sits below the
   middle of the view.
 
-**r, the HQ record's `+0x98`.** It is the seventh float that the unit's
-interface `0x18` slot 12 fills in mode 2 (`0x1007e5c8`–`0x1007e5d6`,
-`AniMesh.dll:0x100146a0`).
-- **That slot returns the mesh object's bound** at `+0x134`: its two axis
-  points put through the object's matrix, and a radius.
-- **Where the bound comes from.** A single-part mesh copies it from its
-  stream-2 header's cylinder (`AniMesh.dll:0x1000a899`,
-  [07-objects.md](07-objects.md#the-stream-2-header-is-the-models-authored-extent)).
-  A multi-part mesh works it out from its box (`0x10009d10`–`0x10009e47`, not
-  followed). Which of the two a unit's object is was not traced.
-- **Measured** on Mission 04's HQ: `r_b_03.msh`'s cylinder radius is 4.832 and
-  its sphere's radius 7.653, so 8 r is 38.7 m or 61.2 m.
-- **Seen**, the recording favours the second. At 80.5 s the HQ is about 200
-  pixels across on the 960-pixel frame. With a field of 1.04 rad, a body
-  13–15 m across would span about 300 pixels at 39 m.
+### r, the unit record's `+0x98` — *read*, and *measured*
+
+**It is the radius of the unit's bounding cylinder, and the cylinder stands in
+the box of all the unit's parts.** On Mission 04's HQ it is **6.649**, so the
+camera rides **53.2 m** behind; on Mission 01's hero it is **1.449**; on the
+L-2f, 8.868.
+
+**The record takes it once, as it is bound** (*read*). The bind asks the
+object's interface `0x18` slot 12 with 2 for seven floats and keeps the last
+(`iron3d.dll:0x1007e5c8`–`0x1007e5d6`). That store is the only
+`mov [esi + 0x98], eax` in the module, and it is in the base record's bind
+(`0x1007e3c0`), so a building's record keeps the same figure of its own
+object. Three things read a unit's:
+
+| reader | what it does with r |
+|---|---|
+| `0x100382e9` | an HQ's command camera rides 8 r behind (the 8 at `0x100e5d00`) |
+| `0x100387c5` | the outer camera stands r × its place's distance back and r × its drop down ([30-turrets.md](30-turrets.md#the-outer-camera--read-and-measured)) |
+| `0x1009135e` | the right button's ray starts r out along the view ([25-sensors.md](25-sensors.md#the-players-target--read-and-measured)) |
+
+**Slot 12 hands out the mesh's cylinder** (`AniMesh.dll:0x100146a0`): two
+points and a radius at `+0x130`, `+0x13c` and `+0x148` of the interface, which
+sits 4 into the mesh object, so `+0x134`, `+0x140` and `+0x14c` of the object.
+Asked with 2 it puts the two points through the object's matrix and leaves the
+radius as it is.
+
+**Where the cylinder comes from** (*read*). The mesh works its bounds out in one
+routine, `0x10009510`: the agent's sphere, then a box at `+0x54`, then the
+cylinder, then the node sphere
+([24-motion.md](24-motion.md#finding-the-ground--read)).
+
+1. **The box is every part's header box, joined** (`0x10009941`–`0x10009ac0`).
+   Each part keeps the 120 bytes that head its mesh's stream-2 header: eight
+   corners and a sphere
+   ([07-objects.md](07-objects.md#the-stream-2-header-is-the-models-authored-extent)).
+   - The agent's own mesh, part 0, gives its eight corners as they are.
+   - A hung part's go through a matrix made of two nodes of the merged model:
+     the **rotation of the part's first own node** and the **place of that
+     node's parent**, the socket (`0x10009967`–`0x100099ba`: the node's matrix
+     is copied and its translation column overwritten with the parent's). The
+     part's node 0 is left out of the merge, so its first own node is its
+     node 1 ([07-objects.md](07-objects.md)).
+   - Each corner then widens a box kept as a least and a greatest corner
+     (`0x1000c3b0`), which writes its eight corners back in the header's own
+     order.
+2. **The cylinder lies along the box's longest side** (`0x10009ac6`–`0x10009c09`).
+   The three sides are compared: z is taken unless x or y is strictly longer,
+   and x over y where those two tie.
+3. **Its two ends are the middles of the box's two end faces**, into `+0x134`
+   and `+0x140` (`0x10009afe`, `0x10009c0f`, `0x10009d0f`, a branch for each
+   axis).
+4. **Its radius is half an end face's diagonal**, the distance from the first
+   end to the box's greatest corner, into `+0x14c` (`0x10009e47`).
+5. A scaled object's ends are scaled, and its radius is multiplied by the
+   largest of the three scales (`0x1000a1fe`–`0x1000a270`). Only scenery is
+   scaled.
+
+**A header's own cylinder is copied first, and does not last** (*read*). The
+mesh's factory sends it part 0 as it is made (`0x10016a70`, message
+`0x80000020` at `0x10016b6d`). For that part alone the load copies the header's
+box, sphere and cylinder straight into the object (`0x1000a87b`–`0x1000a8c3`).
+Every load also marks the bounds stale (`+0x202`, `0x1000a9f9`), and the routine
+above runs:
+- after each hung part's load (`0x10007254`–`0x10007261`);
+- at each attach made with the game clock, message 4 with an argument that is
+  not 0 (`0x100070bd`,
+  [35-hud.md](35-hud.md#what-mode-2-does-with-the-colour--read-measured-and-seen)).
+
+`World3D.dll`'s `CreateObject` makes such an attach as it makes the object
+(`0x10007e6e`), and `AddObjectToGame` makes another (`0x100080a9`) before it
+sends the game's message 1 (`0x100082ea`). Message 1 is what makes a unit's
+record and binds it (`iron3d.dll:0x1006052c` → `0x1007d2f0` → `0x1007d354`). A
+mission's unit has all its parts by then: the sub-items load
+(`ArealMap.dll:0x100158d6`) before the object is added to the game
+(`0x10015dd0`). **So every record keeps the worked-out cylinder, a one-part
+unit's too.**
+
+*Measured*:
+- **The three units.**
+
+  | unit | parts | the joined box's sides | along | r | 8 r |
+  |---|---|---|---|---|---|
+  | Mission 01's hero, `tut1_p.dat` | 2 | 1.502 × 2.478 × 3.372 | z | **1.449** | |
+  | Mission 04's HQ, `tut4_hq.dat` | 4 | 8.948 × 13.111 × 9.837 | y | **6.649** | 53.2 m |
+  | the L-2f, `bld_unit_-2147483647.dat` | 6 | 17.581 × 15.373 × 8.847 | x | **8.868** | |
+
+- **Over the 148 unit models the missions place**, the cylinder lies along y on
+  84, z on 50 and x on 14, and r runs from 1.449, the hero's, to 41.898.
+- **It is not the chassis mesh's authored cylinder.** r equals that header's
+  cylinder radius on 10 of the 148. The HQ's chassis header has 4.832, the
+  hero's 1.017, the L-2f's 11.677 (about z, where the worked-out one lies along
+  x). Seven of the 148 are one part.
+- **A mount's pose would do for the matrix.** With each part's mount pose in
+  place of its first node's rotation at the socket's place, r is the same on all
+  148.
+- **The authored cylinder has the same shape** (the control for the shape).
+  On all 435 mesh headers the cylinder runs between the middles of two opposite
+  faces of the header's own box and is half that face's diagonal across. It is
+  about the box's longest side on 163 and its **shortest on 272**, never the
+  middle one. The game's routine takes the longest always, so the tool that
+  wrote the headers chose its axis by another rule. All 435 hold their eight
+  corners in the order `0x1000c3b0` writes them.
+
+**Against the two recordings** (*seen*, from figures already here):
+- **The hero.** Mission 01's outer views put r at about 1.3–1.5 m
+  ([30-turrets.md](30-turrets.md#the-outer-camera--read-and-measured)); 1.449
+  is inside that.
+- **The HQ.** The view settles at 79.33 s, and from then through 80.73 s the
+  HQ's painted hull keeps one box on the 960 × 720 frame, to the pixel:
+  x 398–593, y 345–497 (the marker's two icons join its right edge at 79.53 s).
+  Nothing tilts the view in that time, so it stands at the tilt the camera is
+  made with, 1.0.
+  - **Where the read puts it** (*derived*, from the install). The HQ stands
+    where Mission 04 places it, turned −3.819 rad. The camera faces north, d
+    back along its look, and is lifted to 36 over the ground under it, which is
+    53.2 to 54.3 there; at each of the four distances below the lift is what
+    sets its height. With a field of 1.04 rad across the frame, the HQ's
+    highest drawn vertex shows at:
+
+    | r | 8 r | the HQ's top, y of 720 |
+    |---|---|---|
+    | 4.832, the chassis header's cylinder | 38.7 m | 439 |
+    | **6.649, the record's** | **53.2 m** | **337** |
+    | 7.653, the chassis sphere | 61.2 m | 295 |
+    | 8.144, the chassis box's half-diagonal | 65.2 m | 277 |
+
+  - **The recording's is 345.** The read's r is 8 pixels off; the chassis
+    sphere, which the engine used until the read, 50 high. A shorter d leaves
+    the lifted camera looking over the HQ, so the HQ sits lower in the frame:
+    that is what tells the distances apart, and it is why the HQ settles in the
+    lower middle.
+  - **Its width does not tell them apart.** The paint is 195 pixels across; all
+    the drawn vertices span 208 at 53.2 m and 187 at 61.2 m, the dark wheels
+    among them, which the grass's shadow hides in the frame. An earlier pass
+    here set 61 against 39 by the width alone.
 
 ### What the player has in mode 3
 
@@ -1023,10 +1143,13 @@ So **the map and the page do peel back one Esc at a time before 735 leaves.**
 | 90–94 | the HQ is ordered to *Standby* |
 | 157–162 | leaving, above |
 
-**The pull-back takes about 0.8 s** from the cut, 78.4 to 79.2 s. At 1 m a
-frame that is about 75 frames a second to reach 61 m, or about 48 to reach
-39 m. The recording's own frame rate is not known, so this does not settle r
-(*derived*).
+**The pull-back takes about 0.8 s** from the cut, 78.4 to 79.2 s; frame by
+frame, the HQ's hull enters at the foot at 78.73 s and has settled by 79.33 s.
+At 1 m a frame, reaching the 53.2 m that 8 r is
+([above](#r-the-unit-records-0x98--read-and-measured)) in 0.8 s takes about 66
+frames a second. The recording's own frame rate is not known, so the timing
+neither confirms r nor contradicts it (*derived*). Where the HQ settles in the
+frame does.
 
 ### For an engine
 
@@ -1051,8 +1174,11 @@ frame that is about 75 frames a second to reach 61 m, or about 48 to reach
      h + 36 … h + 236, and there is no box. The player's move keys are
      overridden; Z zooms.
 
-   For r, 8 r ≈ 61 m on Mission 04's HQ fits the recording. Until `+0x98` is
-   traced, use the assembly's bounding sphere radius as a STAND-IN.
+   r is the radius of the HQ's bounding cylinder: join the header boxes of its
+   chassis, turret and guns at rest, take the box's longest side as the axis,
+   and r is half the diagonal of the face across it
+   ([above](#r-the-unit-records-0x98--read-and-measured)). 8 r is 53.2 m on
+   Mission 04's HQ.
 4. **Panel and orders** work as in mode 4. The HQ may be ordered like any unit,
    and the camera rides with it.
 5. **Telepresence** works from mode 3 as from mode 4. Esc returns to mode 3
@@ -1223,19 +1349,25 @@ mode.
 - ~~What mode 2 does when its unit dies~~ — **read**: the unit record's removal
   rolls the stack back in modes 1, 2, 5 and 7 (`0x100755a9`, table
   `0x1007563c`), so telepresence ends with its unit, back to the command view.
-- **r, the unit record's `+0x98`**, which sets an HQ camera's follow distance at
+- ~~**r, the unit record's `+0x98`**, which sets an HQ camera's follow distance at
   8 r: the bound's seventh float, but whether a unit's object keeps its
-  chassis mesh's cylinder or a bound worked out over its parts was not traced.
-  The outer camera stands off by the same r
-  ([30-turrets.md](30-turrets.md#the-outer-camera--read-and-measured)).
-  - Mission 01's recording puts the hero's at about 1.3–1.5 m. That is near its
-    chassis mesh's box half-diagonal, 1.47, and far from its chassis sphere,
-    1.15, or its joined sphere, 2.18.
-  - Here the HQ recording favours the chassis sphere, 7.65, over the cylinder,
-    4.83. The chassis box's half-diagonal, 8.14, would put the camera at 65 m
-    and fits that recording nearly as well.
-  - The multi-part branch of the bound (`AniMesh.dll:0x10009d0f`) takes the
-    half-diagonal of a box (*seen*, *read* in part).
+  chassis mesh's cylinder or a bound worked out over its parts was not traced.~~
+  **Read**, and **measured**: a bound worked out over its parts. The mesh joins
+  every part's header box into one, a hung part's turned by its first node and
+  put at its socket, and stands a cylinder along the box's longest side, as
+  wide as half the diagonal of the face across it
+  (`AniMesh.dll:0x10009941`–`0x10009e47`); r is that radius. The routine has run
+  over all the parts before `AddObjectToGame`'s message 1 binds the record
+  (`World3D.dll:0x100080a9`, `0x100082ea`). r is 1.449 on Mission 01's hero,
+  6.649 on Mission 04's HQ — 53.2 m for its camera — and 8.868 on the L-2f, and
+  it is the chassis header's own cylinder on 10 of the 148 unit models placed.
+  One figure serves the HQ's camera, the outer camera and the right button's
+  ray, in
+  [r, the unit record's `+0x98`](#r-the-unit-records-0x98--read-and-measured).
+  The two stand-ins it replaces were the chassis sphere's 61.2 m and the
+  chassis box's half-diagonal 1.47. The hero's recording does not tell 1.47 from
+  1.449. The HQ's does tell 61.2 m from 53.2: the lifted camera shows the HQ's
+  top at y 337 at 53.2 m and 295 at 61.2, and the recording has it at 345.
 - ~~**What happens when an HQ is lost in its own mode 3**: nothing read rolls the
   stack back.~~ **Read** for an HQ the hero boarded: the game frame's test of
   the boarded bot rolls the stack back to mode 0 once the HQ is gone or its

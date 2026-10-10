@@ -16,7 +16,7 @@ use parkan_formats::control::{
 use parkan_formats::cpt::{self, ControlPoint};
 use parkan_formats::mesh::NO_SLOT;
 use parkan_formats::mission::{Mission, Value};
-use parkan_formats::pose::{Pose, multiply, rotate};
+use parkan_formats::pose::{IDENTITY, Pose, multiply, rotate};
 use parkan_sim::behaviour::Behaviour;
 use parkan_sim::damage::GroundDamage;
 use parkan_sim::device::{Item, Motion};
@@ -328,6 +328,11 @@ pub struct Robot {
     /// The node sphere in the unit's frame ([`node_sphere`]): the centre the ground contact
     /// holds the body about, and the radius getting out of a bot reaches by.
     pub bound: (Vec3, f32),
+    /// The radius of the agent's bounding cylinder ([`agent_cylinder`]), which the unit's record
+    /// keeps at `+0x98` from its bind (`iron3d.dll:0x1007e5d6`): what the outer camera stands
+    /// off by, where the right button's ray starts and an eighth of how far behind an HQ its
+    /// command camera rides.
+    pub cylinder: f32,
     /// The sphere the collision pair moves and pushes out of an obstacle's faces, in the unit's
     /// frame. A unit's collision object keeps two spheres: the agent's (`+0x38`, interface
     /// `0x18` slot 9) and, in a record of its own at `+0x54`, the node sphere (interface `0x20`
@@ -400,6 +405,64 @@ fn join_spheres(spheres: &[(Vec3, f32)]) -> (Vec3, f32) {
     let centre =
         if weight > 0.0 { spheres.iter().map(|s| s.0 * s.1).sum::<Vec3>() / weight } else { Vec3::ZERO };
     (centre, spheres.iter().map(|s| s.0.distance(centre) + s.1).fold(0.0, f32::max))
+}
+
+/// The agent's bounding cylinder in the object's own frame: the two ends of its axis and its
+/// radius. `AniMesh.dll:0x10009510` works it out between the two spheres (`0x10009ac6`-
+/// `0x10009e47`, into the mesh's `+0x134`, `+0x140` and `+0x14c`), from the box it has just
+/// joined at `+0x54`:
+///
+/// - **The box** is every part's header box in one: the chassis's eight corners as they are,
+///   a hung part's turned by its first own node and set down where the node it hangs on stands
+///   (`0x10009967`-`0x10009a12`), and of them all the least and the greatest along each axis
+///   (`0x1000c3b0`).
+/// - **The cylinder** runs along the box's longest side -- z unless x or y is strictly longer,
+///   and x over y where those two tie (`0x10009ae0`-`0x10009c09`) -- from the middle of one end
+///   face to the middle of the other, and is as wide as half an end face's diagonal.
+///
+/// Interface `0x18` slot 12 hands the seven floats out (`0x100146a0`), and a record keeps the
+/// last of them as it is bound, once the object and all its parts are in the game. It is the
+/// rest pose's, as the two spheres are ([`node_sphere`]).
+pub fn agent_cylinder(assembly: &mut Assembly, parts: &[Part]) -> Option<(Vec3, Vec3, f32)> {
+    let (mut lo, mut hi) = (Vec3::splat(f32::MAX), Vec3::splat(f32::MIN));
+    for part in parts {
+        let Some(mesh) = assembly.mesh(&part.reference) else { continue };
+        let Some(corners) = mesh.mesh.corners else { continue };
+        // A part's own node 0 is left out of the merge and its node 1 hangs on the socket
+        // (`0x1000a79d`, `0x1000a7dd`), so the socket's place is the mount's.
+        let carried = (part.host >= 0).then(|| {
+            let first = if mesh.mesh.nodes.len() > 1 { mesh.mesh.world_pose(1) } else { IDENTITY };
+            Pose { translation: part.pose.translation, rotation: part.pose.compose(&first).rotation }
+        });
+        for corner in corners {
+            let at = match &carried {
+                Some(pose) => pose.apply(corner.map(f64::from)).map(|v| v as f32),
+                None => corner,
+            };
+            lo = lo.min(Vec3::from_array(at));
+            hi = hi.max(Vec3::from_array(at));
+        }
+    }
+    (lo.x <= hi.x).then(|| cylinder_of_box(lo, hi))
+}
+
+/// The cylinder `AniMesh.dll:0x10009510` stands in a box ([`agent_cylinder`]): its far end, its
+/// near end and its radius.
+fn cylinder_of_box(lo: Vec3, hi: Vec3) -> (Vec3, Vec3, f32) {
+    let side = hi - lo;
+    let axis = if side.z >= side.x && side.z >= side.y {
+        2
+    } else if side.x >= side.y {
+        0
+    } else {
+        1
+    };
+    let middle = (lo + hi) * 0.5;
+    let (mut far, mut near, mut across) = (middle, middle, side);
+    far[axis] = hi[axis];
+    near[axis] = lo[axis];
+    across[axis] = 0.0;
+    (far, near, across.length() * 0.5)
 }
 
 /// The agent's node sphere, which interface `0x20` slot 3 hands out by default
@@ -692,6 +755,7 @@ impl Robot {
         let joined = agent_sphere(assembly, &parts);
         let collision = joined.unwrap_or((Vec3::ZERO, 0.0));
         let bound = node_sphere(assembly, &parts);
+        let cylinder = agent_cylinder(assembly, &parts).map_or(0.0, |(_, _, radius)| radius);
         // Both holds on the node sphere's radius ask whether the unit's Type carries the
         // robot's bit (`MBehaviour` `+0xafc` through interface `0x10` slot 14,
         // `Control.dll:0x1001a55a`, `0x1001df88`).
@@ -747,6 +811,7 @@ impl Robot {
             power,
             collision,
             bound,
+            cylinder,
             pair,
             target_point: None,
             steady: false,
@@ -1423,6 +1488,25 @@ mod tests {
         // No gear nodes count as both sides whole.
         let bare = Heft { nodes: vec![node(0, 0, 600.0, 0.0, 0)], ..heft() };
         assert!((bare.factors(0, |_, _| (1.0, false)).0 - 0.8).abs() < 1e-6);
+    }
+
+    #[test]
+    fn a_boxs_cylinder_lies_along_its_longest_side_and_is_half_an_end_faces_diagonal_across() {
+        // `AniMesh.dll:0x10009ae0`-`0x10009e47`: z unless x or y is strictly longer, x over y on
+        // a tie; the ends are the middles of the two end faces.
+        let lo = Vec3::new(-1.0, -2.0, -3.0);
+        let (far, near, r) = cylinder_of_box(lo, Vec3::new(2.0, 2.0, 5.0));
+        assert_eq!((far, near), (Vec3::new(0.5, 0.0, 5.0), Vec3::new(0.5, 0.0, -3.0)));
+        assert_eq!(r, 2.5, "half of the hypotenuse of 3 and 4");
+        let (far, near, r) = cylinder_of_box(lo, Vec3::new(11.0, 2.0, 0.0));
+        assert_eq!((far, near), (Vec3::new(11.0, 0.0, -1.5), Vec3::new(-1.0, 0.0, -1.5)));
+        assert_eq!(r, 2.5, "x is the longest: 4 by 3 across");
+        let (far, near, r) = cylinder_of_box(lo, Vec3::new(2.0, 10.0, 1.0));
+        assert_eq!((far, near), (Vec3::new(0.5, 10.0, -1.0), Vec3::new(0.5, -2.0, -1.0)));
+        assert_eq!(r, 2.5, "y is the longest: 3 by 4 across");
+        // Ties: a cube stands on z, and x and y level over a shorter z lie along x.
+        assert_eq!(cylinder_of_box(Vec3::ZERO, Vec3::splat(2.0)).0, Vec3::new(1.0, 1.0, 2.0));
+        assert_eq!(cylinder_of_box(Vec3::ZERO, Vec3::new(2.0, 2.0, 1.0)).0, Vec3::new(2.0, 1.0, 0.5));
     }
 
     fn about(axis: [f64; 3], angle: f64) -> [f64; 4] {

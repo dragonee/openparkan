@@ -604,6 +604,14 @@ The last seven are a bounding **cylinder**, and its radius is exact: 11.6771
 on `R_B_02` is `sqrt(8.791² + 7.687²)`, 28.3412 on `fr_b_brige` is
 `sqrt(25.6² + 12.16²)`, 66.927 on `fr_b_bunker` is `47.325 × sqrt(2)`.
 
+**The cylinder stands in the box** (*measured*). On all 435 headers its two
+axis points are the middles of two opposite faces of the header's own box, and
+its radius is half that face's diagonal. It is about the box's longest side on
+163 and its shortest on 272, never the middle one. The game does not keep it:
+an agent works its own cylinder out of its parts' boxes joined, always about
+the longest side, and that is the bound a unit's record holds
+([40-command-mode.md](40-command-mode.md#r-the-unit-records-0x98--read-and-measured)).
+
 The box is the useful part, because **it is stated in posed space**. That
 makes it the oracle that decides whether a pose reading is right: with poses
 applied the drawn geometry reaches it on 305 of 434 meshes, without them on

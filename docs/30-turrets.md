@@ -847,17 +847,22 @@ cockpit.
 - **The places fit.** The table puts the hero's centre at 480 × (1 −
   tan 0.4 ÷ tan 0.65) = 213 near and 480 × (1 − tan 0.2 ÷ tan 0.65) = 352 far.
   The recording's are about 200 and 350 (*derived*).
-- **r on the hero.** The recording's right-far hero stands about 290 of 720
+- **r on the hero is 1.449** (*read*, and *measured*). It is the radius of the
+  hero's bounding cylinder, which its mesh stands in the box of its chassis and
+  its turret joined: 1.502 × 2.478 across and 3.372 tall, so the cylinder is
+  upright and r is half the diagonal of 1.502 × 2.478
+  ([40-command-mode.md](40-command-mode.md#r-the-unit-records-0x98--read-and-measured)).
+  So the far places stand 6.52 m behind the eye and the near ones 3.62 m, 0.22 m
+  below it (*derived*).
+- **The recording agrees** (*seen*). Its right-far hero stands about 290 of 720
   pixels tall, 145 on a half-size frame.
   - The engine draws Mission 01's hero at that place 170 tall with r = 1.15,
     the chassis mesh's sphere.
   - It draws 135 with 1.47, the chassis mesh's box's half-diagonal, and 88 with
     2.18, the joined sphere.
-  - A multi-part mesh works its bound's radius out of a box
-    (`AniMesh.dll:0x10009d0f`: the half-diagonal between `+0x78` and `+0xa8`).
-  - So the recording favours a box's half-diagonal of about 1.3–1.5 m (*seen*).
-    Which box that is was not traced
-    ([40-command-mode.md](40-command-mode.md#not-established)).
+  - So the recording puts r at about 1.3–1.5 m, and 1.449 is inside that. The
+    engine stood off by 1.47 until the read; the two differ by a pixel or two
+    of the hero's height at that place.
 
 ## Gun sockets are the mesh's `Base_*` nodes, and their kind is the label — *measured*, and *read*
 
@@ -1235,5 +1240,9 @@ listed are `r_t_01`–`02`, `r_l_01`–`07`, `r_m_01`–`04`, `r_b_01`–`04`,
   the camera's **infrared**, carried over so the outer shot keeps the night sight
   the cockpit had ([The outer camera](#the-outer-camera--read-and-measured),
   [35-hud.md](35-hud.md#the-indicators--read-and-seen)).
-- **Which box r, the unit record's `+0x98`, is the half-diagonal of**
-  ([40-command-mode.md](40-command-mode.md#not-established)).
+- ~~**Which box r, the unit record's `+0x98`, is the half-diagonal of**~~ —
+  **read**, and **measured**: the end face of the box the unit's mesh joins
+  from all its parts' header boxes, the face across the box's longest side
+  (`AniMesh.dll:0x10009941`–`0x10009e47`). 1.449 on Mission 01's hero, where the
+  box is the chassis's and the turret's, 3.372 tall
+  ([40-command-mode.md](40-command-mode.md#r-the-unit-records-0x98--read-and-measured)).
