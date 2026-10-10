@@ -759,10 +759,27 @@ CPUs" in the game's own interface (`iron3d.dll` string 3067).
   `Problems0` itself. Because the refused problem was marked **solved** rather
   than left standing, function 2's duplicate test (`0x10004c50`, same code,
   same *p1* and *p2*) no longer blocks it, and the next want raises it afresh.
+  That was *derived* here from what the nine sites need, and is now *read*:
+  `fn8(ST_SOLVED)` retires the record — `0x10005710` calls `0x10005010`, which
+  zeroes the code and both parameters the test compares, and only then writes
+  the state ([15-behaviour.md](15-behaviour.md#what-ends-a-problem--read-and-measured)).
   So the answer to *retry, drop or queue* is **drop** at every level: the
   factory drops the task, the handler drops the problem, and the clan comes
   back only when something wants a robot again. `ai.dll:0x10007fd0`, named here
   before, is only a helper in the handlers' code that evaluates one argument.
+- **A build that is taken holds its problem until the factory is idle** —
+  *read*, and *measured*. All 9 handlers go on to attach the factory as the
+  problem's critical unit, set `ST_SOLVING` and file `ACTION_NOTHING_DOING` on
+  it. The clan's takt tests that action at its head: true when the factory is
+  there and its order list is empty, or headed by order 1, 18 or 19
+  (`ai.dll:0x10005230`–`0x1000526a`). So the takt after a bot is made the
+  problem is retired, the factory is let go — with order 9, in an AI's clan —
+  and the want is raised afresh and drawn again in that same takt: **one build
+  of a type at a time a clan** — the raise makes no second problem for the same
+  type while one stands — **and the next begun within a takt of the last**. A factory
+  captured or destroyed under a build is a critical unit lost, which ends the
+  problem the same way. And a want heavier than the one that raised the
+  problem takes it over, its `SELECT_*` with it.
 
 So a clan with 5 minds can have at most 5 bots alive, and its factories stop
 until one is lost. Buildings take no mind. A build under way holds a mind only
@@ -1340,6 +1357,13 @@ construction slows research.
   problem comes back only when one of the 108 raises in the corpus wants a
   robot again ([The bot
   limit](#the-bot-limit-is-the-clans-mind-count--read-and-measured)).
+- ~~**Why a problem marked solved does not block the next raise of its want**,
+  the raise's duplicate test matching on code and two parameters alone — and
+  what ends the problem of a build the factory did take.~~ **Read**: `fn8`
+  retires the record for `ST_SOLVED`, code and parameters zeroed, before it
+  writes the state; and a taken build's problem is retired by the clan's takt
+  once the factory it holds has nothing doing, or is lost
+  ([15-behaviour.md](15-behaviour.md#what-ends-a-problem--read-and-measured)).
 - ~~**Which of Mission 03's units hold a mind, and what the factory's "Available
   CPUs" counts** as a build runs: the 4 from 221.5 s, when the finished bot
   should hold the mind its build reserved, and the five warbots built on four

@@ -616,6 +616,18 @@ before the design became a candidate. And four of the nine factories are placed
 with `FreeBotNum` 50 to 101, the other five with 1, so C03 M02's `Enm2`, on
 100, never pays for a warbot at all.
 
+**What a build that is taken does to its clan's plan** (*read*): the problem
+that ordered it holds the factory as its critical unit and stands until the
+factory has nothing doing, which the clan's takt tests at its head — an empty
+order list, or one headed by order 1, 18 or 19. The takt after the bot is made
+the problem is retired and the factory let go, with order 9,
+`ORDER_ROBOT_REPARE`, replacing, in an AI's clan (`ai.dll:0x10003e80`); the
+want is raised and drawn again in that same takt
+([15-behaviour.md](15-behaviour.md#what-ends-a-problem--read-and-measured)).
+The one way a factory is let go **with a build under way** is its problem's
+life running out under it, and what `M_Task_Reload`, given to a factory to
+replace its orders, does to that build is not read.
+
 ## Mission 02 — *measured*, *derived* and *seen*
 
 - **The build is a free bot of 60 s.** The Large Factory `lplant01.dat` is

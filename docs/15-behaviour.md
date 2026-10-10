@@ -409,18 +409,19 @@ Unused functions are the sixteen no shipped script calls.
 
 | fn | uses | arguments | does |
 |---:|---:|---|---|
-| 2 | 176 | code, weight, *a*, *b*, *p1*, *p2*, *p3* | raise the problem the code's variable names; not again while one with the same code, *p1* and *p2* stands (`0x10004c50`) |
-| 8 | 179 | state | set the running problem's state; `ST_SOLVED` and `ST_UNSOLVED` release its units first |
+| 2 | 176 | code, weight, *a*, *b*, *p1*, *p2*, *p3* | raise the problem the code's variable names; not again while one with the same code, *p1* and *p2* stands (`0x10004c50`). A raise that meets one at a weight **not below its own** gives it the new weight, the new *p3* and its life again; a lighter one does nothing ([below](#the-planner-when-a-_start-runs-and-when-a-_continue--read-and-measured)) |
+| 8 | 179 | state | set the running problem's state; **`ST_SOLVED` and `ST_UNSOLVED` retire it**, and the state is written into the freed record ([What ends a problem](#what-ends-a-problem--read-and-measured)) |
 | 12 | 91 | — | the running problem's weight |
 | 62 | 7 | weight | set it |
 | 29 | 163 | 0, 1 or 2 | the running problem's *p1*, *p2* or *p3*; `ERROR` if it has none |
-| 27 | 147 | action, target kind, target | record an `ACTION_*` and its target on the running problem |
-| 6 | 54 | *id*, `UNIT_NORMAL`/`_CRITICAL` | attach a unit to the running problem, marked critical or not |
-| 7 | 28 | — | release the running problem's units |
+| 27 | 147 | action, target kind, target | file an `ACTION_*` and its target on the running problem: a condition the clan's next takts test, and which retires the problem when it comes true |
+| 6 | 54 | *id*, `UNIT_NORMAL`/`_CRITICAL` | attach a unit of the clan's own list to the running problem, and write its critical mark, which is the unit's own; an id not on the list attaches nothing (`0x1000a05d`) |
+| 7 | 28 | — | let the running problem's units go, each with order 9 in an AI's clan |
 | 45 | 14 | — | the running problem's units' summed strength |
 | 50 | 14 | order | a unit of the running problem executing that order |
 | 33 | — | *n* | run `Problems<n>` as the problem handler from now on |
-| 4, 5, 20, 42, 48 | — | *p*, … | 7, 8, 27 on problem *p*; a field; a capture-capable unit |
+| 4, 5, 20, 48 | — | *p*, … | 7, 8, 27 on problem *p*; a capture-capable unit |
+| 42 | — | *n* | store *n* at the running problem's `+0x48`, how its actions combine — but only when *n* is 0, which is what the field already holds (`0x1000c14d`) |
 
 **The weight is a priority** (*read*). Functions 13, 14 and 25 take a unit that
 is busy on another problem only when that problem's weight is **below** the
@@ -435,21 +436,21 @@ slot `0xfffe`) is taken by nobody.
 |---:|---:|---|---|
 | 25 | 85 | `TAKE_*`, [strength in/out, target kind, target…] | open a group in the running problem and fill it: `TAKE_ALL_FREE` every free unit; `TAKE_ALL_BATTLE_UNITS` every battle unit that is free or on a problem of another code; `TAKE_BY_HITS` battle units nearest the target, free ones first and then those on lighter problems, until their summed strength reaches the amount — writing back what it gathered when that falls short. `ERROR`, and no group, if it gathers nothing |
 | 28 | 85 | *g*, then as function 15 | give every unit of the group the order; 1 if all took it |
-| 24 | 7 | *g* | release the group |
+| 24 | 7 | *g* | release the group: each unit it lists leaves its problem, with no order, and the group stands on empty (`0x100055b0`) |
 | 21, 22, 23, 26 | — | … | release, open and add to a group |
 
 **Units.**
 
 | fn | uses | arguments | does |
 |---:|---:|---|---|
-| 15 | 236 | *id*, order, insert, parameter, four floats, target kind, target… | build an order packet and give it to the unit: result 1 taken, 0 refused, **5 no such unit**. The unit is found by logical id through the clan areal map's slot 7, as for 52, so **any clan's** unit takes it; a place's two words become the packet's float x and y (`0x10008054`, [34-progression.md](34-progression.md#what-the-scripts-ask--read-and-measured-1)). The packet is [31-packages.md](31-packages.md)'s |
+| 15 | 236 | *id*, order, insert, parameter, four floats, target kind, target… | build an order packet and give it to the unit: result 1 taken, 0 refused, **5 no such unit**. The unit is found by logical id through the clan areal map's slot 7, as for 52, so **any clan's** unit takes it; a place's two words become the packet's float x and y (`0x10008054`, [34-progression.md](34-progression.md#what-the-scripts-ask--read-and-measured-1)). The packet is [31-packages.md](31-packages.md)'s. Before it reads an operand it tests who is asking: a SuperAI started as the local player's, with 1 and not 2, gives the order only if its clan is number 0 (`0x1000809c`; function 28 the same, `0x1000ba49`) |
 | 14 | 53 | `UNIT_ANY_UNIT` type · `UNIT_ANY_CAPTURER` · `UNIT_ANY_NEAREST_CAPTURER` target kind, target | pick a unit: one of a type, a capturer, or the capturer that reaches the target soonest by distance over its live top speed (IControl 145, `0x100091b0`) |
 | 13 | 2 | `UNIT_FREE_UNIT`/`_FREE_CAPTURER`/`_ANY_UNIT`, type | pick a free unit of a type, a free capturer, or one free or on a lighter problem |
-| 51 | 39 | *id*, `TRUE`/`FALSE` | reserve a unit from every problem, or free it |
+| 51 | 39 | *id*, `TRUE`/`FALSE` | reserve a unit from every problem, or free it: it writes the unit's problem word, `0xfffe` or −1, and nothing else (`0x1000e0d9`, `0x1000e0be`), so the problem the unit was on goes on counting it |
 | 34 | 29 | type | how many entries of the running clan's own SuperAI list (`+0x8c`) have **exactly** that type and a logical id; a building is on the list (`0x10009c30`, [34-progression.md](34-progression.md#what-the-scripts-ask--read-and-measured-1)) |
 | 31 | 48 | *clan*, class mask | how many of clan *clan*'s units have a type sharing a bit with the mask: the entries of that clan's SuperAI unit list (`0x10055398[clan] +0x8c`) whose logical id is set ([34-progression.md](34-progression.md)) |
 | 38 | 13 | *clan*, `FREE_UNITS`/`ALL_UNITS` | the summed strength of that clan's battle units |
-| 11 | 11 | type | 1 when the clan already has as many of the type as its `dMax*` variable allows, or when a per-type counter the brain keeps (`+0x3e0`..`+0x3f8`) is set |
+| 11 | 11 | type | 1 when the clan already has as many of the type as its `dMax*` variable allows, or when a per-type counter the brain keeps (`+0x3e0`..`+0x3f8`) is set. The seven counters are stepped as a building is filed on the clan's list, one for each of the Types `0x80000004`, `…08`, `…10`, `…40`, `0x80100000`, `0x80200000` and `0x80000400` (`0x1000194f`–`0x100019a9`, slot 4's event 2); what lowers them is not followed |
 | 49 | 9 | — | the clan's free minds |
 | 39 | 1 | *id* | 1 when the id names an object |
 | 52 | 47 | *id* | the object's **owner**, its slot 17: a clan's index, 65534 once destroyed; `ERROR` only when no object answers the id. The object is the system areal map's by logical id, asked through the clan areal map's slot 7 ([34-progression.md](34-progression.md#what-the-scripts-ask--read-and-measured)) |
@@ -723,6 +724,41 @@ the CRT's own at `0x1001d6d0`, `timeGetTime` the import at `0x10034128`). An
 index at or past the candidate count falls back to 0, and `n = 0` — what the
 constructor leaves — always takes index 0. So the count is a **spread**: how
 far down its own ranking the clan's next build may fall.
+
+**How free the draw is** (*read*, and *measured*). Three things about it that
+the formula does not show:
+
+- **`rand()` is never seeded.** The module's CRT is its own, single-threaded
+  copy: `rand` keeps its state in one dword, `0x100519d8`, which holds 1 in the
+  file, and steps it by × 214013 + 2531011 to answer bits 16 to 30. Of the
+  3788 dwords the loader fixes up in `ai.dll`, **three** hold that address, and
+  all three are `rand`'s own instructions (`0x1001d6d3`, `0x1001d6e3`,
+  `0x1001d6e8`): there is no `srand`. The control is the `_Start` pass's flag,
+  whose three sites the same count returns. So the stream is the same in every
+  game — 41, 18467, 6334, 26500 — and it is **one stream for every clan**,
+  drawn on by three callers: each clan's takt for its jitter (`0x100017df`),
+  function 70 (`0x1000f11a`) and this draw (`0x10010ac3`).
+- **The clock is what frees it.** `timeGetTime` is the millisecond clock, taken
+  as the takt happens to run, so the sum's remainder is one index in
+  `spread + 1` each, whatever `rand` said.
+- **The remainder is signed.** The sum is divided with `cdq` and `idiv`
+  (`0x10010ade`) and the result tested against the count with a signed `jl`
+  (`0x10010af1`). Once the clock passes 2³¹ − 32,767 ms — **24.8 days** since
+  the machine started — the sum is negative, the remainder is −*n* to 0, and a
+  negative index passes the test and reads the ranking array **before its
+  first entry** (`0x10010b02`). Index 0 is the only draw of the `spread + 1`
+  that then lands in the array. Not seen, and what it reads is the heap's.
+
+The fall-back to 0 changes no shipped draw while the clock is below that
+(*measured*). Each of the six scripts that set a spread has more researched
+warriors than `spread + 1` at every level, 11 against 7 at the least (`c2m3e`
+on easy; [What each clan may build](#what-each-clan-may-build--measured)). The
+8 raises that ask for something else — 4 a `ROBOT_TRANSPORT` and 4 a
+`ROBOT_BUILDER`, all by `SELECT_FASTEST` — are `c2m3e`'s, `c3m1e`'s and
+`c4m2e2`'s, whose trees as shipped have researched **none** of the store's four
+transports and, `c4m2e2`'s, none of its four builders, so the pick has no
+candidate and the order is not given; and `scream`'s, with one of each and no
+spread.
 
 ### What each `SELECT_*` scores — *read*
 
@@ -1000,17 +1036,111 @@ from its count and its kind.
 - **No walker and no flyer is named in either recording.** A ranking of the
   whole store by the figures this page carried before would have had `Enm1`
   build small walkers.
-- **Not explained**: *MWW-21*, *-22* and *-23*, and *LTW-34* and *-35*, whose
-  clan the count does not settle. `23_m2`, a Medium Wheel, is the **eighth** of
-  `Enm1`'s ranking, one past the spread; `Enm2`'s `SELECT_BEST_COMBAT` raises,
-  spread 2, reach only the three large *T*. And *MTW-3*, *-4* and *-5* in a
-  row are one design of seven drawn three times running. What else decides
-  which of a clan's orders becomes a unit — a build that is ordered and never
-  finished is not named — is not read here.
+- **Not explained**: *MWW-21*, *-22* and *-23*, and *LTW-34* and *-35*.
+  `23_m2`, a Medium Wheel, is the **eighth** of `Enm1`'s ranking, one past the
+  spread; `Enm2`'s `SELECT_BEST_COMBAT` raises, spread 2, reach only the three
+  large *T*. And *MTW-3*, *-4* and *-5* in a row are one design of seven drawn
+  three times running. [Below](#enm1s-builds-against-the-read--read-measured-and-not-explained).
 
 The names were read off the recordings in this round's playthrough analysis;
 *MTW-3* (Part 6.5, 9:10) and *SWW-5* (19:58) were looked at again here, at the
 video's own resolution.
+
+#### `Enm1`'s builds, against the read — *read*, *measured*, and *not explained*
+
+The read was gone over again from the raise to the factory, each step against
+the binary, to find what makes `Enm1` build medium tracked warbots first.
+**Nothing in it does.** What each step is, and what it leaves:
+
+- **The type and the mode.** Function 15 hands the pick its order's parameter
+  and its `TARGET_BY_NAME` target (`0x1000866a`, `0x10008671`), which
+  `PBM_ROBOT_NEEDED_Start` reads back out of the problem's *p1* and *p3*:
+  `ROBOT_BATTLEUNIT`, and whatever `SELECT_*` the problem holds **at that
+  takt** — the last heavier want's, not the first raise's
+  ([The planner](#the-planner-when-a-_start-runs-and-when-a-_continue--read-and-measured)).
+- **The candidates.** Type equal, the byte set, not a building: **44** of the
+  59 on `c3m2e.trf`. The store's test of a design and the factory's of a paid
+  bot are the same walk on the same tree, *researched* and *in the tree* of
+  every part (`ai.dll:0x10011530`, `Behavior.dll:0x10029810`), and on this tree
+  a design is researched whole or has a part out of it, 44 and 15, so nothing
+  the store lets through does the factory refuse.
+- **The figures** are the game's own, at ratio 1 on every level
+  ([above](#what-a-strength-is--read-and-measured)).
+- **The sort** takes the first of what is left that scores strictly more
+  (`0x10010a5c`, `test ah, 5`): largest first, equals in the store's order.
+- **The spread** is 6: `6 − 6 × fDifficulty` with `fDifficulty` 0, through
+  `_ftol`; function 69 has one call here, in `Init`, and the store's field one
+  writer.
+- **The factory.** `Enm1`'s is a Large Factory, `lplant01`, size 4, placed with
+  `FreeBotNum` 1: no design of the seven is too large for it, and only its
+  first build is free.
+
+*Measured*, `Enm1`'s ranking by `SELECT_BEST_COMBAT`, the game's own floats:
+
+| | design | name | strength |
+|---:|---|---|---:|
+| 1 | `AI_LT_10` | *LTW* | 6,705 |
+| 2, 3 | `32_l2`, `AI_L2` | *LTW* | 4,373 |
+| 4 | `AI_LT_21` | *LTW* | 3,664 |
+| 5, 6 | `32_l1`, `AI_L1` | *LWW* | 2,573 |
+| 7 | `m_stopper` | *MTW* | 458.7 |
+| 8 | `23_m2` | *MWW* | 398.1 |
+| 9, 10 | `m_dblhow`, `41mtrk1` | *MTW* | 278.3, 254.8 |
+| 11 | `23_m1` | *MWW* | 253.8 |
+| 12 | `41mwlk1` | *MSW* | 250.5 |
+
+So as read a build is *LTW* four times in seven, *LWW* twice and *MTW* once,
+and **never *MWW***. The recordings name **13** of `Enm1`'s builds — *-3*,
+*-4*, *-5*, *-6*, *-8* and *-21* to *-23* in Part 6, *-3*, *-8*, *-9*, *-10*
+and *-21* in Part 6.5; the *MWW* are its own, `Enm2`'s *-21* to *-26* being
+*SWW* — and they are **5 *MTW*, 4 *MWW*, 3 *LWW* and 1 *LTW***, where the read
+expects 1.9, 0, 3.7 and 7.4. Three *MTW* running is 1 in 343, and one *MWW* is
+not possible.
+
+**The recordings are the read's ranking without the `AI_*` files**
+(*measured*). Four of the first six are `AI_L1`, `AI_L2`, `AI_LT_10` and
+`AI_LT_21`. Leave those out and the first seven are `32_l2`, `32_l1`,
+`m_stopper`, `23_m2`, `m_dblhow`, `41mtrk1` and `23_m1`: **one *LTW*, one
+*LWW*, three *MTW* and two *MWW***, and the eighth, one past the spread, is the
+walker. That is every kind the recordings name and neither kind they do not,
+and 13 draws from it expect 5.6 *MTW*, 3.7 *MWW*, 1.9 *LWW* and 1.9 *LTW*
+against the 5, 4, 3 and 1 seen. `Enm2`'s three by `SELECT_BEST_COMBAT` become
+`32_l2`, `32_l1` and `m_stopper`, which *LTW-34* and *-35* fit as well as they
+fit `Enm1`.
+
+*Not established*: why the recorded game would draw without them, and it is
+*inferred* that its `UNITS\UNITS\AI\` does not hold them. In this install
+`AI_L1.dat` and `AI_L2.dat` are **byte for byte** `32_l1.dat` and `32_l2.dat`,
+so nothing the game reads off a design — its Type, its parts, its figures, its
+research — can let one of a pair through and stop the other, and the store's
+loader takes every `*.dat` the directory lists with no test of the name
+(`0x10010686`–`0x10010715`). Only the files' not being there does it. The ten
+`AI_*` files are the only ones in the directory with capitals in their names.
+Whether the recording is of another build of the game is not something the
+install can answer.
+
+The two recordings also agree on every count they share: *MTW-3*, *LWW-8*,
+*MWW-21*. Whether Part 6.5 starts from a save of Part 6's is not established.
+
+**What the names are** is not in doubt: the letters are the object's size
+class, its chassis type and its Type, and the number one more than a count its
+clan keeps ([35-hud.md](35-hud.md#name-and-status--read-and-seen)), so *MTW* is
+a medium tracked warrior and only `m_stopper`, `m_dblhow` and `41mtrk1` of the
+44 are one.
+
+**One more thing the read gives that the recordings do not show.** From the
+takt after the player takes one of `Enm1`'s buildings, the clan — whose every
+warbot is too large to capture — asks for a robot at 0.801 by `SELECT_FASTEST`,
+and that want takes the build problem over for as long as the clan has no
+capturer ([What ends a problem](#what-ends-a-problem--read-and-measured)). Its
+seven fastest are small flyers, `speed_c4` at 27.6 m/s down to `laser_cpt` at
+24.6, none of them an `AI_*` file. The mission's first objective has the player
+take `Enm1`'s generator, and neither recording names an `Enm1` flyer. Whether
+one was built and not looked at, or none was, is *not established*.
+
+So the read stands as it was, and what it gives on this install's files is not
+what was recorded: the kinds and their shares are those of a store with the
+`AI_*` designs out of it.
 
 ## `fDifficulty` is the game level, 0, 0.5 or 1 — *read*
 
@@ -1029,14 +1159,20 @@ slot 4 and writes it with the float setter (`0x10013650`):
 | 2 | 1.0 |
 | 3, 4, 5 | 0.0 |
 
-Its one caller is the SuperAI's constructor (`0x10001270`), which passes one of
-`CreateSuperAI`'s own arguments (`0x10001265`, `[esp + 0x7fc]`). The index is
-therefore `iron3d.dll`'s game level — `Iron_3D.ini`'s `[CS] GAME_LEVEL`, 0
-easy, 1 medium, 2 hard ([22-settings.md](22-settings.md)), the same 0/1/2 the
-level ratio is picked by ([26-damage.md](26-damage.md)) — which the constructor
-is handed per clan; that last step is *derived*, from there being no other
-0-to-2 level in the engine and from the declared default, 0.5, being exactly
-this table's medium.
+Its one caller is the SuperAI's constructor (`0x10001270`), which passes
+`CreateSuperAI`'s **seventh** argument (`0x10001265`, `[esp + 0x7fc]` under a
+frame of `0x7e0`). The index is `iron3d.dll`'s game level — `Iron_3D.ini`'s
+`[CS] GAME_LEVEL`, 0 easy, 1 medium, 2 hard ([22-settings.md](22-settings.md)),
+the same word the level ratio is picked by ([26-damage.md](26-damage.md)).
+That last step was *derived* here and is now *read*: `CreateSuperAI` is
+`ai.dll`'s ordinal 1, `iron3d.dll` calls it from one place (`0x100391d2`, in
+`0x10039170`), and that routine's one caller walks the mission's clan records
+and pushes **the `+0x150` of the object at the game's `+4`** as its second
+argument on each of its ways in (`0x10060204`, `0x1006021e`, `0x10060233`,
+`0x1006023e`, into `0x1006024a`), which `0x100391ad` hands on as the seventh.
+That is the word `GAME_LEVEL` is stored in (`0x10028e93`) and the one the level
+ratio reads, through the same two steps (`0x100760db`–`0x100760de`). Every clan
+gets the same level.
 
 **So every difficulty branch in the corpus is the game level.** `fDifficulty`
 appears in 25 of the 24 distinct formula lines the scripts carry
@@ -1178,11 +1314,19 @@ game's own arithmetic: property 54 on 70 of 70 robots, the gun total on 77 of
 77 records, and property 145 on 70 of 70, which is the constructor's own
 speed for the unit box ([38-designs.md](38-designs.md)).
 
-*Not established*: whether the game level's ratio
+~~*Not established*: whether the game level's ratio
 ([26-damage.md](26-damage.md#the-difficulty-ratio--read-and-measured)) reaches
-the object the fill builds. The install's file is at ratio 1, and what level it
-was written on is not known. The ratio would scale every warrior's hit points
-alike and change no ranking.
+the object the fill builds.~~ **It does not** (*read*, and *derived*). The fill
+hands `CreateObjectFromScheme` the path, a matrix whose sixteen floats are all
+1.0, and then 0, 0, −1, −1, 0 and −1 (`0x10010c4e`–`0x10010ce3`): **clan 0,
+create flags 0**, no host, no id. So the object takes no mind, and it is the
+clan's whose number is 0 whichever clan's store is being filled — the
+player's, in all 9 missions where a clan builds by name (*measured*). The
+ratio is given to the warriors of clans not allied with the player's and never
+to its own, so every clan's store holds the figures at ratio 1 on every level,
+which is what the install's file holds. And had it reached them it would not
+have scaled them alike: property 54 adds a shield the node's ratio does not
+touch.
 
 ### What a `TAKE_BY_HITS` amount is worth — *measured*, and *derived*
 
@@ -1237,11 +1381,10 @@ walks it four times, in this order:
 
 1. **The drain** (`0x10005910` → `0x10004ee0` per problem). Every problem with
    a code loses its **`+0x2c`** from its **`+0x24`**, and at 0 or below it is
-   retired: `0x10005010` releases its units and zeroes its code, its three
-   parameters and its state, which frees the slot. A test ahead of the
-   subtraction, taken only while the drain is above 0, retires it the same way
-   on its `+0x20` count instead (`0x10004efa`–`0x10005040`); what that count
-   holds is not followed.
+   retired: `0x10005010` lets its units go and zeroes its code, its three
+   parameters and its state, which frees the slot. The same step tests the
+   problem's units and the actions function 27 filed on it, and any of those
+   retires it too: [What ends a problem](#what-ends-a-problem--read-and-measured).
 2. **The `_Continue` pass** (`0x10001e50`). Every problem whose state is
    `ST_SOLVING`, in list order: it writes the problem's **index** into
    `dCurrentProblem` (`0x10001ea0`) and runs handler
@@ -1251,21 +1394,43 @@ walks it four times, in this order:
    the problems that are neither `ST_SOLVING` nor `ST_SOLVED`, collects every
    problem at exactly that weight into `0x10054ac8`, and for each writes its
    index into `dCurrentProblem` (`0x10001da4`) and runs handler
-   `[SuperAI + code × 4 + 0xb4]`. If a handler leaves its problem neither
-   solved nor solving, a flag is set and **the whole pass runs again**
-   (`0x10001e3d`), so one takt drains the list from the heaviest down.
+   `[SuperAI + code × 4 + 0xb4]`. Then it looks at each problem's state again,
+   and **it runs another round only if every handler left its problem solving
+   or solved**.
 
-**Two things the pass's reading leaves open**, both of which an engine running
-it has to answer. `fn8(ST_SOLVED)` is read as far as releasing the problem's
-units; whether the record then keeps its slot is not, and it matters, because
-the raise's duplicate test (`0x10004c50`) matches on code, `p1` and `p2` alone
-and would block the next want for as long as a solved record stood — which
-[23-economy.md](23-economy.md#the-bot-limit-is-the-clans-mind-count--read-and-measured)'s
-reading of the nine build sites says does not happen. And the `_Start` pass's
-repeat is read as *while any handler left its problem unstarted*: taken
-literally that never ends, because `PBM_ROBOT_NEEDED_Start` returns without
-setting a state whenever the clan has no factory, and the pass would offer the
-same problem again every round. What the repeat excludes is not read.
+**The repeat, read to its condition.** The pass keeps one flag, the byte at
+`0x10054c74`. It is cleared **once**, as the pass is entered (`0x10001bf8`,
+ahead of the loop's head at `0x10001c04`), and set to 1 for every handler that
+returns with its problem's state neither 2 nor 1 (`0x10001e07`–`0x10001e22`).
+The jump back to the head is taken while the flag is **clear**
+(`cmp [0x10054c74], bl` with `bl` 0, `je 0x10001c04`, at `0x10001e37`). So a
+round that started or solved everything it ran goes on to the next weight —
+those problems are out of the next round by their state — and **the first round
+in which one handler will not start ends the pass**: the rest of that round's
+problems are still run, and nothing lighter is until the next takt. An earlier
+reading here had the flag's sense backwards, repeating *while* a handler left
+its problem unstarted, which taken literally never ends; the three relocated
+references to the byte are these three sites and no other (*measured*).
+
+Two more things the head of the pass decides. The largest weight is found from
+**0** with a strict comparison (`0x10001c82`, `and eax, 0x4100`), and a round
+whose largest is still 0 runs nothing (`0x10001d6f`, against the 0.0 at
+`0x10034280`): **a problem of weight 0 or less is never started.** *Measured*:
+all 176 raises pass a weight above 0 — 79 a literal from 0.4 to 0.85, 6
+`0.8 + fT` or `0.7 + fT`, and 91 the running problem's own, 89 of them with a
+hair added. And a handler is not run while another is running, the byte at the
+SuperAI's `+0x78` (`0x10001dcb`).
+
+*Measured* over the **72** `_Start` handlers of the 58 scripts: **41 have a way
+through that calls function 8 nowhere**, and one of them, `c5m1p`'s
+`PBM_BASE_DEFENCE_Start`, never calls it at all. All nine
+`PBM_ROBOT_NEEDED_Start` are among the 41: with no factory they raise
+`PBM_BUILDING_NEEDED` a hair above themselves and return. As read, that ends
+the takt's pass with the robot problem still unstarted and at the top, so **a
+want the clan cannot start holds back every lighter problem** until it is
+solved, started or retired — two takts for a 25 / 24 that nothing raises
+again. The control is the other 31, every one of whose ways through sets
+`ST_SOLVING` or `ST_SOLVED`.
 
 **Nothing else writes `dCurrentProblem` or `dCurrentSender`** (*read*). The
 SuperAI keeps pointers to the two variables at `+0x868` and `+0x86c`
@@ -1292,9 +1457,38 @@ the script (`0x10011f40`, the suffixes are two strings at `0x1003d770` and
 `0x1003d778`) and caches their indices in the two 100-entry tables. **If either
 name is missing the raise is abandoned** (`0x10005aa1`, `0x10005aff`): no
 record is made and nothing is queued. Then, before the record is pushed, the
-list is searched for one with the same code, `p1` and `p2` (`0x10004c50`); a
-match **refreshes the standing problem's `+0x24` by `+0x28`** (`0x10005070`)
-instead of raising a second.
+list is searched for one with the same code, `p1` and `p2` (`0x10004c50`, three
+compares and nothing else: **not the state**), and a match is not raised a
+second time.
+
+**What a match does depends on the weights** (*read*, `0x10005bbd`–`0x10005c04`).
+The standing problem's weight is compared with the new raise's:
+
+- **the new one is lighter**: nothing. Not the life, not a field;
+- **the new one weighs as much or more**: the standing problem takes the new
+  weight (`0x10005bdf`) and the new **`p3`** (`0x10005bf7`), and its `+0x24`
+  takes its `+0x28` again (`0x10005070`).
+
+So a heavier want **takes the standing problem over**: its place in the
+`_Start` pass's order, and its third parameter — the `SELECT_*` of a
+`PBM_ROBOT_NEEDED`, the strength of a `PBM_PLACE_PROTECT`, which is why
+`Problems0` can raise the same place every takt with the strength it has just
+measured there and have the problem's handlers read it fresh through
+`fn29(d2)`. And from then on **the lighter want's raises no longer keep the
+problem alive**: `c3m2e`'s `Problems0` asks for a robot at 0.52 by
+`SELECT_BEST_COMBAT` each takt, and once its lost building's
+`PBM_BUILDING_INF_CAPTURE` has asked at 0.801 by `SELECT_FASTEST`, the 0.52
+raise is a lighter one and does nothing.
+
+A new record goes into the first slot whose code, `p1` and `p2` are all 0
+(`0x100073e0`, the same three compares against a blank record), and onto the
+end of the list when there is none.
+
+One thing the caching does (*read*, `0x10005a3b`–`0x10005a41`): a code whose
+`_Start` is already cached is not looked up again, **either name**. A script
+that defined a `_Start` and no `_Continue` would have its first raise abandoned
+and its second made. *Measured*: no script is in that position — every code's
+pair is whole or wholly missing in 58 of 58.
 
 The record, as the constructor lays it out (`0x10004e50`):
 
@@ -1322,11 +1516,14 @@ one of which passes two plain numbers:
 
 The commonest shape is *a* = *b* + 1, which leaves the problem exactly **two
 takts** unless the script raises it again — and a raise of the same code, `p1`
-and `p2` adds *a* back. So `PBM_ROBOT_NEEDED`, raised 70 times as 25/24, is a
-standing request the script must keep repeating, while the 28 raises of 1/0 —
-every `PBM_BUILDING_INF_CAPTURE`, `PBM_BUILDING_PROTECT` and
-`PBM_PLACE_PROTECT` — never expire and only a handler's `fn8(ST_SOLVED)` ends
-them.
+and `p2`, at a weight not below the problem's own, adds *a* back. So
+`PBM_ROBOT_NEEDED`, raised 70 times as 25/24, is a standing request the script
+must keep repeating, while the 28 raises of 1/0 — every
+`PBM_BUILDING_INF_CAPTURE`, `PBM_BUILDING_PROTECT` and `PBM_PLACE_PROTECT` —
+never expire by the counter. What ends those is an action come true, a
+critical unit lost, or a handler's `fn8(ST_SOLVED)`
+([below](#what-ends-a-problem--read-and-measured)); an earlier reading here
+said the last alone.
 
 **21 of the 176 raises are dead** (*measured*), because the script raises a
 code whose handler pair it never defines: 17 of `PBM_ROBOT_NEEDED` in `c1m2e`,
@@ -1336,6 +1533,172 @@ fails and the record is dropped, so four of the campaign's enemy clans ask for
 warbots they will never plan for. The control is the other 155, whose pairs all
 resolve, and the ten `_Start` handlers that sit in a script which never raises
 their code — the mirror image, and harmless.
+
+### What ends a problem — *read*, and *measured*
+
+Six things, and five of them are tested in one place: the drain's step,
+`0x10004ee0`, which the takt's first walk calls for each problem that has a
+code. The sixth is the script's own `fn8`.
+
+**The rest of the record** (`0x10004e50`, `0x10004be0`):
+
+| field | what |
+|---|---|
+| `+0x1c`, `+0x20` | the unit array — 100 entries, allocated at the first attach (`0x100050b2`) — and how many of them the record counts |
+| `+0x30` | a byte: a unit marked critical has left the problem |
+| `+0x34` | the list of actions function 27 files |
+| `+0x48` | how the actions combine: 0 any one, 1 all of them |
+| `+0x4c` | the list of groups function 25 opens |
+| `+0x60` | the clan's brain |
+
+The brain is not the SuperAI but the object embedded at its **`+0x7c`**, and
+every offset below a problem is in its coordinates: its `+0` is the clan's
+number, `+0x10` the clan's own unit list (the SuperAI's `+0x8c`), `+0x24` the
+problem list (`+0xa0`), `+0x35c` the clan areal map (`+0x3d8`), `+0x380` the
+word slot 5 started the SuperAI with (`+0x3fc`) and `+0x390` the design store
+(`+0x40c`).
+
+**Function 27 files a 16-byte record** (`0x100094f1`): the action, the kind of
+its target, the target, and a byte it clears. It pushes it on the list at
+`+0x34` (`0x10005530`) and leaves 0 in the result. The push has one other
+caller, function 20's handler, which no script calls.
+
+**One routine reads the list.** The evaluator is `0x10005180`, and it has one
+caller, `0x10004f67`, inside the drain's step; the step has one caller too, the
+takt's first walk (`0x100059b0`). Every other site that names the list is a
+constructor, a copy, a destructor or one of the two retires clearing it. So an
+action is tested **once a takt, at the head of it**, before any handler runs.
+
+**The walk, in order** (`0x10005910`). First the clan's own unit list
+(`0x10003e40` for each): a unit whose id no object answers, or whose owner word
+is no longer the clan's number, is **lost** (`0x10003fc0`) — its mind is freed
+and it leaves its problem. Then each problem (`0x10004ee0`):
+
+1. **Solving, and every unit it held has gone** (`0x100056c0`): the count is
+   above 0 and every entry it counts is a hole. Asked only of a problem with a
+   drain, or a `PBM_MAKE_RESEARCH` (`cmp [ecx], 0xa`).
+2. **With a drain above 0, the count at `+0x20`** (`0x10004efa`–`0x10004f15`):
+   a **solving** problem that holds **no** unit, or an **unstarted** one
+   (`ST_NONE`) that holds **one**. This is the test this page left unfollowed.
+3. **The life counter**, less the drain, at 0 or below (`0x10004f1a`).
+4. **An action come true** (`0x10004f32`–`0x10004fbd`), whatever the problem's
+   state.
+5. **Solving, with the byte at `+0x30` set** (`0x10005650`): if one of the units
+   it still counts is marked critical the byte is cleared; if none is, and the
+   count is above 0, the problem ends. Then test 1 again.
+
+Tests 3 and 4 retire through `0x10005010`, which zeroes the code, the three
+parameters and the state and clears the action and group lists; tests 1, 2 and
+5 through `0x10005040`, which is the same less the third parameter. Either
+frees the slot — a free slot is one whose code, `p1` and `p2` are 0 — and
+**neither touches the weight, the life, the reload or the drain**. The retire's
+four callers are tests 3 and 4 (twice, one for each value of `+0x48`) and
+`fn8`; the other's are tests 1, 2 and 5 and `fn8` (*measured*, every relative
+call and jump in the module).
+
+**What each action tests** — the evaluator's five arms, the table at
+`0x10005510`. Each first checks the target's kind, and an action filed with the
+other kind never comes true. The object is the one the clan areal map's slot 7
+answers for the id:
+
+| action | kind | comes true when |
+|---|---|---|
+| `ACTION_DESTROY` | by logic id | **no object answers the id** (`0x100051df`) |
+| `ACTION_NOTHING_DOING` | by logic id | the object **is there**, and its order list is empty (the behaviour's slot 4) or headed by order **1, 18 or 19** — stop, the construction sphere, shut down (`0x10005230`–`0x1000526a`, slot 6 copying the head) |
+| `ACTION_CAPTURE_BUILDING` | by logic id | the object is there and its owner word, slot 17, is the clan's number (`0x100052b6`) |
+| `ACTION_GROUP_DESTROY` | by group id | no unit the group lists answers its id; a group that lists none passes (`0x10005325`) |
+| `ACTION_GROUP_NOTHING_DOING` | by group id | every unit the group lists that answers has an **empty** order list — no order is excused here; a group that lists none passes |
+
+Two things follow that the names do not say. A unit that is gone has not
+*nothing doing*: the second arm wants the object. And a destroyed building is
+not *destroyed* by the first: its shell answers its id for good
+([65534](#65534-is-a-destroyed-objects-owner--read-and-measured)), so
+`PBM_BUILDING_PROTECT`'s `ACTION_DESTROY` on the building it guards, 1 / 0,
+stands as long as the mission does (*derived*).
+
+**What an action come true does.** With `+0x48` at 0 the first one retires the
+problem at once (`0x10004f96`–`0x10004fbd`). At 1 the step stops at the first
+that has not, and retires only when all have (`0x10004fd8`), the byte in each
+record remembering the ones already true. **Nothing shipped reaches 1**:
+outside the constructors and the copies the field has one writer, function 42's
+(`0x1000c168`), and that handler stores its operand only when the operand is 0
+(`0x1000c14d`) — a setter that can set nothing. No script calls 42 either; the
+control is function 27 beside it, called 147 times.
+
+**Letting units go** (`0x100050f0`, from both retires and from function 7).
+Each unit the record counts has its problem word cleared and is handed to
+`0x10003e80`, and then the array is freed, the count zeroed and the groups
+cleared. `0x10003e80` gives the unit **order 9, `ORDER_ROBOT_REPARE`, with
+target `0x204`, not defined, replacing its orders** — only when the brain's
+`+0x380` is 2, an AI's clan and not the local player's. So an enemy warbot
+whose problem has ended goes to refit, whatever it was doing; and so does the
+factory a build's problem held, which is by then idle. What `M_Task_Reload`
+makes of a building is not read.
+
+**A unit's leaving** (`0x10004010`, three callers: a unit lost, a unit attached
+elsewhere, a group released). The entry it had becomes a hole, −1; **the count
+is not lowered**; and if the unit is marked critical the problem's `+0x30` is
+set. The mark is the unit's, the `+0xc` of its own record, written by function
+6 alone (`0x10004080`, one caller): a group's fill attaches without it, so a
+unit keeps whatever function 6 last said of it. The count goes down in one
+place, a group's release, by one for each unit the group lists (`0x1000561e`).
+
+**`fn8`** (`0x10009b0d`, the setter `0x10005710`). For `ST_SOLVED` it calls the
+retire `0x10005010` and **then** writes 2 into the freed record; for
+`ST_UNSOLVED` it calls `0x10005040` and writes 3; any other value it writes as
+it stands. So a solved problem keeps nothing the raise's duplicate test could
+match — its code is 0 — and the `_Start` pass, which reads the state back, sees
+a 2 and counts the problem started. `ST_UNSOLVED` frees the slot the same way
+and reads as *not started*. The setter's other two callers are function 5,
+which no script calls, and function 65's routine, which marks a
+`PBM_BUILDING_CAPTURE` solved as it latches (`0x1001126b`).
+
+*Measured*, the 58 scripts:
+
+- **`fn8` is called 179 times, 122 with `ST_SOLVING` and 57 with `ST_SOLVED`;
+  no script passes `ST_UNSOLVED`.**
+- **All 147 `fn27` calls pass the kind their arm wants**: 53 `ACTION_DESTROY`,
+  21 `ACTION_CAPTURE_BUILDING` and 19 `ACTION_NOTHING_DOING` by logic id, 30
+  `ACTION_GROUP_NOTHING_DOING` and 24 `ACTION_GROUP_DESTROY` by group id. 125
+  sit in a `_Start` handler and 22 in one a `_Start` switches to; none in a
+  `_Continue`, **44 of whose 72 have no nodes at all**.
+- **Function 6 marks 26 of its 54 units critical**: the factory of all 9
+  `PBM_ROBOT_NEEDED_Start`, each of which then files `ACTION_NOTHING_DOING` on
+  that same factory, and the one unit or building the other 17 problems turn
+  on. The 28 it marks normal are all the capturers of
+  `PBM_BUILDING_INF_CAPTURE`.
+- **One of the 41 `_Start` handlers that can return without a word can be
+  holding a unit by then**: `c5m1p`'s `PBM_BASE_DEFENCE_Start`, the one that
+  never sets a state, which takes every battle unit the player has into a
+  group and sends them to patrol. Its problem is raised 15 / 1, so test 2
+  retires it at the next takt and lets them go — in the player's clan, with no
+  order. The other 40 either gathered nothing or let their group go again
+  (`fn24`) before they returned.
+- **12 of the 14 `PBM_BUILDING_INF_CAPTURE_Start` can leave a problem nothing
+  ends** (*derived*). With no capturer to send they raise `PBM_ROBOT_NEEDED` by
+  `SELECT_FASTEST`, set `ST_SOLVING` and return — ahead of the two `fn27` calls
+  at the handler's end — and no `_Continue` files an action. The problem is
+  raised 1 / 0 and its capturers are attached `UNIT_NORMAL`, so it has no
+  action to come true, no life to run out and no critical unit to lose: it
+  stands for the rest of the mission, its `_Continue` sending a capturer at the
+  building each time the last one's order is done, and asking for the clan's
+  fastest design every takt there is none. The two that do not are `c1m2e`,
+  which returns unstarted and so is tried again, and `c5m1e`, which raises
+  nothing.
+
+**So a build goes like this.** `PBM_ROBOT_NEEDED_Start` orders the factory,
+attaches it as the problem's critical unit, sets `ST_SOLVING` and files
+`ACTION_NOTHING_DOING` on it; `_Continue` is empty. While the factory builds,
+the problem stands — it holds a unit, its script raises it again each takt, and
+the action is false. The takt after the build is done the factory's list is
+empty, the action is true, and the problem is retired and the factory let go;
+`Problems0` raises the want afresh in that same takt and the `_Start` pass
+draws the next design. And a factory captured or destroyed is a critical unit
+lost: test 5 ends the problem at the next takt.
+
+The queue line this answers supposed that nothing but the actions ends a
+problem a handler left solving. Three other things in the same step do, and a
+solving problem that holds no unit does not last a takt if it has a drain.
 
 ## Reading a script
 
@@ -1724,9 +2087,13 @@ capturer — which is why the table stops one call deep.
   and 77 of 77. ~~The object at `+0x40c` behind functions 41, 43 and 65~~ is
   the design store, **read** in [What the store holds](#what-the-store-holds--read-and-measured):
   its records, the cache it writes and never reads, and the byte that keeps a
-  clan to the designs its tree has researched. The problem's action record
-  (`+0x34`) and the store's place list, behind functions 40 and 53, are not
-  read. The table says what each handler does with them. ~~The areal-map list function 32 tests~~ is now read:
+  clan to the designs its tree has researched. ~~The problem's action record
+  (`+0x34`)~~ is now **read**: a list of 16-byte records the drain's step tests
+  once a takt through one five-armed evaluator, the first to come true retiring
+  the problem — and the same step ends a problem on its units too, which is
+  what the count at `+0x20` is ([What ends a
+  problem](#what-ends-a-problem--read-and-measured)). The store's place list,
+  behind functions 40 and 53, is not read. ~~The areal-map list function 32 tests~~ is now read:
   a route's list of the units last reported inside it
   ([34-progression.md](34-progression.md)).
 - ~~**The two numbers a problem is raised with** — `fn2`'s third and fourth
@@ -1734,12 +2101,38 @@ capturer — which is why the table stops one call deep.
   engine does with a problem once raised: which problem handler runs when, and
   who writes `dCurrentProblem` and `dCurrentSender`.~~ All read. The two are a
   **life counter and a drain**, in clan takts of 7–8 s; `_Continue` runs for a
-  problem in `ST_SOLVING` and `_Start` for the heaviest that is not, repeated
-  until none is left to start; `dCurrentProblem` is written by those two passes
-  alone (`0x10001da4`, `0x10001ea0`) and `dCurrentSender` by the event
-  dispatcher (`0x10005d7c`) ([The planner](#the-planner-when-a-_start-runs-and-when-a-_continue--read-and-measured)).
+  problem in `ST_SOLVING` and `_Start` for the heaviest that is not, weight by
+  weight **until one will not start** — this line said *until none is left to
+  start*, which was the pass's flag read backwards; `dCurrentProblem` is
+  written by those two passes alone (`0x10001da4`, `0x10001ea0`) and
+  `dCurrentSender` by the event dispatcher (`0x10005d7c`)
+  ([The planner](#the-planner-when-a-_start-runs-and-when-a-_continue--read-and-measured)).
   When `Init`, `Mission` and `Problems<n>` run is read in
   [34-progression.md](34-progression.md).
+- ~~**What `fn8(ST_SOLVED)` leaves behind, and what the repeated `_Start` pass
+  excludes.**~~ Both **read**. The setter retires the problem for `ST_SOLVED`
+  and for `ST_UNSOLVED` alike and writes the state into the freed record, so a
+  solved problem has no code left for the raise's duplicate test to match, and
+  that test never looked at the state; and the pass excludes nothing — it runs
+  again only while every handler it ran started or solved its problem, and
+  stops at the first that did not ([What ends a
+  problem](#what-ends-a-problem--read-and-measured), [The
+  planner](#the-planner-when-a-_start-runs-and-when-a-_continue--read-and-measured)).
+  41 of the 72 `_Start` handlers can return without a word.
+- **Why the recordings' `Enm1` builds what it builds on C03 M02** — *narrowed*.
+  The read was gone over from the raise to the factory and stands: on this
+  install's files, a free draw among four large tracked, two large wheeled and
+  one medium tracked. The 13 builds the recordings name are 5 medium tracked, 4
+  medium wheeled, 3 large wheeled and 1 large tracked, which is the same draw
+  over a store **without the `AI_*` files** — three, two, one and one in
+  seven. What remains is whether the recorded game's `UNITS\UNITS\AI\` holds
+  them, which the install cannot say, and whether `Enm1` builds the small
+  flyers the read gives it once it has lost a building ([`Enm1`'s builds,
+  against the read](#enm1s-builds-against-the-read--read-measured-and-not-explained)).
+- **What a building makes of the order its problem lets it go with**, order 9
+  on a factory, and whether a build under way is dropped for it: the factory is
+  idle whenever a shipped script's problem lets it go by an action, and not
+  when the problem's life runs out under it.
 - ~~**Channel 2 of the message callback** (function 57), and the `+0x41c` count
   function 69 stores.~~ Both are now read. Channel 2 runs `mission.cfg`'s
   `script`*a* as a debug-console command, and the 14 calls name only lines

@@ -559,6 +559,22 @@ none of those six clans' scripts calls function 41. The two scripts that do
 call it, `c4m2e2` and `scream`, are the two whose trees leave designs open: 4
 and 5. `c1m3e`'s clan reads `data` too and never asks.
 
+**When the clan asks again** (*read*, and *measured*). Both scripts raise
+`PBM_MAKE_RESEARCH` 20 / 1 from `Problems0`, and its `_Start` is the same in
+both, two calls of the stub function 0 in `scream`'s aside: it takes a
+`BUILDING_INSTITUTE`, attaches it as the problem's critical
+unit, calls function 41, and then files `ACTION_NOTHING_DOING` and
+`ACTION_DESTROY` on the centre; the `_Continue` has no nodes. The clan's takt
+tests those at its head
+([15-behaviour.md](15-behaviour.md#what-ends-a-problem--read-and-measured)):
+while the centre has its order 16 the problem stands, and the takt after its
+order list is empty the problem is retired and the centre let go, so the next
+raise asks function 41 for the next cheapest design. A centre captured or
+destroyed under it ends the problem at the next takt as well — a critical unit
+lost, and `PBM_MAKE_RESEARCH` is the one code whose problem ends on its units
+gone whatever its drain (`ai.dll:0x100056c8`). The `ACTION_DESTROY` is dead
+weight: a building's shell answers its id for good.
+
 ## Mission 04's tree — *measured*, and *seen*
 
 *"In the Research Center, research the missing components of the large flying
@@ -659,7 +675,9 @@ warbot and construct it in the Factory."*
   `0x10023aa0` (*read*, as a search). Calls to the tree's slot 7 made through
   its table, from a script or a save, were not searched.
 - **What happens to a research when its centre is captured, upgraded or
-  destroyed** mid-way. Not followed.
+  destroyed** mid-way. Not followed, on the task's side. On the plan's, an AI
+  clan's `PBM_MAKE_RESEARCH` lets go of a centre it has lost at its next takt
+  ([What an AI clan's tree gates](#what-an-ai-clans-tree-gates--read-and-measured)).
 - **How often a building's takt runs**, which fixes how late the message can be.
 
 ## What is not read here

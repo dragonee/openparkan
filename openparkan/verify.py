@@ -27961,6 +27961,344 @@ def check_room_test(check, game: Path) -> None:
           f"face left out, along x differs from along z on {opened})")
 
 
+#: The planner's routines in ``ai.dll`` (docs/15, "What ends a problem"): the two retires,
+#: the state setter, the drain's step for one problem, the action evaluator and the push that
+#: files an action, the unit's leave and its release order, and the CRT's ``rand``.
+PLANNER_RETIRE, PLANNER_RETIRE_KEEPING_P3 = 0x10005010, 0x10005040
+PLANNER_SET_STATE, PLANNER_DRAIN_STEP = 0x10005710, 0x10004EE0
+PLANNER_EVALUATE, PLANNER_FILE_ACTION = 0x10005180, 0x10005530
+PLANNER_LEAVE, PLANNER_RELEASE_ORDER, PLANNER_MARK_CRITICAL = 0x10004010, 0x10003E80, 0x10004080
+AI_RAND, AI_RAND_SEED, START_PASS_FLAG = 0x1001D6D0, 0x100519D8, 0x10054C74
+
+
+def check_planner(check, game: Path) -> None:
+    """What ends a problem, what the ``_Start`` pass repeats on, and the design draw (docs/15).
+
+    The reads are held to the bytes they rest on, and the claims that nothing else calls a
+    routine to every relative call and jump in ``ai.dll``'s code; the scripts are then asked
+    what the read does with them.
+    """
+    path = game / "ai.dll"
+    if not path.exists():
+        return
+    image = path.read_bytes()
+    a = _image_at(image)
+    sections, _ = resources._sections(image)
+    lfanew = struct.unpack_from("<I", image, 0x3C)[0]
+    base = struct.unpack_from("<I", image, lfanew + 24 + 28)[0]
+    text_va, text_size, text_raw = sections[0]
+    text = image[text_raw:text_raw + text_size]
+
+    def reach(opcode: int, target: int) -> list[int]:
+        return [base + text_va + i for i in range(len(text) - 4) if text[i] == opcode
+                and (base + text_va + i + 5 + struct.unpack_from("<i", text, i + 1)[0])
+                & 0xFFFFFFFF == target]
+
+    # Every dword the loader fixes up, by the address it holds: the whole set, which is what
+    # "nothing else names it" wants.
+    relocated = _relocations(image)
+
+    def named(target: int) -> list[int]:
+        return sorted(relocated[target])
+
+    calls = {t: reach(0xE8, t) for t in (
+        PLANNER_RETIRE, PLANNER_RETIRE_KEEPING_P3, PLANNER_SET_STATE, PLANNER_DRAIN_STEP,
+        PLANNER_EVALUATE, PLANNER_FILE_ACTION, PLANNER_LEAVE, PLANNER_RELEASE_ORDER,
+        PLANNER_MARK_CRITICAL, AI_RAND)}
+    setter = (a(PLANNER_SET_STATE, 44) == bytes.fromhex(
+        "56578b7c240c8bf183ff02750de8eef8ffff897e185f5ec2040083ff0375078bcee80af9ffff897e185f5ec2")
+        and calls[PLANNER_SET_STATE] == [0x10009B04, 0x10009B7D, 0x1001126B])
+    check("ai.dll: fn8 retires a problem for ST_SOLVED and for ST_UNSOLVED alike",
+          setter and calls[PLANNER_RETIRE] == [0x10004F2D, 0x10004FBD, 0x10004FDF, 0x1000571D]
+          and calls[PLANNER_RETIRE_KEEPING_P3] == [0x10004F15, 0x10005731]
+          and reach(0xE9, PLANNER_RETIRE_KEEPING_P3) == [0x100056A9, 0x100056FB],
+          "the setter 0x10005710 calls 0x10005010 for 2 and 0x10005040 for 3 and only then "
+          "writes +0x18; its callers are fn5, fn8 and fn65's routine; the retire's four "
+          "callers are the life counter, an action come true (twice, by +0x48) and fn8, and "
+          "the other's four the count test, the two unit tests and fn8")
+
+    step = (a(0x10004EF3, 40) == bytes.fromhex(
+        "8b462c85c07e208b46183bc375078b4e2085c97e0b85c0750e8b462085c07e078bcee8260100008b")
+        and a(0x10004F1A, 24) == bytes.fromhex("8b462c8b4e242bc88bc1894e2485c07f078bcee8de000000")
+        and a(0x10004F96, 7) == bytes.fromhex("8b464885c0741e")
+        and a(0x100056C0, 13) == bytes.fromhex("8b412c5685c0750583390a7538")
+        and a(0x10004035, 4) == bytes.fromhex("c6403001")
+        and a(0x1000561E, 3) == bytes.fromhex("ff4d20")
+        and a(0x1000C14D, 6) == bytes.fromhex("837df4007521"))
+    arms = struct.unpack("<5I", a(0x10005510, 20))
+    excused = a(0x10005253, 29) == bytes.fromhex(
+        "83f801ddd80f849702000083f8130f848e02000083f8120f8591020000")
+    check("ai.dll: the drain's step is the one reader of a problem's action list",
+          step and excused and calls[PLANNER_EVALUATE] == [0x10004F67]
+          and calls[PLANNER_DRAIN_STEP] == [0x100059B0]
+          and calls[PLANNER_FILE_ACTION] == [0x100094DE, 0x100095FD]
+          and arms == (0x100051B1, 0x100051EC, 0x10005275, 0x100052C6, 0x100053DD),
+          "0x10004ee0, called from the takt's first walk alone, tests the count at +0x20 "
+          "while the drain is above 0, takes the drain off the life, and runs the evaluator "
+          "0x10005180 over the list at +0x34 -- its one caller; five arms at 0x10005510, the "
+          "second excusing orders 1, 0x13 and 0x12; +0x48 at 0 retires on the first come true, "
+          "and fn42, the one writer, stores it only when it is 0; fn27 and fn20 file")
+
+    leave = (calls[PLANNER_LEAVE] == [0x10003FDB, 0x100050A6, 0x10005619]
+             and calls[PLANNER_RELEASE_ORDER] == [0x1000513A]
+             and calls[PLANNER_MARK_CRITICAL] == [0x1000A09A]
+             and a(0x10003E95, 9) == bytes.fromhex("83b880030000027574")
+             and a(0x10003ECD, 8) == bytes.fromhex("c744240409000000")
+             and a(0x10003F01, 8) == bytes.fromhex("c744241004020000")
+             and a(0x1000E0BE, 7) == bytes.fromhex("c74014ffffffff")
+             and a(0x1000E0D9, 7) == bytes.fromhex("c74014feff0000")
+             and a(0x1000809C, 9) == bytes.fromhex("83b880030000027410"))
+    check("ai.dll: a problem lets its units go with order 9, in an AI's clan alone",
+          leave,
+          "0x100050f0 calls 0x10003e80 for each unit: order 9, target 0x204, replacing, when "
+          "the brain's +0x380 is 2; a unit leaves a problem from three places (lost, attached "
+          "elsewhere, its group released) and fn6 alone writes its critical mark; fn51 writes "
+          "the unit's problem word and calls none of them")
+
+    flag = named(START_PASS_FLAG)
+    start = (a(0x10001BF8, 6) == bytes.fromhex("881d744c0510")
+             and a(0x10001E07, 60) == bytes.fromhex(
+                 "83781802741c8b0cbdc84a0510518bcee874100000837818017407c605744c051001"
+                 "a1704c0510473bf80f8c66ffffff381d744c05100f84c1fdffff")
+             and flag == [0x10001BFA, 0x10001E24, 0x10001E39]
+             and _rel_je(a, 0x10001E3D) == 0x10001C04)
+    reraise = (a(0x10005BBD, 14) == bytes.fromhex("d94014d85c2424dfe0f6c4417ad1")
+               and a(0x10005BDF, 3) == bytes.fromhex("895014")
+               and a(0x10005BF7, 3) == bytes.fromhex("89480c"))
+    check("ai.dll: the _Start pass repeats only while every handler started its problem",
+          start and reraise,
+          "the flag 0x10054c74 is cleared once at entry (0x10001bf8), set when a handler "
+          "leaves a state that is neither 2 nor 1 (0x10001e22), and the pass loops to "
+          "0x10001c04 while it is clear (0x10001e3d); a raise that meets a standing problem "
+          "does nothing below its weight (0x10005bc9) and else writes the weight and p3 "
+          "(0x10005bdf, 0x10005bf7)")
+
+    seed = named(AI_RAND_SEED)
+    draw = (a(0x10010ADC, 7) == bytes.fromhex("8bc799f7f98bfa")
+            and a(0x10010AEF, 9) == bytes.fromhex("3bfb7c0233ff83c8ff")
+            and a(AI_RAND_SEED, 4) == struct.pack("<I", 1)
+            and seed == [AI_RAND + 4, AI_RAND + 0x14, AI_RAND + 0x19]
+            and calls[AI_RAND] == [0x100017DF, 0x1000F11A, 0x10010AC3])
+    check("ai.dll: the design draw is a signed remainder over one unseeded rand stream",
+          draw,
+          "cdq/idiv by spread + 1 (0x10010ade) and a signed test against the count "
+          "(0x10010aef); the seed at 0x100519d8 is 1 and of the image's relocated dwords only "
+          "rand's own three hold its address, so nothing seeds it (the control: the pass's "
+          "flag, three sites too); rand's callers are the takt, fn70 and the draw")
+
+    scripts = [behaviour.read(p) for p in behaviour.scripts(game)]
+    if not scripts:
+        return
+    B = behaviour
+    table = B.variables(game)
+    index_of = {v.name: i for i, v in enumerate(table)}
+    states, actions, where, marks, uses = Counter(), Counter(), Counter(), Counter(), Counter()
+    starts = continues = empty = silent = holding = 0
+    pairs_ok = 0
+    for s in scripts:
+        flow = _Flow(s, index_of)
+        names = {h.name for h in s.handlers}
+        codes = {h.problem for h in s.handlers if h.problem}
+        pairs_ok += all(f"{c}_Start" in names and f"{c}_Continue" in names for c in codes)
+        for hi, h in enumerate(s.handlers):
+            for n in h.nodes:
+                if not n.calls:
+                    continue
+                uses[n.function] += 1
+                if n.function == 8:
+                    states[B.name_at(table, n.operands[0])] += 1
+                elif n.function == 27:
+                    actions[(B.name_at(table, n.operands[0]),
+                             B.name_at(table, n.operands[1]))] += 1
+                    where[h.phase or "switched to"] += 1
+                elif n.function == 6:
+                    marks[B.name_at(table, n.operands[1])] += 1
+            if h.phase == "Continue":
+                continues += 1
+                empty += not h.nodes
+            if h.phase != "Start":
+                continue
+            starts += 1
+            # Is there a way through the handler that calls function 8 nowhere, and one on
+            # which the problem holds a unit by then?  Function 6 attaches one; a group's
+            # fill does unless its result is ERROR, which the script tests with an `if` of
+            # its own (the true block is the empty-handed way); function 24 lets that group
+            # go again and function 7 everything.
+            error = index_of["ERROR"]
+            seen, stack = set(), [((hi, 0, None, 0), False, None, None)]
+            out = with_unit = False
+            while stack and h.nodes:
+                state, attached, asked, group = stack.pop()
+                if (state, attached, asked, group) in seen:
+                    continue
+                seen.add((state, attached, asked, group))
+                at, i, chain, _ = state
+                after = flow._successors(state)
+                if chain is None:
+                    node = s.handlers[at].nodes[i]
+                    if node.calls and node.function == 8:
+                        continue
+                    if node.calls and node.function == 6:
+                        attached = True
+                    elif node.calls and node.function == 25:
+                        asked = node.destination
+                    elif node.calls and node.function == 7:
+                        attached, asked, group = False, None, None
+                    elif node.calls and node.function == 24 and node.operands:
+                        asked = None if node.operands[0] == asked else asked
+                        group = None if node.operands[0] == group else group
+                    elif (not node.calls and node.kind == B.IF and asked is not None
+                          and node.relation == "==" and tuple(node.operands) == (asked, error)):
+                        stack.extend((t, attached, None, group) for t in after[:-1])
+                        stack.append((after[-1], attached, None, asked))
+                        continue
+                if not after:
+                    out = True
+                    with_unit |= attached or asked is not None or group is not None
+                stack.extend((t, attached, asked, group) for t in after)
+            silent += out or not h.nodes
+            holding += with_unit
+    kinds = {"ACTION_DESTROY": "EXP_TARGET_BY_LOGIC_ID",
+             "ACTION_NOTHING_DOING": "EXP_TARGET_BY_LOGIC_ID",
+             "ACTION_CAPTURE_BUILDING": "EXP_TARGET_BY_LOGIC_ID",
+             "ACTION_GROUP_DESTROY": "EXP_TARGET_BY_GROUP_ID",
+             "ACTION_GROUP_NOTHING_DOING": "EXP_TARGET_BY_GROUP_ID"}
+    fitting = sum(v for (act, kind), v in actions.items() if kinds.get(act) == kind)
+    check("behaviour: every action names a target of the kind its arm wants",
+          sum(actions.values()) == 147 and fitting == 147 and not where["Continue"]
+          and uses[42] == 0 and uses[20] == 0 and marks == Counter(
+              {"UNIT_NORMAL": 28, "UNIT_CRITICAL": 26}),
+          f"{fitting} of {sum(actions.values())} fn27 calls: "
+          + ", ".join(f"{act.removeprefix('ACTION_')} {v}" for (act, _), v in
+                      sorted(actions.items(), key=lambda kv: -kv[1]))
+          + f"; {where['Start']} in a _Start handler, {where['switched to']} in one a _Start "
+          f"switches to, {where['Continue']} in a _Continue; fn42, which would set +0x48, is "
+          f"called {uses[42]} times and fn20 {uses[20]}; fn6 marks {dict(marks)}")
+    check("behaviour: no script sets ST_UNSOLVED, and 41 _Start handlers can return in silence",
+          states == Counter({"ST_SOLVING": 122, "ST_SOLVED": 57}) and starts == 72
+          and continues == 72 and silent == 41 and holding == 1 and empty == 44
+          and pairs_ok == len(scripts),
+          f"fn8 is called {sum(states.values())} times, {dict(states)}; of {starts} _Start "
+          f"handlers {silent} have a way through that calls it nowhere, which ends the "
+          f"takt's pass, and {holding} of those can be holding a unit by then (c5m1p's "
+          f"PBM_BASE_DEFENCE_Start, which sets no state at all), which with a drain retires "
+          f"the problem at the next takt; {empty} of {continues} _Continue handlers have no "
+          f"nodes; every code's pair is whole in {pairs_ok} of {len(scripts)} scripts")
+
+    # A weight of 0 or less is never started (0x10001c82, 0x10001d6f): what the raises pass.
+    weights = Counter()
+    for s in scripts:
+        formulas = B.formulas(s.source) if _has_formulas(s.source) else []
+        for h in s.handlers:
+            for n, last in _last_writers(h, table, formulas):
+                if not n.calls or n.function != 2 or len(n.operands) < 7:
+                    continue
+                written = last.get(n.operands[1], "?").removeprefix("formula ")
+                try:
+                    weights["a literal above 0" if float(written) > 0 else "not above 0"] += 1
+                except ValueError:
+                    weights["fn12, or it and a hair" if written == "fn12" or re.fullmatch(
+                        r"fTemp \+ 0\.0+1", written) else written] += 1
+    check("behaviour: every raise passes a weight above 0, which the _Start pass needs",
+          weights == Counter({"a literal above 0": 79, "fn12, or it and a hair": 91,
+                              "0.8 + fT": 5, "0.7 + fT": 1}),
+          f"the 176 raises' weights: {dict(weights)}; fT is function 66's 0, 0.04 or 0.05")
+
+    # What the raises ask their factories for, and whether the clan's tree lets the store
+    # offer one: a pick with no candidate gives no order at all (0x10010871).
+    folder = game / "UNITS" / "UNITS" / "AI"
+    if not folder.is_dir():
+        return
+    whole = research.STATE_IN_TREE | research.STATE_RESEARCHED | research.STATE_AVAILABLE
+    schemes = [objects.load_unit(p) for p in folder.iterdir() if p.suffix.lower() == ".dat"]
+    asked, offered = Counter(), {}
+    for s in scripts:
+        stem = s.source.stem.lower()
+        tree_file = game / "MISSIONS" / "SCRIPTS" / f"{stem}.trf"
+        for h in s.handlers:
+            for n in h.nodes:
+                if not (n.calls and n.function == 2 and len(n.operands) >= 7
+                        and B.name_at(table, n.operands[0]) == "PBM_ROBOT_NEEDED"):
+                    continue
+                kind = B.name_at(table, n.operands[4])
+                asked[(kind, B.name_at(table, n.operands[6]))] += 1
+                if kind == "ROBOT_BATTLEUNIT" or not tree_file.exists():
+                    continue
+                tree = research.read(tree_file)
+                state = {part.lower(): tree[i].category for part, i in tree.parts.items()}
+                word = int(next(v.default for v in table if v.name == kind), 0)
+                offered[(stem, kind)] = sum(
+                    1 for u in schemes if u.kind == word and all(
+                        (state.get(c.ref.member.lower()) or 0) & whole == whole
+                        for c in u.components))
+    check("behaviour: three clans ask their factory for a transport their tree has none of",
+          asked == Counter({("ROBOT_BATTLEUNIT", "SELECT_BEST_COMBAT"): 65,
+                            ("ROBOT_BATTLEUNIT", "SELECT_FASTEST"): 34,
+                            ("ROBOT_BATTLEUNIT", "SELECT_SMALLEST"): 1,
+                            ("ROBOT_TRANSPORT", "SELECT_FASTEST"): 4,
+                            ("ROBOT_BUILDER", "SELECT_FASTEST"): 4})
+          and offered == {("c2m3e", "ROBOT_TRANSPORT"): 0, ("c3m1e", "ROBOT_TRANSPORT"): 0,
+                          ("c4m2e2", "ROBOT_TRANSPORT"): 0, ("c4m2e2", "ROBOT_BUILDER"): 0,
+                          ("scream", "ROBOT_TRANSPORT"): 1, ("scream", "ROBOT_BUILDER"): 1},
+          f"the 108 raises of PBM_ROBOT_NEEDED ask {dict(asked)}; the researched designs of "
+          f"the type asked on the asking clan's own tree: {offered}")
+
+    # C03 M02's Enm1 against the recordings (docs/15, "Enm1's builds, against the read"): its
+    # SELECT_BEST_COMBAT ranking from the game's own floats, as the pick sorts it, and the
+    # same ranking with the ten AI_* files left out of the store.
+    cache, tree_path = game / "preload.lda", game / "MISSIONS" / "SCRIPTS" / "c3m2e.trf"
+    if not cache.exists() or not tree_path.exists():
+        return
+    data = cache.read_bytes()
+    tree = research.read(tree_path)
+    state = {part.lower(): tree[index].category for part, index in tree.parts.items()}
+    shop = units.Workshop(game)
+    letter = {"flying": "F", "walking": "S", "wheeled": "W", "tracked": "T"}
+    candidates = []
+    for i in range(struct.unpack_from("<i", data, 0)[0]):
+        record = data[4 + i * STORE_RECORD:4 + (i + 1) * STORE_RECORD]
+        name = record[:0x104].split(b"\0")[0].decode("latin-1").rsplit("\\", 1)[-1]
+        kind, size = struct.unpack_from("<Ii", record, 0x108)
+        life, guns = struct.unpack_from("<2f", record, 0x110)
+        if kind != objects.TYPE_WARRIOR or not (folder / name).exists():
+            continue
+        unit = objects.load_unit(folder / name)
+        if not all((state.get(c.ref.member.lower()) or 0) & whole == whole
+                   for c in unit.components):
+            continue
+        chassis = shop.chassis(unit.components[0].ref.member)
+        (score,) = struct.unpack("<f", struct.pack("<f", (guns + 0.8) * life * 1e-5))
+        candidates.append((name.lower().removesuffix(".dat"), score, designs.SIZE_LETTERS.get(
+            size, "?") + letter.get(chassis.locomotion if chassis else "", "?") + "W"))
+
+    def ranked(rows):
+        rows = list(rows)
+        for place in range(len(rows)):
+            best = place
+            for j in range(place, len(rows)):
+                if rows[j][1] > rows[best][1]:
+                    best = j
+            rows[place], rows[best] = rows[best], rows[place]
+        return rows
+
+    full = ranked(candidates)
+    bare = ranked(c for c in candidates if not c[0].startswith("ai_"))
+    check("C03 M02: Enm1's seven are large, and without the AI_* files they are the recordings'",
+          len(candidates) == 44
+          and [c[0] for c in full[:8]] == ["ai_lt_10", "32_l2", "ai_l2", "ai_lt_21", "32_l1",
+                                           "ai_l1", "m_stopper", "23_m2"]
+          and Counter(c[2] for c in full[:7]) == Counter({"LTW": 4, "LWW": 2, "MTW": 1})
+          and [c[0] for c in bare[:8]] == ["32_l2", "32_l1", "m_stopper", "23_m2", "m_dblhow",
+                                           "41mtrk1", "23_m1", "41mwlk1"]
+          and Counter(c[2] for c in bare[:7]) == Counter({"MTW": 3, "MWW": 2, "LTW": 1, "LWW": 1})
+          and bare[7][2] == "MSW",
+          f"{len(candidates)} researched warriors on c3m2e.trf; by SELECT_BEST_COMBAT the first "
+          f"seven are {dict(Counter(c[2] for c in full[:7]))} and the eighth {full[7][0]}, a "
+          f"{full[7][2]}; with the {sum(1 for c in candidates if c[0].startswith('ai_'))} "
+          f"AI_* designs among them left out, {dict(Counter(c[2] for c in bare[:7]))} "
+          f"({', '.join(c[0] for c in bare[:7])}) and the eighth {bare[7][0]}, a {bare[7][2]}")
+
+
 def run(game: Path) -> int:
     """Run every check against ``game``.  Returns a process exit code."""
     results: list[tuple[str, bool, str]] = []
@@ -28032,6 +28370,7 @@ def run(game: Path) -> int:
         check_research_streams, check_atmosphere_events,
         check_varset_types, check_profiles, check_walker,
         check_frame_scale, check_room_test,
+        check_planner,
     )
     for fn in checks:
         fn(check, game)
