@@ -1415,7 +1415,18 @@ yet reproduced (below).
   the scene's camera draws and 1 or 2 while the reflection camera does, which
   is what `CSun`'s draw and the sky's fourth draw ask of it
   ([10-sky.md](10-sky.md#the-skys-first-draw-is-a-screen-wide-quad--read)).
-  Not read: who calls slot 14, and with what.
+  ~~Not read: who calls slot 14, and with what.~~ **Read**: for the
+  reflection camera, the landscape's own slot 14 (`0x1001fcd0`, the entry at
+  `0x1009a4a0` of the vtable at its `+4`), which builds the camera by its name
+  (`0x1001fe75`, `0x1001fec9`), keeps it at `0x100a6004` and calls its slot 14
+  with the argument it was called with itself (`0x1001ff0e`), then sets its
+  flag word to 1 (`0x1001fff7`). The landscape's, like a scene camera's, is
+  called by `World3D.dll` for every object it makes — `CreateObject` with 0
+  once the object is loaded (`0x10007d1a`) and with the word `SetGameTime`
+  keeps (`0x10032a38`) before it returns (`0x10007e6e`). Slot 14 also zeroes
+  the camera's flag word (`0x1008542e`), and each reflection draw then hands
+  the mirror's camera the scene camera's whole word
+  (`0x10083f0e`–`0x10083f20`).
 - ~~**What a basement builder's piece is, and where the band is
   triangulated.**~~ — **read**: a piece is one triangle of a quad-edge
   constrained Delaunay triangulation; the band is the triangulation of the ring

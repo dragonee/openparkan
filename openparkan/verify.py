@@ -27780,6 +27780,187 @@ def check_design_store(check, game: Path) -> None:
           f"what the armour keeps plus the full shield, on {life_ok} of {robots} robots")
 
 
+def _object_meshes(game: Path):
+    """Every `.msh` member of every archive, once: (archive, name, blob)."""
+    seen = set()
+    for path in all_archives(game):
+        archive = NResArchive.open(path)
+        for entry in archive:
+            if not entry.name.lower().endswith(".msh") or (path.name, entry.name) in seen:
+                continue
+            seen.add((path.name, entry.name))
+            yield path.name, entry.name, archive.read(entry)
+
+
+def check_frame_scale(check, game: Path) -> None:
+    """Which shipped frames are not a rotation (docs/10, "The lit colour is the game's own").
+
+    The frame the shade lights an item in is a matrix with its scale kept beside it, so a
+    scaled tree's 3 x 3 is a rotation.  What is left is the matrix the game builds from a pose
+    key: ``(1 - n) I + n R`` for a quaternion of squared length n (``Ngi32.dll:0x10017e60``),
+    which stretches by ``sqrt(1 - 2 n (1 - n)(1 - cos t))`` across its axis.
+    """
+    def stretch(q) -> tuple[float, float]:
+        n = sum(v * v for v in q) / objmesh.QUATERNION_SCALE ** 2
+        if n == 0:
+            return n, 1.0
+        cos_t = (q[0] * q[0] - sum(v * v for v in q[1:])) / sum(v * v for v in q)
+        return n, math.sqrt(max(0.0, 1 - 2 * n * (1 - n) * (1 - cos_t)))
+
+    def matrix(q):
+        w, x, y, z = q
+        return [[1 - 2 * (y * y + z * z), 2 * (x * y + w * z), 2 * (x * z - w * y)],
+                [2 * (x * y - w * z), 1 - 2 * (x * x + z * z), 2 * (y * z + w * x)],
+                [2 * (x * z + w * y), 2 * (y * z - w * x), 1 - 2 * (x * x + y * y)]]
+
+    meshes = keys = zero = 0
+    worst = 0.0
+    odd = {}
+    for _lib, name, blob in _object_meshes(game):
+        inner = NResArchive(blob, name)
+        for stream in inner:
+            if stream.type_id != objmesh.STREAM_POSE_KEY:
+                continue
+            meshes += 1
+            raw = inner.read(stream)
+            for i in range(stream.element_count):
+                q = struct.unpack_from("<4h", raw, i * objmesh.POSE_KEY_SIZE + 16)
+                keys += 1
+                n, s = stretch(q)
+                if n == 0:
+                    zero += 1
+                elif abs(math.sqrt(n) - 1.0) < objmesh.UNIT_KEY:
+                    worst = max(worst, abs(s - 1.0))
+                else:
+                    odd[(name.lower(), i)] = (q, s)
+    # The control: the formula on a quaternion of twice a quarter turn's length, n = 4,
+    # against the matrix's own first axis.
+    twice = (math.sqrt(2.0), 0.0, 0.0, math.sqrt(2.0))
+    m = matrix(twice)
+    axis = math.sqrt(sum(m[r][0] ** 2 for r in range(3)))
+    by_formula = stretch(tuple(v * objmesh.QUATERNION_SCALE for v in twice))[1]
+    wheel_key, dish_key = ("r_m_03.msh", 78), ("o_tur_ba_09.msh", 20)
+    check("MESH: a pose key's matrix is a rotation on all but one",
+          keys - zero - len(odd) > 30000 and worst < 2e-4 and zero == 9
+          and set(odd) == {wheel_key, dish_key}
+          and abs(odd[wheel_key][1] - 1.0) < 1e-4
+          and abs(odd[dish_key][1] - math.sqrt(5.0)) < 1e-9
+          and abs(axis - by_formula) < 1e-9 and abs(axis - 5.0) < 1e-9,
+          f"{keys} keys in {meshes} meshes: {keys - zero - len(odd)} within "
+          f"{objmesh.UNIT_KEY:g} of unit, whose matrix stretches at most {worst:.5f} off 1; "
+          f"{zero} all zero, the identity; "
+          + "; ".join(f"{k[0]} key {k[1]} {q} stretches {s:.5f}"
+                      for k, (q, s) in sorted(odd.items()))
+          + f" (control: a quaternion of squared length 4 stretches {axis:.3f})")
+
+    # The reader takes the turn of that matrix: M R^T is symmetric, the stretch alone.
+    symmetric = 0
+    turned = {}
+    for key, (q, _s) in odd.items():
+        r = objmesh.key_rotation(q)
+        game_m = matrix(tuple(v / objmesh.QUATERNION_SCALE for v in q))
+        turn = matrix((r[0], -r[1], -r[2], -r[3]))
+        left = [[sum(game_m[i][k] * turn[j][k] for k in range(3)) for j in range(3)]
+                for i in range(3)]
+        symmetric += all(abs(left[i][j] - left[j][i]) < 1e-9 for i in range(3) for j in range(3))
+        turned[key] = 2 * math.degrees(math.acos(min(1.0, abs(r[0]))))
+    check("MESH: a key that is not unit is read as its matrix turns",
+          symmetric == len(odd) == 2 and turned.get(wheel_key, 9.0) < 1e-3
+          and abs(turned.get(dish_key, 0.0) - (180 - math.degrees(math.atan(2.0)))) < 1e-6,
+          f"{symmetric}/{len(odd)} leave the game's matrix a symmetric stretch; the wheel's "
+          f"key turns {turned.get(wheel_key, -1):.3f} degrees, where its unit quaternion turns "
+          f"180, and the turret's {turned.get(dish_key, -1):.3f}, where it turns 90")
+
+
+def check_room_test(check, game: Path) -> None:
+    """A building's room test, as the game reads it and as the engine does (docs/10).
+
+    ``IJointMesh`` slot 7 (``AniMesh.dll:0x10010550``) takes the point in the room node's
+    frame, answers no outside the slot's sphere, passes a face whose stored normal has no z,
+    and counts the faces over and under the point along the node's own z by the height of
+    each face's plane.  The engine's ``in_a_room`` uses barycentric weights.  The rooms are
+    closed shells, so the line's axis changes nothing either; the control opens them.
+    """
+    def by_plane(m, slot, faces, p) -> bool:
+        cx, cy, cz, r = slot.sphere
+        if (p[0] - cx) ** 2 + (p[1] - cy) ** 2 + (p[2] - cz) ** 2 > r * r:
+            return False
+        under = over = 0
+        for f in faces:
+            nx, ny, nz = m.face_normal[f]
+            if nz == 0:
+                continue
+            v = [m.positions[i] for i in m.triangles[f]]
+            sides = [(v[(k + 1) % 3][0] - v[k][0]) * (p[1] - v[k][1])
+                     - (v[(k + 1) % 3][1] - v[k][1]) * (p[0] - v[k][0]) for k in range(3)]
+            if not (all(c >= 0 for c in sides) or all(c <= 0 for c in sides)):
+                continue
+            z = (nx * (v[0][0] - p[0]) + ny * (v[0][1] - p[1]) + nz * v[0][2]) / nz
+            if z < p[2]:
+                under += 1
+            else:
+                over += 1
+        return bool((under | over) & 1)
+
+    def by_weights(m, faces, p, axes=(0, 1, 2)) -> bool:
+        i, j, k = axes
+        above = below = 0
+        for f in faces:
+            a, b, c = (m.positions[x] for x in m.triangles[f])
+            den = (b[j] - c[j]) * (a[i] - c[i]) + (c[i] - b[i]) * (a[j] - c[j])
+            if abs(den) < 1e-9:
+                continue
+            l1 = ((b[j] - c[j]) * (p[i] - c[i]) + (c[i] - b[i]) * (p[j] - c[j])) / den
+            l2 = ((c[j] - a[j]) * (p[i] - c[i]) + (a[i] - c[i]) * (p[j] - c[j])) / den
+            if l1 < 0 or l2 < 0 or 1.0 - l1 - l2 < 0:
+                continue
+            if l1 * a[k] + l2 * b[k] + (1.0 - l1 - l2) * c[k] > p[k]:
+                above += 1
+            else:
+                below += 1
+        return above % 2 == 1 or below % 2 == 1
+
+    steps = 5
+    rooms = samples = inside = differ = other_axis = opened = 0
+    with_rooms = set()
+    for lib, name, blob in _object_meshes(game):
+        m = objmesh.parse(blob, name)
+        for index, node in enumerate(m.nodes):
+            if index == 0 or node.flags & 5 != 5:
+                continue
+            level0 = node.slots_for_lod(0)
+            if not level0:
+                continue
+            slot = m.slots[level0[0]]
+            faces = list(range(slot.first_triangle, slot.first_triangle + slot.triangle_count))
+            rooms += 1
+            with_rooms.add((lib, name))
+            # The control's shell: the room less its most level face.
+            open_faces = list(faces)
+            open_faces.remove(max(faces, key=lambda f: abs(m.face_normal[f][2])))
+            lo, hi = slot.aabb_min, slot.aabb_max
+            for a in range(steps):
+                for b in range(steps):
+                    for c in range(steps):
+                        p = tuple(lo[k] + (hi[k] - lo[k]) * ((a, b, c)[k] + 0.37) / steps
+                                  for k in range(3))
+                        samples += 1
+                        along_z = by_weights(m, faces, p)
+                        inside += along_z
+                        differ += by_plane(m, slot, faces, p) != along_z
+                        other_axis += by_weights(m, faces, p, (1, 2, 0)) != along_z
+                        other_axis += by_weights(m, faces, p, (2, 0, 1)) != along_z
+                        opened += (by_weights(m, open_faces, p, (1, 2, 0))
+                                   != by_weights(m, open_faces, p))
+    check("MESH: a room holds a point by either reading, along any axis",
+          rooms == 177 and len(with_rooms) == 21 and differ == 0 and other_axis == 0
+          and 0 < inside < samples and opened > 0,
+          f"{rooms} rooms in {len(with_rooms)} meshes, {samples} points in their boxes, "
+          f"{inside} inside: the game's planes and the engine's weights differ on {differ}, "
+          f"and a line along x or y on {other_axis} (control: with each room's most level "
+          f"face left out, along x differs from along z on {opened})")
+
+
 def run(game: Path) -> int:
     """Run every check against ``game``.  Returns a process exit code."""
     results: list[tuple[str, bool, str]] = []
@@ -27850,6 +28031,7 @@ def run(game: Path) -> int:
         check_settings,
         check_research_streams, check_atmosphere_events,
         check_varset_types, check_profiles, check_walker,
+        check_frame_scale, check_room_test,
     )
     for fn in checks:
         fn(check, game)

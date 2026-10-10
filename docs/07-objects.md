@@ -620,8 +620,12 @@ int16    rotation[4]      w, x, y, z over 32767
 ```
 
 **34038 of the 34049 keys the game ships are unit quaternions** to within
-0.1%; the other eleven are all zero or, in one case, unnormalised, and are
-repaired on read. The game is left-handed — Z up, DirectX — so the matrix it
+0.1%. Of the other eleven nine are all zero and two are neither, and each is
+read as the matrix the game builds from it turns, which normalises nothing:
+the identity for ten of them, and a turn of 116.57° for the last, with a
+stretch the reader leaves out
+([10-sky.md](10-sky.md#the-lit-colour-is-the-games-own--read-and-measured)).
+The game is left-handed — Z up, DirectX — so the matrix it
 builds from a quaternion is the transpose of the right-handed one, and the
 same four numbers denote the **conjugate** rotation here. Reading them
 straight through instead costs a factor of ten in the box error (median 1.48%

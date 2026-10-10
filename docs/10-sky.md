@@ -1115,8 +1115,23 @@ its `+0x1a0` a number it makes of the name it is built with (`0x10083a54`–
 `0x10083aa6`): **2** for `REFLECTION_SHIFTED`, **1** for `REFLECTION`, **0**
 for any other name or none. Slot 14 of its game-object interface
 (`0x100852e0`), called with an argument that is not null, hands that number to
-its view's slot 23 (`0x10085365`) beside the render device and the prim buffer;
-who calls slot 14 is not read. So:
+its view's slot 23 (`0x10085365`) beside the render device and the prim buffer,
+and ends by zeroing the camera's flag word (`0x1008542e`).
+
+**Who calls slot 14** — *read*. Two callers, and one of them matters.
+`World3D.dll` calls slot 14 of every object it makes: `CreateObject` with 0
+once the object is loaded (`0x10007d1a`) and again, before it returns, with
+the word `SetGameTime` keeps at `0x10032a38` (`0x10007e6e`, the store at
+`0x10005144`), and `AddObjectToGame` and its siblings likewise (`0x100080a9`,
+`0x10008580`, `0x100092ba`, `0x10009717`). A scene camera is such an object,
+class 5 ([22-settings.md](22-settings.md#what-the-loaders-do-and-who-asks-for-them--read)),
+and the type it hands its view is the 0 the view was made with. The mirror's
+camera is no object of `World3D.dll`'s. The **landscape's** own slot 14
+(`0x1001fcd0`, the entry at `0x1009a4a0`) builds it by name (`0x1001fe75`,
+`0x1001fec9`), keeps it at `0x100a6004`, calls **its** slot 14 with the
+argument it was called with itself (`0x1001ff0e`) — the one call in the game
+that gives a view a type other than 0 — and then sets its flag word to 1
+(`0x1001fff7`). So:
 
 | type | camera | the sky's quad | the weather | a body | its flare |
 |---:|---|---|---|---|---|
@@ -1137,6 +1152,40 @@ through slot 32 at `0x10083f2e`; asked at `0x100797ca`–`0x10079812`). And
 every camera, whatever its type, runs the sky's `0x800` pass unless its flag
 word carries 8 (`0x100845eb`, `0x10084643`–`0x10084655`), which is how the
 mirror has a sky at all.
+
+**What sets flag 8** — *read*, and *measured*. The flag word is `CCamera`'s
+`+0x164`. `ICamera` — interface 8, the object itself — sets it whole through
+slot 13 (`0x10084a70`) and reads it through slot 20 (`0x10084ad0`), and
+`Terrain.dll` stores to it in three places and in no constructor: the setter
+(`0x10084a79`), the render's own clearing of `0x200` (`0x10084738`), and slot
+14's zero above, which is `+0x160` of the interface it is entered on. The
+render tests bit 8 twice: set, it skips the sky's pass (`0x100845eb`) and then
+the world and the weather's pass with it (`0x10084701`, to `0x100847eb`).
+**One call in the install sets it**, `iron3d.dll:0x10055c9b`: the warbot
+designer's opening, which writes 9 — 8, and the 1 that lets the eye place the
+view — to the game's own scene camera, and its four closings take the 8 off
+again (`0x1005149b`, `0x1005183e`, `0x10055d22`, `0x10055eff`;
+[37-designer.md](37-designer.md#opening-and-closing--read)). So flag 8 marks
+no kind of camera: it is the scene's, for as long as the designer's black
+screen stands over it. The mirror's draw is not gated by the bit
+(`0x1008458f`–`0x100845aa`, `0x1008468e`–`0x100846a9`), but it begins by
+handing the mirror's camera the scene camera's whole word
+(`0x10083f0e`–`0x10083f20`), so behind the designer the mirror draws no sky
+and no world either.
+
+*Measured*: the install holds 375 calls through `+0x34`. 29 have a constant
+carrying 8 pushed, ORed in or loaded since the call before them, and **one**
+of those pushes two values, the constant and the receiver, which is all the
+setter takes (`ret 8`, `0x10084ac7`); 25 push three or four and the other
+three one, six and eight, other interfaces' slot 13
+(`analysis/camflags.py`). The control is `0x200`: the same sweep returns
+eight, and the one with two values pushed is `CBuilding::Render`'s
+`or ah, 2` (`Terrain.dll:0x100599f9`,
+[The weather](#the-weather--read-and-seen)).
+
+**The engine** draws the world under the designer and then the designer's
+black ground over the whole window, so its picture is the game's; it does not
+skip the draw.
 
 *Measured*: the install holds **38** calls through a slot 23 (`+0x5c`). Slot 23
 of `ICamera2` takes its value in `edx` and nothing on the stack — it ends in a
@@ -1467,25 +1516,30 @@ and its length (`0x1004e7b1`–`0x1004e8ea`). Then:
    ([11-effects.md](11-effects.md#what-a-light-does-to-a-surface--read-and-measured)).
    So **the sun's first light and every effect's light leave a highlight, and
    the counter light lights a diffuse and nothing else.**
-   **A light's direction goes into the item's frame unnormalised.** Where the
-   frame's kind word (`+0x6a`) is 1 the direction is used as the record holds
-   it (`0x1004ed1d`); otherwise it goes through `g_FastProc`'s `+0x8c`
-   (`0x1004ed7b`), which multiplies it by the transpose of the frame's 3 × 3
-   and does nothing else (`Ngi32.dll:0x10024260`, x87, and `0x1001ba50`,
-   3DNow!, both read; `0x1001f910`, `0x1001ca90` and `0x1001ca00` fill the
-   same slot for the other processors and were not): the inverse of a
-   rotation, and on a frame scaled by *s* a vector *s* long. The directional
-   routine takes its cosine against that vector as it stands
-   (`0x1001612c`–`0x10016143`), so **an item drawn in a frame scaled by *s*
-   takes *s* times a directional light**, on its diffuse and on its highlight.
+   **A light's direction goes into the item's frame by its 3 × 3 alone.**
+   Where the frame's kind word (`+0x6a`) is 1 the direction is used as the
+   record holds it (`0x1004ed1d`); otherwise it goes through `g_FastProc`'s
+   `+0x8c` (`0x1004ed7b`), which multiplies it by the transpose of the
+   frame's 3 × 3 and does nothing else. **All five builds of the slot are
+   read**, and none takes a root or a reciprocal: x87
+   `Ngi32.dll:0x10024260` and P6 `0x1001f910` are
+   nine products, six sums and three stores, 3DNow! `0x1001ba50` the same in
+   pairs, and the two SSE ones, `0x1001ca90` for an aligned matrix and
+   `0x1001ca00` for any, three `mulps` of the vector's components by the
+   matrix's first three rows and two `addps`. It is the inverse of a
+   rotation, and on a 3 × 3 scaled by *s* it would be a vector *s* long,
+   which the directional routine takes its cosine against as it stands
+   (`0x1001612c`–`0x10016143`). **No scaled object's 3 × 3 is scaled**,
+   though: the frame keeps its scale beside its matrix, and one pose key in
+   the install is all that stretches one (below).
    A point light's position goes through the frame's inverse on a frame of
    kind 4 or 8 — `+0x9c`, `Ngi32.dll:0x100154e0`: the frame's translation
    taken off, the same transpose, and a factor an axis from the frame's
    `+0x5c` — through `0x1002e0c0` on kind 2, and as it stands on kind 1 (the
    table at `0x1004f6cf`); its range is multiplied by the frame's `+0x5c`
    (`0x1004ead5`) and the range's reciprocal by its `+0x50` (`0x1004ec5f`).
-   Kinds 3, 5, 6 and 7 convert no position at all, and whether an item is
-   ever lit in one is not read.
+   Kinds 3, 5, 6 and 7 convert no position at all, and no frame of those
+   kinds is ever made (below).
 2. **The ambient and the floor**: `g_FastProc`'s `+0x50` with the sum, the
    material's ambient and the state block's colour (`0x1004f225`–`0x1004f23d`).
    All four builds of it — x87 `Ngi32.dll:0x100248a0`, 3DNow! `0x1001bdd0`,
@@ -1527,6 +1581,101 @@ brighter for it; a light past 1 whitens what it falls on, by up to 0.8 of a
 channel; and a batch whose lightmap has made its diffuse its self-light
 ([07-objects.md](07-objects.md#how-a-lightmapped-batch-is-drawn--read-and-measured))
 shows the larger of that colour and the scene's.
+
+**The frame keeps its scale beside its matrix** — *read*. What the shade is
+handed as an item's frame is the class the binary's one panic for it names
+`N3DSCALEDMATRIX` (*"Invalid matrix class in N3DSCALEDMATRIX"*, `0x100a1644`):
+a pointer to sixteen floats, a scale an axis at `+0x50`, its reciprocals at
+`+0x5c`, a word at `+0x68` and the **class** at `+0x6a`, the kind word above.
+Its constructor from a matrix and a class (`0x100291a0`; the sky's draw
+carries a copy inline, `0x1007a62e`–`0x1007aae7`) measures the length of each
+of the matrix's three axes on class 8, or of the first alone on class 4, keeps
+them as the scale and **divides them out of the matrix**, each axis by its
+reciprocal (`0x10029416`–`0x100294e4`; `0x10029900` is an axis by a factor),
+so the 3 × 3 it leaves has unit axes. Four classes are ever made:
+
+| class | made by | its 3 × 3 |
+|---:|---|---|
+| 1 | two statics, `0x100a5f80` (its class set at `0x10049073`), which `CShade`'s cell draw copies into a landscape cell's item (`0x1004486f`–`0x100448dd`), and `0x100a60f8` (`0x10054b83`), copied by slot 4 of the vtable at `0x1009b160` (`0x10052630`, at `0x1005410f`–`0x1005417d`), a routine on the shade's own fields whose draw is not read here; and three built in place (`0x1003c60f`, `0x1003cb26`, `0x1003d096`) | the identity |
+| 2 | the sky's draw, for its two dome layers (`0x1007a398`, `0x1007a42e`, the matrix at `0x100a71d8`) and the clouds (`0x1007a62e`, the matrix at `0x100a7218`); `CShade`'s slot 32 (`0x10029107`) | the identity: both sky matrices are made the identity once (`0x1007a0be`–`0x1007a16e`, `0x10079fb4`–`0x1007a064`) and take three floats of translation a frame (`0x1007a183`–`0x1007a1a0`, `0x1007a079`–`0x1007a097`) |
+| 4 | `CShade`'s mesh draw, slot 21 (`0x10044ea0`), through a constructor of its own from a matrix and one float (`0x10048f50`, called at `0x10044eeb`): the matrix **as it is handed**, the float as all three of the scale, its reciprocal beside it | the mesh node's |
+| 8 | `CShade::RenderEffect` (`0x100288ab`) | unit axes, the instance's size divided out; an effect's sprite is no lit item ([11-effects.md](11-effects.md#how-an-effect-sprite-is-coloured--read-and-measured)) |
+
+A word at `+0x6a` has 81 accesses in `Terrain.dll` — five of them in a
+library routine `iron3d.dll` and `Behavior.dll` carry too — and none in
+`Ngi32.dll` or `AniMesh.dll`; its stores there are those and five copies from
+another frame (`0x1002859b`, `0x1002879b`, `0x100299ca`, `0x1002beee`,
+`0x10082dfa`). `Effect.dll` carries a copy of the constructor (`0x1000c5f0`),
+whose one call makes a class 2 (`0x1000bece`); the two other stores of such a
+word in the install, `ai.dll:0x10002a5e` and `Behavior.dll:0x10036311`, are
+in modules that hand the shade nothing and were not read. So classes 3, 5, 6
+and 7, for which the shade converts no light's position, do not occur.
+
+**A scaled mesh's matrix is not scaled** — *read*. The mesh's draw hands
+slot 21 a node's matrix, the node record's `+0x20`, and a pointer to the
+mesh's own scale (`AniMesh.dll:0x10014fad`–`0x10014fc0`), of which the shade
+takes the first float (`0x10044ec0`). That scale is three floats at the mesh's
+`+0x158`, with a byte at `+0x154` that says they are not (1, 1, 1): the
+constructor makes them (1, 1, 1) (`0x10006970`–`0x10006999`, from a static
+its initialiser fills, `0x10007cd0`), and `SetScale` (`0x10014770`, slot 15 of
+the interface at the mesh's `+4`) is their one writer. `SetScale` and the pose
+walk multiply **the translation of each node's matrices** by the scale and
+touch nothing else (`0x10014893`–`0x1001493d`; `0x10008c9d`–`0x10008d83`,
+`0x10008ee7`–`0x10008fcd`): a tree placed at 3 has its nodes three times as
+far apart and each node's 3 × 3 the rotation it had. The frame's scale is what
+sizes it, and what the shade wants of it is a point light's reach — a range
+times `+0x5c`, a position through the inverse and `+0x5c`. A directional light
+has no use for it, so **a scaled object is lit as an unscaled one**. That is
+a read: no recording's frame of a scaled tree or stone was measured for it.
+
+**What a node's 3 × 3 is made of** — *read*, and *measured*. A node's matrix is
+its pose keys' rotations down the chain, under the object's placement. A key's
+four `int16` are multiplied by 1 ÷ 32767 (`AniMesh.dll:0x10012880`, the factor
+made at `0x10013030`); two keys are blended by a spherical interpolation that
+turns linear where their cosine is within 0.00001 of 1 (`g_FastProc`'s
+`+0x58`, `Ngi32.dll:0x10017f50`); and the result is made a matrix by `+0x38`
+(`0x10017e60`), 1 − 2(y² + z²) on the diagonal and 2(xy ± wz) off it, which
+**normalises nothing**. For a quaternion of squared length *n* that is
+
+```
+M = (1 − n) I + n R        R the rotation of the same quaternion made unit
+```
+
+which leaves the axis alone and, across it, turns by the angle of
+(1 − n) + n e^(iθ) and stretches by its length, √(1 − 2n(1 − n)(1 − cos θ)).
+Over the install's **34049 keys in 435 meshes**:
+
+| keys | | the game's matrix |
+|---:|---|---|
+| 34038 | within 0.1% of unit length | a rotation, to within 0.00017 |
+| 9 | all zero | the identity |
+| 1 | `R_M_03.msh` key 78, (0, 0, 71, 0) | the identity, to within 0.00001 |
+| 1 | `o_tur_ba_09.msh` key 20, (−32767, 0, 0, −32767) | **turned 116.57° about z and stretched √5 = 2.236 across it** |
+
+All eleven stand where a full turn wraps round — the six wheels of the Medium
+chassis `R_M_03` at frame 19 of its 21, the dishes of `R_l_06`,
+`o_tur_la_06` and `o_tur_ba_10` — and the last is the node `BTHQ_m1o1` of
+`o_tur_ba_09`, the mesh of the Large turret 09 (`e_tur_bb_09`, `e_tur_bt_09`),
+at frame 47 of its 102, between a (0, 0, 0, −32767) and a (0, 0, 0, 32767). It
+is **the one shipped frame whose 3 × 3 carries a scale**: round that frame the
+node is drawn up to 2.236 times its size across its own z, and takes that much
+of a directional light. Whether a controller ever plays frame 47 is not read.
+The control is the same formula on a quaternion of squared length 4, which
+gives the 5 its matrix's first axis measures (`openparkan verify`).
+
+The missions' 864 placements put no scale in a matrix either: the loader's is
+a turn about z and a translation, and the scale 216 of them carry — 134 trees
+and 82 stones, 0.2 to 21 — goes beside it to `SetScale`
+([04-missions.md](04-missions.md#the-scale)). *Not enumerated*: the placements
+`Control.dll` gives a unit and its parts as they move.
+
+**The engine** took a unit normal against a unit direction whatever the scale,
+which is the game's on every scaled object, so nothing changed there. Its
+readers normalised a key that was not unit, and that made a **half turn about
+y** of (0, 0, 71, 0), the left middle wheel of `R_M_03` at the frame where its
+five siblings hold a zero and the game's matrix is the identity. Both readers
+now take the turn of the matrix the game builds, the identity there and
+116.57° on the turret's key. The stretch they leave out: a pose is a rotation.
 
 *Measured*, the engine before and after following this — with the fog and the
 [ground's materials](03-terrain.md#the-uv-unit-is-1024--read-and-measured)
@@ -1577,8 +1726,8 @@ the same specular, and what turns their sun side yellow is not the sun
 
 **Not followed here**: the engine gathers one list of point lights a frame
 ([11-effects.md](11-effects.md#what-a-light-does-to-a-surface--read-and-measured)),
-and it normalises a light's direction where the game does not, so an object
-drawn in a scaled frame takes the light a unit one would.
+and it leaves out the one stretched pose key's stretch, so the Large turret
+09's `BTHQ_m1o1` is drawn and lit at its own size through frame 47.
 
 ### Fog
 
@@ -1916,6 +2065,39 @@ the building takes the view's flags, ORs in `0x200` and sets them
 (`0x100599dc`–`0x10059a06`). It is the one writer found: across the install,
 that is the only call through a slot 13 (`+0x34`) with an `or` of `0x200` in
 the ten instructions before it.
+
+**The line is the room node's own z** — *read*, and *measured*. An earlier
+reading here had the mesh count crossings "along the direction at its
+`+0x150`". That triple is no direction: it is the mesh's **scale**, `+0x158`
+of the object seen from the interface the slot is entered on, eight bytes in
+([The lit colour is the game's own](#the-lit-colour-is-the-games-own--read-and-measured)),
+and the three floats slot 7 compares it with, zeros in the file at
+`0x10026b40`, are (1, 1, 1) once their initialiser has run (`0x100121f0`): the
+test asks whether the mesh is scaled. The walk's node visitor (`0x100106d0`)
+brings the point into the node's frame — the node's matrix at `+0x20`, its
+translation taken off and the transpose of its 3 × 3, `g_FastProc`'s `+0x84` —
+divides it by the scale where there is one (`0x10010736`–`0x1001074f`) and
+answers no outside the slot's sphere (`0x10010756`–`0x1001078e`). The
+triangle visitor (`0x100107a0`) passes a face whose stored normal has no z
+(`0x10010839`), asks whether the point's x and y lie to one side of all three
+edges (`0x10011530`; the axes 0 and 1 at `0x100209d8` and `0x100209e4`, the
+next corner (1, 2, 0) at `0x100209e8`), finds the height of the face's plane
+there off its normal and first corner (`0x10010947`–`0x1001097f`), and counts
+the face under the point or over it. The filter it walks with shuts no face
+out ([07-objects.md](07-objects.md#who-fills-a-face-querys-filter--read)).
+`CBuilding::Render` hands it the eye as the camera has it and the room's node
+(`0x10059355`–`0x10059373`), having tested the box through the same `+0x84` on
+that node's placement (`0x1005922d`–`0x10059293`). So the line runs along the
+z of the room's own frame, which is what the engine took.
+
+*Measured* (`openparkan verify`): the install has **177 rooms** — nodes past
+the first whose flags carry 4 and 1 — in 21 meshes. At 125 points in each
+room's box, 22125 in all, 13345 are inside, and the game's reading — the
+sphere, the stored normal, the plane's height — and the engine's barycentric
+weights agree on every one. So would a line along x or along y, on all 22125:
+a room's level-0 slot is a closed shell, and the axis never mattered. The
+control opens the shells: with each room's most level face left out, a line
+along x and one along z part on 201 of the points.
 
 So **neither rain nor snow is drawn while the camera stands in a room of a
 building**, any building, the pod room among them; at a doorway, in the
@@ -2271,8 +2453,18 @@ which is what the game does.
   it nor the directional routine normalises the result, so a frame scaled by
   *s* takes *s* times the light
   ([The lit colour is the game's own](#the-lit-colour-is-the-games-own--read-and-measured)).
-  Still open: which shipped frames carry a scale, and so which objects the
-  engine, which normalises, lights otherwise.
+  ~~Still open: which shipped frames carry a scale, and so which objects the
+  engine, which normalises, lights otherwise.~~ **One frame, and no scaled
+  object.** The frame keeps its scale beside its matrix (`N3DSCALEDMATRIX`),
+  so a scaled tree's or stone's 3 × 3 is the rotation it had: 216 of the 864
+  placements carry a scale and none carries it in a matrix. Of the 34049 pose
+  keys a node's 3 × 3 is made of, 34038 give a rotation to within 0.00017, ten
+  the identity, and one — the Large turret 09's `BTHQ_m1o1` at frame 47 — a
+  turn of 116.57° stretched 2.236 across its z. All five builds of the slot
+  are read, and none normalises. The engine's unit light is the game's on
+  every scaled object; its readers made a half turn of a key the game's
+  matrix makes the identity of, which is fixed, and the one stretch is left
+  out. Not enumerated: the placements `Control.dll` gives a unit's parts.
 - ~~**One face of C03 M02's Outpost.**~~ — the building is Enemy 1's Medium
   Mine, and the lavender was the **second light's highlight** on its skin's
   specular, which the game does not take: `CSun`'s constructor flags the
@@ -2402,12 +2594,30 @@ which is what the game does.
   it is not checked against a frame, and the engine draws a body in its
   texture's own colours
   ([The sun and the moon are drawn](#the-sun-and-the-moon-are-drawn)).
-- **The line a room's mesh is asked along.** The room test's second half
+- ~~**The line a room's mesh is asked along.** The room test's second half
   (`AniMesh.dll:0x10010550`) counts crossings along the direction at the mesh's
-  `+0x150`, whose writer is not read; the engine takes the room's own z.
-- **Camera flag 8.** A camera whose flag word carries it draws neither the
+  `+0x150`, whose writer is not read; the engine takes the room's own z.~~
+  **Read**, and *measured*: the room node's own z, as the engine had it. The
+  triple at `+0x150` is the mesh's scale, written by `SetScale`
+  (`0x10014770`) and (1, 1, 1) otherwise, which the point is divided by; the
+  triangle test passes a face whose normal has no z and counts the others
+  under or over the point by the height of their planes (`0x100107a0`). Over
+  the install's 177 rooms the game's reading and the engine's agree on all
+  22125 points tried, and so would a line along x or y: the rooms are closed
+  shells ([The weather](#the-weather--read-and-seen)).
+- ~~**Camera flag 8.** A camera whose flag word carries it draws neither the
   sky's pass nor the world (`0x100845eb`, `0x10084701`); what sets it is not
-  read.
+  read.~~ **Read**, and *measured*: the warbot designer's opening, which
+  writes 9 to the game's scene camera (`iron3d.dll:0x10055c9b`), and nothing
+  else — of the install's 375 calls through the setter's slot, 29 carry a
+  constant with the bit and that one alone passes it as the setter's one
+  value. The mirror's camera takes the scene camera's word each draw, 8 with
+  it ([The sky's first draw is a screen-wide quad](#the-skys-first-draw-is-a-screen-wide-quad--read)).
+- ~~**Who calls `CCamera`'s slot 14.**~~ `World3D.dll`, for every object it
+  makes and adds, a scene camera among them (`CreateObject`, `0x10007d1a`,
+  `0x10007e6e`); and for the mirror's camera the landscape's own slot 14,
+  with the argument it was handed itself (`Terrain.dll:0x1001ff0e`)
+  ([The sky's first draw is a screen-wide quad](#the-skys-first-draw-is-a-screen-wide-quad--read)).
 - **What flag bit 0 of a material's blend byte does.** It is set on `ENV_STARS`
   and on nothing else in the game, and it does not change the blend mode.
 - ~~Which field carries the opcode~~ — the word ahead of slot 0; the three

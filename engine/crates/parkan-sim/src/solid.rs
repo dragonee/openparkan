@@ -57,16 +57,19 @@ pub fn pair_radius(radius: f32, robot: bool) -> f32 {
 /// node past the first whose flags carry the cell's 4 and the interior's 1; the point is
 /// turned into the room's own frame and must lie in its level-0 slot's box, corner to corner
 /// (`0x100592af`-`0x1005934f`), and the room's mesh must then say it holds it -- interface
-/// `0x20` slot 7 (`AniMesh.dll:0x10010550`), which sends a line through the point across
-/// the slot's triangles, counts the crossings to either side (`0x10010995`, `0x100109a5`)
-/// and answers whether either count is odd.
+/// `0x20` slot 7 (`AniMesh.dll:0x10010550`), which brings the point into the node's frame
+/// and divides it by the mesh's scale (`0x100106d0`), sends a line along **the node's own z**
+/// across the slot's triangles -- a face holds the point's x and y or it does not, and its
+/// height there is under the point or over it (`0x100107a0`) -- counts the crossings to
+/// either side (`0x10010995`, `0x100109a5`) and answers whether either count is odd.
+///
+/// The game finds a face's height off its stored normal and passes one whose normal has no
+/// z; the weights here give the same answer on all 22125 points tried in the 177 shipped
+/// rooms, which are closed shells: a line along x or y would too (`openparkan verify`).
 ///
 /// A camera in a room has the building set the view's flag `0x200` (`0x100599f9`), and a
 /// view carrying it is not handed the pass the rain and the snow are drawn in
 /// (`0x10084790`-`0x1008479e`).
-///
-/// STAND-IN: docs/10-sky.md#the-weather--read-and-seen -- the line's direction is the mesh's
-/// `+0x150`, whose writer is not read; here the room's own z.
 pub fn in_a_room(parts: &[Part], p: Vec3) -> bool {
     use parkan_formats::mesh::{NODE_CELL, NODE_INTERIOR};
     parts.iter().any(|part| {

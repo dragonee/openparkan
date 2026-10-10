@@ -178,13 +178,11 @@ fn vs_main(v: VertexIn) -> VertexOut {
     var n = vec3<f32>(0.0);
     if dot(out.normal, out.normal) > 0.0 {
         // The normal as the model's frame turns it; the matrix's scale goes with the length.
-        //
-        // STAND-IN: docs/10-sky.md#the-lit-colour-is-the-games-own--read-and-measured -- the
-        // game puts a directional light into the item's frame by the transpose of the frame's
-        // 3 x 3 and normalises nothing (`g_FastProc` slot 0x8c, `Ngi32.dll:0x10024260`), so an
-        // item drawn in a frame scaled by s takes s times the light; here a unit normal against
-        // a unit direction, whatever the scale. Which shipped frames carry a scale is not
-        // measured.
+        // The game's frame is a matrix with its scale kept beside it (`N3DSCALEDMATRIX`): a
+        // scaled mesh hands the shade its node's rotation and its scale apart
+        // (`AniMesh.dll:0x10014fad`, `Terrain.dll:0x10048f50`), so the light it brings into the
+        // frame by the transpose of that 3 x 3 (`g_FastProc` slot 0x8c) is a unit one whatever
+        // the scale, as here (docs/10, "The lit colour is the game's own").
         n = normalize(out.normal);
     }
     let a = shade_cosine(n, frame.light_direction.xyz);
