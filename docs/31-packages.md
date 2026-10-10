@@ -488,7 +488,12 @@ readers were not traced, that is marked.
 - **Refit — reload.** `M_Task_Reload` walks to a ground-level dock and waits
   until life, charge and ammunition are at 98%
   ([27-ownership.md](27-ownership.md)). `ORDER_ROBOT_REPARE` builds the same
-  task. **With no dock it fails at once** (`0x1002e800`). The start asks
+  task, and it has a giver besides a script's order and the unit's own
+  decision: an AI clan's problem, as it is retired, gives every unit it held
+  order 9, replacing whatever the unit was doing (`ai.dll:0x10003e80`, the 9
+  at `0x10003ecd`, its target `0x204`;
+  [15-behaviour.md](15-behaviour.md#what-ends-a-problem--read-and-measured)).
+  **With no dock it fails at once** (`0x1002e800`). The start asks
   `0x10023b60` (not read) for a building. When the answer is −1, a walking unit
   logs "No Where to reX..." and the task fails. A flying unit first tries a
   second pick from where it is (task slot 15). If that is also −1, it logs

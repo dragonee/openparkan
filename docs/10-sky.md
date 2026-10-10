@@ -849,9 +849,16 @@ the three floats at record `+0x24`, both where the Direct3D light is built
 (`0x10030ab3`, against `+0x18` and `+0x30` for the other types) and in the
 emboss pass (`0x1002d08d`). Its writer is the manager's **slot 9**,
 `0x10080550` — `SetDirection(id, space, x, y, z)`: space 0 stores the vector
-as given (`0x100805a8`), space 2 first turns it through the manager's own
-object's world placement (`0x100805be`–`0x10080629`), and any other space does
-nothing.
+as given (`0x100805a8`), space 2 first takes it **into** the frame of the
+manager's own object, by the transpose of that object's world placement
+(`0x100805be`–`0x10080629`, `g_FastProc`'s `+0x8c` at `0x1008060f`), and any
+other space does nothing. This page had space 2 turning the vector *through*
+the placement; it is the other way, a world vector brought into the owner's
+frame, and the gather brings it out again through `+0x1c` (`0x100803e4`), the
+transpose of `+0x8c`
+([37-designer.md](37-designer.md#the-previews--read-and-seen)). The sun's own
+manager is the atmosphere's, the one object of class 7
+([35-hud.md](35-hud.md#the-sky-is-the-one-object-of-kind-7--read)).
 
 `CSun` calls it twice every takt, from the same slot 3 that walks the arc
 ([above](#the-body-travels-that-matrixs-arc--read)): the **first** light
