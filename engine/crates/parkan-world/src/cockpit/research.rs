@@ -266,7 +266,7 @@ pub fn panel(
                     viewport,
                     view_proj,
                     model,
-                    lights: [Vec3::new(-1.0, 0.0, -1.0).normalize(), Vec3::new(1.0, 0.0, -1.0).normalize()],
+                    lights: super::designer::preview_lights(),
                     paint: None,
                 });
             }

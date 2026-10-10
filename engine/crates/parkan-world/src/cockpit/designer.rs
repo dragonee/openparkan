@@ -69,9 +69,15 @@ pub const PREVIEW_K: f32 = 2.0;
 pub const PREVIEW_FIELD: f32 = std::f32::consts::FRAC_PI_3;
 pub const PREVIEW_PITCH: f32 = -0.5;
 pub const PREVIEW_TURN_RATE: f32 = 0.00075;
-/// A preview's two lights, in the model's own frame: the view sets both directions every
-/// draw through the model's placement (`0x1009f087`–`0x1009f114`, space 2), so they turn
-/// with it; and their colour, (2, 2, 2) each (`0x1009e888`).
+/// A preview's two lights, the way each travels in the view's own frame, where the camera
+/// stands on −x and looks along +x: one comes down from behind the model and one from the
+/// camera's side. They stand still while the model turns. The view sets both directions every
+/// draw in space 2 (`0x1009f087`–`0x1009f114`), just after it has set the model's placement
+/// (`0x1009f060`): the manager's setter takes a space-2 vector back through its owner's
+/// placement, by the transpose (`Terrain.dll:0x10080550`, `g_FastProc` `+0x8c`), and the
+/// shade's gather brings the stored one out through the same placement (`0x100802f0`,
+/// `+0x1c`), so the light falls the way it was handed (docs/37, "The previews"). Their
+/// colour is (2, 2, 2) each (`0x1009e888`).
 pub const PREVIEW_LIGHTS: [[f32; 3]; 2] = [[-1.0, 0.0, -1.0], [1.0, 0.0, -1.0]];
 pub const PREVIEW_LIGHT_COLOUR: f32 = 2.0;
 /// Save's name field (`+0x1444`, laid out at `0x1004eaad`): its rectangle, the most
@@ -417,8 +423,8 @@ pub struct Preview {
     pub viewport: [f32; 4],
     pub view_proj: Mat4,
     pub model: Mat4,
-    /// The two lights' directions in the model's own frame, which the draw turns through
-    /// `model` ([`preview_lights`]).
+    /// The ways the two lights travel, in the view's frame ([`preview_lights`]): they do not
+    /// turn with `model`.
     pub lights: [Vec3; 2],
     /// Drawn flat in this colour, with no lights: the placement ghost (docs/32).
     pub paint: Option<[f32; 3]>,
@@ -1298,10 +1304,10 @@ pub fn band_tint(g: f32) -> [f32; 4] {
     [r, gg, b, 1.0]
 }
 
-/// The directions a preview's two lights travel this draw: [`PREVIEW_LIGHTS`] through the
-/// model's matrix, normalised.
-pub fn preview_lights(model: Mat4) -> [Vec3; 2] {
-    PREVIEW_LIGHTS.map(|d| model.transform_vector3(Vec3::from_array(d)).normalize_or(Vec3::NEG_Z))
+/// The ways a preview's two lights travel: [`PREVIEW_LIGHTS`] normalised, as the view hands
+/// them (`0x1009f087`–`0x1009f114`), whatever the model's turn.
+pub fn preview_lights() -> [Vec3; 2] {
+    PREVIEW_LIGHTS.map(|d| Vec3::from_array(d).normalize())
 }
 
 /// Where a layout point projects in a preview: the layout point of `point` in the model's
@@ -1645,7 +1651,7 @@ fn draw_session(
     }
 
     // The previews.
-    let lights = PREVIEW_LIGHTS.map(Vec3::from_array);
+    let lights = preview_lights();
     let mut previews = Vec::new();
     let viewport = |rect: [f32; 4]| {
         let [px, py] = space.pixel([rect[0], rect[1]], Pin::CENTRE);
@@ -2025,14 +2031,40 @@ mod tests {
     }
 
     #[test]
-    fn a_previews_lights_turn_with_the_model() {
+    fn a_previews_lights_stand_still_in_the_view_while_the_model_turns() {
+        // docs/37, "The previews": set in space 2 each draw, a direction goes into the model's
+        // frame by the placement's transpose and comes out of it by the placement.
+        let [behind, before] = preview_lights();
+        let h = std::f32::consts::FRAC_1_SQRT_2;
+        assert!(
+            behind.abs_diff_eq(Vec3::new(-h, 0.0, -h), 1e-6)
+                && before.abs_diff_eq(Vec3::new(h, 0.0, -h), 1e-6)
+        );
+        let lit = |normal: Vec3| -> f32 {
+            [behind, before].iter().map(|l| PREVIEW_LIGHT_COLOUR * (-normal.dot(*l)).max(0.0)).sum()
+        };
         for angle in [0.0, 0.7, 2.0, 4.5] {
             let (_, model) = preview_camera(Vec3::new(1.0, 2.0, 3.0), 2.0, angle, [0.0, 0.0, 160.0, 151.0]);
-            let lights = preview_lights(model);
-            for (light, own) in lights.iter().zip(PREVIEW_LIGHTS) {
-                let back = model.inverse().transform_vector3(*light).normalize();
-                assert!(back.distance(Vec3::from_array(own).normalize()) < 1e-5, "{angle} {back}");
+            // What the manager keeps and the gather hands the shade: there and back.
+            for light in [behind, before] {
+                let kept = model.inverse().transform_vector3(light);
+                assert!(model.transform_vector3(kept).abs_diff_eq(light, 1e-5), "{angle}");
             }
+            // The model's top, pitched 0.5 rad toward the camera, takes both at every turn:
+            // 2 × (sin 0.5 + cos 0.5) ÷ √2 from the camera's side, 2 × (cos 0.5 − sin 0.5) ÷ √2
+            // from behind.
+            let top = lit(model.transform_vector3(Vec3::Z));
+            assert!((top - 2.0 * 2.0 * 0.5f32.cos() * h).abs() < 1e-4, "{angle}: {top}");
+        }
+        // A wall facing the camera takes the one light from the camera's side whichever of
+        // the model's walls it is; a wall across the view takes neither.
+        for (angle, wall) in [(0.0, Vec3::NEG_X), (std::f32::consts::FRAC_PI_2, Vec3::NEG_Y)] {
+            let (_, model) = preview_camera(Vec3::ZERO, 2.0, angle, [0.0, 0.0, 160.0, 151.0]);
+            let facing = model.transform_vector3(wall);
+            assert!(facing.x < -0.87 && facing.y.abs() < 1e-5, "{angle}: {facing}");
+            assert!((lit(facing) - 2.0 * (0.5f32.cos() - 0.5f32.sin()) * h).abs() < 1e-4, "{angle}");
+            let across = model.transform_vector3(Vec3::new(-wall.y, wall.x, 0.0));
+            assert!(lit(across).abs() < 1e-5, "{angle}: {across}");
         }
     }
 

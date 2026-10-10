@@ -572,9 +572,9 @@ fn previews(
         .enumerate()
         .map(|(i, p)| {
             renderer.set_preview_instance(queue, i, p.model, true);
-            // The two lights turn with the model and are (2, 2, 2) each (docs/37, "The
-            // previews").
-            let [a, b] = p.lights.map(|d| p.model.transform_vector3(d).normalize_or(glam::Vec3::NEG_Z));
+            // The two lights stand still in the view while the model turns, one from behind it
+            // and one from the camera's side, and are (2, 2, 2) each (docs/37, "The previews").
+            let [a, b] = p.lights.map(|d| d.normalize_or(glam::Vec3::NEG_Z));
             // A building being placed takes no directional light: the recordings show it one
             // flat colour, and its draw's gather passes over the lights of a manager whose
             // owner is of kind 7, which the sky's is (docs/35, "The sky is the one object of

@@ -28662,6 +28662,106 @@ def check_view_light_pairs(check, game: Path) -> None:
           f"{slot_11:#x}, `return 7`; `push 0x84000000` in the install's modules: {pushes}")
 
 
+#: docs/37, "The previews": the ways a model view's two lights are handed, the pitch of the
+#: model's frame about y, and the lights' grey.
+PREVIEW_LIGHTS = ((-1.0, 0.0, -1.0), (1.0, 0.0, -1.0))
+PREVIEW_PITCH, PREVIEW_GREY = -0.5, 2.0
+
+
+def check_light_spaces(check, game: Path) -> None:
+    """A light direction set in space 2 is stored by the transpose of its owner's placement and
+    gathered by the placement itself, so a model view's two lights stand still while its model
+    turns (docs/37, "The previews")."""
+    def turned(angle: float) -> list[list[float]]:
+        """P x R: the turn clockwise about z, then the pitch about y, a rotation by rows."""
+        c, s_ = math.cos(-angle), math.sin(-angle)
+        turn = [[c, -s_, 0.0], [s_, c, 0.0], [0.0, 0.0, 1.0]]
+        pc, ps = math.cos(PREVIEW_PITCH), math.sin(PREVIEW_PITCH)
+        pitch = [[pc, 0.0, ps], [0.0, 1.0, 0.0], [-ps, 0.0, pc]]
+        return [[sum(pitch[i][k] * turn[k][j] for k in range(3)) for j in range(3)]
+                for i in range(3)]
+
+    def by(m, v, transposed=False):
+        return tuple(sum((m[k][i] if transposed else m[i][k]) * v[k] for k in range(3))
+                     for i in range(3))
+
+    handed = [tuple(x / math.sqrt(2) for x in d) for d in PREVIEW_LIGHTS]
+
+    def lit(normal, lights) -> float:
+        return sum(PREVIEW_GREY * max(0.0, -sum(n * x for n, x in zip(normal, d, strict=True)))
+                   for d in lights)
+
+    rows = []
+    for angle in (0.0, math.pi / 2, 2.0, 4.5):
+        m = turned(angle)
+        # What the manager stores, and what the gather hands the shade.
+        gathered = [by(m, by(m, d, transposed=True)) for d in handed]
+        still = max(math.dist(g, d) for g, d in zip(gathered, handed, strict=True))
+        # The wall of the model that faces the camera at this turn, and its top.
+        wall = by(m, (-math.cos(angle), -math.sin(angle), 0.0))
+        rows.append((round(still, 6), round(lit(by(m, (0.0, 0.0, 1.0)), gathered), 3),
+                     round(lit(wall, gathered), 3),
+                     # the same wall under lights that turned with the model
+                     round(lit(wall, [by(m, d) for d in handed]), 3)))
+    top = round(4 * math.cos(PREVIEW_PITCH) / math.sqrt(2), 3)
+    front = round(2 * (math.cos(PREVIEW_PITCH) + math.sin(PREVIEW_PITCH)) / math.sqrt(2), 3)
+    check("a model view's lights stand still: its model's top takes 2.48 and the wall facing "
+          "the camera 0.56 at every turn",
+          all(r[0] < 1e-6 and r[1] == top and r[2] == front for r in rows)
+          and (top, front) == (2.482, 0.563)
+          and [r[3] for r in rows[:2]] == [1.414, 0.0],
+          f"at turns 0, a quarter, 2 and 4.5 rad (what is gathered against what was handed, "
+          f"the top, the wall facing the camera, and that wall were the lights to turn with "
+          f"the model): {rows}")
+
+    paths = {name: game / name for name in ("Ngi32.dll", "Terrain.dll", "iron3d.dll")}
+    if not all(p.exists() for p in paths.values()):
+        return
+    images = {name: _image_at(p.read_bytes()) for name, p in paths.items()}
+    # g_FastProc's +0x1c and +0x8c in the plain build: one routine, the matrix's offsets
+    # transposed.
+    plain, across = images["Ngi32.dll"](0x100240A0, 0x53), images["Ngi32.dll"](0x10024260, 0x53)
+    differ = {(a, b) for a, b in zip(plain, across, strict=True) if a != b}
+
+    def transposed(offset: int) -> int:
+        row, column = divmod(offset, 0x10)
+        return 0x10 * (column // 4) + 4 * row
+
+    sites = {
+        "Ngi32.dll": [
+            (0x10003477, b"\xc7\x05\x74\xa0\x03\x10\xa0\x40\x02\x10"),
+            (0x1000348B, b"\x89\x0d\xe4\xa0\x03\x10"),
+        ],
+        "Terrain.dll": [
+            # the setter: space 0 stores the vector, space 2 puts it through +0x8c first
+            (0x10080594, b"\x83\x7d\x90\x00"), (0x1008059A, b"\x83\x7d\x90\x02"),
+            (0x100805A8, b"\x83\xc1\x24"), (0x100805C2, b"\x6a\x02"),
+            (0x100805D3, b"\xff\x50\x20"), (0x1008060F, b"\xff\x90\x8c\x00\x00\x00"),
+            # the getter with space 2: the direction through +0x1c, the place through +0x18
+            (0x10080386, b"\x83\x7d\x10\x02"), (0x10080394, b"\x6a\x02"),
+            (0x100803A5, b"\xff\x51\x20"), (0x100803C3, b"\xb9\x9c\x74\x0a\x10"),
+            (0x100803E4, b"\xff\x50\x1c"), (0x100803ED, b"\xba\x90\x74\x0a\x10"),
+            (0x1008040E, b"\xff\x50\x18"),
+        ],
+        "iron3d.dll": [
+            # a model view's draw: the placement, then the two directions in space 2
+            (0x1009F05D, b"\x6a\x02"), (0x1009F060, b"\xff\x51\x1c"),
+            (0x1009F0C8, b"\x6a\x02"), (0x1009F0CC, b"\xff\x51\x24"),
+            (0x1009F110, b"\x6a\x02"), (0x1009F114, b"\xff\x51\x24"),
+        ],
+    }
+    check("Terrain.dll: a space-2 direction is stored by the placement's transpose and "
+          "gathered by the placement",
+          all(images[name](va, len(code)) == code for name, rows_ in sites.items()
+              for va, code in rows_)
+          and plain[-1:] == b"\xc3" and len(differ) == 6
+          and all(transposed(a) == b for a, b in differ),
+          f"{sum(len(r) for r in sites.values())} sites in {len(sites)} modules; "
+          f"Ngi32.dll:0x100240a0 (+0x1c) and 0x10024260 (+0x8c) are the same 0x53 bytes but "
+          f"for the matrix offsets {sorted((hex(a), hex(b)) for a, b in differ)}, each the "
+          f"other's transpose")
+
+
 def run(game: Path) -> int:
     """Run every check against ``game``.  Returns a process exit code."""
     results: list[tuple[str, bool, str]] = []
@@ -28734,7 +28834,7 @@ def run(game: Path) -> int:
         check_varset_types, check_profiles, check_walker,
         check_frame_scale, check_room_test,
         check_planner,
-        check_record_bound, check_view_light_pairs,
+        check_record_bound, check_view_light_pairs, check_light_spaces,
     )
     for fn in checks:
         fn(check, game)

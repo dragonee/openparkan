@@ -731,15 +731,63 @@ rectangle and a camera of the same kind as the HUD panels'
   flagged `0x80000000`, so they light their owner alone (slot 13,
   [11-effects.md](11-effects.md#what-a-light-does-to-a-surface--read-and-measured)).
   **Every draw sets their directions again**, (−1, 0, −1) and (1, 0, −1)
-  normalised, in space 2 (`0x1009f087`–`0x1009f114`, slot 9), which turns them
-  through the manager's object's placement
-  ([10-sky.md](10-sky.md#where-the-two-lights-point--read)) — the model's, set
-  just before (`0x1009f060`). So **the lights turn with the model**: they come
-  down at 45° from its own two sides, ±x, its top lit by both, its sides by one,
-  its front and back by neither, however it turns. The draw then turns the z test
-  on with writes and `LESSEQUAL` (render states 7, 14 and 23), and draws the mesh
-  with flags `0x5f0` (`0x1009ee30`) between the view camera's `ICamera2` slots 3
-  and 4 (`0x1009f168`, `0x1009f190`).
+  normalised, in space 2 (`0x1009f087`–`0x1009f114`, slot 9), just after it has
+  set the model's placement (`0x1009f060`).
+- **The lights stand still while the model turns** — *read*, and *seen*. They
+  are not turned twice, and they do not turn with the model: a direction given
+  in space 2 goes into the owner's frame and comes back out of it.
+  - **The setter takes it in.** The manager's slot 9 (`Terrain.dll:0x10080550`)
+    stores a space-0 vector as it is (`0x100805a8`). For space 2 it asks its
+    owner for its world placement (slot 8 with 2, `0x100805d3`) and puts the
+    vector through `g_FastProc`'s `+0x8c` first (`0x1008060f`). Any other space
+    does nothing.
+  - **The gather brings it out.** The shade asks each light through slot 7
+    with space 2 (`0x100802f0`), which copies the record, asks the owner for
+    the same placement (`0x100803a5`) and puts the direction through
+    `g_FastProc`'s `+0x1c` (`0x100803e4`), the position through `+0x18`.
+  - **The two routines are each other's transpose.** `+0x1c` is rows on the
+    vector, M · v (`Ngi32.dll:0x100240a0`: `[ecx]`, `+4`, `+8` for x). `+0x8c`
+    is columns on it, Mᵀ · v (`0x10024260`: `[ecx]`, `+0x10`, `+0x20` for x).
+    In the plain build the two are the same 83 bytes but for six matrix
+    offsets, each swapped for its transpose: 4 and `0x10`, 8 and `0x20`, `0x18`
+    and `0x24`. The 3DNow! and SSE builds of `+0x8c` are columns too
+    (`0x1001ba50`, `0x1001ca90`); those of `+0x1c` were not read.
+  - **So the light falls the way it was handed.** A placement's rotation is P · R,
+    whose transpose is its inverse, and the model is not moved between the set
+    and the draw: M · Mᵀ · d = d. A light set in space 0 is the other case: it
+    is stored raw and turned by the placement at the gather, so it turns with
+    its owner, as a unit's view lights do
+    ([35-hud.md](35-hud.md#what-mode-2-does-with-the-colour--read-measured-and-seen)).
+  - **Where they come from**, in the view's frame, the camera on −x looking
+    along +x: the first travels (−1, 0, −1) ÷ √2, down at 45° **from behind the
+    model toward the camera**; the second (1, 0, −1) ÷ √2, down at 45° **from the
+    camera's side**. Neither comes from the left or the right.
+  - **What that lights** (*derived*), on a white diffuse, with the model's top
+    leaning 0.5 rad toward the camera:
+
+    | face | from the camera's side | from behind | sum |
+    |---|---|---|---|
+    | the top | 2 × (cos 0.5 + sin 0.5) ÷ √2 = 1.92 | 2 × (cos 0.5 − sin 0.5) ÷ √2 = 0.56 | **2.48** |
+    | a wall facing the camera | 0.56 | 0 | **0.56** |
+    | a wall across the view, facing left or right | 0 | 0 | **0** |
+    | a wall facing away | 0 | 1.92 | 1.92 |
+
+    The same at every turn, whichever of the model's walls faces the camera.
+    Lights turning with the model would give the wall facing the camera 1.41
+    when it is the model's ±x and 0 when it is its ±y.
+  - *Seen*, the project's model through one whole turn, 113.0 to 121.4 s in
+    twelve frames 0.7 s apart: its top is washed toward white in every frame,
+    and the flank it shows the camera is the same saturated blue and yellow
+    side-on, nose-on and tail-on. The median of its blue paint stays between 188
+    and 208 and of its yellow between 217 and 239, each within 11 %. No flank
+    blows out and none goes dark as the turn brings it round.
+- **The draw** then turns the z test on with writes and `LESSEQUAL` (render
+  states 7, 14 and 23), and draws the mesh with flags `0x5f0` (`0x1009ee30`)
+  between the view camera's `ICamera2` slots 3 and 4 (`0x1009f168`,
+  `0x1009f190`). `0x5f0` gathers the lights not flagged `0x4000000` and passes
+  over the sky's manager, so the model's own pair of view lights and the sun's
+  two stay out of it
+  ([35-hud.md](35-hud.md#what-mode-2-does-with-the-colour--read-measured-and-seen)).
 - **The scene colour is the world's, this takt** — *read*. The colour a material
   adds (`Terrain.dll:0x100308b8`) is the renderer's `+0x2c`, and the renderer is one
   global, `0x100a5d30` (`0x1002ff22`); each prim buffer's render copies its state
@@ -822,8 +870,9 @@ from top to bottom in about a second. Its brightest pixels go (63, 175, 63) at
    60° across the view's width; the model placed by P · T(*c*) · R · T(−*c*), R
    turning it clockwise seen from above at 0.75 rad/s about its own z through its
    centre, P the −0.5 rad pitch about y, its top toward the camera, with −*c* in its
-   translation; two lights of (2, 2, 2) from (∓1, 0, −1) in the model's own frame;
-   the world's scene colour.
+   translation; two lights of (2, 2, 2) travelling (−1, 0, −1) and (1, 0, −1),
+   normalised, **in the view's frame**, one from behind the model and one from the
+   camera's side, standing still while the model turns; the world's scene colour.
 7. **Buttons**: accept (enabled with a turret and a valid design) hands the
    design to the factory and closes; clear empties the project; save opens the
    name field and writes `units/<name>.dat` when its typing ends; load lists the
@@ -881,6 +930,16 @@ from top to bottom in about a second. Its brightest pixels go (63, 175, 63) at
   and a picked row rebuilds the source's same tab for that row's socket and, when
   it holds a part, the preview ([The rows](#the-rows--read-and-seen)). What the fits
   do to the panels' previews (`+0x4dffc`) is not traced.
+- ~~Whether a preview's two lights are turned twice: the gather turns every
+  light's stored direction through its owner's placement, and the view already
+  sets its two in space 2 each draw.~~ **Read**, and **seen**: neither twice nor
+  once. The setter takes a space-2 vector into the owner's frame by the
+  placement's transpose (`Terrain.dll:0x1008060f`, `g_FastProc` `+0x8c`) and the
+  gather brings it out by the placement (`0x100803e4`, `+0x1c`), so the two
+  lights fall the way they were handed, fixed in the view: one from behind the
+  model, one from the camera's side. An earlier reading here had them turn with
+  the model, from its own two sides. The recording's project keeps the same
+  colours through a whole turn ([The previews](#the-previews--read-and-seen)).
 - ~~The scene colour a preview's materials take while the designer is up, and the
   order of the turn and the pitch (*inferred*).~~ **Read**: the world's scene colour,
   one for the game, which the sky sends every takt; and P · T(*c*) · R · T(−*c*), the
