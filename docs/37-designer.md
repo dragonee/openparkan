@@ -72,9 +72,18 @@ through ([30-turrets.md](30-turrets.md#the-outer-camera--read-and-measured)).
 The camera's frame render, its slot 5 (`0x100844c0`), tests **bit 8** twice and,
 with it set, skips the scene's draw through the landscape (`0x100845e5`) and the
 attached object's pass after it (`0x100846fb`). Those are the only two reads of
-bit 8 among the camera field's 18 accesses in `Terrain.dll`; the same sweep
+bit 8 among the camera field's accesses in `Terrain.dll`; the same sweep
 finds the infrared `0x20` (`0x10084524`, through slot 20), `0x10`
-(`0x10084a88`) and `0x200` (`0x10084790`). So while the designer is up **the
+(`0x10084a88`) and `0x200` (`0x10084790`). ~~The field's 18 accesses~~ — the 18
+are the module's every use of the displacement `0x164`, and **eight are the
+flag word's** (`0x100845e5`, `0x100846fb`, `0x1008472c`, `0x10084738`,
+`0x10084790`, `0x10084a79`, `0x10084a82`, `0x10084ad6`): one of the rest is the
+landscape constructor's (`0x10018d65`), eight are the atmosphere's
+(`0x1006eff9`–`0x1006fe00`), and the last, `0x10085462`, stores a 3 through the
+camera's `+4` interface, which is the object's `+0x168`. The word has one more
+writer that the displacement cannot find, for the same reason: slot 14 of that
+interface zeroes it as `+0x160` (`0x1008542e`)
+([10-sky.md](10-sky.md#the-skys-first-draw-is-a-screen-wide-quad--read)). So while the designer is up **the
 game camera draws no world** — the designer's black rectangle covers the screen
 anyway — and nothing here pauses it. The 9 also overwrites the rest of the word,
 so a night sight the player had on (`0x20`) is off when the designer closes.
@@ -112,6 +121,14 @@ mode's own screen comes back:
 - **Esc** (the holder's key handler, `0x10055e80`), when neither the load list
   nor the name field is up; with one of them up, Esc closes that instead;
 - **accept** (`0x1005144c`), below.
+
+**And a fourth, which is not one of those.** The three clear the bit in their
+own code (`0x1005149b`, `0x1005183e`, `0x10055eff`); the write cited above,
+`0x10055d22`, is in a routine of its own, `0x10055d00`, that does the same
+closing, and its one caller — no jump and no table names it — is `0x100628c6`,
+which runs it whenever the holder's `+0x2c` is set (`0x100628bf`–`0x100628c4`).
+Those are the four clears of 8 the sweep counts; what that caller is was not
+read.
 
 **Input** reaches the holder while it is open. Its mouse handler
 (`0x10055ff0`) and its Esc act only while the game object's `+0x08` is 4
