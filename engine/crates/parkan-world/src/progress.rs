@@ -12,7 +12,7 @@ use glam::Vec3;
 use parkan_formats::mission::{self, Mission, Value};
 use parkan_formats::{gamedir, scr};
 use parkan_sim::orders::{self, Order, Target};
-use parkan_sim::planner::{self, Action, Candidate, Planner, Problem};
+use parkan_sim::planner::{self, Action, Candidate, Planner, Problem, Seen};
 use parkan_sim::progression::{self, ClanTakt, Notice, Progress};
 use parkan_sim::script::{Args, Host, Interpreter};
 
@@ -225,6 +225,9 @@ struct Answers<'a> {
     /// The running script's handler names: a raise is abandoned unless both of its are there.
     handlers: &'a [String],
     clan: i64,
+    /// Whether the clan's SuperAI was started as an AI's, with 2, and not as the local
+    /// player's, with 1 (`iron3d.dll:0x100a2750`; the word is the brain's `+0x380`).
+    ai: bool,
     /// The running clan's seconds clock, which functions 59 and 60 read.
     clock: u32,
     relations: &'a [Vec<u32>],
@@ -367,6 +370,30 @@ impl Answers<'_> {
         ORDER_TAKEN
     }
 
+    /// Whether functions 15 and 28 give orders at all (`ai.dll:0x1000809c`, `0x1000ba49`):
+    /// only for a clan started as an AI's, or for clan 0. Otherwise the handler returns with
+    /// 0 in its result before it has read an operand.
+    fn orders_units(&self) -> bool {
+        self.ai || self.clan == 0
+    }
+
+    /// Hand on the units the planner's problems have let go (`ai.dll:0x100050f0`): each one
+    /// an object still answers is given order 9, `ORDER_ROBOT_REPARE`, with no target,
+    /// replacing what it had (`0x10003e80`) — in an AI's clan alone, the test being the
+    /// word its SuperAI was started with. So a warbot whose problem has ended goes to refit.
+    ///
+    /// STAND-IN: docs/15-behaviour.md#what-ends-a-problem--read-and-measured -- a building
+    /// is given the same order, and what `M_Task_Reload` makes of one on a factory is not
+    /// read: the play hands it to robots alone.
+    fn let_go(&mut self) {
+        for id in std::mem::take(&mut self.planner.released) {
+            if self.ai && self.progress.knows(id) {
+                let order = Order { code: planner::RELEASE_ORDER, parameter: 0, target: Target::NotDefined };
+                self.orders.push(ScriptOrder { id, order, insert: orders::INSERT_REPLACE });
+            }
+        }
+    }
+
     /// Functions 13 and 14: pick a unit of the clan's own.
     fn pick(&mut self, args: &Args<'_>) -> u32 {
         let mode = args.dword(0);
@@ -426,17 +453,25 @@ impl Host for Answers<'_> {
                 self.planner.raise(&name, args.dword(0), args.float(1), int(args, 2), int(args, 3), p);
                 0
             }
-            // Attach a unit to the running problem, and release its units.
+            // Attach a unit of the clan's own list to the running problem, marked critical or
+            // not; an id that is not on the list attaches nothing (`0x1000a05d`).
             6 => {
-                self.planner.attach(args.dword(0) as i32, args.dword(1) == planner::UNIT_CRITICAL);
+                let id = args.dword(0) as i32;
+                if self.own().iter().any(|c| c.id == id) {
+                    self.planner.attach(id, Some(args.dword(1) != planner::UNIT_NORMAL));
+                }
                 0
             }
+            // Let the running problem's units go.
             7 => {
                 self.planner.release_units();
+                self.let_go();
                 0
             }
+            // Set its state: solved and unsolved retire it, which lets its units go too.
             8 => {
                 self.planner.set_state(args.dword(0));
+                self.let_go();
                 0
             }
             // 1 when the clan already holds as many of the type as its `dMax*` allows.
@@ -465,6 +500,9 @@ impl Host for Answers<'_> {
             // guard is ahead of it — eight of the nine build handlers drop the problem when the
             // clan has no free mind before they ever order (docs/23).
             15 => {
+                if !self.orders_units() {
+                    return 0;
+                }
                 let (order, insert) = self.packet(args);
                 self.give(args.dword(0) as i32, order, insert)
             }
@@ -489,6 +527,9 @@ impl Host for Answers<'_> {
             }
             // Give every unit of the group the order; 1 when they all took it.
             28 => {
+                if !self.orders_units() {
+                    return 0;
+                }
                 let (order, insert) = self.packet(args);
                 let units = self.planner.group(args.dword(0) as usize).map(|g| g.units.clone());
                 let Some(units) = units else { return 0 };
@@ -989,6 +1030,7 @@ impl Progression {
                 planner,
                 handlers,
                 clan,
+                ai: matches!(which, Which::Other(_)),
                 clock,
                 relations: relations.as_slice(),
                 notices: &mut notices,
@@ -1109,18 +1151,20 @@ impl Progression {
     /// drain, every `ST_SOLVING` problem's `_Continue`, `Problems<n>`, and then the `_Start`
     /// pass from the heaviest weight down.
     ///
-    /// STAND-IN: docs/15-behaviour.md#what-the-functions-do -- what the engine below does
-    /// with a problem's action records is not read. They are plainly conditions to watch —
-    /// `varset.var` names them *"When building capture"*, *"When all units in group killed"*
-    /// and *"When all units in group nothing to do"* — and nothing else ends a problem that
-    /// a handler left `ST_SOLVING`: `PBM_ROBOT_NEEDED_Start` files `ACTION_NOTHING_DOING` on
-    /// the factory it ordered and its `_Continue` is empty, so without them a clan builds one
-    /// warbot and never another. So an action that comes true retires its problem, which the
-    /// next want then raises afresh.
+    /// The drain is where a problem ends without its handler's word (docs/15, "What ends a
+    /// problem"): its life counter, one of the actions function 27 filed come true, or its
+    /// units gone. The `_Start` pass runs the heaviest unstarted problems and goes on to the
+    /// next weight only while every handler it ran started or solved its problem: the first
+    /// that will not start ends the pass for this takt (`0x10001e22`, `0x10001e3d`).
     fn clan_takt(&mut self, which: Which) -> Vec<Notice> {
-        self.actions(which);
         self.with_clan(which, |script, host| {
-            host.planner.drain();
+            let (clan, progress) = (host.clan, &*host.progress);
+            host.planner.drain(clan, |id| {
+                let owner = progress.owner(id);
+                (owner != planner::ERROR)
+                    .then(|| Seen { owner, order: progress.contact(id).and_then(|c| c.order) })
+            });
+            host.let_go();
             for slot in host.planner.solving() {
                 let Some(name) = host.planner.problem(slot).map(Problem::continue_handler) else {
                     continue;
@@ -1132,64 +1176,28 @@ impl Progression {
             host.planner.running = None;
             let handler = host.planner.handler.clone();
             script.run_named(&handler, host);
-            let mut done = BTreeSet::new();
             for _ in 0..planner::MAX_START_PASSES {
-                let batch = host.planner.start_batch(&done);
+                let batch = host.planner.start_batch();
                 if batch.is_empty() {
                     break;
                 }
+                let mut unstarted = false;
                 for slot in batch {
-                    done.insert(slot);
                     let Some(name) = host.planner.problem(slot).map(Problem::start_handler) else {
                         continue;
                     };
                     host.planner.running = Some(slot);
                     script.set_dword("dCurrentProblem", slot as u32);
                     script.run_named(&name, host);
+                    let state = host.planner.state_word(slot);
+                    unstarted |= state != planner::ST_SOLVING && state != planner::ST_SOLVED;
+                }
+                if unstarted {
+                    break;
                 }
             }
             host.planner.running = None;
         })
-    }
-
-    /// Retire every problem of that clan whose action has come true (see [`Self::clan_takt`]).
-    fn actions(&mut self, which: Which) {
-        let (planner, clan) = match which {
-            Which::Player => (&mut self.planner, self.clan),
-            Which::Other(i) => match self.others.get_mut(i) {
-                Some(o) => (&mut o.planner, o.clan),
-                None => return,
-            },
-        };
-        let progress = &self.progress;
-        // A unit with nothing to do: one the engine knows and that is running no order. An id
-        // nothing answers any more counts as done with it.
-        let idle = |id: i32| progress.contact(id).is_none_or(|c| c.order.is_none());
-        let gone = |id: i32| !progress.knows(id);
-        let taken = |id: i32| progress.owner(id) == clan as u32;
-        let fired: Vec<usize> = planner
-            .standing()
-            .filter(|(_, p)| {
-                p.actions.iter().any(|a| match a.action {
-                    planner::ACTION_DESTROY => gone(a.target),
-                    planner::ACTION_NOTHING_DOING => idle(a.target),
-                    planner::ACTION_CAPTURE_BUILDING => taken(a.target),
-                    planner::ACTION_GROUP_DESTROY | planner::ACTION_GROUP_NOTHING_DOING => {
-                        let test = |id: i32| {
-                            if a.action == planner::ACTION_GROUP_DESTROY { gone(id) } else { idle(id) }
-                        };
-                        planner
-                            .group(a.target as usize)
-                            .is_some_and(|g| !g.units.is_empty() && g.units.iter().copied().all(test))
-                    }
-                    _ => false,
-                })
-            })
-            .map(|(slot, _)| slot)
-            .collect();
-        for slot in fired {
-            planner.retire(slot);
-        }
     }
 
     /// The units' takts, every clan's takt, and the `Mission` handler when it is due, at
