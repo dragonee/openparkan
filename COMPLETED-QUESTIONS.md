@@ -696,6 +696,116 @@ and the camouflage share was merged by hand by the branch that landed second. Th
 passed every check: 394 tests, 1066 of 1066 checks, 614 engine tests and 242 install
 tests, `ruff` clean.
 
+A fourteenth round, on **2026-10-10**, took twelve lines in four branches of three, each
+owning whole docs: the sky's light, a building's rooms and the camera
+([10-sky](docs/10-sky.md), [03-terrain](docs/03-terrain.md)); a building's moving parts and
+what a mover meets on it ([24-motion](docs/24-motion.md), [28-chassis](docs/28-chassis.md),
+[26-damage](docs/26-damage.md), [13-control](docs/13-control.md)); the AI clan's planner
+([15-behaviour](docs/15-behaviour.md), [23-economy](docs/23-economy.md),
+[16-research](docs/16-research.md), [36-factory](docs/36-factory.md)); and a unit record's
+bound with the lights of a unit shown on its own ([25-sensors](docs/25-sensors.md),
+[30-turrets](docs/30-turrets.md), [35-hud](docs/35-hud.md), [37-designer](docs/37-designer.md),
+[40-command-mode](docs/40-command-mode.md)). Seven of the twelve stood behind a stand-in in
+the engine. **Eleven closed and one was narrowed** — why Enemy 1's first builds on C03 M02
+are medium tracked — and four further lines went with them, none of them asked: who calls
+`CCamera`'s slot 14, which light manager a gather passes over, Mission 04's own copy of the
+record's `+0x98`, and the sphere behind `IBuilding` slot 15. One was **half stale as asked**:
+[37-designer](docs/37-designer.md) had held camera flag 8's writer while
+[10-sky](docs/10-sky.md) queued it. Nine new lines hold what the answers left.
+
+Five results are **negatives carrying their controls**. No scaled object carries its scale in
+the frame it is lit in — 216 of 864 placements are scaled and none in a matrix — and of 34049
+pose keys one alone gives a matrix that is no rotation, against the same formula on a
+quaternion of squared length 4. One call of the install's 375 through `+0x34` hands the
+camera's flag setter a constant carrying 8, against the same sweep for `0x200` finding its
+one known writer among eight. One routine reads a problem's action list, of twelve sites that
+name its `+0x34`, against ten adds of the group list's `+0x4c`. Nothing lowers a tower's
+mast: a 29 is pushed three times across the 21 modules and two go to a find-by-class, against
+the same search for 25 and 15 finding their neighbours, and the setter's stowing arm has no
+caller. And nothing drops a face flagged `0x20` for a mover — batch word, node words and
+loader each ruled out — which the bridge turns out not to need. A sixth is a negative by
+measure: a room's line could run along any axis, the two readings agreeing on all 22125
+points in 177 rooms, against 201 points parting once each room loses its most level face.
+
+**The engine changed on every branch.** A clan's problem ends where the game ends it — an
+action come true, its units gone, a critical one lost — and lets its units go with order 9; a
+heavier want takes a standing problem over, weight and third parameter; the `_Start` pass
+stops at the first handler that will not start. One figure, the cylinder in the box of all a
+unit's parts, serves the outer camera, an HQ's command camera and the right button's ray,
+and the pick's margin went in with it. Every shown unit takes two pairs of view lights, the
+one-part dummy too, and a preview's two lights stand still in the view while its model
+turns. A mover standing on a building is paired with that building alone; a control pod
+waits with its canopy up; a building's bubble is its construction sphere, 46.7 on a Small
+Tower where its agent's sphere is 37.8; and a tower's mast is switched by its class. A wheel of the
+Medium chassis no longer flips half a turn at one frame of its roll. Nine stand-in rows are
+gone, 157 to 148, and three are reworded to the smaller thing left: the one stretched key, a
+pod's canopy against a unit too tall for it, and what a building makes of order 9.
+
+**This round corrects sixteen premises.** This queue had a scaled item taking *s* times the
+light, where the scale is kept beside the frame's rotation; the room test's `+0x150` as a
+direction with an unread writer, where it is the mesh's scale; nothing but a handler ending
+a problem left `ST_SOLVING`, where the drain's step ends one on its units; the recording
+favouring 61 m behind Mission 04's HQ, read off its width, where its height in the frame
+gives 53; the one-part dummy matching one pair of lights, by the wrong face of a flat board;
+a tower's mast *stowed once its turret is lost*, where the tower's own drum hides it from
+the side the hero had run to; and the hero stopping 183.8 m along the energy bridge *taken
+as read*, which was the engine of 2026-09-20 and not the read.
+[15-behaviour](docs/15-behaviour.md) had the `_Start` pass's flag backwards, repeating while
+a handler left its problem unstarted, where it repeats while none did; and the engine with
+it kept an unsolved problem that `fn8` retires. [07-objects](docs/07-objects.md) and both
+readers had a key that is no unit quaternion *repaired on read*, which turned one wheel half
+round. [35-hud](docs/35-hud.md) had the second pair of lights waiting on a second part.
+[37-designer](docs/37-designer.md) had the preview's lights turned through the model's
+matrix, the camera field's accesses as 18 where eight are its, and three closers beside four
+clears. [10-sky](docs/10-sky.md) had a light set in space 2 turned *through* its owner's
+placement, where it is brought into the owner's frame. And [24-motion](docs/24-motion.md)
+had a collision entry's `+0x40` as the manager it joined, where it is the object's own.
+
+**Which way this round's corrections ran is worth recording.** The coordinator's own stale
+check **found a contradiction before any agent ran**: two docs cited
+`Control.dll:0x1002c500` for different things, the second sphere and the bubble's being up,
+and the branch that was handed both found each right about half of one routine. Two
+branches **corrected a doc from outside it**: the sky's found [37-designer](docs/37-designer.md)'s
+count wrong and its list one short, the camera's found [10-sky](docs/10-sky.md)'s space 2
+the wrong way round, and each reported the fact rather than edit a neighbour's file; the
+coordinator re-read both and wrote them. One branch **corrected a sighting, not a read**:
+the mast *sunk to a stub* was this file's own, made from one silhouette on 2026-09-30, and
+the feedback list carried it. One **corrected a measure by choosing one that discriminates**
+and then asked for the check it could not make itself: the engine's command view at 80 s
+beside the recording's at 80.5 s, which the coordinator rendered, the HQ's width, foot and
+the rocks behind it in place. Two branches **reached one address independently**, as two did
+last round: `World3D.dll:0x10007e6e`, the sky's as slot 14's caller and the camera's as the
+attach at which a mesh makes its lights. One branch **narrowed by finding a difference
+between installs**: the recordings' builds are this install's ranking without its ten
+`AI_*` files, two of which are byte for byte copies of designs beside them, and that the
+recorded game lacks them is *inferred*, since the install cannot answer for another build.
+And one **departed from its brief in form**: three questions in one commit, their changes
+sharing five files.
+
+**Which way this round's checks ran**: every coordinator spot-check confirmed — the census
+of keys run again, 435 meshes, 34049 keys, 9 zero and the same two odd; the designer's
+`push 9` at `iron3d.dll:0x10055c9b`; the static at `AniMesh.dll:0x10026b40` filled with
+(1, 1, 1) at `0x100121f0` and `SetScale`'s store at `0x100147ca`; the pass's byte cleared at
+`ai.dll:0x10001bf8`, set at `0x10001e22` and tested for clear at `0x10001e3d`; the setter's
+two retires at `0x10005710`; the evaluator's one call at `0x10004f67`; order 9 stored at
+`0x10003ecd` beside `0x204`; `AI_L1.dat` and `AI_L2.dat` by their digests; `return 7` at
+`Terrain.dll:0x1006faa0`, the twelfth entry of the vtable at `0x1009bab0`; the clock's word
+handed through `+0x38` at `World3D.dll:0x10007e6e`, and loaded again at `0x1000809f`; the radius
+stored at `AniMesh.dll:0x10009e47`; `Ngi32.dll:0x100240a0` and `0x10024260` differing in six
+bytes of 83; the setter's `+0x8c` at `Terrain.dll:0x1008060f` and the gather's `+0x1c` at
+`0x100803e4`; the `push 0x1d` at `Behavior.dll:0x100187e1` and the latch and the 1 at
+`0x1001982f`–`0x1001985e`; and interface `0x17` asked at `Control.dll:0x1002c51a`, slot 15 or
+the agent's slot 9 after it. The coordinator's own work was the frames — the HQ's view, and
+the mast's silhouette cut at 21:20, 21:32, 21:37 and 21:40 of Part 4, and the tower's pod at
+a tenth of a second, its pad bare at 21:46.05 and a red ring low about the hero by 21:46.35,
+with no canopy caught crossing the view on its way down — and two sweeps for
+[37-designer](docs/37-designer.md): the eighteen uses of `0x164` in `Terrain.dll`, and the
+four sites in `iron3d.dll` that clear bit 8, of which one routine has one caller. All the
+conflicts were `verify.py`'s: every branch appends a check to the one tuple's tail, and the
+branch that landed third met it once for each of its three commits, resolved by keeping
+both. The merged tree passed every check: 401 tests, 1094 of 1094 checks, 625 engine tests
+and 247 install tests, 216 of them `parkan-world`'s, `ruff` clean.
+
 ## Sky and rendering
 
 [10-sky](docs/10-sky.md#not-resolved), [02-texm](docs/02-texm.md),
@@ -1149,6 +1259,92 @@ tests, `ruff` clean.
     three views by the coordinator, the nearer leaves still lie over the farther, and 1274 of
     786,432 pixels differ in a crown's close-up. *Not seen* in a recording
     ([11-effects](docs/11-effects.md#effect-sprites-are-drawn-far-to-near--read-and-seen)).
+- [x] ~~[M1] Which shipped frames carry a scale: the shade puts a directional light into an
+  item's frame by the transpose of the frame's 3 × 3 and normalises nothing, so an item drawn at
+  scale *s* takes *s* times the light.~~ — closed 2026-10-10: **one frame of the install's
+  does, and it is no scaled object's** — the consequence the line drew was wrong. The frame the
+  shade lights an item in is the class its own panic names `N3DSCALEDMATRIX`
+  (`Terrain.dll:0x100a1644`): a matrix with its scale kept *beside* it (`+0x50`, the
+  reciprocals at `+0x5c`, a class word at `+0x6a`), whose constructor (`0x100291a0`) divides
+  the axes' lengths out of a class-4 or class-8 matrix. Four classes are ever made — 1, the
+  identity, for the landscape's cells; 2, the sky's layers and the clouds; 4, the mesh draw's
+  (`0x10048f50`), a node's matrix with the mesh's scale beside it; 8, `RenderEffect`'s, whose
+  sprites are not lit — and `SetScale` (`AniMesh.dll:0x10014770`) and the pose walk multiply a
+  node's translations and nothing else. So **a scaled object is lit as an unscaled one**: 216
+  of the 864 placements carry a scale and none carries it in a matrix. All five builds of
+  `g_FastProc`'s `+0x8c` are read now (`Ngi32.dll:0x10024260`, `0x1001ba50`, `0x1001f910`,
+  `0x1001ca90`, `0x1001ca00`) and none normalises.
+  - **What is left is a pose key's own matrix**, which `Ngi32.dll:0x10017e60` builds without
+    normalising: (1 − *n*) I + *n* R at a squared length of *n*. *Measured* over 34049 keys in
+    435 meshes, the count run again by the coordinator: 34038 give a rotation to within
+    0.00017, 9 are all zero, `R_M_03`'s key 78, (0, 0, 71, 0), is the identity to 0.00001, and
+    `o_tur_ba_09`'s key 20, (−32767, 0, 0, −32767) — the Large turret 09's `BTHQ_m1o1` at
+    frame 47 of 102 — turns 116.57° and stretches √5 across its z. The control is the same
+    formula on a quaternion of squared length 4, which gives the 5 its matrix's axis measures.
+  - **The engine's unit light was right, and the census found a bug beside it.** Both readers
+    normalised any key that was not zero, which made a **half turn about y** of the Medium
+    chassis's left middle wheel at frame 19 of its roll's 21, where its five siblings hold a
+    zero and the game's matrix is the identity. `key_rotation`, Rust and Python, takes the turn
+    of the game's matrix for the two odd keys and leaves the other 34038 as they were. The
+    stretch is not taken, which is what the M1 row says now; it and what was not enumerated
+    are queued ([10-sky](docs/10-sky.md#the-lit-colour-is-the-games-own--read-and-measured)).
+- [x] ~~[M5] The line a room's mesh is asked along: the direction at the mesh's `+0x150`, whose
+  writer is not read.~~ — closed 2026-10-10: **the room node's own z, as the engine had it —
+  and the line's premise was wrong**, the triple at `+0x150` being no direction. It is the
+  mesh's **scale**, the object's `+0x158` seen from interface `0x20` eight bytes in: (1, 1, 1)
+  from the constructor and written by `SetScale` alone (`AniMesh.dll:0x100147ca`, as `+0x154`
+  of the interface it is entered on), and the zeros slot 7 compares it with at `0x10026b40`
+  are (1, 1, 1) once their initialiser has run (`0x100121f0`; both re-read by the
+  coordinator). The node visitor (`0x100106d0`) brings the point into the node's frame and
+  divides it by the scale; the triangle visitor (`0x100107a0`) passes a face whose stored
+  normal has no z, tests x and y against its three edges and counts it under or over the point
+  by its plane's height. *Measured* over the install's 177 rooms in 21 meshes, 125 points a
+  room: on all 22125, 13345 of them inside, the game's reading and the engine's agree, and a
+  line along x or y would too, the rooms being closed shells. The control: with each room's
+  most level face left out, x and z part on 201 points. Nothing in the engine changed but the
+  comment; the stand-in and its row are gone
+  ([10-sky](docs/10-sky.md#the-weather--read-and-seen)).
+- [x] ~~What sets camera flag 8, under which a camera draws neither the sky's pass nor the
+  world.~~ — closed 2026-10-10: **the warbot designer, on the scene camera, and nothing
+  else** — and the line was half stale, [37-designer](docs/37-designer.md) having held the
+  writer while [10-sky](docs/10-sky.md) asked for it. The flag word is `CCamera`'s `+0x164`,
+  set whole through `ICamera` slot 13 (`Terrain.dll:0x10084a70`); the module stores to it in
+  three places and in no constructor — the setter, the render's clearing of `0x200`
+  (`0x10084738`) and slot 14's zero (`0x1008542e`). Of the install's 375 calls through `+0x34`,
+  29 carry a constant with bit 8 and **one** hands it to the setter as its one value:
+  `iron3d.dll:0x10055c9b`, the designer's opening, with 9 (re-read by the coordinator); its
+  four closings clear it. So flag 8 marks no kind of camera. It is the scene camera while the
+  designer covers it, and the mirror's camera, handed the scene camera's whole word at each
+  draw (`0x10083f0e`–`0x10083f20`), draws nothing either. The control: the same sweep for
+  `0x200` returns eight, and the one with two values pushed is the known
+  `Terrain.dll:0x100599f9` (`analysis/camflags.py`). The engine agrees as seen, the world and
+  then the designer's black ground over the whole window, and was not changed; it does not
+  skip the draw under it
+  ([10-sky](docs/10-sky.md#the-skys-first-draw-is-a-screen-wide-quad--read)).
+- [x] ~~Who calls `CCamera`'s `+4` slot 14 (`Terrain.dll:0x100852e0`), the routine that hands a
+  camera's type to the buffering camera's slot 23.~~ — closed 2026-10-10, out of the flag's
+  enumeration and outside the batch: **`World3D.dll`, for every object it makes**, a scene
+  camera among them — `CreateObject` with 0 once the object is loaded (`0x10007d1a`) and with
+  the game clock's word (`0x10032a38`) before it returns (`0x10007e6e`, a call through `+0x38`,
+  re-read), `AddObjectToGame` and its siblings likewise. The mirror's camera is the
+  landscape's: its own slot 14 (`Terrain.dll:0x1001fcd0`) builds the camera by its name, calls
+  its slot 14 with the argument it was itself handed (`0x1001ff0e`) — the one call that gives
+  a view a type other than 0 — and sets its flag word to 1 (`0x1001fff7`). The camera branch
+  of the same round reached `0x10007e6e` from the other side, as the attach at which a mesh
+  makes its view lights ([10-sky](docs/10-sky.md#the-skys-first-draw-is-a-screen-wide-quad--read),
+  [03-terrain](docs/03-terrain.md#not-established)).
+- [x] ~~Which light manager the gather passes over under bit 1 of the draw's mode: one whose
+  registered object answers class 7 (`Terrain.dll:0x10047633`–`0x10047653`). What answers
+  class 7 is not read.~~ — closed 2026-10-10, out of the view lights' line and outside the
+  batch: **the sky's.** `CAtmosphere`'s slot 11 is `return 7` (`Terrain.dll:0x1006faa0`, the
+  twelfth entry of the vtable at `0x1009bab0`, re-read by the coordinator), the atmosphere
+  makes the light manager it owns (`0x1006f057`–`0x1006f062`) and the sun makes its two lights
+  on it (`0x1007c7fc`, `0x1007cf12`). The only other `return 7` in a vtable is slot 0 of a
+  `Behavior.dll` table. So an agent attached under a node whose record carries bit 0 at `+0xc`,
+  and a draw carrying `0x400`, take no sunlight, and the placement ghost's want of shading,
+  *inferred* from the recordings on 2026-10-01, is read. Which nodes carry the bit is queued
+  ([35-hud](docs/35-hud.md#the-sky-is-the-one-object-of-kind-7--read),
+  [11-effects](docs/11-effects.md#not-resolved)).
 
 ## Effects and sound
 
@@ -1767,6 +1963,87 @@ tests, `ruff` clean.
   action-4 records on 101 objects name one point three times; the direction is a unit long on 689,
   and the one other is `fr_l_gener`'s `Sign_Type1`, (0, 0, 8.98)
   ([13-control](docs/13-control.md)).
+- [x] ~~[M17] What stops a tower's gun mast at the top: the two class-29 records set their
+  switch word to 9, open and bouncing, and nothing found switches it off. Seen: the mast stays
+  up while the turret lives and is stowed once it is lost.~~ — closed 2026-10-10: **the
+  tower's own behaviour, within its first tick — and the mast is never stowed, so the
+  sighting's second half was wrong.** Class 29 is the plain base item, the factory's byte
+  table (`Control.dll:0x1002d864`) giving it the default case `0x1002d6ec`, so it has no step
+  of its own. `MBehaviour`'s place set (`+0x3d0`) finds an object's class-29 items
+  (`Behavior.dll:0x100187e1`, a `push 0x1d` to a find-by-class) and files them in a list of
+  their own at the set's `+0x70`; its first tick sends each of them switch word **1**, open
+  and stop, behind a latch at `+0xad` (`0x1001982f`–`0x1001985e`, both re-read by the
+  coordinator). So the record's 9 is replaced five seconds before the progress first reaches
+  an end, and the fire control asks for the same every takt through the latched setter
+  (`0x100199b0`, called at `0x10024211` with 1), whose other arm, 2 for stow, no caller
+  reaches. The control: across the 21 modules a 29 is pushed three times and only these two
+  go to a find-by-class call, where the same search for 25 and 15 finds their neighbours.
+  - **The recording's mast does not sink.** The target panel's silhouette turns with the
+    hero, who by 21:36 of Part 4 has run round to the entrance, where the tower's own drum
+    stands in front of the mast and hides its lower two thirds: its top is 60–61 px over the
+    base line at 21:32 and 64–65 px at 21:37, on a plate 240–256 px wide, and a stowed mast,
+    6.9 m under the hull's top, would show nothing. The coordinator's own crops at 21:20,
+    21:32, 21:37 and 21:40 agree: the pole's top no lower, the drum taller before it.
+  - **The engine was right in effect**; `buildings::started` now switches by class 29 rather
+    than by the bounce bit, and the row is gone. The stowing arm is queued
+    ([28-chassis](docs/28-chassis.md#what-stops-a-towers-mast-at-the-top--read-and-seen)).
+- [x] ~~[M15] What lets a mover past a face flagged `0x20`: the collision's filters take a
+  triangle mask of 4, the energy bridge's join cap carries `0x20`, and taken as read the hero
+  walks 183.8 m of the 185.5 to the join and stops.~~ — closed 2026-10-10: **nothing drops
+  the face and nothing has to — and the 183.8 m was the engine's, not the read's.** The
+  pair's triangle mask is 4 (`Control.dll:0x1001dbad`, `0x1001dbce`), all three of its
+  filters carry 0 in both node words (`0x1001db53`–`0x1001dbf3`) and the cap's batch word is
+  `0x100` with no 8: batch, node and loader are each ruled out. Two reads carry a mover over
+  the join, either enough. The cap ends at the deck's surface — z 7.54 to 8.14 on
+  `fr_e_brige`, over it only as two kerbs 0.18 and 0.90 high at the edges — under the node
+  sphere the pair pushes out, the hero's riding 0.59 over the deck. And a mover standing on a
+  building has left the world's collision manager for that building's own (`0x1001f585` →
+  `0x1001fea0`, `0x1001fe40`), so the pass pairs it with that building and no other
+  (`0x1001c1ae`–`0x1001c256`, a pair with no contact record on either side dropped at
+  `0x1001c1e9`): the far half, whose cap faces it, is never asked.
+  - *Measured* on the engine with the cap a wall, all four ways: only the agent's sphere
+    paired with every building stops, at exactly 183.8 m, which is the engine of 2026-09-20.
+    The stand-in had been idle for the bridge since the node-sphere read of 2026-10-01.
+  - **The engine was wrong in two places.** `collision_push` pairs a mover on a building with
+    that building alone, and `passes` no longer passes the bridge's `0x20`; both bridges
+    still cross. And what the pass was really holding up was glass: 234 `B_COMP_3G` faces in
+    two-sided batches, every one a control pod's canopy, which the engine left at the mesh's
+    rest pose, down. Read, and *seen* (Part 4, 21:45.1–21:46.4), a pod waits with its canopy
+    5.5 to 8.7 m **up** and opening lowers it over the occupant; buildings are posed as their
+    items hold them before their faces are taken. The coordinator's frames, a tenth of a second
+    apart, have the two ends and not the way between: the pad bare at 21:46.05, red entering at
+    the foot of the view from 21:46.15 and a ring standing low about the hero from 21:46.35 on,
+    with nothing seen crossing the view from above. Whether the canopy keeps out a unit too
+    tall for it is the row's new stand-in, queued
+    ([24-motion](docs/24-motion.md#the-cap-where-two-halves-meet--measured-and-read)).
+- [x] ~~What a building's second sphere is: it comes from its device manager's slot 12
+  (`Control.dll:0x1002c500`), and what that slot answers is not read.~~ — closed 2026-10-10:
+  **its construction sphere, which is also its shield's bubble.** The routine is one with two
+  answers, and the two docs that cited it for different things were each right about half
+  ([24-motion](docs/24-motion.md) for the sphere, [26-damage](docs/26-damage.md) for the
+  bubble's being up — a tension the coordinator's stale check found). In `al`: whether the
+  bubble is up, both shield devices on and whole (`0x1002c546`–`0x1002c581`). Through its
+  pointer: the bubble's sphere. It asks the control's owner for `IBuilding`, interface `0x17`
+  (`0x1002c51a`, re-read); a building's slot 15 answers (`Terrain.dll:0x1005c540`, named
+  `CBuilding::GetConstructionSphere` by its own panic), and anything else gets interface
+  `0x18` slot 9, the agent's sphere. The sphere is written whether or not there is a shield.
+  - **The construction sphere** (`0x1005bd70`): the middle of the box round the `.bas` outer
+    ring, whose upper corner starts at `FLT_MIN`, so the box ends at 0 where the ring lies
+    below it — z on 17 of 30 plans and no other axis; the radius the farthest point taken at
+    z 0, plus 5, plus 15 where the name holds `mine`. *Measured* over the 30 plans: wider than
+    the mesh's header sphere on 23, by 10.8 to 31.8, and centred on the ground plan — the
+    Small Tower 46.71 against its agent's 37.75, the Large Factory 118.82.
+  - **Its callers**: the collision object's second sphere (`0x1001ffb3`), a blast's shield
+    step (`0x1000ff6a`), the sector pick (`0x1002c5cf`) and action 5's frame. A round's bubble
+    contact is swept against a building's second sphere and a unit's first (`0x1001d6c4`);
+    the mesh test follows whatever the sweep found, so the sphere gates no face.
+  - **The engine was wrong**: every bubble was its own bound of node spheres. A building's
+    is its construction sphere now, for the round's contact, the blast's shield step, the
+    sector pick and the flash. One install test moved with it: the shot that opens Mission
+    02's factory door is fired from 30 m, since from 40 it starts outside the 118.8 m bubble
+    and meets the shield. This also answers Mission 04's *the sphere behind `IBuilding` slot
+    15* ([26-damage](docs/26-damage.md#a-round-meets-a-bubble--read),
+    [24-motion](docs/24-motion.md#collision-between-objects--read)).
 
 ## Turrets, weapons and camera
 
@@ -2014,6 +2291,80 @@ tests, `ruff` clean.
     58) and the dummy (40, 163, 40) ([35-hud](docs/35-hud.md), [32-builder](docs/32-builder.md)).
     Queued: what lights a unit of more than one part, which the recordings show about twice as
     bright as one pair gives.
+- [x] ~~Which bound the unit record's `+0x98` is: where the right button's ray starts ([M6]), an
+  eighth of how far an HQ's command camera rides behind it ([M13]) and the outer camera's r
+  ([M14]) — three stand-ins on one float, taking it as 0, the chassis sphere's radius and the
+  half-diagonal of the chassis's box.~~ — closed 2026-10-10: **the radius of the cylinder the
+  unit's mesh stands in the box of all its parts.** It is the seventh float interface `0x18`
+  slot 12 hands the bind (`iron3d.dll:0x1007e5c8`–`0x1007e5d6`, `AniMesh.dll:0x100146a0`), the
+  mesh object's `+0x14c` (the store at `0x10009e47`, re-read by the coordinator). One routine,
+  `0x10009510`, works it out from the box it joins at `+0x54` out of every part's stream-2
+  header box, a hung part's corners turned by its first own node and set down at its socket
+  (`0x10009941`–`0x10009ac0`): the cylinder lies along the box's longest side — z unless x or
+  y is strictly longer, x over y on a tie — between the middles of the two end faces, and is
+  half an end face's diagonal across. The header's own cylinder is copied for part 0 as the
+  mesh is made and does not last: the routine runs again after each hung part (`0x10007261`)
+  and at each attach, both before message 1 binds the record.
+  - *Measured*: the hero **1.449** (a box of 1.502 × 2.478 × 3.372, along z), Mission 04's HQ
+    **6.649** (8.948 × 13.111 × 9.837, along y), the L-2f 8.868. Over the 148 placed unit
+    models it is the chassis header's own cylinder on 10. The control for the shape: on all
+    435 mesh headers the authored cylinder has this shape about its own box, along the longest
+    side on 163 and the shortest on 272.
+  - **It corrects this queue's 61 m.** The Mission 04 line had the recording favouring the
+    chassis sphere's 8 × 7.653; that was read off the HQ's width in the frame, which does not
+    tell 53 from 61. Its height does: settled from 79.33 s to 80.73 s the HQ's top is at y 345
+    of 720, where the read's own camera rules put it at 337 for 53.2 m, 295 for 61.2 and 439
+    for 38.7. *Seen* by the coordinator: the engine's command view at 80 s beside the
+    recording's at 80.5 s, the HQ's width and foot and the rocks behind it in place, its top
+    within about ten pixels. The hero's 1.449 lies inside the 1.3 to 1.5 m its recording gave.
+  - **The engine was wrong in all three places**, and one figure serves them now; the pick's
+    margin, the record's `+0x94`, which stood under *Read since*, went in with it. Four rows
+    are gone ([40-command-mode](docs/40-command-mode.md#r-the-unit-records-0x98--read-and-measured),
+    [30-turrets](docs/30-turrets.md), [25-sensors](docs/25-sensors.md)).
+- [x] ~~What lights a unit of more than one part in a panel's view: a mesh makes two
+  directional lights at its set-up, the one-part dummy matches that, and the hero, a chassis
+  and a turret, is lit twice as strongly. What makes the second pair was not found.~~ — closed
+  2026-10-10: **a second attach, not a second part — and the premise was wrong: the dummy has
+  both pairs too.** The mesh makes its eight lights, two of them flagged `0x84000000` and on,
+  whenever message 4 arrives with an argument that is not 0 (`AniMesh.dll:0x10006ff1`–
+  `0x1000723b`); it keeps no mark of having done so, and the manager's slot 12 hands out a
+  fresh record each time (`Terrain.dll:0x100806b0`). The argument is the game clock
+  (`World3D.dll:0x10032a38`), and an object is attached with it twice: by `CreateObject`
+  (`0x10007e65`–`0x10007e6e`) and again by `AddObjectToGame` (`0x1000809f`–`0x100080a9`, both
+  re-read), which both scheme builders call one after the other (`ArealMap.dll:0x1001556a`,
+  `0x10015dd0`; `Behavior.dll:0x1001d71a`, `0x1001df80`). So **every placed or built unit and
+  building holds two pairs, whatever its parts**, and the gather for a panel's view walks one
+  manager, the drawn object's own, once for the whole draw (`Terrain.dll:0x100472e2`–
+  `0x1004759b`, `AniMesh.dll:0x10014dd0`).
+  - **Why the dummy looked like one pair.** It is a flat board whose aim face (`R_AIM`,
+    diffuse green 198) looks along +y, and all three `l_targ.dat` face the hero's start (dot
+    0.999, 0.979 and 1.0). Only the counter lights reach that face: 145 under one pair, 162
+    under two, and the recording's board is a flat (40, 162, 41) at 143 s. The earlier match
+    was the back face (`R_RL_06`, 140) under one main light, 162 as well by coincidence.
+  - **The engine was wrong for a unit of one part**, giving it one pair; every shown object
+    takes two now, and the stand-in and its row are gone. The sky's kind, which this line also
+    asked, is read with it (*Sky and rendering*); the shade's phase `+0x1928` is queued
+    ([35-hud](docs/35-hud.md#what-mode-2-does-with-the-colour--read-measured-and-seen)).
+- [x] ~~Whether the designer's two preview lights are turned twice: the mesh gather turns every
+  light's stored direction through its manager's owner's placement, and the designer already
+  sets its two lights in space 2 each draw.~~ — closed 2026-10-10: **neither twice nor once —
+  the two turns undo each other, and the lights stand still in the view.** The setter takes a
+  space-2 vector *into* the owner's frame through `g_FastProc`'s `+0x8c`
+  (`Terrain.dll:0x10080550`, `0x1008060f`) and the gather brings it out again through `+0x1c`
+  (`0x100802f0`, `0x100803e4`), and the two are each other's transpose: `Ngi32.dll:0x100240a0`
+  is rows on the vector and `0x10024260` columns, the same 83 bytes but for six matrix offsets
+  exchanged, 4 with `0x10`, 8 with `0x20` and `0x18` with `0x24` (compared byte for byte by
+  the coordinator). The view sets the placement and then the two directions at every draw
+  (`iron3d.dll:0x1009f060`, `0x1009f0cc`, `0x1009f114`), so each light falls as it was handed:
+  (−1, 0, −1)/√2 from behind the model and (1, 0, −1)/√2 from the camera's side. The model's
+  top takes 2.48 and whichever wall faces the camera 0.56 at every turn, where lights turning
+  with the model would give that wall 1.41 or 0. *Seen*: through one whole turn of the
+  project's model in *The Constructor*'s recording (113.0–121.4 s, twelve frames) the median
+  of its blue paint stays 188–208 and of its yellow 217–239. **The engine was wrong**, turning
+  the two through the model's matrix as [37-designer](docs/37-designer.md) had it; the
+  designer's, the factory screen's and the research box's previews all take them as handed
+  now. Not read: the 3DNow! and SSE builds of `+0x1c`
+  ([37-designer](docs/37-designer.md#the-previews--read-and-seen)).
 
 ## Damage, sensors and ownership
 
@@ -2373,6 +2724,57 @@ tests, `ruff` clean.
     ([15-behaviour](docs/15-behaviour.md), [36-factory](docs/36-factory.md),
     [16-research](docs/16-research.md)). Queued: why Enemy 1's first builds are medium tracked three
     times running, and function 41 in the engine.
+- [x] ~~[M18] What the engine below a SuperAI does with a problem's action record (`+0x34`,
+  function 27): retire, re-raise, or something else, and where it is tested.~~ — closed
+  2026-10-10: **the first action to come true retires its problem, tested once a takt at its
+  head — and the same step ends a problem on its units, which the line's premise left out.**
+  Function 27 (`ai.dll:0x100094f1`) pushes a 16-byte record — action, target kind, target and
+  a came-true byte — on the list at the problem's `+0x34` (`0x10005530`). One routine reads
+  it, the evaluator `0x10005180`, whose one caller is `0x10004f67` (re-read) in the drain's
+  step `0x10004ee0`, itself called only from the takt's first walk (`0x100059b0`). The negative
+  has its control: twelve sites name `+0x34`, against ten register adds of the group list's
+  `+0x4c`.
+  - **The five arms** (the table at `0x10005510`): `ACTION_DESTROY`, no object answers the id;
+    `ACTION_NOTHING_DOING`, the object **is there** and its order list is empty or headed by
+    order 1, 18 or 19; `ACTION_CAPTURE_BUILDING`, the owner word is the clan's number; the two
+    group actions, every listed unit gone or on no order at all, an empty group passing. With
+    the problem's `+0x48` at 0 the first to come true retires it through `0x10005010`; nothing
+    shipped sets `+0x48`, its one writer, function 42 (`0x1000c168`), storing only a 0 and no
+    script calling 42.
+  - **The unit rules**, with the unread `+0x20` the unit count: with a drain above 0, a solving
+    problem holding no unit or an unstarted one holding some (`0x10004efa`–`0x10004f15`);
+    solving with every unit gone (`0x100056c0`); a critical unit lost with none left critical
+    (`0x10005650`). Retiring lets the units go through `0x100050f0` → `0x10003e80`: in an AI's
+    clan (brain `+0x380` = 2) each is given order 9, `ORDER_ROBOT_REPARE`, replacing.
+  - **The engine was right in kind and place and wrong in detail**: it counted a unit that had
+    gone as having nothing doing, did not excuse orders 1, 18 and 19, failed an empty group,
+    let a destroyed building satisfy `ACTION_DESTROY`, and had none of the unit rules and no
+    release order. All are in; the three M18 rows are one, for what a building makes of order
+    9, queued ([15-behaviour](docs/15-behaviour.md#what-ends-a-problem--read-and-measured)).
+- [x] ~~[M18] What `fn8(ST_SOLVED)` leaves behind, and what the repeated `_Start` pass excludes:
+  as read, a handler that returns without setting a state has the pass offer its problem again
+  for ever.~~ — closed 2026-10-10: **nothing, and nothing — the page had the pass's flag
+  backwards.** The setter (`ai.dll:0x10005710`, re-read) calls the retire `0x10005010` for
+  `ST_SOLVED` and `0x10005040` for `ST_UNSOLVED` and only then writes the state into the freed
+  record; a solved record's code is 0, so the raise's duplicate test (`0x10004c50`, three
+  compares and never the state) cannot match it. The pass's byte `0x10054c74` is cleared once
+  at entry (`0x10001bf8`), set for each handler that leaves its problem neither solved nor
+  solving (`0x10001e22`), and the loop repeats while it is **clear** (`0x10001e37`–
+  `0x10001e3d`, re-read): the pass goes down the weights only while every handler started or
+  solved its problem, and **stops at the first that did not**. There is no endless loop, and a
+  weight of 0 or less is never started (`0x10001d6f`). The raise, read with it: meeting a
+  standing problem at a weight not below its own it re-weights it, replaces its *p3* and
+  reloads its life, and a lighter raise does nothing (`0x10005bbd`–`0x10005c04`).
+  - *Measured* over the 58 scripts: `fn8` is called 179 times, 122 `ST_SOLVING`, 57
+    `ST_SOLVED` and no `ST_UNSOLVED`; 41 of the 72 `_Start` handlers have a way through with
+    no `fn8`, all nine `PBM_ROBOT_NEEDED_Start` among them, and as read each ends the takt's
+    pass; all 176 raises pass a weight above 0.
+  - **The engine was wrong on three counts**: it kept an unsolved problem, ran every weight
+    every takt under a cap of 64 rounds, and reloaded the life on any re-raise without
+    touching the weight or *p3*. Both rows are gone; the 64 stays as a guard, the game's loop
+    having no bound
+    ([15-behaviour](docs/15-behaviour.md#the-planner-when-a-_start-runs-and-when-a-_continue--read-and-measured),
+    [23-economy](docs/23-economy.md#the-bot-limit-is-the-clans-mind-count--read-and-measured)).
 
 ## Mission progression
 
@@ -2768,6 +3170,22 @@ briefing's route. [40-command-mode](docs/40-command-mode.md#not-established),
 - [x] ~~[M13] Which of Mission 04's hero, helicopter and HQ holds no mind. The recording's factory shows one free of three once all three are the player's, and Mission 02's shows the hero holding one; the engine lets the HQ taken by Enter hold none, or the build could never start. Mission 03's "4 free, five built" may be the same question.~~ — closed 2026-09-21, from Mission 02's round: **the HQ**. Every unit a mission places takes a free mind as it is made (`ArealMap.dll:0x100152ba`), and the `Capture` that Enter runs on a unit writes none (`Behavior.dll:0x10009051`), so of the three the HQ taken by Enter holds none and 3 minds leave the recording's one free. The engine was right; its stand-in comment and M13 row are gone ([23-economy](docs/23-economy.md#the-bot-limit-is-the-clans-mind-count--read-and-measured)).
 - [x] ~~Mission 02's leaving places moved with the joined sphere~~ — closed in M14: the ground contact holds a machine about its node sphere's centre with the joined sphere's radius (read), so a landed L-2f stands 9.67 over flat ground and the whole island lets the hero out. The recording's 11 on landing and the hero's 3 on the same ground fit it ([24-motion](docs/24-motion.md#finding-the-ground--read), [39-boarding](docs/39-boarding.md#against-the-recording--seen)). Open still: see [Mission 02](#mission-02-the-constructor).
 
+**The HQ's command view**
+
+- [x] ~~[M13] Which bound a unit record's `+0x98` is: 8 × it is how far the camera rides behind
+  the HQ. The engine takes the chassis sphere, 61 m, which the recording favours.~~ — closed
+  2026-10-10 with the record's line under *Turrets, weapons and camera*: the radius of the
+  cylinder in the box of all the unit's parts, 6.649 on this HQ, so **53.2 m** — and the
+  recording favours that, by where the HQ's top stands in the frame and not by its width
+  ([40-command-mode](docs/40-command-mode.md#r-the-unit-records-0x98--read-and-measured)).
+
 **Capture and the maps**
 
 - [x] ~~[M13] A contour vertex's areal flag word, which the engine has no areals for~~ — closed in M14: the engine reads the areal map, and a vertex counts on a walkable areal.
+- [x] ~~The sphere behind `IBuilding` slot 15.~~ — closed 2026-10-10, out of the second
+  sphere's line under *Motion, ground and controls*: **the building's construction sphere**,
+  `Terrain.dll:0x1005c540`, named `CBuilding::GetConstructionSphere` by its own panic — the
+  sphere round the `.bas` outer ring, plus 5, that the builder's dome is framed by, a patrol's
+  octagon is drawn about while the dome runs, and a shield's bubble stands on
+  ([26-damage](docs/26-damage.md#a-round-meets-a-bubble--read),
+  [31-packages](docs/31-packages.md#not-established)).

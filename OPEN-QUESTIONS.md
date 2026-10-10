@@ -44,33 +44,27 @@ remainder a closed line names stays here as a line of its own.
   machine ran — no device test stands between `Iron_3D.ini` and the mode, and the compiled
   default is `REFLECTION` — and the lake's (162, 248, 253)
   ([03-terrain](docs/03-terrain.md#not-established)).
-- [ ] Who calls `CCamera`'s `+4` slot 14 (`Terrain.dll:0x100852e0`), the routine that hands a
-  camera's type — 2 `REFLECTION_SHIFTED`, 1 `REFLECTION`, 0 otherwise, made of its name at
-  `0x10083a54` — to the buffering camera's slot 23 at `0x10085365`. Reached by the sky's and the
-  light's branches independently on 2026-10-03; its caller was found by neither
-  ([10-sky](docs/10-sky.md#the-skys-first-draw-is-a-screen-wide-quad--read),
-  [03-terrain](docs/03-terrain.md#not-established)).
 - [ ] [M1] Whether slot 17's alpha reaches a body's sprite. The sun's and the moon's sprite
   carries slot 17's colour on its four vertices (`Terrain.dll:0x1007cd98`), alpha and all, and
   the alpha is 50 of 255 or less on 249 of the 656 keyframes; what the device does with it is
   not checked against a frame, and the engine draws a body in its texture's own colours
   ([10-sky](docs/10-sky.md#the-sun-and-the-moon-are-drawn)).
-- [ ] [M5] The line a room's mesh is asked along. A building's room test is the room's box and
-  then a count of crossings by its mesh (`AniMesh.dll:0x10010550`) along the direction at the
-  mesh's `+0x150`, whose writer is not read; the engine takes the room's own z. It decides
-  whether the rain and the snow are drawn ([10-sky](docs/10-sky.md#the-weather--read-and-seen)).
-- [ ] What sets camera flag 8. A camera whose flag word carries it draws neither the sky's pass
-  nor the world (`Terrain.dll:0x100845eb`, `0x10084701`) ([10-sky](docs/10-sky.md#not-resolved)).
-- [ ] [M1] Which shipped frames carry a scale. The shade puts a directional light into an
-  item's frame by the transpose of the frame's 3 × 3 and normalises nothing
-  (`Ngi32.dll:0x10024260`, `0x1001ba50`; three other builds of `g_FastProc`'s `+0x8c` were not
-  read), so an item drawn at scale *s* takes *s* times the light; the engine takes a unit
-  direction whatever the scale ([10-sky](docs/10-sky.md#the-lit-colour-is-the-games-own--read-and-measured)).
-- [ ] Which light manager the gather passes over under bit 1 of the draw's mode: one whose
-  registered object answers class 7 (`Terrain.dll:0x10047633`–`0x10047653`), for an agent
-  attached to a parent's node whose record carries bit 0 at `+0xc`, or a draw whose argument
-  carries `0x400` (`AniMesh.dll:0x10014d9d`). What answers class 7 and which nodes carry the
-  bit are not read; if it is the sun's, a part hung inside a building takes no sunlight
+- [ ] [M1] **The one stretched pose key, and a scale's other ways in.** Left when the
+  scaled-frame line closed 2026-10-10 ([COMPLETED-QUESTIONS](COMPLETED-QUESTIONS.md#sky-and-rendering)). One shipped key of
+  34049 gives a matrix that is no rotation — `o_tur_ba_09`'s `BTHQ_m1o1` at frame 47 of 102,
+  (−32767, 0, 0, −32767), which `Ngi32.dll:0x10017e60` makes a turn of 116.57° stretched √5
+  across its z — and the engine takes the turn without the stretch; whether a controller ever
+  plays that frame is not read. Not enumerated: the placements `Control.dll` gives a unit's
+  parts as they move, `SetScale`'s callers on a unit, and two stores of a word at `+0x6a` in
+  `ai.dll` and `Behavior.dll`. And *a scaled object is lit as an unscaled one* is a read — the
+  scale is kept beside the frame's rotation (`Terrain.dll:0x10048f50`) — not set against a
+  recording's frame of any of the 216 scaled placements
+  ([10-sky](docs/10-sky.md#the-lit-colour-is-the-games-own--read-and-measured)).
+- [ ] Which nodes carry bit 0 at their record's `+0xc`, under which a hung part takes no
+  sunlight. Left 2026-10-10, when the manager the gather passes over under bit 1 of the draw's
+  mode was read as the sky's ([COMPLETED-QUESTIONS](COMPLETED-QUESTIONS.md#sky-and-rendering)): an agent attached to such a
+  node, and a draw whose argument carries `0x400` (`AniMesh.dll:0x10014d9d`), take neither of
+  the sun's two lights. Which shipped nodes carry the bit is not counted
   ([11-effects](docs/11-effects.md#not-resolved)).
 - [ ] C03 M02's Large Factories' roofs, and the mine's glow. *Seen 2026-10-03 and not
   investigated*: in the briefing frames that settled the masts ("Part 6", -yNnsqudMzw, briefing
@@ -168,51 +162,41 @@ remainder a closed line names stays here as a line of its own.
   upright in every frame ("Let's Play - Parkan: Iron Strategy, Part 4", 1:43, 15:13–15:15). Still not
   read: where the frame is drawn in the takt. The engine draws the body where the contact last held
   it ([24-motion](docs/24-motion.md#not-established)).
-- [ ] **What a building's second sphere is.** A collision object of kind 3 or 4 keeps two spheres;
-  a round is swept against a unit's first, its agent sphere, but against a building's second
-  (`Control.dll:0x1001d6cd`), which comes from its device manager's slot 12 (`0x1002c500`). What that
-  slot answers is not read ([24-motion](docs/24-motion.md#collision-between-objects--read),
-  [26-damage](docs/26-damage.md)).
+- [ ] **The construction sphere's leftovers**, from the second sphere's line, closed
+  2026-10-10 ([COMPLETED-QUESTIONS](COMPLETED-QUESTIONS.md#motion-ground-and-controls)): which name the `mine` test that adds
+  15 to the radius looks in — interface `0x24`'s, not followed past the agent; the engine takes
+  the root record's `fr_*_mine` — and the engine's own `construction::building_sphere`, which
+  the dome's frame and the kill still take flat at the placement's z, its centre off the read
+  one by the ring's box-centre z (2.73 on the Small Tower) and its radius by under 0.1. Also
+  not read: the height under which a building's own collision context drops a bubble contact
+  (`Control.dll:0x1001d846`, a compare against a float from the manager's `+0x14` slot 7)
+  ([26-damage](docs/26-damage.md#a-round-meets-a-bubble--read),
+  [32-builder](docs/32-builder.md#upgrading-a-building--read)).
 - [ ] **Whether the walk-face query reads a door's faces.** *Seen on the engine, not read*: a large
   walker that reaches the Large Factory's front leaf while it is still sinking is lifted 5.6 m onto
   the leaf's top by its feet's up pass, whose bound is 7.5, and rides it down for about a second
   ([24-motion](docs/24-motion.md#not-established)).
-- [ ] **What lets a mover past a face flagged `0x20`.** Raised 2026-09-20 from play on C02 M04,
-  *The Last Bastion*. The collision's own two filters take a triangle mask of **4**
-  (`Control.dll:0x1001dbad` for the segment, `0x1001dbce` for the push-out) where a round's takes
-  `0x24`; nothing read drops `0x20`. The shipped data needs it dropped. *Measured*: all **9** bridge
-  pairs the 29 missions place stand π apart with their decks abutting, so each half's join cap — six
-  level-0 faces at the deck's far end, all facing the span — is square in the way; three of the four
-  `fortif.rlb` bridge meshes flag that cap **4** and `fr_e_brige` flags it **`0x20`**, the bit its
-  additive `B_A_BRIGE` material carries throughout. Taken as read the hero walks 183.8 m of the 185.5
-  to the join and stops. The **batch word** is the obvious other candidate — the query excludes
-  batches flagged 8, and the energy batches carry `0x100` and no 8 — so either a third filter or a
-  flag set on the loaded batch does it. The engine passes `0x20` as a stand-in
-  ([24-motion](docs/24-motion.md#the-cap-where-two-halves-meet--measured-and-a-stand-in)).
-- [ ] **What stops a tower's gun mast at the top.** Raised 2026-09-21 from play on C02 M04,
-  *The Last Bastion*. Both `fortif.rlb` tower controllers carry a **class-29** component whose
-  channels raise the mast out of the ground — `fr_m_tower`'s node 13 by 10.4 m over mesh frames
-  1 to 4, `fr_b_tower`'s node 12 by 19.4 m over 0 to 3 — and each sets its switch word at
-  `+0x18` to **9**, open and *bouncing*. Bit 8 is read to hold the progress at the end and swap
-  the low bits (`Control.dll:0x10020ae4`), so as the file stands a tower raises its mast over
-  five seconds and stows it over the next five, for ever. *Measured*: those two are the only
-  records of the install's 1066 whose word bounces; the other 28 that set the word at all set 0
-  (class 25) or 33 (the hero's arms). Nothing found switches it off — the component factory
-  files every class in the controller's timed list (`0x1002d70a`), `CBuilding` looks for classes
-  12 and 13 and no other (`Terrain.dll:0x100583a2`), and neither record names a section-5 group
-  at `+0x10` or `+0x14`, which is what an item runs on its first step and its first skip. In the
-  game the mast comes up as the tower is built and stays up, so the engine starts a bouncing
-  item as one that opens and stops. What is left to find is the switch: the likely places are
-  the fire control that owns a tower's turret and whatever handles a building finishing
-  construction ([28-chassis](docs/28-chassis.md#every-component-is-stepped-not-only-a-device--read-and-measured)).
-  *Seen* 2026-09-30 in "Let's Play - Parkan: Iron Strategy, Part 4" (Qqs8_i9IeUU): the valley's
-  Light Tower keeps its mast up through the 40 s of the hero's attack from 20:42, its target
-  silhouette sampled every 3 s, so the game's mast does not bounce on a ten-second period; its
-  turret's node shows red from 21:27, and the mast sinks to a stub by 21:36. So the mast stays up
-  while the turret lives and is stowed once it is lost — what switches it is still to find, and
-  the engine keeps it up either way.
+- [ ] **[M15] Whether a control pod's glass canopy keeps out a unit too tall to pass under
+  it.** Left 2026-10-10, when the `0x20` line closed for the bridge
+  ([COMPLETED-QUESTIONS](COMPLETED-QUESTIONS.md#motion-ground-and-controls)). The 234 `B_COMP_3G` faces, in two-sided batches
+  whose word is `0x102`, are every control pod's canopy; read, a face flagged `0x20` is a wall
+  to a mover, and a pod waits with its canopy 5.5 to 5.8 m up (8.7 on `fr_l_angar`), coming
+  down over whoever stands in it. The hero, 3.77 m as the pair measures it, walks under; a
+  small wheeled warrior, 5.84 m, sent to take C02 M04's plateau Small Tower is turned back by
+  the canopy's side 6.2 m from the pod. No recording looked at shows a warbot at a pod, so the
+  engine lets every mover through a `0x20` face in a two-sided batch, those 234 and nothing
+  else. Also not established: the canopy's way down. Part 4 shows the Light Tower's pad bare at
+  21:46.05 and a red ring low about the hero from 21:46.35, the red entering at the foot of the
+  view, and no frame a tenth of a second apart has it crossing the view from above ([24-motion](docs/24-motion.md#a-pods-canopy-and-a-mover-too-tall-for-it--measured-and-a-stand-in),
+  [27-ownership](docs/27-ownership.md)).
+- [ ] What the mast setter's stowing arm was written for. Left 2026-10-10 by the mast's line
+  ([COMPLETED-QUESTIONS](COMPLETED-QUESTIONS.md#motion-ground-and-controls)): the latched setter the fire control raises a
+  tower's mast through (`Behavior.dll:0x100199b0`) sends 2, stow, on an argument of 0, and no
+  caller passes one — one direct call, with 1, no address taken, the latch written at three
+  sites. Nothing in the shipped game lowers a mast
+  ([28-chassis](docs/28-chassis.md#what-stops-a-towers-mast-at-the-top--read-and-seen)).
 - [ ] **Whether a building's collision mesh follows the nodes its own items turn.** Raised
-  2026-09-21 alongside the above. Nine class-26 records turn nodes that never stop — the three
+  2026-09-21 alongside the tower's mast. Nine class-26 records turn nodes that never stop — the three
   mines' rotors, the Main Teleport's twenty-eight rings, `fr_e_brige`'s hub — and the engine
   poses them every tick but rebuilds the collision solid only for a door's channels, since
   rebuilding it for a hub turning for ever would rebuild it every tick on every one of them.
@@ -229,21 +213,15 @@ remainder a closed line names stays here as a line of its own.
 [29-weapons](docs/29-weapons.md#not-established), [30-turrets](docs/30-turrets.md#not-established),
 [28-chassis](docs/28-chassis.md#not-established), [25-sensors](docs/25-sensors.md#not-established)
 
-- [ ] [M5] How the HUD draws the aim point, the guns and the player's target; what plays `TARGET_READY` and `TARGET_ZOOM`; and the unit record's `+0x98`. ~~Its `+0x94`~~ — **read**, noticed 2026-09-22 by the coordinator: docs/39 had it all along as the radius the sphere interface `0x20` slot 3 answers as the record is bound, the unit's node sphere (`0x1007e5f2`–`0x1007e60e`), 11.84 on the L-2f, which leaving and the game frame read. The right button's pick still takes it as 0, filed under the README's "Read since" ([25-sensors](docs/25-sensors.md#not-established)).
-- [ ] **What lights a unit of more than one part in a panel's view.** Left 2026-10-01 by the mode-2
-  read ([COMPLETED-QUESTIONS](COMPLETED-QUESTIONS.md#turrets-weapons-and-camera)). A mesh of agent
-  kind 2, 3 or 4 makes two directional lights at its set-up (`AniMesh.dll:0x100070c9`–`0x1000723b`),
-  and a panel's view is lit by the shown unit's own lights alone. The one-part dummy matches that in
-  the recordings; the hero, a chassis and a turret, is 2.06, 1.98 and 2.03 times as far over its
-  floor, and Mission 01's spider and a driven warbot look the same. What makes the second pair was
-  not found. The engine takes two pairs for a unit of more than one part, a stand-in. Also not read:
-  that the sky's light manager is of kind 7, which is what keeps the sun off the placement ghost
-  (*inferred* from the recordings), and what the phase at the shade's `+0x1928` sets
-  ([35-hud](docs/35-hud.md)).
-- [ ] Whether the designer's two preview lights are turned twice: the mesh gather turns every
-  light's stored direction through its manager's owner's placement (`Terrain.dll:0x100802f0` with
-  space 2), and the designer already sets its two lights in space 2 each draw. Noticed 2026-10-01,
-  not followed up ([37-designer](docs/37-designer.md)).
+- [ ] [M5] How the HUD draws the aim point, the guns and the player's target; and what plays `TARGET_READY` and `TARGET_ZOOM`. The unit record's `+0x98` and `+0x94`, which this line carried, closed 2026-10-10 and are in the engine ([COMPLETED-QUESTIONS](COMPLETED-QUESTIONS.md#turrets-weapons-and-camera)) ([25-sensors](docs/25-sensors.md#not-established)).
+- [ ] What the view lights' line left, closed 2026-10-10
+  ([COMPLETED-QUESTIONS](COMPLETED-QUESTIONS.md#turrets-weapons-and-camera)): what the phase at the shade's `+0x1928` sets on
+  the device (2 where the device answers for it, `Terrain.dll:0x1004115b`); the class of
+  `iron3d.dll`'s sixth `AddNewObjectToGame` call (`0x100a2322`), the one of the six not read
+  when the two attaches were counted; and the 3DNow! and SSE builds of `g_FastProc`'s `+0x1c`,
+  the routine that brings a light's direction back out of its owner's frame, of which only the
+  x87 one (`Ngi32.dll:0x100240a0`) is read ([35-hud](docs/35-hud.md),
+  [37-designer](docs/37-designer.md)).
 - [ ] Which objects answer world class 2, the one class the outer camera's line drops. *Narrowed
   2026-09-20* with three controls, all negative. A class is slot 11 of the object interface and the
   query's first word is anded with `[class*4 + 0x1009a5f0]`, sixteen dwords whose entry *k* is `1 << k`,
@@ -297,23 +275,29 @@ remainder a closed line names stays here as a line of its own.
 [15-behaviour](docs/15-behaviour.md#what-is-not-read-here), [31-packages](docs/31-packages.md#not-established),
 [23-economy](docs/23-economy.md#not-established), [32-builder](docs/32-builder.md#not-established)
 
-- [ ] **What the engine below a SuperAI does with a problem's action record** (`+0x34`, function 27).
-  Raised 2026-09-21 by M18. `varset.var` names the five *"what to do with expression"*, *"When
-  building capture"*, *"When all units in group killed"* and *"When all units in group nothing to
-  do"*, and nothing else ends a problem a handler left `ST_SOLVING`: `PBM_ROBOT_NEEDED_Start` files
-  `ACTION_NOTHING_DOING` on the factory it ordered and its `_Continue` has no nodes, so without them a
-  clan builds one warbot and never another. The engine retires a problem whose action has come true,
-  tested at the head of each clan takt. What the game actually does with the record — retire, re-raise,
-  or something else — and where it is tested, is the question
+- [ ] [M18] **What a building makes of the order a problem lets its units go with.** Left
+  2026-10-10 by the action record's line ([COMPLETED-QUESTIONS](COMPLETED-QUESTIONS.md#ai-scripts-packages-and-economy)). An
+  AI clan's problem, as it is retired, gives each unit it held order 9, `ORDER_ROBOT_REPARE`,
+  replacing (`ai.dll:0x10003e80`), and the factory a build's problem held is among them. What
+  `M_Task_Reload` does on a building — and to a build under way, when the problem's life has
+  run out under it — is not read; the engine hands the order to robots alone, and a shipped
+  script's factory is idle whenever an action lets it go
+  ([15-behaviour](docs/15-behaviour.md#what-ends-a-problem--read-and-measured)).
+- [ ] [M18] What lowers function 11's per-type counters. The seven at the brain's `+0x3e0`..
+  `+0x3f8` are stepped as a building is filed on the clan's list, one for each of seven Types
+  (`ai.dll:0x1000194f`–`0x100019a9`, slot 4's event 2); what takes one down again is not
+  followed, and the engine tests the `dMax*` variable alone
   ([15-behaviour](docs/15-behaviour.md#what-the-functions-do)).
-- [ ] **What `fn8(ST_SOLVED)` leaves behind, and what the repeated `_Start` pass excludes.** Raised
-  2026-09-21 by M18. The state setter is read only as far as releasing the problem's units, but a
-  solved record that keeps its slot would be matched by the raise's duplicate test and block the next
-  want for as long as it stood — which [23-economy](docs/23-economy.md) says does not happen. And the
-  pass is read to run again whenever a handler leaves its problem neither solved nor solving, which
-  `PBM_ROBOT_NEEDED_Start` does when the clan has no factory: as read, that is an endless loop. The
-  engine retires a solved problem and does not offer a problem twice in one takt
-  ([15-behaviour](docs/15-behaviour.md#the-planner-when-a-_start-runs-and-when-a-_continue--read-and-measured)).
+- [ ] **A capture want that nothing ends.** *Derived* 2026-10-10, not run in play: 12 of the 14
+  `PBM_BUILDING_INF_CAPTURE_Start` handlers, with no capturer to send, raise `PBM_ROBOT_NEEDED`
+  by `SELECT_FASTEST`, set `ST_SOLVING` and return ahead of their two `fn27`, and no `_Continue`
+  files an action. The problem is raised 1 / 0 with its capturers attached `UNIT_NORMAL`, so it
+  has no action to come true, no life to run out and no critical unit to lose: it stands for
+  the rest of the mission, asking for the clan's fastest design every takt there is no
+  capturer. That is what would have Enemy 1 build small flyers on C03 M02 once the player
+  takes its generator, which neither recording shows; whether the game's clans do carry it is
+  not checked against one
+  ([15-behaviour](docs/15-behaviour.md#what-ends-a-problem--read-and-measured)).
 - [ ] **A `PBM_PLACE_PROTECT` place that is not on walkable ground strands the clan's warbots.**
   Raised 2026-09-21 from play on C02 M03. `c2m3e`'s `Problems0` names three places; (265, 1540) has
   **0 of 400** points sampled within its 150 m radius usable, its centre included, so the patrol's 350
@@ -323,16 +307,22 @@ remainder a closed line names stays here as a line of its own.
   gorge wall, and it stands at 0 m/s for the rest of the mission — while from where the mission places
   it there is a 31-leg route over the bridge to the player's factory. What the game does with a patrol
   place off its own areal map, and what its walker does once stranded, are both unread.
-- [ ] **Why Enemy 1's first builds on C03 M02 are medium tracked.** Left 2026-10-01 by the design
-  store's line ([COMPLETED-QUESTIONS](COMPLETED-QUESTIONS.md#ai-scripts-packages-and-economy)). In
-  "Let's Play - Parkan: Iron Strategy, Part 6" Enemy 1's builds are named MTW-3, MTW-4, MTW-5, then
-  LTW-6, and in Part 6.5 its first is MTW-3 again. As read, `SELECT_BEST_COMBAT` with the easy
-  level's spread of 6 draws from seven designs — four large tracked, two large wheeled and one
-  medium tracked, `m_stopper.dat` — so three in a row is one design of seven drawn three times.
-  Later names are not explained either: MWW-21 to -23, where `23_m2`, the Medium Wheel, ranks eighth,
-  one past the spread, and LTW-34 and -35. Not read: whether the draw `(rand() + timeGetTime()) %
-  (n + 1)` is as free as it looks, and whether the level ratio reaches the object the store's fill
-  builds ([15-behaviour](docs/15-behaviour.md)).
+- [ ] **Whether the recorded game's `UNITS\UNITS\AI\` holds the ten `AI_*` designs.** *Narrowed
+  2026-10-10* out of Enemy 1's first builds on C03 M02 ([COMPLETED-QUESTIONS](COMPLETED-QUESTIONS.md#the-rounds)). The read was
+  walked again from the raise to the factory and stands: 44 candidates on `c3m2e.trf`, a spread
+  of 6, a free draw among four large tracked, two large wheeled and one medium tracked, so
+  *MTW* once in seven and *MWW* never. The 13 builds the two recordings name are 5 *MTW*,
+  4 *MWW*, 3 *LWW* and 1 *LTW*. **The same ranking without the `AI_*` files** gives a first
+  seven of `32_l2`, `32_l1`, `m_stopper`, `23_m2`, `m_dblhow`, `41mtrk1` and `23_m1` — every
+  kind recorded and neither kind that is not, 13 draws expecting 5.6, 3.7, 1.9 and 1.9. In this
+  install `AI_L1.dat` and `AI_L2.dat` are byte for byte `32_l1.dat` and `32_l2.dat`, and the
+  store's loader tests no name (`ai.dll:0x10010686`–`0x10010715`), so only the files' absence
+  does it; that the recording's build lacks them is *inferred*, and the install cannot answer
+  it. The engine draws as read, from this install's files. Also left: from the takt after the
+  player takes one of Enemy 1's buildings its capture want asks for a robot at 0.801 by
+  `SELECT_FASTEST` and takes the build problem over, the seven fastest being small flyers, and
+  neither recording names an Enemy 1 flyer; and whether Part 6.5 starts from a save of Part 6's
+  ([15-behaviour](docs/15-behaviour.md#enm1s-builds-against-the-read--read-measured-and-not-explained)).
 - [ ] Function 41, a clan's research order, in the engine: the design store's `+0x104` byte is
   marked again each time function 41 orders a research (`ai.dll:0x10010f90`), and only `c4m2e2` and
   `scream` call it. The engine leaves 41 unanswered, so a store is marked once, at load
@@ -460,7 +450,6 @@ remainder a closed line names stays here as a line of its own.
 
 **The HQ's command view**
 
-- [ ] [M13] Which bound a unit record's `+0x98` is: 8 × it is how far the camera rides behind the HQ. The engine takes the chassis sphere, 61 m, which the recording favours over the whole bound's 104 m and the cylinder's 38.7 m.
 - [ ] [M13] What the game does when an HQ reached from a bunker's command view is lost in its mode 3 (nothing read pops it), and how the stack reads after Enter in telepresence aboard an HQ. ~~An HQ the hero boarded~~ — **read** 2026-09-22: the game frame tests the boarded bot every frame and rolls the stack back to mode 0 once the component test refuses it (`iron3d.dll:0x1005eacf`), through any view standing on it ([40-command-mode](docs/40-command-mode.md#not-established)).
 - [ ] Why the HQ reads "[no order]" in its cockpit at 160 s after "[standing]" at 94 s. The engine's capture-standby departure gives it Standby.
 
@@ -469,7 +458,6 @@ remainder a closed line names stays here as a line of its own.
 - [ ] [M13] How a walker's path joins the hall way (`MGraph`), so which exit a capturer takes (the engine: the shortest whole way); whether a flyer touches down or hovers at its landing corner; and a flyer against a building's walls outside the hall way (the leg to exit 67 skirts the factory's west side).
 - [ ] [M13] The escape's damaged-node test, and which paths a unit leaves a building by (the engine: back along the hall way).
 - [ ] [M13] The maps' contact list: the engine marks what lies in a player unit's radar range, not the list the run loop empties and each unit's takt refills.
-- [ ] The sphere behind `IBuilding` slot 15.
 - [ ] Why the Teleport's map icon looks white at about 412 s, as if selected, when a main teleport's capture selects nothing.
 
 **Research**
@@ -508,10 +496,10 @@ remainder a closed line names stays here as a line of its own.
 
 What was left on 2026-10-01 of the list made by setting the mission against "Let's Play - Parkan:
 Iron Strategy, Part 6" (-yNnsqudMzw) and its bonus "Part 6.5" (9SBZOCWv_vE). Lines of that list
-already queued in their own areas: Enemy 1's first builds and function 41 (*AI, scripts, packages
-and economy*); the raid's launch, 414 m in the engine against the recording's 365–390, with the
-fire line's remainders, and a unit of more than one part in a panel's view (*Turrets, weapons and
-camera*); a save's own bytes (*Mission 03*); C03 M01's lava, the lit colour's remainders with the
+already queued in their own areas: Enemy 1's builds, narrowed 2026-10-10 to the `AI_*` designs
+the recorded game seems to lack, and function 41 (*AI, scripts, packages and economy*); the
+raid's launch, 414 m in the engine against the recording's 365–390, with the fire line's
+remainders (*Turrets, weapons and camera*); a save's own bytes (*Mission 03*); C03 M01's lava, the lit colour's remainders with the
 Outpost's lavender face, and a captured building's emblem (*Sky and rendering*); the Large
 Factory's masts (*Effects and sound*).
 
