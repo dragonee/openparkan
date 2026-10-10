@@ -184,6 +184,22 @@ find.
   initialisers have run, and the landscape's UV unit, 0 in the file, is 1 ÷ 1024
   (`Terrain.dll:0x10035070`). Look for the store before trusting the bytes
   ([24-motion.md](24-motion.md#finding-the-ground--read)).
+  This trap and the wrong coordinates met in one field: the triple a room's
+  mesh test reads at `+0x150` was queued for a round as *a direction whose
+  writer is not read*. It is the mesh's scale, written by `SetScale` as `+0x154`
+  of the interface it is entered on (`AniMesh.dll:0x100147ca`), and the zeros it
+  is compared with at `0x10026b40` are (1, 1, 1) once their initialiser has run
+  (`0x100121f0`) — a test for *unscaled*, not for *no direction*
+  ([10-sky.md](10-sky.md#the-weather--read-and-seen)).
+- **Matching a listing's text for a small number.** A tool that searches the
+  disassembler's own text has to spell a constant as the disassembler does, and
+  capstone prints an immediate below ten in decimal: `mov edx, 8`, never
+  `mov edx, 0x8`. `analysis/slotcalls.py` asked for an interface's id in hex, so
+  for interface 8, the camera's, it answered that none of the install's 375 calls
+  through `+0x34` could be on one, where eight are. A tool's "no caller" wants
+  the same control a hand search does: a slot whose callers are known, on an
+  interface whose id is of the same size
+  ([10-sky.md](10-sky.md#the-skys-first-draw-is-a-screen-wide-quad--read)).
 
 ## Reading other people's work
 
