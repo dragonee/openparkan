@@ -1566,8 +1566,14 @@ caller, function 20's handler, which no script calls.
 **One routine reads the list.** The evaluator is `0x10005180`, and it has one
 caller, `0x10004f67`, inside the drain's step; the step has one caller too, the
 takt's first walk (`0x100059b0`). Every other site that names the list is a
-constructor, a copy, a destructor or one of the two retires clearing it. So an
-action is tested **once a takt, at the head of it**, before any handler runs.
+constructor, a copy, a destructor or one of the two retires clearing it: a
+sweep of every operand at `+0x34` and every register add of it, in the record's
+own coordinates, returns twelve sites — four constructors and copies, the
+assignment, the destructor's two, the two retires, the push, the step and the
+evaluator. The control is the group list beside it at `+0x4c`, which the same
+sweep finds added to a register in ten places, nine of them in the function
+handlers. So an action is tested **once a takt, at the head of it**, before any
+handler runs.
 
 **The walk, in order** (`0x10005910`). First the clan's own unit list
 (`0x10003e40` for each): a unit whose id no object answers, or whose owner word

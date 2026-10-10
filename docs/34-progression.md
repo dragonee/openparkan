@@ -233,6 +233,16 @@ state word `+0x710` is 5:
     every later one, and a pause, which skips the frame, costs a clan what the
     pause lasted beyond its deadline. A quick save does not pause
     ([14-controls.md](14-controls.md#quick-save-and-quick-load--read-and-seen)).
+  - **A unit or a building filed on the clan's list brings the next takt 1.4 s
+    nearer** (*read*): slot 4, called for an object that is there and not yet
+    on the list, takes 1400 off the deadline as it returns, whichever its event
+    (`0x10001a9d`–`0x10001abc`, a 64-bit add of −1400 to `+0x860`). So a
+    clan's first takt after a build is the sooner for it.
+  - `rand` there is the module's own and **never seeded**: its state starts at
+    1 in every game and every clan's takt, function 70 and the design draw step
+    the one stream
+    ([15-behaviour.md](15-behaviour.md#function-69-sets-how-sloppy-the-ais-design-pick-is--read-and-measured)).
+    The first jitter any clan draws is 41 ms.
   - Each run adds 7 to the seconds clock that function 59 reads
     ([15-behaviour.md](15-behaviour.md)), then runs `Problems<n>`.
 - **Slot 5** (`0x10001ae0`) runs `Init`, once.
