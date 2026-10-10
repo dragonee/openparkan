@@ -197,6 +197,10 @@ FACE_STRIDE = 16
 POSE_KEY_SIZE = 24
 #: A pose quaternion is int16 over this scale, so 32767 reads as 1.0.
 QUATERNION_SCALE = 32767.0
+#: How far a key's quaternion may be from unit length and still be read as the
+#: rotation it is: 34038 of the 34049 shipped keys are, the largest stretch of
+#: the matrix the game builds from one of them 0.00017 off 1.
+UNIT_KEY = 0.001
 #: A node with no entry in the frame map.
 NO_ANIMATION = 0xFFFF
 
@@ -300,15 +304,49 @@ def apply(pose: Pose, point: tuple[float, float, float]) -> tuple[float, float, 
     return (x + tx, y + ty, z + tz)
 
 
+def key_rotation(packed: tuple[int, int, int, int]) -> tuple[float, float, float, float]:
+    """A key's rotation as the game's matrix turns it, from the file's ``int16[4]``.
+
+    The game divides the four by 32767 (``AniMesh.dll:0x10013030``) and makes the
+    matrix without normalising them (``Ngi32.dll:0x10017e60``): for a quaternion
+    of squared length *n* that is ``(1 - n) I + n R``, *R* the rotation of the
+    same quaternion made unit.  At *n* = 1 it is *R*, and at 0 the identity,
+    which is what nine all-zero keys come to.  Anything else leaves the axis
+    alone and, across it, turns by the angle of ``(1 - n) + n e^(i t)`` and
+    stretches by its length: ``R_M_03``'s ``(0, 0, 71, 0)`` is the identity to
+    one part in 100000, where normalising it reads a half turn, and
+    ``o_tur_ba_09``'s ``(-32767, 0, 0, -32767)`` turns 116.57 degrees and
+    stretches by the square root of 5.  The turn is taken here and the stretch
+    is not: a pose is a rotation (docs/10-sky.md, "The lit colour is the game's
+    own").
+
+    The answer is conjugated, because the game is left-handed; see ``parse``.
+    """
+    w, x, y, z = (v / QUATERNION_SCALE for v in packed)
+    n = w * w + x * x + y * y + z * z
+    length = math.sqrt(n)
+    if length < 1e-6:
+        return (1.0, 0.0, 0.0, 0.0)
+    if abs(length - 1.0) < UNIT_KEY:
+        return (w / length, -x / length, -y / length, -z / length)
+    across = math.sqrt(x * x + y * y + z * z)
+    if across == 0.0:
+        return (1.0, 0.0, 0.0, 0.0)
+    turn = 2.0 * math.atan2(across, w)
+    taken = math.atan2(n * math.sin(turn), 1.0 - n + n * math.cos(turn))
+    s = math.sin(taken / 2.0) / across
+    return (math.cos(taken / 2.0), -x * s, -y * s, -z * s)
+
+
 @dataclass
 class PoseKey:
     """One entry of stream 8: where a node sits, and when.
 
     24 bytes: a ``float32[3]`` translation, a ``float32`` time in frames, and
     the rotation as ``int16[4]`` over 32767 in ``(w, x, y, z)`` order -- 34038
-    of the 34049 keys the game ships are unit length to within 0.1%, and the
-    eleven that are not are all zero or unnormalised, so they are repaired on
-    read.
+    of the 34049 keys the game ships are unit length to within 0.1%, nine are
+    all zero and two are neither; ``key_rotation`` reads each as the game's
+    matrix turns it.
 
     A node's rest pose is its ``fallback_key``.  Animated nodes walk the frame
     map instead; their fallback is the animation's last frame, which is why
@@ -902,16 +940,10 @@ def parse(blob: bytes, name: str = "<mesh>", texture_names: list[str] | None = N
             break
         translation = struct.unpack_from("<3f", raw_keys, o)
         time = struct.unpack_from("<f", raw_keys, o + 12)[0]
-        w, x, y, z = struct.unpack_from("<4h", raw_keys, o + 16)
-        length = math.sqrt(sum((v / QUATERNION_SCALE) ** 2 for v in (w, x, y, z)))
-        if length < 1e-6:
-            rotation = (1.0, 0.0, 0.0, 0.0)
-        else:
-            scale = QUATERNION_SCALE * length
-            # The game is left-handed (Z up, DirectX): the matrix it builds
-            # from a quaternion is the transpose of the right-handed one, so
-            # the same four numbers denote the conjugate rotation here.
-            rotation = (w / scale, -x / scale, -y / scale, -z / scale)
+        # The game is left-handed (Z up, DirectX): the matrix it builds from a
+        # quaternion is the transpose of the right-handed one, so the same four
+        # numbers denote the conjugate rotation here.
+        rotation = key_rotation(struct.unpack_from("<4h", raw_keys, o + 16))
         keys.append(PoseKey(translation, time, rotation))
 
     frame_entry = entries.get(STREAM_FRAME_MAP)

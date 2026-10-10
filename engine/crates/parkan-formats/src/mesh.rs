@@ -48,6 +48,10 @@ pub const BATCH_TWO_SIDED: u32 = 0x2;
 pub const UV_SCALE: f64 = 1024.0;
 pub const LIGHTMAP_UV_SCALE: f64 = 1024.0;
 pub const QUATERNION_SCALE: f64 = 32767.0;
+/// How far a key's quaternion may be from unit length and still be read as the rotation it
+/// is: 34038 of the 34049 shipped keys are, and the matrix the game builds from the worst of
+/// them stretches by 0.00017 off 1.
+pub const UNIT_KEY: f64 = 0.001;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Node {
@@ -134,6 +138,41 @@ impl Key {
     pub fn pose(&self) -> Pose {
         Pose { translation: self.translation.map(f64::from), rotation: self.rotation }
     }
+}
+
+/// A key's rotation as the game's matrix turns it, from the file's four `int16`, conjugated.
+///
+/// The game divides the four by 32767 (`AniMesh.dll:0x10013030`) and makes the matrix without
+/// normalising them (`Ngi32.dll:0x10017e60`): for a quaternion of squared length *n* that is
+/// `(1 - n) I + n R`, *R* the rotation of the same quaternion made unit. At *n* = 1 it is *R*
+/// and at 0 the identity, which is what the nine all-zero keys come to. Anything else leaves
+/// the axis alone and, across it, turns by the angle of `(1 - n) + n e^(i t)` and stretches by
+/// its length. Two shipped keys are of that kind: `R_M_03`'s `(0, 0, 71, 0)`, the identity to
+/// one part in 100000 where normalising it reads a half turn, and `o_tur_ba_09`'s
+/// `(-32767, 0, 0, -32767)`, 116.57 degrees and a stretch of the square root of 5 (docs/10,
+/// "The lit colour is the game's own").
+///
+/// STAND-IN: docs/10-sky.md#the-lit-colour-is-the-games-own--read-and-measured -- the turn is
+/// taken and the stretch is not: a pose here is a rotation, so the Large turret 09's
+/// `BTHQ_m1o1` at frame 47 is neither drawn nor lit 2.236 times its size across its z.
+pub fn key_rotation(packed: [i16; 4]) -> [f64; 4] {
+    let [w, x, y, z] = packed.map(|v| f64::from(v) / QUATERNION_SCALE);
+    let n = w * w + x * x + y * y + z * z;
+    let length = n.sqrt();
+    if length < 1e-6 {
+        return [1.0, 0.0, 0.0, 0.0];
+    }
+    if (length - 1.0).abs() < UNIT_KEY {
+        return [w / length, -x / length, -y / length, -z / length];
+    }
+    let across = (x * x + y * y + z * z).sqrt();
+    if across == 0.0 {
+        return [1.0, 0.0, 0.0, 0.0];
+    }
+    let turn = 2.0 * across.atan2(w);
+    let taken = (n * turn.sin()).atan2(1.0 - n + n * turn.cos());
+    let s = (taken / 2.0).sin() / across;
+    [(taken / 2.0).cos(), -x * s, -y * s, -z * s]
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -453,14 +492,7 @@ pub fn parse(blob: &[u8], name: &str) -> Result<Mesh, FormatError> {
         .take_while(|i| (i + 1) * POSE_KEY_SIZE <= raw_keys.len())
         .map(|i| {
             let o = i * POSE_KEY_SIZE;
-            let q = [0, 1, 2, 3].map(|k| f64::from(u16_at(raw_keys, o + 16 + 2 * k) as i16));
-            let length = q.iter().map(|v| (v / QUATERNION_SCALE).powi(2)).sum::<f64>().sqrt();
-            let rotation = if length < 1e-6 {
-                [1.0, 0.0, 0.0, 0.0]
-            } else {
-                let s = QUATERNION_SCALE * length;
-                [q[0] / s, -q[1] / s, -q[2] / s, -q[3] / s]
-            };
+            let rotation = key_rotation([0, 1, 2, 3].map(|k| u16_at(raw_keys, o + 16 + 2 * k) as i16));
             Key { translation: vec3(raw_keys, o), time: f32_at(raw_keys, o + 12), rotation }
         })
         .collect();
@@ -541,6 +573,46 @@ mod tests {
         assert_eq!(node(&[3, 4]).slot_for_lod(0, 0), Some(3));
         assert_eq!(node(&[NO_SLOT, NO_SLOT, NO_SLOT, NO_SLOT, 9]).slot_for_lod(0, 0), Some(9));
         assert_eq!(node(&[NO_SLOT, NO_SLOT, NO_SLOT, NO_SLOT, 9]).slot_for_lod(1, 0), None);
+    }
+
+    /// The game's matrix for a quaternion of squared length n is (1 - n) I + n R
+    /// (`Ngi32.dll:0x10017e60`): its turn is what a key is read as. The four quadruples are
+    /// the install's: a unit key, one of the nine zeros, `R_M_03`'s key 78 and `o_tur_ba_09`'s
+    /// key 20.
+    #[test]
+    fn a_key_that_is_no_unit_quaternion_turns_as_the_games_matrix_does() {
+        let degrees = |r: [f64; 4]| 2.0 * r[0].abs().min(1.0).acos().to_degrees();
+        let quarter = key_rotation([23169, 23169, 0, 0]);
+        assert!((degrees(quarter) - 90.0).abs() < 1e-3, "{quarter:?}");
+        assert!(quarter[1] < 0.0, "conjugated: {quarter:?}");
+        assert_eq!(key_rotation([0, 0, 0, 0]), [1.0, 0.0, 0.0, 0.0]);
+        // A wheel's wrap frame, as its five siblings' zeros: not the half turn about y that
+        // normalising (0, 0, 71, 0) makes of it.
+        let wheel = key_rotation([0, 0, 71, 0]);
+        assert!(degrees(wheel) < 1e-3, "{wheel:?}");
+        // -I + 2 R(a quarter turn about z): 180 - atan 2 degrees about z, where the unit
+        // quaternion of the same four numbers turns 90.
+        let dish = key_rotation([-32767, 0, 0, -32767]);
+        assert!((degrees(dish) - (180.0 - 2.0_f64.atan().to_degrees())).abs() < 1e-6, "{dish:?}");
+        assert_eq!((dish[1], dish[2]), (0.0, 0.0), "about z: {dish:?}");
+        // And the turn is the matrix's own: M R^T is symmetric, with the stretch on it.
+        let m = |q: [f64; 4]| {
+            let [w, x, y, z] = q;
+            [
+                [1.0 - 2.0 * (y * y + z * z), 2.0 * (x * y + w * z), 2.0 * (x * z - w * y)],
+                [2.0 * (x * y - w * z), 1.0 - 2.0 * (x * x + z * z), 2.0 * (y * z + w * x)],
+                [2.0 * (x * z + w * y), 2.0 * (y * z - w * x), 1.0 - 2.0 * (x * x + y * y)],
+            ]
+        };
+        let (game, turn) = (m([-1.0, 0.0, 0.0, -1.0]), m([dish[0], -dish[1], -dish[2], -dish[3]]));
+        let left: [[f64; 3]; 3] =
+            std::array::from_fn(|i| std::array::from_fn(|j| (0..3).map(|k| game[i][k] * turn[j][k]).sum()));
+        for i in 0..3 {
+            for j in 0..3 {
+                assert!((left[i][j] - left[j][i]).abs() < 1e-9, "{left:?}");
+            }
+        }
+        assert!((left[0][0] - 5.0_f64.sqrt()).abs() < 1e-9 && (left[2][2] - 1.0).abs() < 1e-9, "{left:?}");
     }
 
     /// Two runs back to back, as the frame map lays them out: node 0 holds its last key from

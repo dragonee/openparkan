@@ -105,3 +105,21 @@ fn all_eleven_fonts_step_one_past_the_advance_and_draw_one_texel_to_the_pixel() 
         }
     }
 }
+
+/// `R_M_03`'s six wheels turn once through frames 14 to 18, and frame 19 is where the turn
+/// wraps: five carry a zero quaternion there and the left middle one `(0, 0, 71, 0)`, which
+/// the game's matrix makes the identity of (`Ngi32.dll:0x10017e60`) and normalising made a
+/// half turn about y. See `docs/10-sky.md`, "The lit colour is the game's own".
+#[test]
+#[ignore = "needs the game install"]
+fn a_medium_chassis_s_left_middle_wheel_wraps_its_turn_as_its_five_siblings_do() {
+    use parkan_formats::mesh;
+
+    let archive = nres::Archive::open(&gamedir::resolve(&game(), "bases.rlb").unwrap()).unwrap();
+    let m = mesh::parse(archive.read_name("R_M_03.msh").unwrap(), "R_M_03.msh").unwrap();
+    for name in ["WMRF_m1o1", "WMLF_m1o1", "WMLM_m1o1", "WMRM_m1o1", "WMLB_m1o1", "WMRB_m1o1"] {
+        let i = m.nodes.iter().position(|n| n.name == name).unwrap_or_else(|| panic!("no {name}"));
+        let turned = 2.0 * m.pose_at(i, 19.0).rotation[0].abs().min(1.0).acos().to_degrees();
+        assert!(turned < 0.5, "{} is turned {turned} degrees at its wrap", m.nodes[i].name);
+    }
+}
