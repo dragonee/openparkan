@@ -839,8 +839,10 @@ Feedback on the first chapter's *The Arrival* and *Outflanking Maneuver*.
 - **Shields** (docs/26, "Shields"). Every unit and building with a fight shield and a deflector
   carries six sectors, loaded from its controllers with a fitted generator or deflector taking
   its slot's figures, and the sector maximum at the level ratio: `hero11` 1,850 at 0.9,
-  `11tin2` 350 at 0.7, *Outflanking Maneuver*'s Small Bunker 11,000 at 0.36. The bubble is the
-  bounding sphere, up while both devices' nodes live. A round meeting it from outside takes the
+  `11tin2` 350 at 0.7, *Outflanking Maneuver*'s Small Bunker 11,000 at 0.36. The bubble is a
+  unit's agent sphere and a building's construction sphere — the sphere round its ground plan,
+  46.7 on a Small Tower where its agent's is 37.8 (docs/26, "A round meets a bubble") — up
+  while both devices' nodes live. A round meeting it from outside takes the
   sector its hit's dominant axis names in the unit's frame; a round with more life than the
   sector's strength passes, emptying the sector and losing that much life, and any other stops
   on the bubble, its hit stopped by what the sector holds, the sector paying for it over the

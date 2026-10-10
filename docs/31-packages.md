@@ -881,7 +881,10 @@ agree with the recording.
   33.3 m/s forward top speed.
 - What held it at (715, 847) from 362 s: a roaming search plans again whenever
   its walker stops.
-- `IBuilding` slot 15's sphere, which the octagon contour is drawn about.
+- ~~`IBuilding` slot 15's sphere, which the octagon contour is drawn about.~~ —
+  **read**: the building's construction sphere (`Terrain.dll:0x1005c540`,
+  `CBuilding::GetConstructionSphere`), the one its shield's bubble stands on
+  ([26-damage.md](26-damage.md#a-round-meets-a-bubble--read)).
 
 ## Where a search looks — *read*, and *measured*
 
