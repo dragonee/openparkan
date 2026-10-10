@@ -382,6 +382,27 @@ makes other calls at the same offset on other objects, and the list has those
 too. The arity settles each — a setter that pops one dword is not a getter
 called with none.
 
+An interface whose id is below ten was a second blind spot: the listing writes
+such an immediate in decimal, so the search for `mov edx, 0x8` matched nothing
+and answered "no caller" for the camera's interface, which has dozens.
+
+## `camflags.py`, for a bit a caller sets by a constant
+
+```
+uv run --group analysis python analysis/camflags.py          # camera flag 8
+uv run --group analysis python analysis/camflags.py 0x200    # the control
+```
+
+`ICamera`'s slot 13 stores its one argument in the camera's flag word, and the
+question was who sets one bit of it. A caller pushes a constant, ORs one into
+what the getter answered, or loads one into a register, so this lists every
+call at the slot's offset with such a constant since the call before it, and
+how many values the call pushes: of 375 calls, 29 carry a constant with bit 8
+and one of them pushes the two the setter takes, the warbot designer's 9
+([../docs/10-sky.md](../docs/10-sky.md#the-skys-first-draw-is-a-screen-wide-quad--read)).
+The control is `0x200`, whose one writer was published; it is an `or ah, 2`,
+so a byte register's high half is shifted before it is tested.
+
 ## `filters.py`, for a block nobody constructs
 
 ```

@@ -72,9 +72,19 @@ def listing(module) -> list[tuple[int, list[str]]]:
     return out
 
 
+def asks_for(interface: int) -> str:
+    """The load of an interface's id as the listing prints it.
+
+    capstone writes an immediate below ten in decimal, with no `0x`: asked as `0x8`, the
+    camera's interface matched nothing, and the search answered "no caller" for a slot that
+    has dozens.
+    """
+    return f"mov edx, {interface:#x}" if interface > 9 else f"mov edx, {interface}"
+
+
 def fields(functions, interface: int) -> set[str]:
     """Displacements a `QueryInterface` for `interface` stores its answer at."""
-    ask = f"mov edx, {interface:#x}"
+    ask = asks_for(interface)
     found = set()
     for _, lines in functions:
         for i, line in enumerate(lines):
@@ -121,7 +131,7 @@ def main(argv: list[str]) -> int:
     slot = int(argv[2], 0) if len(argv) > 2 else 16
     offset = f"{4 * slot:#x}"
     call = re.compile(r"call dword ptr \[(e..) \+ " + offset + r"\]$")
-    ask = f"mov edx, {interface:#x}"
+    ask = asks_for(interface)
     total = 0
     hits = defaultdict(list)
     for name, module in cov.load().items():
