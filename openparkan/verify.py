@@ -1913,7 +1913,7 @@ def check_arealmap(check, game: Path) -> None:
     switches = [line.split("=")[1].strip()
                 for line in (game / "Behavior.ini").read_text(errors="replace").splitlines()
                 if line.startswith("UseWizard")]
-    check("Behavior.ini: UseWizard is 1, so MWalker::ClearMoverReachedPoint is the branch not taken",
+    check("Behavior.ini: UseWizard is 1, so MWalker::ClearMoverReachedPoint is not the branch run",
           switches == ["1"], f"{switches}")
 
     # KM_4, The Iron Monster: the canyon under the bridge is not walkable, the banks are.
@@ -4169,7 +4169,7 @@ def check_light_highlights(check, game: Path) -> None:
 
 
 def check_debris_and_the_pass(check, game: Path) -> None:
-    """A type-10 particle is a lump, no shipped fade goes under 0, and a light and a sound have no draw."""
+    """A type-10 particle is a lump, no fade goes under 0, and a light and a sound have no draw."""
     paths = {n: game / n for n in ("Terrain.dll", "Effect.dll", "AniMesh.dll")}
     if not all(p.exists() for p in paths.values()):
         return
@@ -4209,16 +4209,21 @@ def check_debris_and_the_pass(check, game: Path) -> None:
                 named[e.resource.member] += 1
                 if table == 0x20:
                     spars[e.resource.member] += 1
-                grows += struct.unpack_from("<3f", e.body, 92) != struct.unpack_from("<3f", e.body, 104)
+                least = struct.unpack_from("<3f", e.body, 92)
+                grows += least != struct.unpack_from("<3f", e.body, 104)
 
     # Slot 3 of a light's and a sound's vtables is the bare ret the sprite's is not; the
     # lump's vtable hands slot 1 to a draw that reads neither the fade nor the phase, and its
     # size slots are ret 4.
-    slot = lambda at, i: struct.unpack_from("<I", e_at(at, 4 * (i + 1)), 4 * i)[0]
+    def slot(at, i):
+        return struct.unpack_from("<I", e_at(at, 4 * (i + 1)), 4 * i)[0]
+
     no_draw = (slot(0x1001E78C, 3) == 0x100026F0 and slot(0x1001F048, 3) == 0x100026F0
                and e_at(0x100026F0, 1) == b"\xc3" and slot(0x1001E770, 3) == 0x100106C0)
-    lump = (slot(0x1001EB90, 1) == 0x1000BD10 and all(slot(0x1001EB90, i) == 0x1000D6D0 for i in (4, 5, 6, 7))
-            and e_at(0x1000D6D0, 3) == b"\xc2\x04\x00" and e_at(0x10001A94, 6) == bytes.fromhex("81c3ec010000"))
+    lump = (slot(0x1001EB90, 1) == 0x1000BD10
+            and all(slot(0x1001EB90, i) == 0x1000D6D0 for i in (4, 5, 6, 7))
+            and e_at(0x1000D6D0, 3) == b"\xc2\x04\x00"
+            and e_at(0x10001A94, 6) == bytes.fromhex("81c3ec010000"))
     # The renderer's test is C3 alone, and the alpha goes to a byte by a shift with no clamp.
     wraps = (t_at(0x10028886, 3) == bytes.fromhex("f6c440")
              and t_at(0x1004F86B, 9) == bytes.fromhex("df7db08b45b0c1e018"))
@@ -10764,7 +10769,7 @@ def check_place_work(check, game: Path) -> None:
           and served["loading", True] == 3 and served["unloading", True] == 3
           and not served["loading", False] and not served["unloading", False],
           f"{dict(served)}; of the 24 parts {len(named)} are on a place's node, and {unnamed}")
-    check("fortif.rlb: the nine class-26 parts that name channels turn 3,205 faces, 2,689 on fr_l_mtp",
+    check("fortif.rlb: the nine class-26 parts naming channels turn 3,205 faces, 2,689 on fr_l_mtp",
           sum(turning_faces.values()) == 3205 and turning_faces["fr_l_mtp"] == 2689,
           f"{dict(turning_faces)}")
 
@@ -29550,7 +29555,8 @@ def run(game: Path) -> int:
         check_water, check_strike_floor, check_water_reflection, check_layers, check_materials,
         check_material_draw,
         check_sky,
-        check_render_state, check_shade, check_light_highlights, check_debris_and_the_pass, check_blend_depth,
+        check_render_state, check_shade, check_light_highlights, check_debris_and_the_pass,
+        check_blend_depth,
         check_minimap_agreement, check_arealmap,
         check_grid, check_missions, check_scale, check_objects, check_poses, check_lod,
         check_damage, check_blasts, check_node_stages, check_what_a_nodes_stage_moves,
@@ -29564,7 +29570,8 @@ def run(game: Path) -> int:
         check_mission_03_economy,
         check_motion, check_playback, check_ground, check_sensors, check_hit_test,
         check_collision, check_lake_and_buoys,
-        check_combat, check_ownership, check_place_work, check_owner_word, check_insignia, check_hall_way_gates,
+        check_combat, check_ownership, check_place_work, check_owner_word, check_insignia,
+        check_hall_way_gates,
         check_batch_word_and_collision_flags,
         check_capture, check_building_entry, check_pod_zone, check_door_shot,
         check_building_lighting,
