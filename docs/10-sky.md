@@ -1665,16 +1665,65 @@ chassis `R_M_03` at frame 19 of its 21, the dishes of `R_l_06`,
 `o_tur_ba_09`, the mesh of the Large turret 09 (`e_tur_bb_09`, `e_tur_bt_09`),
 at frame 47 of its 102, between a (0, 0, 0, −32767) and a (0, 0, 0, 32767). It
 is **the one shipped frame whose 3 × 3 carries a scale**: round that frame the
-node is drawn up to 2.236 times its size across its own z, and takes that much
-of a directional light. Whether a controller ever plays frame 47 is not read.
-The control is the same formula on a quaternion of squared length 4, which
-gives the 5 its matrix's first axis measures (`openparkan verify`).
+node would be drawn up to 2.236 times its size across its own z, and take that
+much of a directional light. The control is the same formula on a quaternion of
+squared length 4, which gives the 5 its matrix's first axis measures
+(`openparkan verify`).
 
-The missions' 864 placements put no scale in a matrix either: the loader's is
-a turn about z and a translation, and the scale 216 of them carry — 134 trees
-and 82 stones, 0.2 to 21 — goes beside it to `SetScale`
-([04-missions.md](04-missions.md#the-scale)). *Not enumerated*: the placements
-`Control.dll` gives a unit and its parts as they move.
+**No controller plays it, or any of the eleven** — *measured*. A node with a
+channel plays that channel's frames from its `first` to its `last`
+([07-objects.md](07-objects.md#how-the-engine-plays-it--read)); what else a mesh plays
+is its controller's state pairs. The Large turret 09 has two records, and both
+controllers give `BTHQ_m1o1` one channel of frames **42 to 46**, the radar's dish
+([25-sensors.md](25-sensors.md#the-dish-turns-while-the-radar-runs--read-and-measured)),
+and no state at all. Frame 46 is a key of its own, (0, 0, 0, −32767), so the walk's "takes
+that key or the next one where *f* equals its time" never interpolates on towards 47. The
+frames of the run after the dish's are its author's closing of the turn: all eleven keys
+stand **one frame past the channel that turns their node**, the six wheels of `R_M_03` at 19
+against 14 to 18, `Radr_m1o1` of `R_l_06` at 11 against 6 to 10, `o_tur_ba_10`'s two at 6
+against 1 to 5 and `o_tur_la_06`'s at 7 against 2 to 6. Of the 15 pairs of a key and a
+record that names its mesh, **0** lie within a channel's or a state's frames, where the frame
+before each lies within one on all 15, the control (`openparkan verify`).
+
+**So no drawn frame's 3 × 3 is stretched, and the turn the readers take of those keys is
+never drawn either.** The rest of a scale's ways in:
+
+- **The missions' 864 placements** put no scale in a matrix: the loader's is a turn about z
+  and a translation, and the scale 216 of them carry — 134 trees and 82 stones, 0.2 to 21 —
+  goes beside it to `SetScale` ([04-missions.md](04-missions.md#the-scale)).
+- **`SetScale` is called on scenery alone** — *read*. Its slot takes its object on the stack
+  and a pointer after it. Of the install's 117 calls at `+0x3c`, 39 have that shape; those on
+  an interface `0x18` are four, one in each of `World3D.dll`'s `AddNewObjectToGame`
+  (`0x1000842a`, the published one and so the control), `CreateMirrorObject` (`0x100091bd`),
+  `AddMirrorObjectToGame` (`0x100093ab`) and `AddNewMirrorToGame` (`0x100095d8`), each of the
+  scale in a block its last argument points at. The three mirrors no module imports. Of
+  `AddNewObjectToGame`'s six callers, all in `iron3d.dll`, three pass no block (`0x100366b4`,
+  `0x100a2322`, `0x100a24b5`), one passes (1, 1, 1) for a type 11 (`0x10039249`), and the two
+  that pass a mission's scale are the two kinds of scenery's, type 10 (`0x100a4334`,
+  `0x100a43e4`). The building's slot only hands on to its mesh's (`Terrain.dll:0x10056bf0`).
+  **Nothing calls `SetScale` on a unit.**
+- **The placements `Control.dll` gives a unit and its parts** — *read*. `PlaceObject` is
+  `IGameObject` slot 7, `+0x1c` (`AniMesh.dll:0x10017790`, table `0x10020d28`), and of the
+  install's calls of its shape nine are in `Control.dll`. Six change only a matrix's
+  translation: the machine's own `+0x2e4` as it steps and is pushed (`0x10005a85`, `0x1000c93c`,
+  `0x1000cb6b`), the body's follow of the ground (`0x10015f0f`) and a copy of another's placement
+  moved by a point (`0x10030a54`, `0x10030ab4`). Two are a camera's (`0x10023879`, `0x10023896`).
+  The ninth is the walker's turn (`0x100194e7`), a pivot's translations about the matrix
+  `g_FastProc`'s `+0x38` makes of a quaternion built from an angle's sine and cosine. No site
+  multiplies an axis by anything; the `+0x2e4` itself is `GetPlacement`'s answer or one of
+  these (`0x10007a48`, `0x1000c898`, `0x100194cd`, `0x1003189f`), or what `0x10004690` is
+  handed whole, whose callers this round did not follow.
+- **The two other stores of a word at `+0x6a`** are no frame the shade is handed — *read*:
+  `ai.dll:0x10002a5e` is a static identity of class 1, and `Behavior.dll:0x10036311` no matrix
+  at all, a 7 beside a `0xf` in an object of −1s and zeros (`0x10036290`).
+
+*Not set against a frame*: that a scaled object is lit as an unscaled one. C00 M01's hero
+starts 304 and 319 m from its stones at 16 and 20, under a main light of (0.7, 0.11, 0) and a
+second of (0.45, 0.45, 0.63) as the mission opens; multiplied by 16 either saturates, and
+`STONE00`'s texels stand at (127, 114, 89) on the mean, where the rock at the left of the frame
+at 6:40 of "Part 1" (9_rcJkRzgZQ) measures (33, 20, 21) over its area. But which rock that is
+was not established against the map: it does not plainly wear `STONE00`'s picture, and may be
+the landscape's own.
 
 **The engine** took a unit normal against a unit direction whatever the scale,
 which is the game's on every scaled object, so nothing changed there. Its
@@ -1682,7 +1731,8 @@ readers normalised a key that was not unit, and that made a **half turn about
 y** of (0, 0, 71, 0), the left middle wheel of `R_M_03` at the frame where its
 five siblings hold a zero and the game's matrix is the identity. Both readers
 now take the turn of the matrix the game builds, the identity there and
-116.57° on the turret's key. The stretch they leave out: a pose is a rotation.
+116.57° on the turret's key. The stretch they leave out, and no controller
+plays it.
 
 *Measured*, the engine before and after following this — with the fog and the
 [ground's materials](03-terrain.md#the-uv-unit-is-1024--read-and-measured)
@@ -1732,9 +1782,10 @@ the same specular, and what turns their sun side yellow is not the sun
 ([11-effects.md](11-effects.md#what-a-light-does-to-a-surface--read-and-measured)).
 
 **Not followed here**: the engine gathers one list of point lights a frame
-([11-effects.md](11-effects.md#what-a-light-does-to-a-surface--read-and-measured)),
-and it leaves out the one stretched pose key's stretch, so the Large turret
-09's `BTHQ_m1o1` is drawn and lit at its own size through frame 47.
+([11-effects.md](11-effects.md#what-a-light-does-to-a-surface--read-and-measured)).
+It leaves out the one stretched pose key's stretch, and rightly: the Large turret
+09's `BTHQ_m1o1` is drawn and lit at its own size through its channel, which stops short of
+its one stretched key.
 
 ### Fog
 
@@ -2471,7 +2522,13 @@ which is what the game does.
   are read, and none normalises. The engine's unit light is the game's on
   every scaled object; its readers made a half turn of a key the game's
   matrix makes the identity of, which is fixed, and the one stretch is left
-  out. Not enumerated: the placements `Control.dll` gives a unit's parts.
+  out. ~~Not enumerated: the placements `Control.dll` gives a unit's parts.~~
+  **No controller plays the stretched key, nor any of the eleven**: both records'
+  dish runs 42 to 46 against its 47, and all eleven stand one frame past their
+  node's channel. `SetScale` reaches scenery alone, `Control.dll`'s nine placements
+  multiply no axis, and the two other `+0x6a` stores are no frame. What stays
+  open is the frame ([The lit colour is the game's
+  own](#the-lit-colour-is-the-games-own--read-and-measured)).
 - ~~**One face of C03 M02's Outpost.**~~ — the building is Enemy 1's Medium
   Mine, and the lavender was the **second light's highlight** on its skin's
   specular, which the game does not take: `CSun`'s constructor flags the

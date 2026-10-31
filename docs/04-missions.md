@@ -327,7 +327,10 @@ node's life and maximum by **the three factors multiplied**
 its table's hit points and Mission 02's `s_stone_10` at 21 holds 4,630,500,000.
 See [26-damage.md](26-damage.md#vegetation-and-rock-carry-node-life--read-and-measured).
 
-**Unknown:** whether anything calls `SetScale` on a unit while the game runs.
+~~**Unknown:** whether anything calls `SetScale` on a unit while the game runs.~~
+**Nothing does**: its four callers are `World3D.dll`'s object adders, and the only scale
+any of their callers hands them is scenery's
+([10-sky.md](10-sky.md#the-lit-colour-is-the-games-own--read-and-measured)).
 
 ### Property
 

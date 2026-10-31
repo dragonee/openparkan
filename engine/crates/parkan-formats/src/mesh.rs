@@ -152,9 +152,9 @@ impl Key {
 /// `(-32767, 0, 0, -32767)`, 116.57 degrees and a stretch of the square root of 5 (docs/10,
 /// "The lit colour is the game's own").
 ///
-/// STAND-IN: docs/10-sky.md#the-lit-colour-is-the-games-own--read-and-measured -- the turn is
-/// taken and the stretch is not: a pose here is a rotation, so the Large turret 09's
-/// `BTHQ_m1o1` at frame 47 is neither drawn nor lit 2.236 times its size across its z.
+/// The turn is taken and the stretch is not, because no controller plays it: all eleven keys
+/// that are not unit stand one frame past the channel that turns their node, the turret's dish
+/// running 42 to 46 with this key at 47 (`openparkan verify`; docs/10, the same section).
 pub fn key_rotation(packed: [i16; 4]) -> [f64; 4] {
     let [w, x, y, z] = packed.map(|v| f64::from(v) / QUATERNION_SCALE);
     let n = w * w + x * x + y * y + z * z;

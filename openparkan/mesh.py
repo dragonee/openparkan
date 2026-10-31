@@ -317,8 +317,9 @@ def key_rotation(packed: tuple[int, int, int, int]) -> tuple[float, float, float
     one part in 100000, where normalising it reads a half turn, and
     ``o_tur_ba_09``'s ``(-32767, 0, 0, -32767)`` turns 116.57 degrees and
     stretches by the square root of 5.  The turn is taken here and the stretch
-    is not: a pose is a rotation (docs/10-sky.md, "The lit colour is the game's
-    own").
+    is not, and no controller plays either: all eleven such keys stand one frame
+    past the channel that turns their node (docs/10-sky.md, "The lit colour is
+    the game's own").
 
     The answer is conjugated, because the game is left-handed; see ``parse``.
     """

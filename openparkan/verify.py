@@ -28097,7 +28097,10 @@ def check_frame_scale(check, game: Path) -> None:
     meshes = keys = zero = 0
     worst = 0.0
     odd = {}
+    zeros: set[tuple[str, int]] = set()
+    blobs: dict[str, bytes] = {}
     for _lib, name, blob in _object_meshes(game):
+        blobs[name.lower()] = blob
         inner = NResArchive(blob, name)
         for stream in inner:
             if stream.type_id != objmesh.STREAM_POSE_KEY:
@@ -28110,6 +28113,7 @@ def check_frame_scale(check, game: Path) -> None:
                 n, s = stretch(q)
                 if n == 0:
                     zero += 1
+                    zeros.add((name.lower(), i))
                 elif abs(math.sqrt(n) - 1.0) < objmesh.UNIT_KEY:
                     worst = max(worst, abs(s - 1.0))
                 else:
@@ -28151,6 +28155,53 @@ def check_frame_scale(check, game: Path) -> None:
           f"{symmetric}/{len(odd)} leave the game's matrix a symmetric stretch; the wheel's "
           f"key turns {turned.get(wheel_key, -1):.3f} degrees, where its unit quaternion turns "
           f"180, and the turret's {turned.get(dish_key, -1):.3f}, where it turns 90")
+
+    # And nothing plays them.  A node with a channel plays that channel's frames; the rest of
+    # a mesh plays its controller's state pairs.  All eleven stand one frame past the channel
+    # that turns their node, where the map closes the turn.  The control is the same question
+    # asked of the frame before each: its channel's last, which the search must find.
+    library = objects.ObjectLibrary(game / "objects.rlb")
+    controllers: dict[str, set[tuple[str, str]]] = defaultdict(set)
+    for record in library.records.values():
+        model, ctl = record.mesh, record.slot_with_suffix("ctl")
+        if model and ctl:
+            controllers[model.member.lower()].add((ctl.library, ctl.member.lower()))
+    archives: dict[str, NResArchive] = {}
+
+    def controller(lib: str, member: str):
+        archive = archives.setdefault(lib, NResArchive.open(game / lib))
+        return control.parse(archive.read(next(e for e in archive if e.name.lower() == member)))
+
+    def plays(c, node: int, frame: int) -> bool:
+        channels = [ch for ch in c.channels if ch.node == node]
+        pairs = [p for s in c.states for p in (s.pair_a, s.pair_b) if p[0] >= 0]
+        return any(min(ch.first, ch.last) <= frame <= max(ch.first, ch.last) for ch in channels) \
+            or any(min(p) <= frame <= max(p) for p in pairs)
+
+    off_keys = zeros | set(odd)
+    asked = played = before = 0
+    for name, blob in blobs.items():
+        wanted = {i for m, i in off_keys if m == name}
+        if not wanted:
+            continue
+        model = objmesh.parse(blob, name)
+        for index, node in enumerate(model.nodes):
+            if not node.is_animated:
+                continue
+            for frame, key in enumerate(model.track(index)):
+                if key not in wanted:
+                    continue
+                for lib, member in controllers.get(name, ()):
+                    c = controller(lib, member)
+                    asked += 1
+                    played += plays(c, index, frame)
+                    before += plays(c, index, frame - 1)
+    check("CTL: no controller plays a pose key that is not unit",
+          len(off_keys) == 11 and asked == 15 and played == 0 and before == asked,
+          f"{len(off_keys)} keys, asked of the {asked} record pairs that name their meshes: "
+          f"{played} within a channel's or a state's frames (o_tur_ba_09's dish runs 42 to 46 and "
+          f"its stretched key stands at 47; control: the frame before each is reached on "
+          f"{before} of {asked})")
 
 
 def check_room_test(check, game: Path) -> None:
