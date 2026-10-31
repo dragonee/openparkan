@@ -28,6 +28,16 @@ of one mask and every bit of another).
 | `0x80`, `0x800` | a factory's creation node | `0x100299ea` |
 | `0x10000000` | **ground level**: a place of radius 10 and height 12 instead of 5 and 3 ([who is in a place](#who-stands-in-a-place--read)) | `0x100184f0` |
 
+**The tick acts on five of them** (*read*): `0x8000`, `0x4000`, a dock's three, `0x8`
+and `0x10`, each down the chain from `0x10018bb1` to `0x100195b8`. A pod's `0x40` and a
+creation node's `0x80` make a place and have no act in it, and `0x800` makes none: a pod's
+occupant list is refreshed and read by nothing here, and the capture asks the pod of its
+own ([Capture](#capture--read)). **A transport's arrival does not read a place either**:
+it is the walker done and the walker's place holding that building and vertex
+(`Behavior.dll:0x10032620`–`0x1003264e`, the storage; the mine's the same way from
+`0x1003245e`), so the cylinder decides only what ore moves by itself
+([23-economy.md](23-economy.md#the-ore-a-place-moves-by-itself--read)).
+
 The engine's own debug view draws the ore places blue, the docks red and the
 pod green (`0x10018574`). That is what the game looks like too: a red charging
 station, and a green pod beside it.
@@ -484,7 +494,14 @@ Whether such a unit fits is not established.
 behaviour's takt. This happens before the takt returns for a neutral clan, so
 it runs on the neutral teleport too. The set's own timer is built from
 (0.1 s, 0.1 s) (`0x10003749`, `0x10003754`). That is 64 ms plus a random share
-of 64 ms (`0x1004c550`), so the tick runs every 64–128 ms.
+of 64 ms (`0x1004c550`), so the tick runs every 64–127 ms, a whole number of them.
+
+**The share is `Behavior.dll`'s own `rand()`** (*read*): the draw's low byte × 64 ÷ 256,
+truncated (`0x1004c569`–`0x1004c585`), from the C library's generator at `0x1004ce3c`,
+never seeded and one stream for the module
+([23-economy.md](23-economy.md#what-else-draws-on-the-steps-stream--read-and-counted)).
+A place set's and each place's timers are two of the 111 other sites that step it, so
+which share comes when hangs on everything else the module draws.
 
 **The place records** are 0x3c bytes (built at `0x100188e2`):
 
@@ -505,8 +522,14 @@ A vertex becomes a place only with a bit of `0xf8` or `0xc600`
 
 **Each tick first asks the building about the place's node.** When the node word
 is not −1 and the building's interface `0xb`, slot 16, answers non-zero for it,
-the place is passed over whole (`0x10018b55`–`0x10018b83`). What that slot asks
-is not read; a destroyed node is the *guess*.
+the place is passed over whole (`0x10018b55`–`0x10018b83`): its occupants are not
+refreshed and nothing is done to them. ~~What that slot asks is not read; a destroyed
+node is the *guess*.~~ **Slot 16 answers the node's stage held below its stage count**
+([31-packages.md](31-packages.md#the-escape--read)), so it is a *damaged* node, and only
+one of more than one stage: a node of one stage reads 0 however hurt, gone included.
+*Measured*: 16 of the 47 places of the 29 hall ways ride a node of two or three stages,
+among them the mine's loading place and the storage's unloading place on all three of
+each, a medium main teleport's two in places, and the rest docks and pods.
 
 **The occupancy refresh** (`0x10018310`) runs when the place's timer is due.
 
@@ -549,6 +572,28 @@ For each occupant, every tick (`0x10018c84`–`0x10019132`), these must all hold
   - At least one must be the hero's.
   - The same walk, with the teleport's owner and skipping a neutral one, sets
     the place's power byte (`0x10018c55`).
+  - **A list holds every registered object of its class, until the object is deleted**
+    (*read*). Slot 13 hands out one of the static lists at `World3D.dll:0x1003a758`,
+    3001 words a class, a count and 3000 pointers (`0x10007a00`). The lists are added to
+    at two sites, the two registrations (`0x100057ea`, `0x100059d2`), and removed from
+    at one, the queue's Unregister, slot 3 (`0x10006010`–`0x10006047`), which takes the
+    class out of the object's id. Of the 2 calls at slot 3 in the install, both are
+    `World3D.dll` deleting an object: at once (`0x10008887`, in `DeleteGameObject`) and
+    from the list a walk defers it to (`0x10013af4`). The control is the same sweep at
+    slot 13, the list itself, which finds 21 callers across six modules, the two here
+    among them.
+  - **So a destroyed generator stays in queue 3, and ends the walk** (*read*). A
+    building is never deleted for dying: its death time is not set, and `KillGameObject`
+    waits on that (`Control.dll:0x100110ab`,
+    [26-damage.md](26-damage.md#what-a-damaged-node-a-destroyed-part-and-a-dead-unit-draw--read-and-measured)).
+    Its Type stands, and slot 17 hands out its owner word as it is
+    (`Behavior.dll:0x10009290`), `0xfffe` and nobody's, and the word is one-way. **Only the
+    wreck's burn brings a generator to that** (*read*). Its node 0 has one hit point that
+    neither a round nor a blast can reach, no building controller carries the kill, and the
+    sphere's kill passes class 3 by; but under a fifth of its total the burn takes it from
+    the last node down to node 0 ([26-damage.md](26-damage.md#hit-points--read-and-measured)).
+    So a generator shot that far and left to burn out shuts the teleport for good, whoever
+    holds the others (*derived*; no recording of it was looked for).
 - **Property `0x208` is 0.** `0x208` is the behaviour's `+0xa64` (the getter's
   table, `0x1000aa2c`), which `MBehaviour`'s mode message sets for mode 2
   (`0x10006266`) and clears for 0 and 1. It sits beside the "Switch from Mirror
@@ -1054,9 +1099,16 @@ mask and 3 — 1 in mode 5, `0x20` in mode 6, and `0x40` in the takeover
     **read**, in [13-control.md](13-control.md#a-buildings-load-group--read-and-measured);
     ~~and a class-29 part with the 1 the first tick sets~~ — **read**, in
     [28-chassis.md](28-chassis.md#what-stops-a-towers-mast-at-the-top--read-and-seen).
-  - What the building's interface `0xb`, slot 16, asks about a place's node.
-  - What `World3D.dll`'s queue list 3 holds beyond the generators the walk
-    looks for, and whether every generator on the map is always in it.
+  - ~~What the building's interface `0xb`, slot 16, asks about a place's node.~~
+    **Read**: the node's stage held below its count, so a place on a damaged node of
+    more than one stage is out of use
+    ([Who stands in a place](#who-stands-in-a-place--read)).
+  - ~~What `World3D.dll`'s queue list 3 holds beyond the generators the walk
+    looks for, and whether every generator on the map is always in it.~~ **Read**:
+    every registered object of class 3, until it is deleted, so a dead generator stays
+    and refuses the hero, and only the wreck's burn kills one
+    ([Teleport in](#teleport-in-0x8000--read)). Whether a building's agent is registered
+    beside it was not read, and changes nothing the walk counts.
   - What property `0x208`, the behaviour's `+0xa64`, is named. The network
     mirror is a *guess*.
   - Whether anything sets or calls `MBehaviour`'s `pTeleFunc` (`+0xa50`).

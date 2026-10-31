@@ -68,8 +68,21 @@ Each node of a model has a life, built from its `.ndp` record
   40,000–500,000 — mines, plants, stores, the generator, the hangar and the medium
   main teleport — and on **all 12 node 0 has no level-0 geometry**, where it has
   on all 18 others. A round, which strikes level 0 only
-  ([the hit test](#the-hit-test--read-and-measured)), can never hit that node;
-  that a blast cannot either, having no sphere to overlap, is a *guess*.
+  ([the hit test](#the-hit-test--read-and-measured)), can never hit that node, and
+  ~~that a blast cannot either, having no sphere to overlap, is a *guess*~~ neither
+  can a blast — *read*: asked for its sphere a node with no level-0 slot answers
+  radius 0 (`AniMesh.dll:0x1000f40c`–`0x1000f432`), and the falloff multiplies the
+  damage by 0 for one (`Control.dll:0x10010101`–`0x10010134`). None of the 30
+  building controllers carries the kill, action 17, where all 69 of the install's are
+  in `weapon.rlb`, and the sphere's kill takes classes 2, 4 and 10
+  ([32-builder.md](32-builder.md)). **So nothing aimed kills those 12**, and shooting
+  their parts away leaves the owner word standing. **What reaches node 0 is the wreck's
+  burn** (*read*). Under a fifth of its total (`+0x594`) an object loses a share of that
+  mark on the control tick (`0x10012bdc`–`0x10012c37`), and the node update takes a
+  shared loss from the **last node down** (`0x10010d87`–`0x10010df0`), so node 0 goes
+  last and the word reads `0xfffe` then. A generator holds 2,464,001: under 492,800 it
+  burns out unless repair lifts it back
+  ([27-ownership.md](27-ownership.md#teleport-in-0x8000--read)).
 - **Damage stages.** A node with *N* stages — its mesh blocks in a row that
   have a level-0 slot, block 0 included — is in stage
   `N − ceil(N × life / max)`; each step up plays the node's `.exp` explosion
@@ -144,10 +157,10 @@ when it names one (`0x100113b2`–`0x100113be`). Then:
   (`0x100118cd`–`0x100118e2`). That sets status `0x20`, and sets **flag 1 in
   the mesh record's flags word** through `IAnimation` slot 8 (`0x10011a52`;
   slot 8 is `AniMesh.dll:0x10005500`, which clears the flags it is given when
-  its operation word is odd and sets them otherwise). It also takes the node's area
-  and volume (queries `0xf`, `0x10`) and its mass out of the totals, and
-  recomputes the live limits
-  ([24-motion.md](24-motion.md#what-sets-the-live-limits--read)).
+  its operation word is odd and sets them otherwise). It also takes the node's area,
+  its volume and **everything its record weighs, the devices on it included**, out of
+  the totals, and recomputes the live limits
+  ([24-motion.md](24-motion.md#what-a-nodes-last-stage-takes-out-of-the-load--read-and-measured)).
   Leaving stage *N* again, under repair, clears flags 1 and 4
   (`0x1001199e`).
 - **A node with flag 1 is gone from the world.** The mesh draw skips it
@@ -1386,7 +1399,12 @@ anybody else" below).
     it.
 - **On C02 M04's plateau Light Tower** — *measured*, then *derived*. `mtow02`'s
   repair system gives 110 a second. Its turret carries 3,506 hit points, and
-  each of its two `e_gun_fc_01` cannons 6,000. With the turret shot off:
+  each of its two `e_gun_fc_01` cannons 6,000, against the 290,002 of its own 18
+  nodes. So the turret and its guns gone are about 5% of the tower, and a building's
+  repair decision wants it under 90% ([below](#repair-a-units-own-repair-unit-switched-on-and-off--read-and-measured)):
+  **shot off and nothing else, they stay off** until the rest of it has been shot down
+  by as much again. Once it is on it stays on. With the turret shot off and the system
+  on:
   - the turret is whole again in 32 s;
   - the first cannon at 86 s;
   - the second at 141 s.

@@ -767,9 +767,8 @@ presses a hero standing at it down), and which of Mission 04's units holds no mi
   machine does. A warbot is held by a building's walls and by its shut doors, and pushed off
   trees, stones and other units, where before it walked through them.
 - **A bot built in a factory leaves by its doors** (docs/31, "The escape"). It is made at the
-  factory's creation vertex, inside the building, so it counts as having walked in and its
-  escape is routed out along the hall way, which is what the engine's own 20-second check does
-  with a unit still on a building ("LEAVE IS TOO !!!"). On Mission 02 the Large Factory's bot
+  factory's creation vertex, inside the building, and its walker's place holds that vertex from
+  birth (variable `0x801`), so its escape runs out along the hall way. On Mission 02 the Large Factory's bot
   walks north from the creation vertex, waits 2.25 s at the front door it opened by standing
   near it, and is out on the landscape 1.5 s later; before, the escape's straight line took it
   through the wall and the ground contact put it on the roof.
@@ -1108,11 +1107,9 @@ out of the ground.
   spokes 120° apart at 20 m from the deck's axis.
 - **A building whose items play its nodes is drawn node by node.** The scene drew a target
   that way only where it takes damage, each node at its own pose and its own stage, and
-  anything else as one model built whole at its placement. The energy bridge takes no damage,
-  so its three arms stood still on screen while the rays hung on their own control points
-  swept round without them. *Measured*: the buildings this brings in and life does not are
-  the two bridge halves, the generators, the small Main Teleport and a ruin — every one a
-  building with doors, a pod or a running item and no damage table.
+  anything else as one model built whole at its placement, so the energy bridge's three arms
+  stood still on screen while the rays hung on their own control points swept round without
+  them.
 - **A sprite is drawn through its frame** (docs/11, "A sprite is drawn through its frame").
   Action 4 builds a *matrix* — the three points' directions as its rows, their centroid as
   the fourth — and the draw scales its columns by the size channel and combines it with the
@@ -1615,22 +1612,20 @@ a row here. A row leaves this table when research closes it.
 | M13 | How the stack reads after Enter in telepresence aboard an HQ | the telepresence ends and mode 3 takes its place over the command view it came from | [40](../docs/40-command-mode.md#an-hqs-command-mode-mode-3--read-and-seen) |
 | M13 | The colour the research box's name is drawn in (`GAME_FONT`'s, as whatever drew before left it) | white, as the recording reads | [41](../docs/41-commander.md#not-established) |
 | M13 | The research box's clip 5 inside its frame, applied to its preview | the preview's view is not clipped | [41](../docs/41-commander.md#what-it-draws--read) |
-| M13 | What "a node reaching its last damage stage" takes out of the load (`0x10011920`) | a destroyed node's own weight and its armour; the devices on it stay | [24](../docs/24-motion.md#what-sets-the-live-limits--read) |
 | M13 | The hall-way trajectory (`Behavior.dll:0x1003fde0`), which times a point with the machine's turn and pull-away and waits at a door; what a walker does with an exit on an upper storey | the one search over the areals and the hall ways, past each exit's approach as read, is handed on as plain legs, a way in stopping on its last vertex rather than half its velocity beyond it; an exit more than 20 over the ground under it is no exit to a walker; a unit within 5 of a vertex, or one the search finds no way for, takes the hall way's shortest way | [24](../docs/24-motion.md#how-a-walk-joins-a-hall-way--read-and-measured) |
 | M13 | What the walker does with the pod handed to it again while the unit stands there | within 1.5 of the pod, the go task's arrival at an object, it holds | [31](../docs/31-packages.md#each-tick-slot-7-0x10030300--read) |
-| M13 | The building's own paths an escape is routed out by ("LEAVE IS TOO !!!") | a unit sent into a building along its hall way walks out of it along the hall way, from its nearest vertex to the exit that makes the way to its goal shortest, while it stands inside the building: within its outer ring and under one of its floors, so a unit up on the roof goes its own way | [31](../docs/31-packages.md#the-escape--read) |
-| M13 | The unit takt escape's node test (a unit on a damaged node is left be) | every node counts as whole | [31](../docs/31-packages.md#the-escape--read) |
+| M13 | What a building whose node 0 has died stops doing: its owner word reads `0xfffe`, its takt returns at once, and the interface passes it over (docs/26, "Hit points") | its nodes and what hangs on them go, its turrets with them, and it keeps its clan and its place in the lists, until something asks the life's `marked`, as the in place's power walk does | [26](../docs/26-damage.md#hit-points--read-and-measured) |
+| M13 | The wreck's burn (`Control.dll:0x10012bdc`-`0x10012c37`): under a fifth of its total an object goes on losing life from its last node down, which is the one way a generator's node 0 dies; its rate per tick or per second is read only in outline | not modelled: an object stops where the last hit left it | [26](../docs/26-damage.md#hit-points--read-and-measured) |
+| M13 | The walker's own `RESET PATH` (`Behavior.dll:0x1003ca34`): a unit too far from its place on two tests running, on a building, is put back on the nearest vertex of the node under it, its limit partly read | not modelled: it walks on from where it is | [31](../docs/31-packages.md#which-paths-a-unit-leaves-a-building-by--read-and-measured) |
+| M13 | The vertex a walker's place holds along a walk through a building, which its way out starts from (docs/31, "Which paths a unit leaves a building by") | a unit sent into a building along its hall way walks out of it along the hall way, from its nearest vertex to the exit that makes the way to its goal shortest, while it stands inside the building: within its outer ring and under one of its floors, so a unit up on the roof goes its own way | [31](../docs/31-packages.md#which-paths-a-unit-leaves-a-building-by--read-and-measured) |
 | M13 | The clan's contact list the maps mark other clans' objects by, kept from each unit's last scan for its 750 ms | each of the player's radars is asked at the frame by the scan's own test | [35](../docs/35-hud.md#the-panel-in-the-cockpit--read-and-seen) |
-| M13 | The places besides a dock's and a main teleport's: whether a loading or unloading place's cylinder is what a transport's arrival reads | a dock, the in and out places of a main teleport and the ore a loading or unloading place moves by itself are ticked; a transport keeps its own arrival | [27](../docs/27-ownership.md#the-places--read-and-measured) |
-| M13 | The random source of a place set's and a place's 64 ms share (`0x1004c550`) | a 32-bit xorshift per building | [27](../docs/27-ownership.md#who-stands-in-a-place--read) |
-| M13 | Whether a destroyed generator stays in `World3D.dll`'s queue 3, which the in place's power walk reads | the live generators are asked | [27](../docs/27-ownership.md#teleport-in-0x8000--read) |
+| M13 | Which draw of `Behavior.dll`'s one `rand()` stream a place set's and a place's 64 ms share takes (`0x1004c569`): 111 other sites step it | the game's generator and its low byte, a stream a set | [27](../docs/27-ownership.md#who-stands-in-a-place--read) |
 | M14 | The target point the guided lock projects (the target list's `+4`), and whether `getTimer`, which times its beeps, runs on a clock or on `timeGetTime` | the target's sphere centre, as the target panel's frame takes it; game time | [35](../docs/35-hud.md#the-guided-lock--read) |
 | M14 | How often the game frame runs, which paces a unit's zoom by 0.1 an update and the outer camera's ease | once a 60 Hz tick | [30](../docs/30-turrets.md#not-established) |
 | M14 | What silences the hero's breath in its own view: its effect is read to run, its loop inside its near distance, and the recording has none of it | the hero's own turret effects flagged `0x800` (`hero_breath`; `hero_helm_light` is a light) play no sound | [11](../docs/11-effects.md#how-a-sound-is-heard--read-and-measured) |
 | M14 | How many tracks the install's `winmm.dll` reports for its `MUSIC` files | the highest `TrackNN.ogg` present; a track with no file is not audio | [34](../docs/34-progression.md#music-the-cds-tracks--read-and-measured) |
 | M14 | How `CD_VOLUME` and `SFX_VOLUME`, each a share of a mixer control, become loudness | the music plays at the sounds' level, as the install's equal settings and Mission 01's recording have it | [34](../docs/34-progression.md#music-the-cds-tracks--read-and-measured) |
 | M14 | What becomes of a part already knocked off and flying when its dock puts its node back | it is taken out of the air, rather than drawn beside the node it is again | [26](../docs/26-damage.md#repair-a-units-own-repair-unit-switched-on-and-off--read-and-measured) |
-| M14 | Where a unit built in a factory joins the building's own paths, which the escape's 20-second check routes it out by ("LEAVE IS TOO !!!") | a bot made at a creation vertex counts as having walked in: it leaves along the hall way, as a unit sent in does | [31](../docs/31-packages.md#the-escape--read) |
 | M14 | A building's draws beyond its efficiency: its shield, deflector and guns on its batteries | a building's shield takes the level its batteries serve its efficiency at, its shield's and deflector's draws come out of no battery, and its guns' capacitors are full again every tick | [23](../docs/23-economy.md#bots-spend-power-through-the-same-code-priced-by-part--read-and-measured) |
 | M14 | When a unit's shield recharges against its power tick: the recharge is read on the power tick | the battery pays for the shield on the unit's power tick and the shield recharges every frame at the level that tick served | [26](../docs/26-damage.md#power--read) |
 | M14 | The AI's camouflage switch, which the device manager's sibling sends as it sends the repair system's (`Behavior.dll:0x10019a10`) | a unit the player does not drive keeps its camouflage off | [26](../docs/26-damage.md#repair-a-units-own-repair-unit-switched-on-and-off--read-and-measured) |

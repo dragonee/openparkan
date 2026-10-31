@@ -351,8 +351,8 @@ it writes
 
 It runs at load, at reset, after any node takes damage (the flag at `+0x598`
 set in `0x10010f30`, `0x1001102f`, acted on next tick by `0x10012a40`), and
-when a node reaches or leaves its last damage stage, taking its area, volume and mass
-out of the totals or back (`0x10011920`).
+when a node reaches or leaves its last damage stage
+([below](#what-a-nodes-last-stage-takes-out-of-the-load--read-and-measured)).
 
 What follows from it:
 
@@ -395,6 +395,58 @@ What follows from it:
   So a robot whose body is down to half its hit points has half its E: it
   runs at half speed and turns at half its rate. The hero too, whose built-in
   engine sits on its body node (*derived*).
+
+### What a node's last stage takes out of the load — *read*, and *measured*
+
+**A node leaves with everything on it, its devices among them.** The weigh leaves
+in each node's 44-byte life record, at `+0x20`, the node's density × volume
+(`0x1000fb5a`), armour's weight over its area (`0x1000fbb4`), and the mass of every
+device whose node it is (`0x1000fc31`, `0x1000fc39`). Those three are the field's only
+writers. `Control.dll:0x10011920`, the routine a node's last stage goes through
+([26-damage.md](26-damage.md#what-a-damaged-node-a-destroyed-part-and-a-dead-unit-draw--read-and-measured)),
+then takes it as one sum. With 0, as the node is hidden, and undoing each line with 1,
+as it comes back:
+
+| field | moves by |
+|---|---|
+| area `+0x530` | the node's area, query `0xf` (`0x10011a70`) |
+| volume `+0x534` | the node's volume, query `0x10` (`0x10011a80`) |
+| mass `+0x538` | all of `+0x20` (`0x10011a94`) |
+| spare payload `+0x4d8` | all of `+0x20` back; on a node of part 0, the chassis's own, less its density × volume (`0x10011aa4`–`0x10011ace`) |
+
+The live limits are then rerun (`0x10011adc`). `0x100118e2` is its one caller, and a
+sweep of `Control.dll` for the four fields finds no other writer but the weigh and the
+constructor; the two weighs, at load (`0x100079fb`, `0x10007d6d`), are the sweep's
+control.
+
+- **The spare comes out as the weigh would have it,** which is why a root node's body
+  is held back: it never counted against the payload
+  ([Load](#load--read-and-measured)).
+- **With one exception.** The weigh holds the spare to 0 (`0x1000fc51`) and this does
+  not, so a unit loaded past its payload has every kilo it loses to spend at once, from
+  0, however far over it still is. *Measured*: 10 of the 382 assemblies.
+- **Only a hidden node counts.** A node that never hides, status 2, keeps its weight at
+  0 life. A part in the air, status `0x40`, keeps its until its flight ends and its
+  stage runs, and whatever it carried with it, status `0x80`, likewise.
+- **The device stays on the list.** Nothing here touches the device itself: its condition
+  is its node's, which is 0, and its mass has gone. What the device list does with a
+  device on a hidden node is its own business, and it is the same one it had at 0 life.
+- **The figures go on to whoever asks**: the mass as property `0x7c` to the collision
+  pass and the three of them as the sensor figures
+  ([25-sensors.md](25-sensors.md)).
+
+**Where a device hangs** — *read*. An external part's device on its own node *n*
+is rebased as the part's first merged node − 1 + *n* (`0x10009090`), and on its node
+0, which is not merged, to the node the part attaches to (`0x10009081`). An internal
+part's re-parse keeps the slot's node
+([28-chassis.md](28-chassis.md#a-fitted-part-takes-over-its-slot--read-and-measured)).
+
+*Measured*, over the 382 assemblies with a root controller and a model: 6752 devices,
+3175 with a mass, and **none names a node its model has not got**. 1843 of the 3175
+sit on merged node 0, which dies with the unit; **1332 sit elsewhere, 1,337,275 of the
+3,772,662 kg**, on a turret's body or the node a gun bolts to. One assembly in 373 with
+any device mass, `m_crab`, carries all of it on node 0, and at the other end `23_m2` has
+66% of it off.
 
 ### Flag `0x800` is the unit's leave to be ordered — *read*, and *measured*
 

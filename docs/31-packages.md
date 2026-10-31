@@ -563,9 +563,9 @@ reached its point. Nothing in the takt tests the ground under the unit at the
 end: that the point, on a usable areal, is always off the building is a
 *guess* the 20-second check below backs. Two refinements:
 
-- an escape with no target that still finds the unit on a building after 20 s
-  stops it and routes it out through the building's own paths ("LEAVE IS TOO
-  !!!");
+- an escape with no target that still finds the unit walking on a building after
+  20 s **puts it on the building's hall way and starts over**
+  ([below](#which-paths-a-unit-leaves-a-building-by--read-and-measured));
 - an escape from a named building is held while that building's variable
   `0x205` reads 1 or `0x309`, or its `0x20c` reads 1. **`0x205` is the
   construction sphere's phase code** (*read*): the variable getter returns
@@ -584,7 +584,7 @@ task beneath it on the stack, if any, resumes.
 | when | escape | inserted | read at |
 |---|---|---|---|
 | a unit **stands on a building** with **no order or a stop** — not a ruin, not a destroyed building, and not attached to a damaged node of the building (below) | no target | replacing | unit takt `0x10005408` |
-| the behaviour's flag `0x10` is switched back on while the unit stands on a building: **the player lets go of the bot**, or raises its auto-driver level (below) | from that building | first | mode setter `0x10006f48` |
+| the behaviour's flag `0x10` is switched back on while the unit stands on a building: **the player lets go of the bot**, or raises its auto-driver level (below). It is first put on the hall way, and with no vertex on its node there is no escape at all ([below](#which-paths-a-unit-leaves-a-building-by--read-and-measured)) | from that building | first | mode setter `0x10006f48` |
 | a factory has just made the unit | no target | replacing | `0x1002aa6e`, "Adding Robot to game..." |
 | a small unit guarding another clan's building, after capturing it | from that building | queued | patrol `0x1002da7a` |
 | a building begins its construction sphere, for every unit within its radius + 15 not already escaping or upgrading | from that building | first | ShowUpgrade `0x10031571` |
@@ -611,9 +611,88 @@ is how damaged the node is**, 0 while it is whole. Two things follow:
 - a unit attached to a damaged node of a building is not given the escape;
 - a building's hall-way place on a damaged node is out of use.
 
+**The joint is the node of the face the unit stands on**: the ground contact's face
+record names an object and a node, and the placement hangs the unit on them
+(`Terrain.dll:0x10025fc0`, [24-motion.md](24-motion.md#finding-the-ground--read)).
+
+**Only a node of more than one stage can read as damaged** (*read*, then *measured*).
+*Held below the count* makes the value 0 for good on a node of one stage, however
+hurt, and when it is gone too, and then nothing stands on it. Of the 484 nodes of the
+29 hall-way models **112 have two or three stages**, and every one of the 112 has a
+floor. So a unit on the other 372's floors always gets its escape, and one on those 112
+loses it from the first stage to the last but one.
+
 The search that found it listed the slots called through each module's stored
 `IAnimation` (`Control.dll`'s `+0x20` among them). A search for interface `0xb`
 followed by a call at `+0x44` had found only the two slot-16 readers.
+
+### Which paths a unit leaves a building by — *read*, and *measured*
+
+**The hall way is the only path a building has**, and a walker leaves by it because
+its own place holds a vertex of it. The walker keeps its place in three copies of a
+36-byte record (`+0x6c`, `+0x90`, `+0xb8` of the walker, the first being behaviour
+`+0x124`): a point, an areal, and at `+0x1c` and `+0x20` a building's id and a vertex
+([32-builder.md](32-builder.md)). `0x1003c3d0` writes all three and empties the walker's
+queues. The global search starts from the place, the hall-way vertex it holds or else
+the areal under it (`0x10043220`), so the escape's walk (`0x10001960`, the go command)
+runs out along the links on its own.
+
+**What puts a vertex in the place** is the question, and the six callers of
+`0x1003c3d0` answer it:
+
+| caller | what it writes |
+|---|---|
+| `0x1000ac47`, variable `0x801` | a building's id and vertex, as the creator hands them: **a bot made in a factory holds its creation vertex from birth** (`0x1001e153`, the end of `CreateObjectFromScheme`, given the building and vertex at `0x1001d4fe`). The order of its escape comes after (`0x1002aa6e`) |
+| `0x1002c5ca`, the escape's 20 s | the vertex below |
+| `0x10006eaa`, the mode setter | the vertex below |
+| `0x100061d9`, `0x10006860`, `0x100069fa` | its own position: the areal under it, no vertex (the attach, a flag `0x10` turned off, and a flag turned on with the unit on the landscape) |
+
+None of them gives an order inside the building. The log line
+at `0x1000ac4c`, *"Give default patrol inside building order"*, is followed by no order:
+it stores 1, the building and the vertex at `+0xc30`, `+0xc34` and `+0xc38`, and a sweep
+of `Behavior.dll` finds no reader of `+0xc30` or `+0xc38` and one of `+0xc34`, the mode
+setter's, of what it has just stored (`0x10006f06`). The control is the same sweep at
+`+0xc28` and `+0xc2c` beside them, which finds their readers (`0x1000444e`,
+`0x10004970`, `0x1000d178`).
+
+**The teleport** (`0x1002c255`–`0x1002c5df`, in the escape's takt, and the mode setter's
+`0x10006bfd`–`0x10006f48`, *read*). Its log says *"Teleport to"*, and it is one.
+
+1. **It asks for a vertex.** The unit's parent, if its logic id has the top bit, a
+   building's (`0x1002c3d9`–`0x1002c3e7`), answers the hall way (`0x303`), and `MHallWay`
+   slot 27 (`ArealMap.dll:0x1000be50`) is given the unit's world position and its joint.
+   Slot 27 walks every vertex, whatever its flags (slot 4, `0x1000a6c0`, answers the
+   vertex's world point and, at `+0x10`, its joint), keeps those **on that joint**, and
+   answers the nearest in all three axes, or −1.
+2. **It moves the unit there.** `0x10014590` writes the point into the unit's matrix, takes
+   it off its parent and hangs it on the object it is given, at no joint: the mode setter
+   gives it the parent it had (`0x10006d01`), the takt what the behaviour's `+0x34` answers
+   at slot 12, which was not read. The rotation stands; nothing is played. The next ground
+   contact hangs it on the face it then stands on.
+3. **It writes the place**: the point, the areal under it (`+0x48` slot 48), the
+   building's id and the vertex, through `0x1003c3d0`.
+4. **It starts over.** The escape's takt restarts its own task from the point
+   (`0x1002c5df`, slot 6), so its 400 tries begin about the vertex and its clock from 0;
+   the mode setter gives the order "from that building", inserted first.
+
+With −1 **the two part**: the takt restarts from where the unit stands, unmoved, and
+tries again in 20 s; the mode setter gives no order at all. And only an escape with no
+target has the check, walking, on an object of class 3 (`0x1002c216`–`0x1002c24f`), and
+so on a bridge too.
+
+**The walker has the same teleport of its own**, whatever the unit's task, under *"RESET
+PATH !!!"* (`0x1003ca34`–`0x1003cec3`, *read*). When a unit has stood too far across the
+ground from its walker's place on a second test running (`0x1003c8a8`–`0x1003c8c8`; the
+limit, 10 or 2.5 or a figure of the local path's, is `0x1003c82a`–`0x1003c855`), the
+walker empties its queues and runs its stop. Then, if the unit's parent is of class 3 and
+its Type is not `0x80001000`, a bridge's, it asks slot 27 and moves the unit as above, and
+with a vertex writes all three copies of its place, then takes up its goal from there
+(`0x1003bad0`). So a unit knocked off its path in a room goes back to the nearest vertex of
+the floor it is on.
+
+*Measured*, over the 29 hall ways: the 1056 vertices sit on 180 joints of 484 nodes, and
+**211 of the 390 nodes with a walkable face have no vertex on them**, so a unit that
+strays onto those stays put when the 20 s come round, and let go there it is left be.
 
 **Flag `0x10` is the player's hand** (*read*). Each unit's agent carries a
 `Wizard.dll` object, and only it was found calling the mode setter
@@ -1106,9 +1185,12 @@ named, so reasons 2 and 4 are tested by the priorities but never asked.
   ([27-ownership.md](27-ownership.md)). The default priority lets reason 3
   through only if a dock is reachable (`0x100018a0`).
 - **With no order.** An animal's default order is 15, migrate; a mine's is to
-  mine (`0x100088f0`). A unit placed inside a building gets a patrol inside it
-  ("Give default patrol inside building order", `0x1000ac4c`). **A unit left
-  idle or stopped on a building escapes** from it ([The escape](#the-escape--read)).
+  mine (`0x100088f0`). ~~A unit placed inside a building gets a patrol inside it
+  ("Give default patrol inside building order", `0x1000ac4c`).~~ A unit placed inside
+  a building gets the line in the log and no order: what the line stores has no reader
+  ([Which paths](#which-paths-a-unit-leaves-a-building-by--read-and-measured)).
+  **A unit left idle or stopped on a building escapes** from it
+  ([The escape](#the-escape--read)).
   For other units no default order was found: an empty stack answers with an
   embedded stop task, and a go to a place that was a unit's only order leaves a
   patrol of 150 about it ([Route — go](#what-each-package-does--read)) ([Which objects run a behaviour](#which-objects-run-a-behaviour--read)).
@@ -1921,10 +2003,16 @@ captures by logic id 34 times.
 - ~~Which string the status line shows for which task.~~ By the head order.
 - ~~Whether a wingman menu is what the second table is.~~ It is.
 - ~~What the building's `IAnimation` test in the unit takt admits.~~ A unit on
-  a damaged node of the building: the node's value is its damage stage
+  a damaged node of the building: the node's value is its damage stage, and only a node
+  of more than one stage shows one, 112 of the 484 of the hall-way models
   ([The escape](#the-escape--read)). Whether other code than
   `Control.dll:0x100118c4` sets the value was not searched beyond the stored
   `IAnimation` pointers.
+- ~~Which paths a unit leaves a building by.~~ The hall way, the only one it has, from
+  the vertex the walker's place holds. A factory's bot holds its creation vertex from
+  birth; a unit let go, or still walking on a building 20 s into an escape with no
+  target, is put on the nearest vertex of the node under it
+  ([Which paths](#which-paths-a-unit-leaves-a-building-by--read-and-measured)).
 - ~~Who calls the behaviour's mode setter.~~ `Wizard.dll`, from the player's
   taking and letting go of a bot ([The escape](#the-escape--read)).
 - ~~What a building's variable `0x205` holds.~~ The sphere's phase code.
