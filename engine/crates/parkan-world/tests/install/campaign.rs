@@ -1650,6 +1650,18 @@ fn c02_m03s_enemy_factory_turns_out_the_designs_its_tree_has_researched_until_it
     let plant = play.units.iter().position(|u| u.logical_id == -2147483608).expect("its Large Factory");
     assert!(play.factories.iter().any(|f| f.target == plant), "which the play knows as a factory");
 
+    // The minds it starts with to spare, and every one of its robots lost since, each of which
+    // frees its mind for the factory (docs/23, "The bot limit is the clan's mind count").
+    let spare = play.free_minds(enemy);
+    assert_eq!(spare, 3, "three minds to spare at the start");
+    let holds = |play: &parkan_world::play::Play, t: usize| {
+        play.units[t].clan == Some(enemy) && play.units[t].type_word & CLASS_ROBOT != 0
+    };
+    let mut alive: Vec<usize> = (0..placed)
+        .filter(|&t| holds(&play, t) && play.battle.combat.targets[t].alive)
+        .collect();
+    let mut lost: Vec<f32> = Vec::new();
+
     let mut made: Vec<(f32, u32, u8, String)> = Vec::new();
     for step in 0..(150 * 30) {
         play.tick(tick, [0.0; 2]);
@@ -1660,9 +1672,30 @@ fn c02_m03s_enemy_factory_turns_out_the_designs_its_tree_has_researched_until_it
             let size = play.robots.iter().find(|(rt, _)| *rt == t).map_or(0, |(_, r)| r.size_class);
             let file = play.commander.paths[t].rsplit('\\').next().unwrap().to_ascii_lowercase();
             made.push((step as f32 / 30.0, u.type_word, size, file));
+            alive.push(t);
         }
+        alive.retain(|&t| {
+            let live = play.battle.combat.targets[t].alive;
+            if !live {
+                lost.push(step as f32 / 30.0);
+            }
+            live
+        });
     }
-    assert_eq!(made.len(), 3, "three warbots, one a mind: {made:?}");
+    // It builds until the minds run out: the three to spare, then one for each unit lost, and
+    // each of those only after its loss. What its enemies kill along its patrols' routes is
+    // their affair; a fourth warbot with no loss before it is the factory overrunning its limit.
+    assert!(made.len() >= spare, "the three it has minds for: {made:?}");
+    for (k, m) in made.iter().enumerate().skip(spare) {
+        let freed = lost.get(k - spare);
+        assert!(freed.is_some_and(|&at| at < m.0), "warbot {k} on a mind a loss freed: {made:?}, lost {lost:?}");
+    }
+    let building = play.factories.iter().find(|f| f.target == plant).is_some_and(|f| !f.idle());
+    assert_eq!(
+        made.len() + usize::from(building) + play.free_minds(enemy),
+        spare + lost.len(),
+        "every mind freed is in a warbot, on the slip or still to come: {made:?}, lost {lost:?}"
+    );
     assert!(made.iter().all(|m| m.1 & CLASS_ROBOT != 0), "every one a robot: {made:?}");
     // The free bot first, in the time a large factory takes over its chassis: 20 s for a small
     // one and 40 for a medium (docs/23, "Construction"). The two behind it are paid, and wait
@@ -1670,9 +1703,12 @@ fn c02_m03s_enemy_factory_turns_out_the_designs_its_tree_has_researched_until_it
     let free = if made[0].2 == 3 { 35.0..50.0 } else { 15.0..30.0 };
     assert!(free.contains(&made[0].0), "the free one at {} s: {made:?}", made[0].0);
     assert!(made[1].0 > made[0].0 + 15.0, "and the paid ones dig for theirs: {made:?}");
-    assert_eq!(play.free_minds(enemy), 0, "the clan's minds are all held now");
-    let factory = play.factories.iter().find(|f| f.target == plant).unwrap();
-    assert!(factory.idle(), "so the factory stands idle rather than queueing another");
+    // With no loss in the last build's time the minds are all held and the factory stands idle.
+    if lost.iter().all(|&at| at < 100.0) {
+        assert_eq!(play.free_minds(enemy), 0, "the clan's minds are all held now: lost {lost:?}");
+        let factory = play.factories.iter().find(|f| f.target == plant).unwrap();
+        assert!(factory.idle(), "so the factory stands idle rather than queueing another");
+    }
 
     let store = play.stores.get(&enemy).expect("the enemy's design store is loaded");
     assert!(store.designs.len() > 50, "the whole of UNITS\\UNITS\\AI: {}", store.designs.len());
@@ -2610,4 +2646,85 @@ fn single_01s_enemy_researches_what_it_could_not_build_and_its_best_design_chang
         store.ranked(WARRIOR, SELECT_BEST_COMBAT).iter().map(|d| design_file(d)).collect();
     assert_eq!(ranked.len(), 12);
     assert_eq!(ranked[0], "23sfly1e.dat", "{ranked:?}");
+}
+
+/// What a unit told to move and going nowhere looks like, and that none does (`standing_units`).
+/// A building cuts no areal, so the walker's way may run straight across one, and planned again
+/// from the wall it runs into it is the same way: before the way round the contour, C02 M03's
+/// factory's second warbot, `23_swhl1`, stood against the factory's own wall at 13 to 15 m/s from
+/// 80 s on, and a unit each on C01 M03 and C01 M04 against a wall of theirs.
+fn assert_no_walker_stands(mut play: parkan_world::play::Play) {
+    let found = standing_units(&mut play, 150.0);
+    let walkers: Vec<_> = found
+        .into_iter()
+        .filter(|(t, ..)| play.robots.iter().any(|(rt, r)| rt == t && !r.flyer))
+        .collect();
+    assert!(walkers.is_empty(), "walkers at speed going nowhere: {walkers:?}");
+}
+
+#[test]
+#[ignore = "needs the game install"]
+fn c02_m03s_walkers_go_round_their_factorys_walls_and_none_stands_at_speed() {
+    assert_no_walker_stands(campaign_play_at(gamedir::C02_MISSION_03, Some(1)));
+}
+
+#[test]
+#[ignore = "needs the game install"]
+fn c01_m03s_walkers_go_round_their_buildings_and_none_stands_at_speed() {
+    assert_no_walker_stands(campaign_play(gamedir::C01_MISSION_03));
+}
+
+#[test]
+#[ignore = "needs the game install"]
+fn c01_m04s_walkers_go_round_their_buildings_and_none_stands_at_speed() {
+    assert_no_walker_stands(campaign_play(gamedir::C01_MISSION_04));
+}
+
+#[test]
+#[ignore = "needs the game install"]
+fn c02_m04s_walkers_go_round_their_buildings_but_for_one_in_a_notch_of_a_buildings_steep_faces() {
+    // Target 10 stands in a notch of building 5's steep faces, 4 m up its skirt, told 16 m/s, and
+    // its way out of there, clear of every wall the way round can see, does not free it. It is the
+    // one walker on these maps the way round does not help; what the game's would do there is not
+    // read (docs/24, "What a wall does to a walk"). Any other is a new one.
+    let mut play = campaign_play(gamedir::C02_MISSION_04);
+    let found = standing_units(&mut play, 150.0);
+    let walkers: Vec<_> = found
+        .into_iter()
+        .filter(|(t, ..)| play.robots.iter().any(|(rt, r)| rt == t && !r.flyer))
+        .collect();
+    assert!(walkers.iter().all(|(t, ..)| *t == 10), "walkers at speed going nowhere: {walkers:?}");
+}
+
+/// The route C02 M03's placed unit 7, id 33, takes from its start to the far end of its patrol
+/// runs by the read past unit 16's gun at (885, 1398) on about half of its draws: each waypoint
+/// stands where the straight line to the goal crosses the next areal's edge, so the walk keeps
+/// close to that line, which passes some 20 m from there. So its death there is the search's draw
+/// and the gun's, and not a route the walker should not have taken.
+#[test]
+#[ignore = "needs the game install"]
+fn c02_m03s_patrol_to_its_far_end_keeps_to_the_straight_line_past_the_gun_that_kills_it() {
+    let mut play = campaign_play_at(gamedir::C02_MISSION_03, Some(1));
+    let from = play.battle.combat.targets[7].position;
+    let goal = glam::Vec3::new(219.8, 1080.4, 0.0);
+    let gun = glam::Vec2::new(885.5, 1397.7);
+    const PLANS: usize = 1000;
+    let (mut by, mut none) = (0, 0);
+    for _ in 0..PLANS {
+        let Some(Ok(legs)) = play.walker_search(7, from, goal) else {
+            none += 1;
+            continue;
+        };
+        let mut at = from.truncate();
+        let near = legs.iter().any(|p| {
+            let (a, d) = (at, p.truncate() - at);
+            at = p.truncate();
+            let s = ((gun - a).dot(d) / d.length_squared().max(1e-6)).clamp(0.0, 1.0);
+            (a + d * s).distance(gun) < 60.0
+        });
+        by += usize::from(near);
+    }
+    eprintln!("{by} of {PLANS} plans pass within 60 of the gun, {none} found no way");
+    assert_eq!(none, 0);
+    assert!(by * 3 > PLANS, "a good share of the plans run past it: {by} of {PLANS}");
 }

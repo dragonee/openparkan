@@ -35,6 +35,11 @@ pub const WAY_JOIN: f32 = 5.0;
 /// every building the shipped campaigns place stands within 15 of the ground under it but the
 /// two mines' upper doors, which stand 28 and 29 over it, their ground-level doors 5 and 10.
 pub const WAY_DOOR_STEP: f32 = 20.0;
+/// How [`Play::round_walls`] looks for a wall: within this of a building's sphere, along a leg in
+/// pieces this long, this far over the landscape.
+pub const WALL_MARGIN: f32 = 10.0;
+pub const WALL_PIECE: f32 = 10.0;
+pub const WALL_WAIST: f32 = 2.0;
 
 /// The buildings' hall ways by path, and which building each unit walked into.
 #[derive(Clone, Debug, Default)]
@@ -599,8 +604,127 @@ impl Play {
         if way.is_empty() {
             return Vec::new();
         }
+        let way = self.round_walls(t, start, way);
         legs.extend(way);
         legs
+    }
+
+    /// Robot target `t`'s walk `legs` from `from`, with the walls taken out of it: for each
+    /// building the walk would run into, the points it holds under the building dropped and the
+    /// way round its ground contour ([`Play::way_round`]) put in their place.
+    ///
+    /// STAND-IN: docs/24-motion.md#what-a-wall-does-to-a-walk--measured-and-a-stand-in -- a
+    /// building cuts no areal, so the search's way may run straight across one, and no read step
+    /// takes a walker round it: the game's plans again once a point due lies 10 from it. Planned
+    /// again from a wall the search gives the same way, and a unit in a corner of the walls stands
+    /// there at full speed for as long as its task lasts. So a plan made within a building's
+    /// sphere and 10 goes round it, and one whose goal lies behind its walls ends at its contour.
+    /// A bridge is left alone, its deck being a way, and so is a building the unit was sent into.
+    fn round_walls(&mut self, t: usize, from: Vec3, legs: Vec<Vec3>) -> Vec<Vec3> {
+        if self.flies(t) || legs.is_empty() {
+            return legs;
+        }
+        let buildings: Vec<usize> = (0..self.units.len())
+            .filter(|&b| {
+                self.units[b].kind == KIND_BUILDING
+                    && self.units[b].type_word != BUILDING_BRIDGE
+                    && self.battle.combat.targets.get(b).is_some_and(|x| x.alive)
+                    && self.ground.solids.get(b).is_some_and(|s| s.present)
+            })
+            .collect();
+        let mut legs = legs;
+        for b in buildings {
+            let Some((centre, radius)) = self.ground.solids.get(b).map(|s| (s.centre, s.radius)) else {
+                continue;
+            };
+            // Only a plan made at the building: a walker comes to a wall by the search's way, as
+            // read, and it is planning again from there that gets it nowhere. A way that merely
+            // lies across a building far ahead is left to the search's next plan.
+            let far = from.truncate().distance(centre.truncate()) >= radius + WALL_MARGIN;
+            if far || self.construction.ways.entered.get(&t) == Some(&b) {
+                continue;
+            }
+            // A way that meets no wall of it is left as the search gave it.
+            let mut at = from;
+            let walled = legs.iter().any(|&p| {
+                let hit = self.runs_into(b, at, p);
+                at = p;
+                hit
+            });
+            if !walled {
+                continue;
+            }
+            let ring = self.contour(b);
+            let under = |p: Vec3| {
+                let mut inside = false;
+                for i in 0..ring.len() {
+                    let (a, c) = (ring[i], ring[(i + 1) % ring.len()]);
+                    if (a.y > p.y) != (c.y > p.y) && p.x < a.x + (p.y - a.y) * (c.x - a.x) / (c.y - a.y) {
+                        inside = !inside;
+                    }
+                }
+                inside
+            };
+            // A goal behind the walls is one a walk across the ground never reaches: it ends at
+            // the contour's corner nearest it, and holds there.
+            let ends_inside = legs.last().filter(|&&p| under(p)).copied();
+            let kept: Vec<Vec3> = legs.iter().copied().filter(|&p| !under(p)).collect();
+            let mut out = Vec::with_capacity(kept.len());
+            let mut at = from;
+            for p in kept {
+                if self.runs_into(b, at, p) {
+                    out.extend(self.round_from(b, at, p));
+                }
+                out.push(p);
+                at = p;
+            }
+            if let Some(goal) = ends_inside {
+                out.extend(self.round_from(b, at, goal));
+            }
+            legs = out;
+        }
+        legs
+    }
+
+    /// The way round building `b` from `at` to `to`, setting out for the nearest corner of its
+    /// contour no wall stands in the way of: in a notch of the walls the very nearest may lie
+    /// behind one.
+    fn round_from(&mut self, b: usize, at: Vec3, to: Vec3) -> Vec<Vec3> {
+        let mut ring = self.contour(b);
+        let across = |p: Vec3| p.truncate().distance(at.truncate());
+        ring.sort_by(|p, q| across(*p).total_cmp(&across(*q)));
+        // From where the unit stands, at its own height: it may be up on a building's skirt.
+        let open = |play: &Play, c: Vec3| {
+            let waist = Vec3::Z * WALL_WAIST;
+            play.ground.solids.get(b).is_none_or(|s| {
+                !parkan_sim::solid::blocked(at + waist, c.with_z(at.z) + waist, s)
+            }) && !play.runs_into(b, at, c)
+        };
+        let Some(start) = ring.iter().copied().find(|&c| open(self, c)) else {
+            return self.way_round(b, at, to);
+        };
+        let round = self.way_round(b, start, to);
+        if round.is_empty() { vec![start] } else { round }
+    }
+
+    /// Whether a walker's leg from `a` to `b_at`, along the ground, meets a shut wall of building
+    /// `b`: the leg in pieces a walker's waist over the landscape, since a leg's own ends stand at
+    /// an areal's corners, which may lie under the ground it walks on.
+    fn runs_into(&self, b: usize, a: Vec3, b_at: Vec3) -> bool {
+        let Some(solid) = self.ground.solids.get(b) else { return false };
+        let pieces = ((b_at - a).truncate().length() / WALL_PIECE).ceil().max(1.0) as usize;
+        let on_land = |p: Vec3| {
+            let z = self.ground.landscape_top(p.x, p.y).unwrap_or(p.z);
+            p.with_z(z + WALL_WAIST)
+        };
+        (0..pieces).any(|k| {
+            let (p, q) = (
+                a.lerp(b_at, k as f32 / pieces as f32),
+                a.lerp(b_at, (k + 1) as f32 / pieces as f32),
+            );
+            p.truncate().distance(solid.centre.truncate()) < solid.radius + WALL_MARGIN
+                && parkan_sim::solid::blocked(on_land(p), on_land(q), solid)
+        })
     }
 
     /// The way round building `b` on the ground, from the corner of its contour nearest `from`

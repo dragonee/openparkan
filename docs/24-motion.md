@@ -4167,6 +4167,51 @@ contour, where the game's would walk into it and plan again once 10 m from a poi
 no way the search will give, as for a unit past a vertex's gate, the old way in stands: the
 hall way's shortest from the door that makes the whole way shortest.
 
+### What a wall does to a walk — *measured*, and a stand-in
+
+**Planning again does not get a walker off a wall.** A building cuts no areal, so the search's
+way may run straight across one, with waypoints under its roof. A walker that meets the wall
+falls behind its points, passes one more than 10 off, and plans again
+([above](#dropping-the-points-a-unit-has-passed--read)), from the same areal to the same goal:
+the same way, into the same wall. In a corner of the walls the pushes cancel and it stands, its
+velocity written at full speed. *Measured* on C02 M03: the factory's second warbot, `23_swhl1`,
+target 51, is held at (797.7, 1355.1) on the factory's own sloped faces from 80 s to the end at
+150 s, velocity 13 to 15 m/s, planning again every 5 s or so, and its points run on through the
+hall at (763, 1342) and (762, 1329). What let such a unit off before the walker planned again
+is, *inferred* and not tried apart, the clock: the Wizard's points ran on past the wall, and its pull
+swung with them.
+
+**How many** (*measured*). Over the 14 campaign missions the install tests play, 150 s each at
+30 Hz with the hero idle, the units alive and driven by the AI that are told more than 5 m/s for
+20 s together and stay under 1 m:
+
+| engine | standing | which |
+|---|---:|---|
+| before the walker planned again | 2 | C02 M01's target 4 at 178 m/s and C04 M02's 33 at 235 m/s, written velocities far past any moving state, as the medusas' are ([Not established](#not-established)) |
+| planning again, no way round | 6 | those on C02 M01; four walkers against a building (C01 M03's 12, C01 M04's 11 for 147 s, C02 M03's 51, C02 M04's 10); C01 M03's flyer 7 |
+| with the way round | 3 | C02 M01's 4; C01 M03's flyer 7; and one walker, C02 M04's 10, for 90 s |
+
+So it is general to a walker on a way across a building, not to one unit on one map. A count that
+leaves out nothing shows 14 on the middle row: a destroyed unit's walker is no longer run and keeps
+its last figures, and those are not standing. The flyer is a different thing: its patrol's point
+(1429, 559) lies in the soft zone of [the map's edge](#the-map-edge--read), the push holds it at
+x 1418, 11 from the point, and it plans again, as read, until the patrol's own loop timer moves it
+on (*inferred* for the push, from the figures; the plan is measured). That is left as it is. C02 M04's
+walker stands in a notch of building 5's steep faces, 4 m up its skirt at (1022, 1139), told 16 m/s
+at a corner of the contour no wall the search for one can see lies in the way of; what pushes it back
+there is not established, and the way round does not free it. With no way round it stands 30 s and
+gets off when its patrol moves on, so this one is a shade worse for the stand-in.
+
+**The engine** goes round, once it is there. A plan made within a building's sphere and 10 (not a
+bridge's, and not one it starts or ends inside) whose way would meet a shut wall, tested a walker's
+waist over the landscape, loses the points under the building, and the leg that still meets the wall
+takes the way round the building's ground contour, setting out for the nearest corner no wall hides;
+a goal behind the walls ends the walk at the corner nearest it. A way that merely lies across a
+building further on is left as the search gave it, so a walker comes to the wall by the read's way
+and only its planning again is changed. This is a stand-in: no read step does it, and what the game's walker does
+at a wall beyond planning again is not established. Whether the game's units stand at such a wall too is not known; no recording looked
+at shows one.
+
 ### Walking out — *read*
 
 A walker has two walks that are not the search's. Each comes from `0x1003dde0`, which the
@@ -4389,9 +4434,10 @@ patrol runs past it.
   ~~How a walk to a door gets past the building's own walls~~ — **narrowed**: it
   does not, by any read step. The search's leg runs across the areal to a point 3
   beyond the exit ([How a walk joins a hall way](#how-a-walk-joins-a-hall-way--read-and-measured)),
-  and a walker held at a wall plans again once 10 m from a point due. Whether that
-  is enough in the game is not established; the engine's way round the ground
-  contour remains a stand-in. ~~Who calls
+  and a walker held at a wall plans again once 10 m from a point due, the same way
+  into the same wall. Whether the game's stand there too is not established; the
+  engine's way round the ground contour, for a walker planning from a building's wall,
+  remains a stand-in ([What a wall does to a walk](#what-a-wall-does-to-a-walk--measured-and-a-stand-in)). ~~Who calls
   `MHallWay` slot 11 (`0x1000b390`, which links a building's exits)~~ —
   **read**: `OnAddStatic` and `OnRemoveStatic` alone, on every building
   ([Who relinks a hall way](#who-relinks-a-hall-way--read)); ~~what a

@@ -267,3 +267,45 @@ pub(crate) fn campaign_play_at(path: &str, level: Option<usize>) -> parkan_world
     play.load_progression(&game, &dir, &m).unwrap();
     play
 }
+
+/// The units the AI drives that stand while told to move, over `seconds` of play at 30 Hz with the
+/// hero idle: commanded above 5 m/s at every sample of a 20 s window, and under 1 m from where the
+/// window began. A unit at speed 0 is arriving; one with speed and no travel is held. Each one
+/// once: its target, where it was held, for how long at most in seconds, its task.
+pub(crate) fn standing_units(
+    play: &mut parkan_world::play::Play,
+    seconds: f32,
+) -> Vec<(usize, glam::Vec3, usize, String)> {
+    use std::collections::{BTreeMap, VecDeque};
+    const WINDOW: usize = 20;
+    let mut track: BTreeMap<usize, VecDeque<(glam::Vec3, bool)>> = BTreeMap::new();
+    let mut found: BTreeMap<usize, (glam::Vec3, usize, String)> = BTreeMap::new();
+    for step in 0..(seconds * 30.0) as usize {
+        play.tick(1000.0 / 30.0, [0.0; 2]);
+        if step % 30 != 0 {
+            continue;
+        }
+        for (t, r) in &play.robots {
+            // A destroyed unit's walker is no longer run: it keeps its last figures.
+            if !play.battle.combat.targets.get(*t).is_some_and(|x| x.alive) {
+                track.remove(t);
+                continue;
+            }
+            let commanded = r.walker.drive.is_some_and(|d| d.velocity.length() > 5.0);
+            let window = track.entry(*t).or_default();
+            window.push_back((r.walker.body.position, commanded));
+            if window.len() > WINDOW + 1 {
+                window.pop_front();
+            }
+            if window.len() == WINDOW + 1 {
+                let start = window[0].0;
+                if window.iter().all(|(p, c)| *c && p.distance(start) < 1.0) {
+                    let e = found.entry(*t).or_insert((start, 0, String::new()));
+                    e.1 += 1;
+                    e.2 = format!("{:?}", r.behaviour.task());
+                }
+            }
+        }
+    }
+    found.into_iter().map(|(t, (p, n, task))| (t, p, n + WINDOW, task)).collect()
+}
