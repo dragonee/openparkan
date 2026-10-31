@@ -492,12 +492,16 @@ fn mission_02s_outpost_charges_repairs_rearms_and_shields_the_hero_standing_on_i
     // The dock's glow runs while it charges, with `f_recharge.wav` in it (docs/13).
     let charged: Vec<String> = play.cues.iter().map(|c| c.sound.to_ascii_lowercase()).collect();
     assert!(charged.iter().any(|s| s == "f_recharge.wav"), "the charging sound: {charged:?}");
-    let ids = play.places.iter().find(|p| p.target == outpost).unwrap().places[0].recharge.clone();
-    assert_eq!(ids.len(), 1, "the Outpost's one dock glow");
-    let owner = parkan_world::fx::Owner::Building(outpost, ids[0]);
+    // The class-25 item on the dock's own node runs it, by the record's action 10 in mode 2.
+    let set = play.places.iter().find(|p| p.target == outpost).unwrap();
+    assert!(set.places[0].working);
+    let item =
+        set.parts.iter().find(|p| p.node == set.places[0].vertex.joint as i32).expect("the dock's item");
+    assert!(item.on && item.running);
+    let owner = parkan_world::fx::Owner::Building(outpost, 2000);
     let (_, glow) = play.fx.instances.iter().find(|(o, _)| *o == owner).expect("its glow runs");
     assert!(glow.effect.name.eq_ignore_ascii_case("f_recharge_r"), "{}", glow.effect.name);
-    assert!(glow.on && glow.mode == parkan_world::places::RECHARGE_TIME_MODE);
+    assert!(glow.on && glow.mode == parkan_formats::fxid::TIME_LOOP);
     // It hangs on the field's own `Rech_*` points, which size it to the ground-level dock's
     // cylinder: 10 across and 12 up.
     let axes = glow.frame.axes.map(glam::Vec3::length);
@@ -516,7 +520,11 @@ fn mission_02s_outpost_charges_repairs_rearms_and_shields_the_hero_standing_on_i
     assert_eq!(life(&play), off, "off the dock: {off}");
     let quiet: Vec<String> = play.cues.iter().map(|c| c.sound.to_ascii_lowercase()).collect();
     assert!(!quiet.iter().any(|s| s == "f_recharge.wav"), "the glow is quiet again: {quiet:?}");
-    assert!(!play.fx.instances.iter().any(|(o, i)| *o == owner && i.on), "and switched off");
+    // Action 11 has put it back in its own mode 0, where *t* stays 0: no window of the four is
+    // open, so nothing draws, and it is still on, as a load group left it.
+    let (_, glow) = play.fx.instances.iter().find(|(o, _)| *o == owner).unwrap();
+    assert!(glow.on && glow.mode == glow.effect.header.mode && glow.effect.header.mode == 0);
+    assert_eq!(glow.t(play.hero.time_ms), 0.0);
 }
 
 #[test]
@@ -1521,6 +1529,25 @@ fn a_loading_place_gives_a_transport_one_ore_a_second_and_an_unloading_place_tak
     }
     assert_eq!(play.economy.held(transport), 1000.0, "a transport's efficiency is 0");
     assert!(play.economy.held(store) <= stored + 1e-3);
+    // It moves nothing, and the place is at work all the same, since the test is who stands
+    // there, not what they are given (`0x10019646`): the item on the storage's unloading place's
+    // node has run the start group of its blue field. (The parked transport's speed flickers
+    // round the place's bound, so the word is what is asked here and not the effect's mode: a
+    // stop within the 3 s of a start leaves action 11's request standing through the next one.)
+    let running = |play: &parkan_world::play::Play, t: usize| {
+        let set = play.places.iter().find(|s| s.target == t).unwrap();
+        assert_eq!(set.parts.len(), 1, "one class-25 item");
+        set.parts[0].on && set.parts[0].running
+    };
+    let field = |play: &mut parkan_world::play::Play, t: usize| {
+        let i = parkan_world::fx::Owner::Building(t, 2000);
+        let f = play.fx.owned(i).next().expect("the place's field");
+        f.effect.name.to_ascii_lowercase()
+    };
+    assert!(running(&play, store), "the storage's");
+    assert!(!running(&play, mine), "nobody at the mine's yet");
+    assert_eq!(field(&mut play, store), "f_recharge_b");
+    assert_eq!(field(&mut play, mine), "f_recharge_b");
     // In the mine's loading place: about 1 a second, the mine's efficiency times its 1.
     let loading = place(&play, mine, PLACE_LOADING);
     for _ in 0..10 * 60 {
@@ -1529,6 +1556,38 @@ fn a_loading_place_gives_a_transport_one_ore_a_second_and_an_unloading_place_tak
     }
     let gained = play.economy.held(transport) - 1000.0;
     assert!((8.0..=11.0).contains(&gained), "{gained} in 10 s");
+    assert!(running(&play, mine), "the mine's item");
+    assert!(!running(&play, store), "and the storage's stopped");
+    // The mine's rotors have been turning all the while, and its solid with them: every face
+    // stands where a solid built afresh from the same poses has it (docs/28).
+    let built = play.building_solid(mine);
+    let kept = &play.ground.solids[mine];
+    assert_eq!(built.faces.len(), kept.faces.len());
+    let worst = built
+        .faces
+        .iter()
+        .zip(&kept.faces)
+        .map(|(a, b)| a.a.distance(b.a).max(a.b.distance(b.b)).max(a.c.distance(b.c)))
+        .fold(0.0f32, f32::max);
+    assert!(worst < 1e-3, "{worst} m off");
+    let rotor = play
+        .buildings
+        .iter()
+        .find(|b| b.target == mine)
+        .unwrap()
+        .running
+        .iter()
+        .flat_map(|i| &i.channels)
+        .find(|c| c.flags & 1 != 0)
+        .unwrap()
+        .node as usize;
+    let at = |play: &parkan_world::play::Play| {
+        let n = play.ground.solids[mine].nodes.iter().find(|n| n.node == rotor).expect("the rotor's faces");
+        play.ground.solids[mine].faces[n.faces.start].a
+    };
+    let then = at(&play);
+    play_for(&mut play, 0.7, |_| {});
+    assert!(at(&play).distance(then) > 0.05, "the rotor's face has moved: {then}");
 }
 
 /// Mission 04, loaded with its scripts, for the research tests.

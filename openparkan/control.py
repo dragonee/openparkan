@@ -447,6 +447,13 @@ SALVO = 0x2000000
 #: A section-5 group of the controller a gun runs when a barrel starts its
 #: stroke (``Control.dll:0x1002a1df``), or -1.  34 guns set one.
 COMPONENT_GROUP_AT = 0x0C
+#: The section-5 groups an item's update runs as it starts and as it stops
+#: working (``Control.dll:0x10020951``, ``0x10020931``), or -1.  Set on the 24
+#: class-25 records, ``COMPONENT_WORK_CLASS``, and read in docs/13-control.md,
+#: "A building's load group".
+COMPONENT_STARTED_AT = 0x10
+COMPONENT_STOPPED_AT = 0x14
+COMPONENT_WORK_CLASS = 25
 #: A component's 4-byte entries are **section-2 channel indices**, rebased by
 #: the part's first channel and kept as the channels the component drives
 #: (``Control.dll:0x10021de7``): a gun's barrels, a turret's yaw and pitch, a
@@ -1307,6 +1314,9 @@ class Component:
     flags: int = 0
     #: The group at ``COMPONENT_GROUP_AT``, ``NO_GROUP`` for none.
     group: int = -1
+    #: The groups at ``COMPONENT_STARTED_AT`` and ``COMPONENT_STOPPED_AT``.
+    started: int = -1
+    stopped: int = -1
     #: The two floats at ``COMPONENT_WEIGHTS_AT``: a generic device's input
     #: weights.
     weights: tuple[float, float] = (0.0, 0.0)
@@ -1397,6 +1407,8 @@ def read_component(blob: bytes, pos: int) -> Component | None:
         mass=struct.unpack_from("<f", blob, pos + COMPONENT_MASS_AT)[0],
         flags=struct.unpack_from("<I", blob, pos + COMPONENT_FLAGS_AT)[0],
         group=struct.unpack_from("<i", blob, pos + COMPONENT_GROUP_AT)[0],
+        started=struct.unpack_from("<i", blob, pos + COMPONENT_STARTED_AT)[0],
+        stopped=struct.unpack_from("<i", blob, pos + COMPONENT_STOPPED_AT)[0],
         weights=struct.unpack_from("<2f", blob, pos + COMPONENT_WEIGHTS_AT),
     )
 

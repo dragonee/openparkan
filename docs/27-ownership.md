@@ -498,7 +498,7 @@ of 64 ms (`0x1004c550`), so the tick runs every 64–128 ms.
 | `+0x2c` | the speed bound |
 | `+0x30` | the radius: 5, or 10 at ground level |
 | `+0x34` | the height: 3, or 12 at ground level |
-| `+0x38` | a byte, the teleport's power (below) |
+| `+0x38` | a byte, whether the place is at work: the teleport's power (below), a dock serving someone, an ore place a transport ([13-control.md](13-control.md#a-buildings-load-group--read-and-measured)) |
 
 A vertex becomes a place only with a bit of `0xf8` or `0xc600`
 (`0x100189a7`–`0x100189b3`). So the `0x10000` vertex is no place.
@@ -640,10 +640,15 @@ A repeated `MISSION_COMPLETE` does nothing
   - At an in place (`0x100197dd`) it sets state `0x20`, or 0, through slot 6 on
     every part whose list is not empty.
   - At any other place it sets the state only on a part whose list holds the
-    place's node word. There the byte never changes.
+    place's node word. There the byte is whether a dock or an ore place has
+    anyone it serves
+    ([13-control.md](13-control.md#a-buildings-load-group--read-and-measured)).
 - **The parts.** `fr_m_mtp` has three class-25 parts, on `o01`, `i01` and
   `i03` (*measured*).
-- **Still open.** What a class-25 part does with the state is not read.
+- ~~**Still open.** What a class-25 part does with the state is not read.~~ —
+  **read**: it runs its record's two groups, which start the part's effect looping and
+  let it fall back. On `fr_m_mtp` that is the three `f_teleport_on` fields
+  ([13-control.md](13-control.md#a-buildings-load-group--read-and-measured)).
 - **At the start.** The first tick sets state 1 on every class-29 part
   (`0x1001982f`).
 
@@ -1045,8 +1050,10 @@ mask and 3 — 1 in mode 5, `0x20` in mode 6, and `0x40` in the takeover
   ([39-boarding.md](39-boarding.md#the-other-writers-of-0xa2--read)).
 - **The main teleport**
   ([above](#the-main-teleport--read-measured-and-seen)):
-  - What a class-25 part does with the state `0x20` the power byte sets, and a
-    class-29 part with the 1 the first tick sets.
+  - ~~What a class-25 part does with the state `0x20` the power byte sets~~ —
+    **read**, in [13-control.md](13-control.md#a-buildings-load-group--read-and-measured);
+    ~~and a class-29 part with the 1 the first tick sets~~ — **read**, in
+    [28-chassis.md](28-chassis.md#what-stops-a-towers-mast-at-the-top--read-and-seen).
   - What the building's interface `0xb`, slot 16, asks about a place's node.
   - What `World3D.dll`'s queue list 3 holds beyond the generators the walk
     looks for, and whether every generator on the map is always in it.

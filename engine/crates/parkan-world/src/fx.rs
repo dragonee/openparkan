@@ -232,6 +232,14 @@ impl Fx {
         }
     }
 
+    /// Ask every instance `owner` holds back into its header's own mode once its end has passed
+    /// (action 11).
+    pub fn back_to_own(&mut self, owner: Owner) {
+        for i in self.owned(owner) {
+            i.back_to_own = true;
+        }
+    }
+
     /// Switch every instance `owner` holds on or off (actions 18 and 19): one switched off
     /// neither updates, draws nor sounds, and its loops stop.
     pub fn switch(&mut self, owner: Owner, on: bool) {

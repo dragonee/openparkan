@@ -33,6 +33,9 @@ pub const ACT_EFFECT_POINTS: i32 = 4;
 /// in time mode v5 (docs/13, "The section-5 record").
 pub const ACT_EFFECT_NODE: i32 = 3;
 pub const ACT_START_EFFECT: i32 = 10;
+/// Action 11 puts effect v4 back in its header's own time mode once its end has passed
+/// (`Effect.dll:0x10007b40`, docs/11, "Starting, ending, switching").
+pub const ACT_RESTART_EFFECT: i32 = 11;
 /// Action 8 deletes effect v4; 18 and 19 switch it on and off.
 pub const ACT_DELETE_EFFECT: i32 = 8;
 pub const ACT_EFFECT_ON: i32 = 18;
@@ -320,6 +323,10 @@ pub struct Component {
     pub mass: f32,
     pub flags: u32,
     pub group: i32,
+    /// The groups at `+0x10` and `+0x14`, run by the item's update as it starts and as it stops
+    /// working (`Control.dll:0x10020951`, `0x10020931`), [`NO_GROUP`] for none.
+    pub started: i32,
+    pub stopped: i32,
     /// The two floats at `+0x24`: a generic device's or a radar's input weights
     /// (docs/28-chassis.md, "The class-3 records turn the wheels").
     pub weights: [f32; 2],
@@ -548,6 +555,8 @@ fn component(b: &[u8], pos: usize) -> Option<(Component, usize)> {
         mass: f32_at(b, pos + 0x1C),
         flags: u32_at(b, pos + 0x08).expect("inside"),
         group: i32_at(b, pos + 0x0C),
+        started: i32_at(b, pos + 0x10),
+        stopped: i32_at(b, pos + 0x14),
         weights: [f32_at(b, pos + 0x24), f32_at(b, pos + 0x28)],
     };
     Some((part, end))

@@ -10525,6 +10525,83 @@ def _building_places(game: Path) -> dict[str, tuple[str, list[int]]]:
     return out
 
 
+def check_place_work(check, game: Path) -> None:
+    """What a place's work switches, and what a running item's faces come to.
+
+    docs/13-control.md, "A building's load group", and docs/28-chassis.md, "Every component is
+    stepped".
+    """
+    fortif = NResArchive.open(game / "fortif.rlb")
+    entries = {e.name.lower(): e for e in fortif}
+    effects_lib = NResArchive.open(game / "effects.rlb")
+    fx_entries = {e.name.lower(): e for e in effects_lib}
+    parts, loops, stops, windows = 0, 0, 0, []
+    named, unnamed = [], []
+    names: Counter[str] = Counter()
+    served = Counter()
+    turning_faces: Counter[str] = Counter()
+    for entry in fortif:
+        stem = entry.name.lower().removesuffix(".ctl")
+        if not entry.name.lower().endswith(".ctl") or stem + ".msh" not in entries:
+            continue
+        ctl = control.parse(fortif.read(entry))
+        raw = fortif.read(entries[stem + ".msh"])
+        mesh = objmesh.parse(raw, stem)
+        graph = objmesh.read_path_graph(NResArchive(raw, stem))
+        items = [c for c in ctl.components if c.type_id == control.COMPONENT_WORK_CLASS]
+        nodes = {c.node for c in items}
+        for c in items:
+            parts += 1
+            on = [r for r in ctl.references if r.group == c.started]
+            off = [r for r in ctl.references if r.group == c.stopped]
+            loops += len(on) == 1 and on[0].action == 10 and on[0].args[1] == 2
+            stops += len(off) == 1 and off[0].action == 11 and off[0].args[0] == on[0].args[0]
+            made = [r for r in ctl.references if r.action in (3, 4) and r.args[3] == on[0].args[0]]
+            names[made[0].resource.member.lower()] += 1
+            fx = effects.parse_effect(effects_lib.read(fx_entries[made[0].resource.member.lower()]),
+                                      made[0].resource.member)
+            windows.append((fx.mode, round(fx.duration, 3), fx.flags & 0x20,
+                            min(e.window[0] for e in fx.emitters) > 0))
+        places = [n for n in (graph.nodes if graph else [])]
+        place_nodes = set()
+        for n in places:
+            kind = ("dock" if n.flags & objmesh.PLACE_DOCK else
+                    "loading" if n.flags & objmesh.PLACE_MINE else
+                    "unloading" if n.flags & objmesh.PLACE_STORE else None)
+            if kind:
+                served[kind, n.b in nodes] += 1
+            if n.flags & (0xf8 | 0xc600):
+                place_nodes.add(n.b)
+        for c in items:
+            (named if c.node in place_nodes else unnamed).append((stem, c.node))
+        for c in ctl.components:
+            if c.type_id == control.EFFICIENCY_TYPE and c.entries:
+                # The channels' nodes and whatever hangs on them.
+                turned = {ctl.channels[e].node for e in c.entries}
+                grew = True
+                while grew:
+                    below = {i for i, n in enumerate(mesh.nodes) if n.parent in turned} - turned
+                    turned |= below
+                    grew = bool(below)
+                turning_faces[stem] += sum(mesh.slots[mesh.nodes[n].slot_index[0]].triangle_count
+                                           for n in turned
+                                           if mesh.nodes[n].slot_index[0] < len(mesh.slots))
+    check("fortif.rlb: every class-25 part starts one effect looping and stops it with action 11",
+          parts == 24 and loops == 24 and stops == 24,
+          f"{parts} parts, {loops} action 10 in mode 2, {stops} action 11 on the same id; "
+          f"{dict(names)}")
+    check("effects.rlb: what a class-25 part runs is mode 0, 3 s, ping-pong, every window above 0",
+          set(windows) == {(0, 3.0, 0x20, True)}, str(set(windows)))
+    check("fortif.rlb: a dock's and an ore place's second word names the class-25 part they switch",
+          served["dock", True] == 15 and served["dock", False] == 1
+          and served["loading", True] == 3 and served["unloading", True] == 3
+          and not served["loading", False] and not served["unloading", False],
+          f"{dict(served)}; of the 24 parts {len(named)} are on a place's node, and {unnamed}")
+    check("fortif.rlb: the nine class-26 parts that name channels turn 3,205 faces, 2,689 on fr_l_mtp",
+          sum(turning_faces.values()) == 3205 and turning_faces["fr_l_mtp"] == 2689,
+          f"{dict(turning_faces)}")
+
+
 def check_ownership(check, game: Path) -> None:
     """Charging docks and control pods in the hall-way graph; clan types."""
     places = _building_places(game)
@@ -29152,7 +29229,7 @@ def run(game: Path) -> int:
         check_mission_03_economy,
         check_motion, check_playback, check_ground, check_sensors, check_hit_test,
         check_collision, check_lake_and_buoys,
-        check_combat, check_ownership, check_owner_word, check_insignia, check_hall_way_gates,
+        check_combat, check_ownership, check_place_work, check_owner_word, check_insignia, check_hall_way_gates,
         check_batch_word_and_collision_flags,
         check_capture, check_building_entry, check_pod_zone, check_door_shot,
         check_building_lighting,

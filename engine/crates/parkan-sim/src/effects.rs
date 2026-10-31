@@ -683,6 +683,10 @@ pub struct Instance {
     /// Switched on (actions 18 and 19); header flag 0x40 starts it off. An instance
     /// switched off neither updates, draws nor sounds (docs/11, "Starting, ending, switching").
     pub on: bool,
+    /// Action 11 has asked it back into its header's own mode (flag `0x20` at `+0xa0`,
+    /// `Effect.dll:0x10007b40`); the first update at or past its end does it ([`Self::update`]).
+    /// A start does not clear it (`0x10007b00`).
+    pub back_to_own: bool,
     /// Plays none of its sounds, while it updates and draws as ever.
     pub silent: bool,
     /// The sound emitters' previous time (`+0x9c`), 0 at load, and the loops playing.
@@ -1240,6 +1244,7 @@ impl Instance {
             light_drawn_ms: None,
             id: 0,
             on,
+            back_to_own: false,
             silent: false,
             heard_t: 0.0,
             looping: Vec::new(),
@@ -1337,6 +1342,15 @@ impl Instance {
     pub fn update(&mut self, now_ms: f64) {
         if !self.on {
             return;
+        }
+        // Action 11's restart (`0x10008134`): start and end are set again and the mode goes back
+        // to the header's. The end is the one the last start set, and a looping mode never moves
+        // it, so an instance past its first run goes back at the next update, mid-sweep.
+        if self.back_to_own && self.end_ms <= now_ms {
+            self.back_to_own = false;
+            self.start_ms = now_ms;
+            self.end_ms = now_ms + f64::from(self.effect.header.duration) * 1000.0;
+            self.mode = self.effect.header.mode;
         }
         // Header flag 1's jitter on *t*, redrawn each tick (`Effect.dll:0x1000830e`): 58
         // of the 923 effects carry it, and its spread is 0.05 to 0.4 on 56 of them.
@@ -2201,6 +2215,45 @@ mod tests {
     fn with_word(mut e: Emitter, at: usize, v: u32) -> Emitter {
         e.body[at..at + 4].copy_from_slice(&v.to_le_bytes());
         e
+    }
+
+    /// Action 11 (`Effect.dll:0x10007b40`, `0x10008134`): the first update at or past the end
+    /// the last start set puts the instance back in its header's mode, start and end set again.
+    /// A loop never moves its end, so before the first sweep is out it waits, and after it the
+    /// loop stops at once, mid-sweep. A start in between leaves the request standing.
+    #[test]
+    fn action_11_sends_an_instance_back_to_its_own_mode_once_the_end_its_last_start_set_has_passed() {
+        let mut fx = Instance::new(
+            effect(0, 3.0, FX_PING_PONG, Vec::new()),
+            Frame::along(Vec3::ZERO, Vec3::Y, 1.0),
+            1.0,
+            0.0,
+            Some(TIME_LOOP),
+            1,
+        );
+        fx.update(1000.0);
+        assert!(fx.t(1000.0) > 0.6, "a third through the loop, folded");
+        fx.back_to_own = true;
+        fx.update(2000.0);
+        assert_eq!(fx.mode, TIME_LOOP, "the first sweep is not out");
+        fx.update(3000.0);
+        assert_eq!(fx.mode, 0, "its end, 3 s after the start");
+        assert!(!fx.back_to_own);
+        assert_eq!((fx.start_ms, fx.end_ms), (3000.0, 6000.0));
+        assert_eq!(fx.t(3500.0), 0.0, "a value set from outside, and nothing sets it");
+
+        let mut long = Instance::new(
+            effect(0, 3.0, FX_PING_PONG, Vec::new()),
+            Frame::along(Vec3::ZERO, Vec3::Y, 1.0),
+            1.0,
+            0.0,
+            Some(TIME_LOOP),
+            1,
+        );
+        long.update(40_000.0);
+        long.back_to_own = true;
+        long.update(40_016.0);
+        assert_eq!(long.mode, 0, "37 s past its end: at the next update");
     }
 
     fn effect(mode: u32, duration: f32, flags: u32, emitters: Vec<Emitter>) -> Rc<Effect> {

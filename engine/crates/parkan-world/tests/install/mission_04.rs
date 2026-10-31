@@ -102,6 +102,14 @@ fn mission_04s_teleport_arc_sends_the_hero_down_only_while_the_player_holds_it_a
     let generator = object_target(&play, &m, "gener01.dat");
     let player = play.player_clan;
     assert_eq!(play.units[generator].clan, Some(player), "Mission 04's one generator");
+    // A neutral teleport's three fields stand at their own mode 0, drawing nothing.
+    let fields = |play: &mut parkan_world::play::Play| -> Vec<u32> {
+        (2000..=2002)
+            .map(|id| play.fx.owned(parkan_world::fx::Owner::Building(t, id)).next().expect("a field").mode)
+            .collect()
+    };
+    tick_for(&mut play, 1.0);
+    assert_eq!(fields(&mut play), [0, 0, 0]);
     // Under the arc of a neutral teleport nothing happens.
     assert!(play.stand_at(1184.0, 1293.5, 0.84));
     let (_, arrived, _, sent) =
@@ -112,6 +120,7 @@ fn mission_04s_teleport_arc_sends_the_hero_down_only_while_the_player_holds_it_a
     play.units[generator].clan = Some(1);
     tick_for(&mut play, 1.0);
     assert!(play.hero.walker.body.position.z > 100.0);
+    assert_eq!(fields(&mut play), [0, 0, 0], "no power");
     // Every generator the player's: the next place tick puts the hero on the landing vertex,
     // turned as it was.
     play.units[generator].clan = Some(player);
@@ -131,6 +140,13 @@ fn mission_04s_teleport_arc_sends_the_hero_down_only_while_the_player_holds_it_a
     let ground = play.hero.walker.ground.expect("on a floor");
     assert!(ground.solid.is_some_and(|(s, _)| s == t), "the teleport's own floor: {ground:?}");
     assert!((ground.point.z - 65.6).abs() < 1.0, "the chamber's floor: {ground:?}");
+    // The in places' byte has switched every class-25 item the building has, whoever stands
+    // where: all three fields loop, the one on `o01`, which no place's node names, among them
+    // (docs/13, "A building's load group").
+    assert_eq!(fields(&mut play), [2, 2, 2], "powered");
+    play.units[generator].clan = Some(1);
+    tick_for(&mut play, 4.0);
+    assert_eq!(fields(&mut play), [0, 0, 0], "and off again once the generator is lost");
 }
 
 #[test]

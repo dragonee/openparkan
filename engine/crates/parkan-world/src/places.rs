@@ -6,6 +6,7 @@
 //! places", "What a dock gives" and "The main teleport".
 
 use glam::Vec3;
+use parkan_formats::control::{self, ACT_RESTART_EFFECT, ACT_START_EFFECT, Controller};
 use parkan_formats::hallway::{self, HallWay, Vertex};
 use parkan_formats::mission::{self, Mission};
 use parkan_sim::behaviour::Dock;
@@ -36,20 +37,11 @@ pub const PLACE_DOCK: u32 = 0x20 | 0x200 | 0x400;
 /// (`0x10018100`) and of each gun's magazine and capacitor (`0x100181e0`). So a unit standing
 /// in one is full in ten seconds, whatever it is (docs/27, "What a dock gives").
 pub const DOCK_SHARE: f32 = 0.1;
-/// The dock glow a building's load group places over each of its docks, with the charging
-/// sound `f_recharge.wav` in it: `f_recharge_r`, and a storage's `f_recharge_b` (docs/13, "A
-/// building's load group"). It hangs on the field's own `Rech_*` control points, whose
-/// direction vectors size it: 15 up and 11 across over the Outpost's ground-level dock, 5.7
-/// and 5.2 over a generator's indoor one.
-pub const RECHARGE_EFFECT: &str = "f_recharge";
-/// The time mode a charging dock runs its glow in: its own is 0, a value set from outside, so
-/// it stands still until something drives it (docs/11, "Effect time t"). Looping, its 3 s
-/// duration and its ping-pong flag sweep the timeline 0 → 1 → 0, which runs the two sprites
-/// and the light and plays `f_recharge.wav` as the time crosses 0.1 rising.
-///
-/// STAND-IN: docs/13-control.md#a-buildings-load-group--read-and-measured -- what the game
-/// drives a dock's glow with is not read; a charging dock runs it looping and stops it again.
-pub const RECHARGE_TIME_MODE: u32 = parkan_formats::fxid::TIME_LOOP;
+/// The class that carries a place's work (docs/13, "A building's load group"): 24 records on 18
+/// buildings, each on the node its place's second word names.
+pub const WORK_CLASS: i32 = 25;
+/// An item with no channel to time steps every 100 ms (`Control.dll:0x10020d72`).
+const WORK_STEP_MS: f64 = 100.0;
 /// A vertex is a place with a bit of either mask (`0x100189a7`–`0x100189b3`).
 pub const PLACE_BITS: u32 = 0xf8;
 pub const PLACE_BITS_HIGH: u32 = 0xc600;
@@ -103,17 +95,80 @@ pub fn holds(vertex: Vec3, flags: u32, origin: Vec3) -> bool {
     (-below..=height).contains(&dz) && origin.truncate().distance(vertex.truncate()) <= radius
 }
 
-/// One place: its vertex, its occupants when last refreshed, and when it refreshes next. A
-/// dock also keeps the glow standing over it and whether it was charging anyone last tick.
+/// One place: its vertex, its occupants when last refreshed, and when it refreshes next, and
+/// whether anybody was at work there at its last tick.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Place {
     pub index: usize,
     pub vertex: Vertex,
     pub occupants: Vec<Child>,
     pub due_ms: f64,
-    /// The record ids of the load-group [`RECHARGE_EFFECT`]s that stand at this place.
-    pub recharge: Vec<i32>,
-    pub charging: bool,
+    /// The byte at the place's `+0x38` (`Behavior.dll:0x10019772`): a dock charging, an ore
+    /// place loading or unloading a transport, or an in place's teleport holding every generator.
+    pub working: bool,
+}
+
+/// A class-25 item, which `MBehaviour`'s place set files and a place's work switches
+/// (`Behavior.dll:0x100187af`, `0x10019809`). It is the base item, with no channel, so all its
+/// update does is run the record's two groups as its word goes from 0 and back to it
+/// (`Control.dll:0x10020951`, `0x10020931`).
+#[derive(Clone, Debug, PartialEq)]
+pub struct PlacePart {
+    /// The node its record names (`IItemManager` slot 12, `Control.dll:0x1002ed90`).
+    pub node: i32,
+    /// `(action, v4, v5)` of the records of its start group and its stop group, which on all 24
+    /// are one action 10 in mode 2 and one action 11.
+    started: Vec<(i32, i32, i32)>,
+    stopped: Vec<(i32, i32, i32)>,
+    /// Its switch word: 0x20 or 0.
+    pub on: bool,
+    /// The latch `+0x99`: its start group has run and its stop group has not.
+    pub running: bool,
+    step_ms: f64,
+}
+
+impl PlacePart {
+    /// Every class-25 item of `controller`.
+    pub fn of(controller: &Controller) -> Vec<PlacePart> {
+        let records = |group: i32| -> Vec<(i32, i32, i32)> {
+            let group = usize::try_from(group).ok();
+            controller
+                .references
+                .iter()
+                .filter(|r| Some(r.group) == group)
+                .map(|r| (r.action(), r.values[4], r.values[5]))
+                .collect()
+        };
+        controller
+            .components
+            .iter()
+            .filter(|c| c.type_id == WORK_CLASS)
+            .map(|c| PlacePart {
+                node: c.node,
+                started: records(c.started),
+                stopped: records(c.stopped),
+                on: false,
+                running: false,
+                step_ms: 0.0,
+            })
+            .collect()
+    }
+
+    /// The item's step at `now`, its node's life given: the records of the group it runs, if a
+    /// step is due and the word has moved. A destroyed node's item counts as stopped
+    /// (`Control.dll:0x10020912`, slot 2).
+    fn step(&mut self, now: f64, alive: bool) -> &[(i32, i32, i32)] {
+        if now < self.step_ms {
+            return &[];
+        }
+        self.step_ms = now + WORK_STEP_MS;
+        let working = self.on && alive;
+        if working == self.running {
+            return &[];
+        }
+        self.running = working;
+        if working { &self.started } else { &self.stopped }
+    }
 }
 
 /// One building's docks and teleport places.
@@ -126,6 +181,8 @@ pub struct Places {
     pub target: usize,
     pub part: usize,
     pub places: Vec<Place>,
+    /// The building's class-25 items.
+    pub parts: Vec<PlacePart>,
     /// The first vertex with `0x10000`, where an in place puts a hero.
     pub landing: Option<Vertex>,
     pub due_ms: f64,
@@ -145,7 +202,12 @@ impl Places {
         let blob =
             assembly.archive(&root.reference.library)?.read_name(&root.reference.member).ok()?.to_vec();
         let hall_way = hallway::parse(&blob, &root.reference.member).ok()?;
-        Self::of(&hall_way, target, part)
+        let record = root.record.clone();
+        let mut places = Self::of(&hall_way, target, part)?;
+        let ctl = assembly.library.record_slot(assembly.library.get(&record), "ctl", 0)?;
+        let controller = assembly.archive(&ctl.library)?.read_name(&ctl.member).ok()?;
+        places.parts = PlacePart::of(&control::parse(controller, &ctl.member).ok()?);
+        Some(places)
     }
 
     /// The docks and teleport places of `hall_way`, on part `part` of target `target`.
@@ -161,8 +223,7 @@ impl Places {
                 vertex,
                 occupants: Vec::new(),
                 due_ms: 0.0,
-                recharge: Vec::new(),
-                charging: false,
+                working: false,
             })
             .collect();
         if places.is_empty() {
@@ -174,6 +235,7 @@ impl Places {
             target,
             part,
             places,
+            parts: Vec::new(),
             landing,
             due_ms: 0.0,
             last_ms: None,
@@ -208,42 +270,6 @@ impl Play {
         self.places = (0..self.battle.combat.targets.len())
             .filter_map(|t| Places::load(&mut self.assembly, mission, self.battle.objects[t], t))
             .collect();
-        self.join_dock_glows();
-    }
-
-    /// Each dock's own glow: a [`RECHARGE_EFFECT`] of the building's load group belongs to the
-    /// dock whose vertex is nearest it (docs/13, "A building's load group"). Every one of them
-    /// stands within 4 of a dock and tens of metres from any other, and a dock with none — a
-    /// generator's second ground-level one — simply keeps quiet.
-    pub(crate) fn join_dock_glows(&mut self) {
-        for set in &mut self.places {
-            for place in &mut set.places {
-                place.recharge.clear();
-            }
-            let Some((b, _)) = self.building_effects.iter().find(|(b, _)| b.target == set.target) else {
-                continue;
-            };
-            let Some(target) = self.battle.combat.targets.get(set.target) else { continue };
-            let (Some(own), Some(theirs)) = (target.parts.get(set.part), target.parts.get(b.part)) else {
-                continue;
-            };
-            let docks: Vec<(usize, Vec3)> = set
-                .places
-                .iter()
-                .enumerate()
-                .filter(|(_, p)| p.vertex.flags & PLACE_DOCK != 0)
-                .filter_map(|(k, p)| Some((k, crate::factory::vertex_world(&p.vertex, own)?)))
-                .collect();
-            for e in b.effects.iter().filter(|e| e.name.starts_with(RECHARGE_EFFECT)) {
-                let Some(frame) = b.frame(theirs, e.on) else { continue };
-                let nearest = docks
-                    .iter()
-                    .min_by(|(_, a), (_, c)| a.distance(frame.origin).total_cmp(&c.distance(frame.origin)));
-                if let Some(&(k, _)) = nearest {
-                    set.places[k].recharge.push(e.id);
-                }
-            }
-        }
     }
 
     /// The objects a place may hold: the hero on foot and every live unit, each with its
@@ -276,6 +302,7 @@ impl Play {
     /// The place set's tick for every building (`Behavior.dll:0x10018ac0`), at `now`.
     pub(crate) fn tick_places(&mut self, now: f64) {
         for i in 0..self.places.len() {
+            self.step_place_parts(i, now);
             if now < self.places[i].due_ms {
                 continue;
             }
@@ -307,17 +334,17 @@ impl Play {
                         .collect();
                 }
                 let flags = self.places[i].places[k].vertex.flags;
-                let mut charging = false;
+                let mut working = flags & PLACE_TELEPORT_IN != 0 && self.teleport_powered(t);
                 let count = self.places[i].places[k].occupants.len();
                 for occupant in self.places[i].places[k].occupants.clone() {
                     if flags & PLACE_LOADING != 0 {
-                        self.ore_place(t, occupant, count, dt, true);
+                        working |= self.ore_place(t, occupant, count, dt, true);
                     }
                     if flags & PLACE_UNLOADING != 0 {
-                        self.ore_place(t, occupant, count, dt, false);
+                        working |= self.ore_place(t, occupant, count, dt, false);
                     }
                     if flags & PLACE_DOCK != 0 {
-                        charging |= self.dock(t, occupant, dt);
+                        working |= self.dock(t, occupant, dt);
                     }
                     if flags & PLACE_TELEPORT_IN != 0 && self.teleport_in(t, occupant, landing) {
                         self.places[i].places[k].due_ms = now;
@@ -326,9 +353,47 @@ impl Play {
                         self.teleport_out(t, occupant);
                     }
                 }
-                if flags & PLACE_DOCK != 0 {
-                    self.glow(i, k, charging, now);
-                }
+                self.place_at_work(i, k, working);
+            }
+        }
+    }
+
+    /// A place's byte, as it changes (`Behavior.dll:0x10019772`–`0x10019814`): every class-25
+    /// item on the place's own node, or every one of the building's at an in place, is sent
+    /// switch word `0x20`, or 0.
+    fn place_at_work(&mut self, i: usize, k: usize, working: bool) {
+        let set = &mut self.places[i];
+        let place = &mut set.places[k];
+        if place.working == working {
+            return;
+        }
+        place.working = working;
+        let (node, flags) = (place.vertex.joint, place.vertex.flags);
+        for part in &mut set.parts {
+            if part.node == node as i32 || flags & PLACE_TELEPORT_IN != 0 {
+                part.on = working;
+            }
+        }
+    }
+
+    /// The building's class-25 items' update (`Control.dll:0x10020900`): what each one's group
+    /// asks of the effects its load group made.
+    fn step_place_parts(&mut self, i: usize, now: f64) {
+        let t = self.places[i].target;
+        let part = self.places[i].part;
+        let life =
+            self.battle.combat.targets.get(t).and_then(|x| x.parts.get(part)).and_then(|p| p.life.as_ref());
+        let mut runs: Vec<(i32, i32, i32)> = Vec::new();
+        for item in &mut self.places[i].parts {
+            let alive = usize::try_from(item.node).is_ok_and(|n| crate::play::node_alive(life, n));
+            runs.extend_from_slice(item.step(now, alive));
+        }
+        for (action, v4, v5) in runs {
+            let owner = crate::fx::Owner::Building(t, v4);
+            match action {
+                ACT_START_EFFECT => self.fx.restart(owner, now, u32::try_from(v5).ok()),
+                ACT_RESTART_EFFECT => self.fx.back_to_own(owner),
+                _ => {}
             }
         }
     }
@@ -379,19 +444,19 @@ impl Play {
     /// - and a builder there is given, as at a loading place ("Stored ???").
     ///
     /// Moved as `0x100155f0` moves it: no more than the giver holds or the taker has room for.
-    fn ore_place(&mut self, t: usize, occupant: Child, count: usize, dt: f32, loading: bool) {
-        let Child::Robot(r) = occupant else { return };
-        let Some(Some(clan)) = self.occupant_clan(occupant) else { return };
+    fn ore_place(&mut self, t: usize, occupant: Child, count: usize, dt: f32, loading: bool) -> bool {
+        let Child::Robot(r) = occupant else { return false };
+        let Some(Some(clan)) = self.occupant_clan(occupant) else { return false };
         if !self.battle.combat.targets.get(t).is_some_and(|x| x.alive)
             || self.units.get(t).and_then(|u| u.clan) != Some(clan)
         {
-            return;
+            return false;
         }
         let type_word = self.units.get(r).map_or(0, |u| u.type_word);
         if type_word != TRANSPORT && type_word != BUILDER {
-            return;
+            return false;
         }
-        let Some(site) = self.economy.site(t) else { return };
+        let Some(site) = self.economy.site(t) else { return true };
         let (gives, takes) = (site.kpd() * site.off_board, site.on_board);
         let (on_board, off_board) = self.economy.unit_rates(&self.assembly, type_word);
         let share = dt / count.max(1) as f32;
@@ -400,6 +465,7 @@ impl Play {
         } else {
             self.economy.transfer(r, t, share * takes.min(UNIT_KPD * off_board));
         }
+        true
     }
 
     /// The clan of a place's occupant, and whether it is still there to act on.
@@ -416,32 +482,13 @@ impl Play {
         }
     }
 
-    /// A dock's glow as it starts and stops charging: the [`RECHARGE_EFFECT`]s standing over
-    /// that place run in [`RECHARGE_TIME_MODE`] while it charges — their sprites and light
-    /// over the field, `f_recharge.wav` once every sweep — and are switched off again when it
-    /// stops, which silences them. Only a change is acted on, so the sound is not struck again
-    /// every 64–128 ms.
-    fn glow(&mut self, i: usize, k: usize, charging: bool, now: f64) {
-        if self.places[i].places[k].charging == charging {
-            return;
-        }
-        self.places[i].places[k].charging = charging;
-        let t = self.places[i].target;
-        for id in self.places[i].places[k].recharge.clone() {
-            let owner = crate::fx::Owner::Building(t, id);
-            if charging {
-                self.fx.restart(owner, now, Some(RECHARGE_TIME_MODE));
-            }
-            self.fx.switch(owner, charging);
-        }
-    }
-
     /// A dock (`0x10019251`): every unit standing in it that belongs to the building's clan or
     /// an ally (`0x10019318`) gains, over `dt` seconds, [`DOCK_SHARE`] a second of a full
     /// battery (`0x10019372`), of its full life, destroyed parts restored with it, and of its
     /// fight shield's mean sector fill (`0x10018100`), and of each of its guns' magazine and
-    /// capacitor (`0x100181e0`). See docs/27, "What a dock gives". Returns whether it gave this
-    /// occupant anything, which runs the dock's glow.
+    /// capacitor (`0x100181e0`). See docs/27, "What a dock gives". Returns whether this occupant
+    /// is one it serves, which sets the place's byte (`0x10019348`) whether or not it lacks
+    /// anything.
     ///
     /// STAND-IN: docs/27-ownership.md#what-a-dock-gives--read -- a part still in the air when its
     /// node is put back is taken out of the air rather than drawn beside it.
@@ -455,9 +502,6 @@ impl Play {
             return false;
         }
         let share = DOCK_SHARE * dt;
-        if share <= 0.0 {
-            return false;
-        }
         match occupant {
             Child::Hero => {
                 let mut lives: Vec<&mut Life> = self.hero.lives.iter_mut().flatten().collect();
@@ -509,16 +553,7 @@ impl Play {
         if !teleport_alive || self.units.get(t).and_then(|u| u.clan) != Some(clan) {
             return false;
         }
-        // STAND-IN: docs/27-ownership.md#teleport-in-0x8000--read -- whether a destroyed
-        // generator stays in `World3D.dll`'s queue 3 is not read; the live ones are asked.
-        let generators: Vec<Option<i64>> = self
-            .units
-            .iter()
-            .zip(&self.battle.combat.targets)
-            .filter(|(u, x)| u.type_word == BUILDING_GENERATOR && x.alive)
-            .map(|(u, _)| u.clan)
-            .collect();
-        if generators.is_empty() || generators.iter().any(|c| *c != Some(clan)) {
+        if !self.holds_every_generator(clan) {
             return false;
         }
         let Some(at) = landing else { return false };
@@ -539,6 +574,29 @@ impl Play {
             }
         }
         true
+    }
+
+    /// Whether `clan` holds every generator on the map, and at least one.
+    fn holds_every_generator(&self, clan: i64) -> bool {
+        // STAND-IN: docs/27-ownership.md#teleport-in-0x8000--read -- whether a destroyed
+        // generator stays in `World3D.dll`'s queue 3 is not read; the live ones are asked.
+        let generators: Vec<Option<i64>> = self
+            .units
+            .iter()
+            .zip(&self.battle.combat.targets)
+            .filter(|(u, x)| u.type_word == BUILDING_GENERATOR && x.alive)
+            .map(|(u, _)| u.clan)
+            .collect();
+        !generators.is_empty() && generators.iter().all(|c| *c == Some(clan))
+    }
+
+    /// An in place's byte (`0x10018bb7`–`0x10018c6c`): its teleport's clan is not neutral and
+    /// holds every generator, whoever stands there or nobody.
+    fn teleport_powered(&self, t: usize) -> bool {
+        self.units
+            .get(t)
+            .and_then(|u| u.clan)
+            .is_some_and(|c| self.thinks(Some(c)) && self.holds_every_generator(c))
     }
 
     /// An out place (`0x10019158`–`0x1001923e`): a hero, whatever its clan, raises its

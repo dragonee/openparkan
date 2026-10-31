@@ -266,6 +266,8 @@ mod tests {
             mass: 0.0,
             flags,
             group: -1,
+            started: -1,
+            stopped: -1,
             weights: [1.0, 1.0],
         }
     }

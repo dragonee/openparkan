@@ -856,6 +856,58 @@ What those effects are ([11-effects.md](11-effects.md#how-an-effect-runs--read),
 *Seen*: in *The Constructor*'s recording the factory's chimneys smoke from the
 briefing on (12 s), and its consoles glow inside (100 s).
 
+**What drives a dock's glow** — *read*, *measured*, and *seen*. Not a value from
+outside: nothing sets a `f_recharge_*`'s *t* at all
+([11-effects.md](11-effects.md#time-mode-0-waits-for-a-start--read-and-measured)).
+It is started and stopped from its own controller, by a component of class 25 that
+the place's work switches.
+
+- **The part.** Every one of the install's **24** class-25 records, on 18 buildings,
+  has word 0, no channel, and in its `+0x10` and `+0x14` two groups of one record
+  each that the load group's block does not name: action 10 on one effect id in time
+  mode 2, and action 11 on that id (*measured*). The effect is `f_recharge_r` on 15,
+  `f_recharge_b` on 6 (the three mines and three storages) and `f_teleport_on` on 3
+  (`fr_m_mtp`), and all 24 of them are 3 s, ping-pong and mode 0, with every window
+  opening above 0. So at rest each stands at *t* = 0 and shows nothing.
+- **The place's byte.** `MBehaviour`'s place set files the class-25 items
+  (`Behavior.dll:0x1001879c`–`0x100187c4`). Each place starts its tick with the byte
+  clear (`0x10018b3a`) and sets it on an occupant it serves:
+  a dock on any unit of the building's clan or an ally's (`0x10019348`), whether or
+  not it lacks anything; a loading or an unloading place on a transport or a builder
+  of its own clan (`0x1001950f`, `0x10019646`). An in place sets it on no occupant at
+  all, whenever its clan is not neutral and holds every generator (`0x10018c6c`).
+- **On a change** the byte is kept at the place's `+0x38` and each class-25 item
+  whose node (`IItemManager` slot 12, its record's `+4`) is the place's second word
+  is sent switch word `0x20`, or 0 (`0x10019772`–`0x10019814`). An in place sends it
+  to every item it has (`0x100197dd`), which is how `fr_m_mtp`'s field on `o01`,
+  named by no place, is powered.
+- **The node is the join** (*measured*). 15 of the 16 docks and all 6 ore places name
+  a class-25 item's node; the one that does not is the generator's second
+  ground-level dock, node 19, which has no glow. 23 of the 24 items are on a place's
+  node, and the other is that field on `o01`. Each item's group starts the effect the
+  load group hung over that same place.
+- **The item runs its groups.** With no channel its step is 100 ms
+  (`Control.dll:0x10020d72`), and its update runs `+0x10` on the first step with the
+  word set and the node alive, and `+0x14` on the first without
+  (`0x10020951`, `0x10020931`, under the latch `+0x99`).
+- **Action 10 loops it.** Mode 2 and the ping-pong sweep *t* 0 → 1 → 0 every 3 s,
+  which runs the two sprites and the light and strikes `f_recharge.wav` as *t* passes
+  0.1 rising.
+- **Action 11 ends it, at the first update past its first sweep.** It sets flag `0x20`
+  (`Effect.dll:0x10007b40`), and the update, finding that flag with `+0x24`, the end,
+  passed, starts the instance again in its header's mode (`0x10008134`). The end is the
+  one the start set and a loop never moves it, so inside the first 3 s the glow sees
+  that sweep out, and after them it stops at the next update, mid-sweep. A start does
+  not clear the flag (`0x10007b00`): started again within those 3 s, it still falls
+  back when the end comes, and stays down until the place stops and starts once more.
+
+*Seen*: "Let's Play - Parkan: Iron Strategy, Part 6" (-yNnsqudMzw), the hero on the
+Small Bunker's dock. The view comes to rest at 28:25.5. Sampled ten times a second,
+the red wall above the window holds at R 53 for the half second after that, and from
+28:26.1 to 28:29.7 flashes six times to R 87–126, each for a few samples, where it had
+stood steady; the hero walks off at 28:30.9. That fits a light the stop has started.
+One visit does not time the 3 s, and the flashes are not told from the sprites here.
+
 **Where an action-3 effect stands** (*read*, and *measured*). The instance is
 made on the owner and an attach point of (object, node)
 (`Control.dll:0x100029ee`; the node is v4 plus the part's first node, less one),
@@ -1048,6 +1100,12 @@ is wired to a message.
 
 ### Not established
 
+- ~~What the game drives a dock's `f_recharge_*` glow with, whose own time mode is 0, a
+  value set from outside~~ — **read**, and **measured**: nothing sets its time. A class-25
+  part on the dock's node starts it looping and lets it fall back, on the word the place's
+  byte sends it, and the same part runs a mine's and a storage's `f_recharge_b` and the
+  main teleport's `f_teleport_on`
+  ([A building's load group](#a-buildings-load-group--read-and-measured)).
 - ~~Triple 5 (+68): multiplied into the spin integrator (`0x10014b15`); what it
   stands for~~ — **read**: how fast the hull rights itself
   ([24-motion.md](24-motion.md#the-hull-leans-and-rights-itself--read-and-measured)).

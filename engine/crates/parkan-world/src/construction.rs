@@ -1137,9 +1137,6 @@ impl Play {
             let n = effects.effects.len();
             self.building_effects.push((effects, vec![0.0; n]));
         }
-        if self.places.iter().any(|p| p.target == t) {
-            self.join_dock_glows();
-        }
     }
 
     /// A sphere's phase starting: its code sent to the building's controller, and the clearing.

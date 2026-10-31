@@ -513,6 +513,8 @@ mod tests {
             mass: 0.0,
             flags: 0,
             group: -1,
+            started: -1,
+            stopped: -1,
             weights: [0.0; 2],
         };
         Gun::new(0, &record, &channels)

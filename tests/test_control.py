@@ -43,6 +43,13 @@ def test_sections_one_and_two_do_not_hide_section_five(ctl, reference):
     assert str(c.references[0].resource) == "effects.rlb/dust_03"
 
 
+def test_a_component_carries_the_groups_its_update_runs_as_it_starts_and_stops(ctl, component):
+    part = bytearray(component(25, "", ""))
+    part[0x10:0x18] = struct.pack("<ii", 9, 10)
+    one = control.parse(ctl(counts=(0, 0, 0, 1, 0), components=[bytes(part)])).components[0]
+    assert (one.started, one.stopped) == (9, 10)
+
+
 def test_a_component_carries_its_resource_and_label(ctl, component):
     part = component(9, "objects.rlb", "bb_l_01", entries=(4, 5), label="i_eng_l")
     c = control.parse(ctl(counts=(0, 0, 0, 1, 0), components=[part]))

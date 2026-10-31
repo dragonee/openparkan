@@ -735,9 +735,12 @@ presses a hero standing at it down), and which of Mission 04's units holds no mi
   building models carry stand where the models put them — one indoors in each bunker, tower and
   the large ruin, one indoors and one outside on each factory, one outside on the Outpost and
   three on a generator — and a building put up in play gets its own.
-- **A charging dock glows, and sounds** (docs/13, "A building's load group"): the `f_recharge_r`
-  its load group placed over the field stands still at time 0 until something drives it, and a
-  dock that is charging runs it looping and stops it again when it stops. It hangs on the
+- **A place at work glows, and sounds** (docs/13, "A building's load group"): the `f_recharge_*`
+  its load group placed over the field stands at time 0 and shows nothing, until the class-25
+  item on the place's own node runs its record's action 10, in mode 2, on the word the place's
+  byte sends it, and its action 11 lets it fall back. A dock serving someone runs it, a mine's
+  or a storage's place with a transport or a builder in it runs its blue one, and a main
+  teleport whose clan holds every generator runs its three `f_teleport_on`. It hangs on the
   field's own `Rech_*` control points, whose direction vectors size it — 15 up and 11 across
   over the Outpost's ground-level dock, 20 over a generator's, 5.7 and 5.2 over an indoor one —
   so the red field it draws covers the charging station it stands on, and `f_recharge.wav`
@@ -1630,7 +1633,6 @@ a row here. A row leaves this table when research closes it.
 | M14 | How many tracks the install's `winmm.dll` reports for its `MUSIC` files | the highest `TrackNN.ogg` present; a track with no file is not audio | [34](../docs/34-progression.md#music-the-cds-tracks--read-and-measured) |
 | M14 | How `CD_VOLUME` and `SFX_VOLUME`, each a share of a mixer control, become loudness | the music plays at the sounds' level, as the install's equal settings and Mission 01's recording have it | [34](../docs/34-progression.md#music-the-cds-tracks--read-and-measured) |
 | M14 | What becomes of a part already knocked off and flying when its dock puts its node back | it is taken out of the air, rather than drawn beside the node it is again | [26](../docs/26-damage.md#repair-a-units-own-repair-unit-switched-on-and-off--read-and-measured) |
-| M14 | What the game drives a dock's glow with: its own time mode is 0, a value set from outside, and nothing read sets it | a charging dock runs it looping and switches it off again; the `f_recharge_*` nearest a dock's vertex is that dock's | [13](../docs/13-control.md#a-buildings-load-group--read-and-measured) |
 | M14 | Where a unit built in a factory joins the building's own paths, which the escape's 20-second check routes it out by ("LEAVE IS TOO !!!") | a bot made at a creation vertex counts as having walked in: it leaves along the hall way, as a unit sent in does | [31](../docs/31-packages.md#the-escape--read) |
 | M14 | A building's draws beyond its efficiency: its shield, deflector and guns on its batteries | a building's shield takes the level its batteries serve its efficiency at, its shield's and deflector's draws come out of no battery, and its guns' capacitors are full again every tick | [23](../docs/23-economy.md#bots-spend-power-through-the-same-code-priced-by-part--read-and-measured) |
 | M14 | When a unit's shield recharges against its power tick: the recharge is read on the power tick | the battery pays for the shield on the unit's power tick and the shield recharges every frame at the level that tick served | [26](../docs/26-damage.md#power--read) |
