@@ -4134,6 +4134,93 @@ def check_light_highlights(check, game: Path) -> None:
           f"{micro.texture if micro else None}")
 
 
+def check_debris_and_the_pass(check, game: Path) -> None:
+    """A type-10 particle is a lump, no shipped fade goes under 0, and a light and a sound have no draw."""
+    paths = {n: game / n for n in ("Terrain.dll", "Effect.dll", "AniMesh.dll")}
+    if not all(p.exists() for p in paths.values()):
+        return
+    t_at, e_at, a_at = (_image_at(p.read_bytes()) for p in paths.values())
+
+    def calls_of(target: int) -> list[int]:
+        # Every rel32 call in the module's first code bytes that lands on target.
+        found = []
+        base = 0x10001000
+        code = e_at(base, 0x1B000)
+        for i in range(len(code) - 5):
+            if code[i] == 0xE8:
+                rel = struct.unpack_from("<i", code, i + 1)[0]
+                if base + i + 5 + rel == target:
+                    found.append(base + i)
+        return found
+
+    fading = out_of_range = 0
+    tables: Counter[int] = Counter()
+    spars: Counter[str] = Counter()
+    named: Counter[str] = Counter()
+    grows = 0
+    library = effects.EffectLibrary(game / "effects.rlb")
+    passes = sprites_gated = 0
+    for fx in library:
+        gated = fx.flags & 0x800
+        passes += bool(gated)
+        for e in fx.emitters:
+            if gated and e.kind in (3, 4, 7, 8, 9):
+                sprites_gated += 1
+            if e.fade is not None:
+                fading += 1
+                out_of_range += not all(0.0 <= v <= 1.0 for v in e.fade[:2])
+            if e.kind == 10:
+                table = struct.unpack_from("<I", e.body, 4)[0]
+                tables[table] += 1
+                named[e.resource.member] += 1
+                if table == 0x20:
+                    spars[e.resource.member] += 1
+                grows += struct.unpack_from("<3f", e.body, 92) != struct.unpack_from("<3f", e.body, 104)
+
+    # Slot 3 of a light's and a sound's vtables is the bare ret the sprite's is not; the
+    # lump's vtable hands slot 1 to a draw that reads neither the fade nor the phase, and its
+    # size slots are ret 4.
+    slot = lambda at, i: struct.unpack_from("<I", e_at(at, 4 * (i + 1)), 4 * i)[0]
+    no_draw = (slot(0x1001E78C, 3) == 0x100026F0 and slot(0x1001F048, 3) == 0x100026F0
+               and e_at(0x100026F0, 1) == b"\xc3" and slot(0x1001E770, 3) == 0x100106C0)
+    lump = (slot(0x1001EB90, 1) == 0x1000BD10 and all(slot(0x1001EB90, i) == 0x1000D6D0 for i in (4, 5, 6, 7))
+            and e_at(0x1000D6D0, 3) == b"\xc2\x04\x00" and e_at(0x10001A94, 6) == bytes.fromhex("81c3ec010000"))
+    # The renderer's test is C3 alone, and the alpha goes to a byte by a shift with no clamp.
+    wraps = (t_at(0x10028886, 3) == bytes.fromhex("f6c440")
+             and t_at(0x1004F86B, 9) == bytes.fromhex("df7db08b45b0c1e018"))
+    update, tick = calls_of(0x10008120), calls_of(0x10006170)
+    # The atmosphere is class 7, and the seventh entry of the shade's table is the robots'.
+    table = struct.unpack_from("<10I", t_at(0x10048291, 40))
+    sky = t_at(0x1006FAA7, 5) == bytes.fromhex("b807000000") and table[6] == table[0] != table[2]
+    check("effects.rlb: a type-10 particle is a lump of geometry, and no shipped fade goes under 0",
+          lump and wraps and fading == 3571 and out_of_range == 0
+          and tables == {0x10: 143, 0x20: 17} and grows == 2 and named[""] == 25,
+          f"its vtable's draw is 0x1000bd10 and its size slots ret 4 (Effect.dll:0x1001eb90); "
+          f"the renderer tests a fade for exactly 0 and wraps the rest into the alpha's byte "
+          f"(Terrain.dll:0x10028886, 0x1004f86b); {out_of_range} of the {fading} fading blocks "
+          f"have an end outside 0..1; the block's +4 is {dict(tables)} and the spars name "
+          f"{dict(spars)}; +92 differs from +104 on {grows}; {named['']} name no material")
+    # A view registers on one mesh and a hung mesh asks its own list: no gun carries a camera.
+    cameras: Counter[str] = Counter()
+    for name in ("guns", "weapon", "turrets"):
+        archive = NResArchive.open(game / f"{name}.rlb")
+        cameras[name] = sum(
+            any(p.type_id == control.CAMERA_TYPE and p.entries
+                for p in control.parse(archive.read_name(e.name)).components)
+            for e in archive if e.name.lower().endswith(".ctl"))
+    own = a_at(0x10014BDB, 6) == bytes.fromhex("ff9188000000")
+    check("effects.rlb: flag 0x800 withholds a draw, and a light and a sound have none",
+          no_draw and update == [0x1000629E] and tick == [0x10003E90] and sky and own
+          and passes == 198 and sprites_gated == 535
+          and cameras == {"guns": 0, "weapon": 0, "turrets": 58},
+          f"slot 3 of a light and a sound is the ret at 0x100026f0 and a sprite's is 0x100106c0; "
+          f"the instance's update is called from {[hex(a) for a in update]} alone and its tick "
+          f"from {[hex(a) for a in tick]} alone; {passes} effects carry the flag, holding "
+          f"{sprites_gated} blocks that draw; the atmosphere answers 7 and the table's seventh "
+          f"is the robots' arm ({table[6]:#x}); a mesh asks its own list of views and the control "
+          f"files with a camera are {dict(cameras)}")
+
+
 def check_blend_depth(check, game: Path) -> None:
     """What a blended batch writes: the alpha test's reference and the item's depth states."""
     paths = {n: game / n for n in ("Ngi32.dll", "Terrain.dll", "Effect.dll")}
@@ -29052,7 +29139,7 @@ def run(game: Path) -> int:
         check_water, check_strike_floor, check_water_reflection, check_layers, check_materials,
         check_material_draw,
         check_sky,
-        check_render_state, check_shade, check_light_highlights, check_blend_depth,
+        check_render_state, check_shade, check_light_highlights, check_debris_and_the_pass, check_blend_depth,
         check_minimap_agreement, check_arealmap,
         check_grid, check_missions, check_scale, check_objects, check_poses, check_lod,
         check_damage, check_blasts, check_node_stages, check_scenery_life,

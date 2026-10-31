@@ -6,12 +6,14 @@ use std::path::Path;
 use std::rc::Rc;
 
 use anyhow::{Context, Result};
-use glam::Vec3;
+use glam::{Mat4, Vec3, Vec4};
 use parkan_formats::exp::Explosion;
 use parkan_formats::fxid::{self, Effect};
 use parkan_formats::gamedir;
 use parkan_formats::nres::Archive;
-use parkan_sim::effects::{Arm, Cue, Frame, Instance, LEVEL_HIDDEN, Lens, PointLight, Rng, Sprite};
+use parkan_sim::effects::{
+    Arm, Cue, Frame, Instance, LEVEL_HIDDEN, Lens, PointLight, Rng, Sprite, debris_material,
+};
 
 use crate::textures::{Animation, Phase, TextureStore};
 
@@ -53,6 +55,35 @@ impl Owner {
             _ => None,
         }
     }
+}
+
+/// The camera's six planes in the world, each facing in, its length 1 (the camera's `+0x1f0`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Planes(pub [Vec4; 6]);
+
+impl Planes {
+    /// The six of a view-projection whose depth runs 0 to 1, as the renderer's does.
+    pub fn of(view_proj: Mat4) -> Planes {
+        let (x, y, z, w) = (view_proj.row(0), view_proj.row(1), view_proj.row(2), view_proj.row(3));
+        Planes([w + x, w - x, w + y, w - y, z, w - z].map(|p| p / p.truncate().length().max(f32::EPSILON)))
+    }
+
+    /// Whether a sphere is inside all six: nothing of it may lie at or past its own radius on
+    /// the outer side of any (`AniMesh.dll:0x10014c3d`–`0x10014c70`).
+    pub fn hold(&self, centre: Vec3, radius: f32) -> bool {
+        self.0.iter().all(|p| p.truncate().dot(centre) + p.w > -radius)
+    }
+}
+
+/// Whether `instance` draws, its owner seen or not. Only the instance's draw waits for the pass
+/// its header's `0x800` asks for (`Effect.dll:0x10007d44`): an owner that is not seen hands its
+/// manager a pass of 0 and the instance draws nothing. Its emitters are updated all the same,
+/// by the manager's tick and every 100 ms, and a light and a sound do all their work there --
+/// their draw slot is a bare `ret` (`0x100026f0`) -- so an unseen owner's lights stay lit and
+/// its loops go on being played and moved, whatever the flag says (docs/11, "Which draw reaches
+/// a unit's own manager"). Those are [`Fx`]'s other outputs, which do not ask this.
+pub fn draws(instance: &Instance, owner_seen: bool) -> bool {
+    instance.effect.header.flags & fxid::FX_PASS_ONLY == 0 || owner_seen
 }
 
 /// A material's look for sprites: its texture, the cell of it the entry takes, and its blend
@@ -297,8 +328,8 @@ impl Fx {
             .values()
             .flatten()
             .flat_map(|t| t.emitters.iter())
-            .filter(|e| e.kind != fxid::EMITTER_SOUND && !e.resource.member.is_empty())
-            .map(|e| e.resource.member.clone())
+            .filter(|e| e.kind != fxid::EMITTER_SOUND && (e.kind == 10 || !e.resource.member.is_empty()))
+            .map(|e| if e.kind == 10 { debris_material(e).to_string() } else { e.resource.member.clone() })
             .collect();
         for m in materials {
             if self.look_of.contains_key(&key(&m)) {
@@ -363,18 +394,28 @@ impl Fx {
     /// sphere seen from `eye` (`Effect.dll:0x10007e6d`, `Terrain.dll:0x10047fe0`), which the
     /// manager's draw asks afresh each time. At 8 or over nothing of it is drawn; under that
     /// the level thins its bursts and streams and picks its domes' detail.
+    ///
+    /// `owner_seen` is the pass an instance's owner hands its manager ([`draws`]).
+    ///
+    /// STAND-IN: docs/11-effects.md#which-draw-reaches-a-units-own-manager--read-and-measured
+    /// -- the pass is the sphere against the camera's six planes alone, where the game asks the
+    /// object's cell too, and an object in no cell the landscape's draw walks is not drawn at
+    /// all, its effects without `0x800` with it. A sphere inside the six planes stands in a cell
+    /// whose box is not wholly outside any of them, so the first goes the same way but at a
+    /// frustum's corners; the second is a chimney's smoke rising into view from out of sight.
     pub fn sprites_seen(
         &self,
         now_ms: f64,
         eye: Vec3,
         lens: Lens,
         in_view: impl Fn(Vec3) -> bool,
+        owner_seen: impl Fn(Owner, &Instance) -> bool,
     ) -> Vec<(usize, Sprite)> {
         let mut out = Vec::new();
         let mut buffer = Vec::new();
-        for (_, instance) in &self.instances {
+        for (owner, instance) in &self.instances {
             let level = instance.level(now_ms, eye, lens);
-            if level >= LEVEL_HIDDEN {
+            if level >= LEVEL_HIDDEN || !draws(instance, owner_seen(*owner, instance)) {
                 continue;
             }
             buffer.clear();
@@ -413,14 +454,6 @@ impl Fx {
     /// `in_view` says whether a point is in view from the camera, for the instances
     /// that test one.
     ///
-    /// STAND-IN: docs/11-effects.md#which-draw-reaches-a-units-own-manager--read-and-measured
-    /// -- the pass argument header flag 0x800 waits for is 1 in the landscape's and the
-    /// atmosphere's draws, and in an object's own draw of its manager only while it is seen: it
-    /// stands in a cell the landscape draws and its sphere is inside the camera's six planes
-    /// (`AniMesh.dll:0x10014c3d`, `0x100151c6`). An object that is not seen draws none of its
-    /// 0x800 effects -- its lights, beacons, breath and looped sounds -- and here every
-    /// instance draws and sounds whether or not its owner is seen: which cells the landscape
-    /// walks, and the sphere a mesh answers with, are not read.
     pub fn sprites(&self, now_ms: f64, eye: Vec3, in_view: impl Fn(Vec3) -> bool) -> Vec<(usize, Sprite)> {
         let mut out = Vec::new();
         let mut buffer = Vec::new();
@@ -430,5 +463,63 @@ impl Fx {
             out.extend(buffer.drain(..).filter_map(|s| Some((self.sprite_look(&s.material, s.phase)?, s))));
         }
         out
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use parkan_formats::fxid::{Emitter, Header};
+    use parkan_formats::objects::ResourceRef;
+
+    fn instance(flags: u32) -> Instance {
+        // A light: its window 0 to 1 at +8 and +12, and the rest at its zeros.
+        let mut body = vec![0u8; 256];
+        body[0] = 1;
+        body[4] = 1;
+        body[12..16].copy_from_slice(&1.0f32.to_le_bytes());
+        let light = Emitter {
+            kind: 1,
+            word: 1,
+            resource: ResourceRef { library: String::new(), member: String::new() },
+            body,
+        };
+        let effect = Effect {
+            name: "t".into(),
+            header: Header {
+                count: 1,
+                mode: 1,
+                duration: 1.0,
+                jitter: 0.0,
+                flags,
+                gate: 0,
+                offset: [0.0; 3],
+                point: [0.0; 3],
+                scale: [1.0; 3],
+            },
+            emitters: vec![light],
+        };
+        Instance::new(Rc::new(effect), Frame::along(Vec3::ZERO, Vec3::X, 1.0), 1.0, 0.0, None, 1)
+    }
+
+    #[test]
+    fn an_unseen_owner_draws_none_of_its_0x800_effects_and_its_others_draw_as_ever() {
+        let (waits, plain) = (instance(fxid::FX_PASS_ONLY), instance(0));
+        assert!(draws(&waits, true) && !draws(&waits, false));
+        assert!(draws(&plain, true) && draws(&plain, false));
+    }
+
+    #[test]
+    fn a_sphere_is_seen_while_any_of_it_is_inside_all_six_planes() {
+        // Looking along +x from the origin, a quarter turn wide, out to 100.
+        let view = Mat4::look_at_rh(Vec3::ZERO, Vec3::X, Vec3::Z);
+        let projection = Mat4::perspective_rh(std::f32::consts::FRAC_PI_2, 1.0, 0.5, 100.0);
+        let planes = Planes::of(projection * view);
+        assert!(planes.hold(Vec3::new(10.0, 0.0, 0.0), 0.0), "straight ahead");
+        assert!(!planes.hold(Vec3::new(-10.0, 0.0, 0.0), 1.0), "behind the eye");
+        assert!(!planes.hold(Vec3::new(10.0, 20.0, 0.0), 1.0), "off to the side");
+        assert!(planes.hold(Vec3::new(10.0, 20.0, 0.0), 8.0), "off to the side, but it reaches in");
+        assert!(!planes.hold(Vec3::new(200.0, 0.0, 0.0), 1.0), "past the far plane");
+        assert!(planes.hold(Vec3::new(-0.1, 0.0, 0.0), 1.0), "the eye inside its own unit's sphere");
     }
 }

@@ -311,7 +311,7 @@ record's id.
 | 0x80 / 0x100 | 110 on 0x100 | hold *t* at 0 while the manager's bit 0 (messages 23, 24) is clear / set |
 | 0x200 | — | × linear progress |
 | 0x400 | 114 | **draw nothing while the tested point is hidden** (`0x10008016`): the building and robot beacon lights, `f_*light*`, `rb_*light*` |
-| 0x800 | 198 | **drawn only by a draw call that passes a nonzero pass argument** (`0x10007d44`; the manager skips such a call outright when all its instances are 0x800, `0x10004061`) — which the world's two managers always are, and a unit's own only while its owner is seen ([below](#which-draw-reaches-a-units-own-manager--read-and-measured)). Lights, sounds, breath and beacons |
+| 0x800 | 198 | **drawn only by a draw call that passes a nonzero pass argument** (`0x10007d44`; the manager skips such a call outright when all its instances are 0x800, `0x10004061`) — which the world's two managers always are, and a unit's own only while its owner is seen ([below](#which-draw-reaches-a-units-own-manager--read-and-measured)). What it withholds is the draw, so the sprites of the beacons and the breath: the lights and the sounds among them go on in the tick |
 | 0x1000 | 14 | **hand the emitters the manager's target point** every manager tick (`0x10006349`, manager slot `0x44`); a type-5 bolt takes it for its start (`0x10003070`). Exactly the 14 effects with a bolt, all bolt-only |
 | 0x2000 | 1 | passed to the renderer as effect draw flag 4 (`0x1001088c`, and the same `shr 0xd` in the other three drawing classes at `0x100016c2`, `0x10002fe3`, `0x10012326`), which **holds the sprite's fog factor at 1** instead of taking it from the distance (`Terrain.dll:0x10028417` into the shader's colour call, `0x1004f841` against `0x1004bf20` — [above](#how-an-effect-sprite-is-coloured--read-and-measured)); `env_lightning` alone |
 | 0x8000 | 5 | skip the attach point's second test |
@@ -518,7 +518,7 @@ channel numbers instead, the seven name a channel on that node twice.
 | 7 | 0x48, `0x1001e228` | +20..+24 | +0x24 **groups** of +0x28 particles, each running +44 → +56 in place and +92 → +104 in size over its life, both jittered at the high end and shaped by the powers at +80 and +128 (`0x10001720`, `0x10001300`); a group's age = (progress − its spawn) / +0x1c, and it is gone past 1; a fall from +140, and a fade value from +8/+12/+16 | a **particle burst** — smoke, fire, splashes — [below](#a-burst-is-groups-that-leave-one-after-another--read-and-measured) |
 | 8 | 0xac, `0x1001e71c` | +16..+20 | one particle every +24..+28 seconds into a ring of +36 while *t* is inside the window (`0x100115c0`), each running +88 → +100 in place and +136 → +148 in size, shaped by the powers at +124 and +172; the particles out are drawn until their turn of the ring is over, window or no (`+0x8c` is their count) | a **particle stream** — dust, missile smoke — [below](#bolts-streams-and-fades--read-and-measured) |
 | 9 | 0x100, `0x1001e700` | +32..+36 | type 3 with its own update (slot 3, `0x100138c0`), which hands the draw a shape code from +200 in place of the quad's, a level and +204's bit | a **half sphere** in place of the quad, its pole on the sprite's own z — [below](#type-9-is-a-half-sphere--read-measured-and-seen) |
-| 10 | 0x48, `0x1001e24c` | +20..+24 | type 7 with its own load (`0x10001a40`), which clears the flag that ends a group at an age of 1 (`0x10001ab1`) | **debris** that flies on and falls for as long as its window is open (`NE_Gibs_Stn`) |
+| 10 | 0x48, `0x1001e24c` | +20..+24 | type 7's update and draw (`0x10001230`, `0x10001300`) with its own load (`0x10001a40`), which clears the flag that ends a group at an age of 1 (`0x10001ab1`) and makes each particle a class of its own, `0x1ec` bytes (`0x1000bb40`, vtable `0x1001eb90`) | **debris**: lumps of geometry that fly on and fall for as long as the window is open (`NE_Gibs_Stn`) — [below](#type-10-is-a-lump-of-geometry--read-measured-and-seen) |
 
 *Measured*: the window is an ordered span inside 0..1 on **4736 of 4737**
 emitters; read four bytes early or late, 705.
@@ -529,9 +529,9 @@ value in mode 0 (`0x100019d0`), which faces the eye
 
 ### A channel is a (low, high, jitter, exponent) run — *read*, and *measured*
 
-Every drawing emitter builds the same **particle**: a 0xcc-byte class whose vtable is
-`Effect.dll:0x1001eb08` and whose constructor is `0x100092d0`. A type-3, 4 or 9 sprite
-embeds one at its `+0x30` (`0x10009246`); types 7, 10 and 8 allocate an array of them; a
+Every drawing emitter but type 10 builds the same **particle**: a 0xcc-byte class whose
+vtable is `Effect.dll:0x1001eb08` and whose constructor is `0x100092d0`. A type-3, 4 or 9
+sprite embeds one at its `+0x30` (`0x10009246`); types 7 and 8 allocate an array of them; a
 bolt's sprites are a 0x14c-byte derivation with the same slots (`0x1001eb2c`). The class
 keeps **three lerped `float32[3]` channels** — a base, a delta and the value they make —
 at `+0x60`/`+0x6c`/`+0x78`, `+0x84`/`+0x90`/`+0x9c` and `+0xa8`/`+0xb4`/`+0xc0`. Each has
@@ -601,8 +601,8 @@ that age. A group whose age is still under 0 is not drawn (`0x10001376`), and on
 past 1 is not drawn either while the emitter's `+0x3c` is set (`0x1000137c`) —
 which the shared load sets (`0x10001023`) and **type 10's own load clears**
 (`0x10001ab1`). So a type-7 group is gone at the end of its life, and type-10
-debris flies on past it for as long as the window is open, its channels running
-on beyond their high ends.
+debris flies on past it for as long as the window is open, its place's channel
+running on beyond its high end.
 
 A particle's material stands at **(progress − spawn) ÷ +32**, the same
 difference before it is divided by the life (`0x10001618`–`0x10001664`;
@@ -626,15 +626,101 @@ effect's frame points. A negative +140 rises.
   group leaves 0.05 to 0.887 of the way through; on 183 blocks, ten groups living
   0.85, at 0.135.
 - All **160** type-10 blocks are one group with a life of 0.25 (112), 0.45 (42) or
-  0.2 (6): three quarters of the window is spent past the age of 1. 118 fade to 0
-  by then and 42 hold their fade at 1, and are drawn the whole way.
+  0.2 (6): three quarters of the window is spent past the age of 1. 118 give a fade
+  that reaches 0 by then and 42 one that holds at 1, and **no lump reads either**, so
+  all 160 are drawn the whole way
+  ([below](#type-10-is-a-lump-of-geometry--read-measured-and-seen)).
 - **+140 is 0 on 660**, above 0 on **486** — 1.0 on 375, and every one of the 160
   type-10 blocks — and below 0 on **175**, all type 7, the smoke and fire that
   rise (−0.35 on 61, −0.15 on 43). 319 effects carry a burst that falls or rises.
 
-Not read: what a fade below 0 draws. A type-10 block that fades 1 → 0 by the power
-4 is at 1 − age⁴ past its age of 1, and the renderer passes over a fade of exactly
-0 alone (`Terrain.dll:0x1002887e`).
+**What a fade below 0 draws** (*read*, and *measured*). What the renderer would do with
+one is read: its test is for exactly 0, `test ah, 0x40` after the compare, where a test for
+0 or less is `0x41` (`Terrain.dll:0x1002887e`–`0x10028889`), and the Shader then multiplies
+the value by 255, stores it as a 64-bit integer, rounded, and shifts the low word 24 up
+(`0x1004f862`–`0x1004f871`), with no clamp on the way, so **it wraps as a byte**: −0.004 is
+alpha 255, −0.5 is 128, and −1.004 is 0 again. And **nothing shipped hands it one**. The
+only particle whose age passes 1 is type 10's, and its draw never reads the fade
+([below](#type-10-is-a-lump-of-geometry--read-measured-and-seen)). A type-7 group is dropped
+at 1; a sprite's progress is the window's; a stream's slot is at most (+36 − 1) ÷ +36 old
+and the time since the last emission adds under one more part in +36 (`0x1001209e`), since
+the ring is stepped on for as long as a particle is live. And *measured*, **0 of the 3571**
+fading blocks (1545 type 3, 202 type 4, 266 type 9, 1161 type 7, 160 type 10, 237 type 8) has
+either end outside 0..1, so between its ends none leaves that range. The same wrap would
+take a fade over 1 to almost nothing; nothing shipped gets there either.
+
+### Type 10 is a lump of geometry — *read*, *measured* and *seen*
+
+**A type-10 particle is not a sprite.** Its load allocates `0x1ec`-byte particles
+(`0x10001a68`), constructed by `0x1000bb40` with the vtable `0x1001eb90`, where a type-7's
+are the 0xcc-byte sprite particle (`0x10001774`). The shared draw (`0x10001300`) calls the
+same slots on either. Slot 1, the draw, is handed six words, the fade and the material's
+phase among them (`0x100016c8`–`0x100016dd`), and **`0x1000bd10` reads neither**: it takes
+the material by the index it keeps, with phase 0 (`0x1000bd59`), and hands the shade a
+triangle list (slot 16, `Terrain.dll:0x10028500`, called at `0x1000bf1e`). So the 118 blocks
+that fade a type-10 block "to 0" fade nothing. A lump is whole until its window shuts, and
+the instance ends it.
+
+**The size is the low end, kept.** The load makes the particle's scale the block's +92 plus
+a draw of the jitter +116 (`0x10001d10`–`0x10001e06`), and the particle's own slots for the
+size channel are a bare `ret 4` (slots 4 to 7, `0x1000d6d0`). So **+104 is read by nothing
+in type 10**. *Measured*: on 158 of the 160 it equals +92 anyway (0.1 on 83 blocks, 0.07 on
+38, 0.2 on 20), and the two that differ end at (0.05, 0.05, 0.5) and (0.06, 0.06, 0.06). 40
+carry a jitter, 0.1 on 39.
+
+**The place runs as a burst's**: slot 3 (`0x1000d610`) lerps +44 to its jittered +56 by the
+age raised to +80..+88, past 1 and on; slot 2 and the fall are the shared draw's.
+
+**The shape.** The particle's constructor draws a uniform from a generator of its own
+(`0x10024810`) and takes one of six tables that static initialisers build
+(`0x10009c30`–`0x1000b600`), by the block's +4: 0x20 the second column, anything else the
+first (`0x10001b7a`–`0x10001b95`). The number the routine returns is kept as the particle's
+**detail number** (`0x10001b95`), in place of the settings' one a burst's gets, so the
+level's thinning falls on the shapes.
+
+| block's +4 | the draw | shape | vertices, faces | scale | spins | detail |
+|---|---:|---|---:|---:|---|---:|
+| not 0x20 | over 1/8 | tetrahedron | 4, 4 | 1 | no | 0 |
+| | 1/64 to 1/8 | octahedron | 6, 8 | 1.5 | yes | 1 |
+| | 1/512 to 1/64 | cube | 8, 12 | 2 | yes | 2 |
+| | under 1/512 | icosahedron | 12, 20 | 3 | yes | 3 |
+| 0x20 | over 1/16 | tetrahedron | 4, 4 | 1 | no | 1 |
+| | 1/32 to 1/16 | a three-sided rod, ±3 long and ±0.2 thick | 12, 20 | 3 | yes | 3 |
+| | under 1/32 | a plate, ±1 across and ±0.1 thick | 18, 32 | 3 | yes | 3 |
+
+(`0x1000bf30`–`0x1000c194`.) So seven in eight of a stone's particles are the little
+tetrahedra, gone at the first level, with a larger one the odd time: the big lump a recording
+shows among a spray of chips is what the odds give. *Measured*: +4 is 0x10 on **143** of the
+160 and 0x20 on **17**: all 5 blocks of the metal `R_RL_06`, and 12 that name no material. The
+material named is `NE_Gibs_Aln`, `NE_Gibs_Ice`, `NE_Gibs_Anm` or `NE_Gibs_Stn` on 105
+of them, the ground's `L00` or `L22` on 25, `R_RL_06` on 5, and **no name on 25**. A block with
+no name takes a uniform pick of its manager's whole material list (`0x10001ad4`–`0x10001b4f`).
+
+**Each is its own stone.** Each vertex is the table's plus a displacement of ± half of itself
+on each axis, a fresh one every vertex — every 3 on a rod, so its four rings move whole, and
+every 2 on a plate, so its two faces do — and all of it times the shape's scale
+(`0x1000c42a`–`0x1000c5ab`). The table's normals and texture coordinates are not moved.
+
+**The spin is per draw.** A spinning shape draws an axis from three uniforms in ±0.5 and an
+angle uniform in ±(π ÷ 4) ÷ its scale, makes the quaternion and keeps it as a matrix
+(`0x1000c1ba`–`0x1000c2f4`; π ÷ 2 is the static at `0x1000ce90`), and **every call of slot 0
+multiplies it in** (`0x1000bc24`–`0x1000bc49`). So a lump turns by one small fixed angle at
+each draw, however long that draw took: a cube up to 22.5°, about one axis. Its tumbling
+follows the frame rate.
+
+**It is lit once.** On its first draw it copies the material's four colours and asks the
+shade for its colours through slot 32 (`0x100290a0`, `0x1000be08`), the shade's lighter with
+the lights gathered there, and keeps them (`0x1000be5f`–`0x1000bead`): the draw flags it files
+with, `0x404`, do not ask for lighting again (`0x10028500`). So what a lump's facet looks like
+is fixed as it leaves.
+
+*Seen*: "Let's Play - Parkan: Iron Strategy, Part 8" (Q5lESz4E-dw), 3:45.2–3:45.6, where a
+blast throws stones against the sky at 4K: a solid faceted lump with a material on it, its
+outline changing between each pair of frames 0.1 s apart as it turns, among half a dozen small
+dark three-sided chips, none of them a quad and none fading. **That settles the geometry and
+the spin and not the fade**: which of the 923 that blast was is not established, and if it is one
+of the 42 blocks that hold their fade at 1, it would look the same with the fade read. The read
+above is what says the fade is not.
 
 ### A control-point frame's axes are depth, width and height — *measured*
 
@@ -957,8 +1043,9 @@ against. An emitter's own:
 |---:|---|---|
 | 3, 4, 9 | the instance's origin | the longer of the size's two ends as vectors, plus the largest component of the position's two ends (`0x10010515`–`0x100105d8`, at the load) |
 | 7, 10 | the origin, less the fall | the longer of the position's two ends, plus the largest size component of either end, plus the largest size jitter, plus the position jitter's length (`0x10001068`–`0x10001178`) |
-| 8 | midway between where the particle about to be overwritten left and where the stream is | the same sum (`0x10011434`–`0x10011576`), plus a share of that distance (`0x1001198b`–`0x10011a2d`, read in outline) |
+| 8 | midway between where the particle about to be overwritten left and where the stream is | the same sum (`0x10011434`–`0x10011576`), plus **a quarter of that distance**: half the way from the middle to where the stream is (`0x1001198b`–`0x10011a2d`) |
 | 5 | midway along the bolt | half its length (`0x10002b91`–`0x10002bc0`) |
+| 1 | — | **none**: the emitter's constructor zeroes the four words (`0x100076e8`, `0x100091a7`–`0x100091b0`), and neither the light's load nor its update writes them, where the same sweep over a bolt and a stream finds `0x10002bc0` and `0x10011a2d`; a radius of 0 is passed over (`0x10008676`) |
 
 Once they are merged the update multiplies the radius by **the length of the
 longest of the instance's matrix's three axes** (`0x100087d8`–`0x100088a5`) —
@@ -967,7 +1054,9 @@ is in the world's metres whatever frame the effect hangs in. The jitters go in
 whole, so it is generous: `tree_light_33a`'s smoke answers 100 + 80 + 4 + 66.3 =
 250.3 m on its unit frame. An instance whose sphere has no radius is not drawn
 at all (`0x10007df3`), and one outside any of the shade's six planes is not
-either (`0x10007e2f`).
+either (`0x10007e2f`). That costs an effect of lights alone nothing: its emitters are
+updated by the manager's tick, not by the draw
+([below](#which-draw-reaches-a-units-own-manager--read-and-measured)).
 
 **The size the level is cut from is in pixels.** The shade takes the viewport's
 width from the camera (slot 4, right less left) and the eye from its matrix
@@ -997,7 +1086,11 @@ The three settings are `Terrain.dll`'s own page, entries 7, 8 and 14, as compile
 ([10-sky.md](10-sky.md#the-render-settings)) — which the shade copies to its
 `+0x1648`, `+0x1644` and `+0x164c` (`0x10046cd6`–`0x10046d32`). No effect
 manager's owner answers 5, 6 or 8: every agent is 4, 9, 2 or 10 or takes its
-owner's 3. The atmosphere's own class is not read.
+owner's 3. **The atmosphere is 7**: it hands itself to `CreateFxManager` as the owner, the
+last of the three words (`Terrain.dll:0x1006f091`–`0x1006f09c`, kept at `Effect.dll:0x100140d1`),
+and its slot 11 is `return 7` (`Terrain.dll:0x1006faa0`,
+[35-hud.md](35-hud.md#the-sky-is-the-one-object-of-kind-7--read)). The table's seventh entry is
+the robots' (`0x10048291`, `0x1004817b`), so **the lightning takes the robots' thresholds**.
 
 **What the level gates** — the five readers of the context's `+0x60`, which a
 sweep for that displacement over the module's draws returns, and the manager's
@@ -1808,11 +1901,9 @@ flag `0x8000`) counts as hidden is switched off unless its header has flag
 `0x10` (`0x10006170`–`0x10006211`), and `hero_breath` has not; that the hero's
 node 3 counts as hidden in the game's own view is not found. Two more are ruled out,
 as far as they are read. **No sound is head-relative**: a buffer's mode is never set.
-And the effect's flag `0x800` keeps it back only while its owner is not seen — the
-turret's own mesh draws its manager with the pass 1 while its sphere is inside the
-camera's planes and the draw's flag 1 is clear
-([below](#which-draw-reaches-a-units-own-manager--read-and-measured)); whether either
-fails on the hero's turret in its own view is not read.
+And the effect's flag `0x800` does not keep it back at all: the flag withholds a draw, and a
+sound has none. Its work is done in the manager's tick, seen or not
+([below](#which-draw-reaches-a-units-own-manager--read-and-measured)).
 
 ### Bolts, streams and fades — *read*, and *measured*
 
@@ -1972,7 +2063,8 @@ and what takes the 2.6 out is **not established**.
 **+8 + (+12 − +8) × age^+16** (`0x100013c2`), a stream particle
 +4 + (+8 − +4) × age^+12 (`0x10012322`), a sprite +20 + (+24 − +20) ×
 progress^+28 (`0x10010881`). The renderer draws nothing at 0
-(`Terrain.dll:0x1002887e`). *Measured*: 1197 of the 1321 burst blocks fall
+(`Terrain.dll:0x1002887e`), and type 10's lumps never hand it theirs
+([above](#type-10-is-a-lump-of-geometry--read-measured-and-seen)). *Measured*: 1197 of the 1321 burst blocks fall
 from start to end, 118 hold and 6 rise; 233 of the 237 streams fall and 4
 hold.
 
@@ -2030,7 +2122,9 @@ particle's slot 8 — so nothing of its own reaches the vertices.)
 **Where the pair comes from.** `CShade::RenderEffect` (`Terrain.dll:0x10028840`, the
 shade's interface slot 27, which `Effect.dll` calls at `0x100099df`) is handed the material
 entry the manager gave the sprite, with the fade already written into the entry's **ambient
-alpha `+0x20`** (`Effect.dll:0x100099a8`); it draws nothing at 0 or less (`0x1002887e`).
+alpha `+0x20`** (`Effect.dll:0x100099a8`); it draws nothing at exactly 0 (`0x1002887e`), and
+takes anything else on, wrapped into a byte if it is under 0
+([above](#a-burst-is-groups-that-leave-one-after-another--read-and-measured)).
 The item builder then asks the **Shader** component — `Comp.ini` names component 6
 `terrain.dll!CreateShader` — through `shade+0xbd0` slot 4 (`0x10028220`, `0x1002824e`),
 which is `0x1004f710`, with the entry, the distance to the eye (`0x1003c340`) and effect
@@ -2261,8 +2355,10 @@ receiver is the object's own manager
 ([below](#which-draw-reaches-a-units-own-manager--read-and-measured)).
 
 So **a 0x800 effect in one of the world's two managers always draws, and one on an object
-draws only while the object is seen**: out of view the object draws none of its lights,
-looped sounds, breath or beacons.
+draws only while the object is seen**: out of view the object draws none of its sprites.
+~~Its lights, looped sounds, breath and beacons go with them~~ — **the lights and the sounds
+do not**: neither has a draw at all
+([below](#which-draw-reaches-a-units-own-manager--read-and-measured)).
 
 **`Terrain.dll:0x1001f178` is not one of them**, and there is no stack mismatch. That call
 belongs to a method of the interface `CLandscape` installs at its **`+4`** (the table at
@@ -2314,6 +2410,12 @@ through the mesh's copy.
 | the key | −2, every instance; −1 under the draw's flag 8 |
 | the pass | 1 where the mesh's sphere is inside all six of the camera's planes (`0x10014c3d`–`0x10014c70`) and the draw's flag 1 is clear; else **0** |
 
+**There is a second such call**, which the enumeration above read past: the per-part draw
+behind the mesh's interface `0x20` slot 6 (`AniMesh.dll:0x100101d0`) ends in a manager draw
+with the part's own node for its key and the pass 1 unless the flag 1 is set, its planes asked
+of nobody (`0x1001042d`–`0x1001044b`), which is what the keys are for: an instance's key is the
+node it hangs on, and −1 once it has let go of it (`Effect.dll:0x1000633c`).
+
 The mesh draws once a frame (its byte `+0x1fe`, `0x10014b3e`): its own nodes, then its
 manager, then the meshes hung on it with the same camera and flags (`0x1001523e`,
 `0x10015270`).
@@ -2327,10 +2429,44 @@ on to a list of objects of its own (`0x1001b7c7`). Otherwise it keeps a map of w
 (`0x1001be21`–`0x1001bed2`); every object of every cell the draw walks goes in as seen as
 its cell is, and one in several cells is seen if any of them is (`0x1001c56f`–`0x1001c79f`).
 When the cells are done **every object of the map is drawn: a seen one with the flags the
-landscape was given, an unseen one with those flags and 1** (`0x1001c89d`–`0x1001c900`). A
-building's own draw (`CBuilding::Render`, `0x10058b90`, which its assertion names at
-`0x10058ee9`) hands its mesh its flags as they are, or with 3, or with `0x48`
-(`0x10058d4e`, `0x10059d16`); which of the three it is when is not read here.
+landscape was given, an unseen one with those flags and 1** (`0x1001c89d`–`0x1001c900`).
+
+**Which cells.** The camera's interface `0x12` hands the draw five points, the eye first
+(`0x1001b9ac`). The grid cells of those five points' bounding rectangle, held to the grid, are
+what the draw walks and no others (`0x1001b9f1`–`0x1001bc1f`): a cell is one of `Land.msh`'s
+([03-terrain.md](03-terrain.md#the-file-states-the-grid-and-the-cell-size-falls-out-of-it--read-and-measured)),
+and its box is its own slot's in x and y, from −100 to 500 in z (`0x1001bf1e`–`0x1001c019`). A
+cell is **seen** unless all eight of its box's corners lie outside one of the camera's six
+planes (`0x1001c10d`–`0x1001c1b8`), and the eye's own cell is seen without asking
+(`0x1001c0b4`, the first point's, which is taken for the eye: *inferred*, from its going
+first and being asked alone). So an object out of that rectangle is not in the map and is not drawn at all,
+every effect it holds with it, and an object within it but in a cell wholly past one plane
+goes in unseen.
+
+**The mesh's sphere** is what its interface `0x18` slot 9 answers for 2 (`0x10014580`): its own,
+its parts' spheres joined (`0x10009510`), through its world matrix `+0x160`. Its radius is
+raised by the mesh's `+0x150`, the farthest a placed node has stood from the mesh's origin
+since the last draw (`0x1000546d`–`0x1000549d`), which the draw takes and clears
+(`0x10014b8e`–`0x10014ba9`).
+
+**A building.** `CBuilding::Render` (`Terrain.dll:0x10058b90`, which its assertion names at
+`0x10058ee9`) asks the same sphere of its agent (`0x10058c5e`). With its byte `+0xb1` set, or the
+draw's flag 1 or 8, it hands the agent's mesh the flags as they are. **Outside any of the six
+planes it adds 3** (`0x10058d4e`): the pass 0 and the key −2, the whole manager. Otherwise it
+draws its exterior or its rooms, part by part, and **adds `0x48` to the agent's own draw**
+(`0x10059d16`): the flag 8 is the key −1, so the manager draws only what has let go of its node,
+and the flag `0x40` keeps the hung meshes back. What hangs on a node of a building is drawn by
+the per-part draw above, as that part is drawn.
+
+**A gun hung on a turret does not count the camera as its own.** A mesh asks its own list of
+views (`AniMesh.dll:0x10014bdb`, `0x10005f60`), its slot 33 adds to that list with no walk of
+what hangs on it (`0x10005ec0`), and a mesh drawing what hangs on it passes the flags and the
+camera as they are (`0x1001523e`, `0x10015270`). The one call that registers a view is the
+camera component's on its own control system's mesh (`Control.dll:0x1002399a`), and *measured*, of
+the 530 control files in the install's archives **0 of `guns.rlb`'s 124 carries a camera** and
+none of `weapon.rlb`'s 66, where all 58 of `turrets.rlb`'s do, with 2 of `animals.rlb`'s and 1 of
+`bases.rlb`'s. So a gun's mesh draws at its distance's level and its manager's sprites go to the
+world's layer 6, depth test and all.
 
 **So, for what is seen:**
 
@@ -2348,14 +2484,21 @@ building's own draw (`CBuilding::Render`, `0x10058b90`, which its assertion name
   hangs in the manager of the unit the camera rides is drawn over every sprite and every
   surface of the world, however near the eye, and under the cockpit, whose layers 9 and
   10 come after.
-- **`0x800` is "only while my owner is seen".** The pass is 0 for an object outside the
-  camera's planes and for one the landscape draws unseen. The manager's draw then returns
-  at once unless it holds a live instance without the flag — its flag 2, which each
-  instance's tick sets where the header's `0x800` is clear (`Effect.dll:0x1000635e`–
-  `0x10006376`) — and an instance with the flag is passed over (`0x10007d44`). An emitter
-  updates inside its instance's draw, a sound and a light as a sprite does, so an unseen
-  object's `0x800` effect does none of the three. A loop already playing is not stopped by
-  that: it stops being moved.
+- **`0x800` is "only while my owner is seen", and it is the sprites alone.** The pass is 0
+  for an object outside the camera's planes and for one the landscape draws unseen. The
+  manager's draw then returns at once unless it holds a live instance without the flag — its
+  flag 2, which each instance's tick sets where the header's `0x800` is clear
+  (`Effect.dll:0x1000635e`–`0x10006376`) — and an instance with the flag is passed over
+  (`0x10007d44`). ~~An emitter updates inside its instance's draw, a sound and a light as a
+  sprite does, so an unseen object's `0x800` effect does none of the three. A loop already
+  playing is not stopped by that: it stops being moved.~~ — **read, and taken back**: the
+  instance's update (`0x10008120`) has one caller, the instance's tick (`0x1000629e`), and that
+  has one, the manager's tick on message 28 (`0x10003e90`). Neither asks the pass, and the only
+  two readers of the flag are the two above. A light's draw slot and a sound's is the bare `ret`
+  at `0x100026f0` (slot 3 of `0x1001e78c` and `0x1001f048`), so what a light and a sound do they
+  do in the tick: **an unseen owner's lights stay lit and its loops go on being moved**, every
+  100 ms where they are not being drawn ([above](#who-hands-a-manager-its-time--read-and-seen)).
+  The control is the sprite's slot 3, which is its draw (`0x100106c0`).
 - **A culled unit's other effects still draw**, as long as the landscape draws the unit at
   all: one in a cell it walks, or a round anywhere. The mesh is not drawn — flag 1 is also
   what keeps its nodes back (`0x10014cea`) — and its manager is, with the pass 0: a
@@ -2364,14 +2507,13 @@ building's own draw (`CBuilding::Render`, `0x10058b90`, which its assertion name
 *Measured*: `0x800` is on **198** of the 923 effects, which hold **147 of the 618** light
 emitters and **29 of the 517** sound emitters — all 29 loops, of the 106: the animals' calls
 and breath, three chassis' engine loops and `hero_breath` — with 246 type-3 sprites, 157
-type-9 domes, 88 type-4 glows, 33 streams and 11 bursts.
+type-9 domes, 88 type-4 glows, 33 streams and 11 bursts. **It is those 535 that an unseen owner
+withholds**, and of the 198 effects, the ones that hold nothing but a light or a sound withhold
+nothing at all.
 
-Not read: which cells the landscape's draw walks, beyond that each is a box from −100 to
-500 tested against the camera (`0x1001bf8f`–`0x1001c1c1`); the sphere a mesh answers with,
-and what raises its radius (the mesh's `+0x150`, `0x10014b8e`); whether a mesh hung on
-another — a gun on a turret — counts the camera as its own; and what clears the instances'
-drawn bytes between the reflection's draw and the scene's (manager slot 20,
-`Effect.dll:0x10004d50`).
+Not read: what clears the instances' drawn bytes between the reflection's draw and the scene's
+(manager slot 20, `Effect.dll:0x10004d50`); and how an object comes to be in several cells' lists
+at the walk, which [26-damage.md](26-damage.md) reads for a sphere.
 
 ### Header flag `0x10000` has no reader — *read*, a controlled negative
 
@@ -2632,9 +2774,9 @@ Read one slot either way, none of the seven name witnesses agrees.
   part: +80 is kept past the `DS3DBUFFER`, where nothing reads it, and a sound past
   its far distance is silent, a loop too.
 - **What silences the hero's breath** in its own view. Not a head-relative mode: no
-  buffer's mode is ever set. Not, as far as it is read, the pass its flag `0x800`
-  waits for, which a unit's own mesh passes while the unit is seen
-  ([How a sound is heard](#how-a-sound-is-heard--read-and-measured)).
+  buffer's mode is ever set. Not the pass its flag `0x800` waits for, which a sound never asks:
+  a sound's work is done in the tick, seen or not
+  ([Which draw reaches a unit's own manager](#which-draw-reaches-a-units-own-manager--read-and-measured)).
 - ~~**How Direct3D Sound pans** a sound about the listener.~~ Answered as far as the
   game's files go: every buffer asks for `DS3DALG_NO_VIRTUALIZATION`, which Microsoft
   documents as plain left and right stereo panning, hard over at 90° and blind to
@@ -2784,9 +2926,15 @@ Read one slot either way, none of the seven name witnesses agrees.
   "only while my owner is seen"; its sprites go to the world's layer 6, or to layer 7
   with the depth test off for the unit the camera rides
   ([Which draw reaches a unit's own manager](#which-draw-reaches-a-units-own-manager--read-and-measured)).
-  Still open: what "seen" is measured by — which cells the landscape's draw walks, the
+  ~~Still open: what "seen" is measured by — which cells the landscape's draw walks, the
   sphere a mesh answers with, and which flags `CBuilding::Render` adds when — and whether a
-  mesh hung on another, a gun on a turret, counts the camera as its own.
+  mesh hung on another, a gun on a turret, counts the camera as its own.~~ Answered: the cells
+  in the bounding rectangle of the camera's five points, each seen unless its box lies wholly
+  past one plane; the mesh's parts' spheres joined, its radius raised by how far a placed node
+  has gone; 3 outside the planes and `0x48` inside; and a gun does not. **And what it stops was
+  overstated**: an instance's update is the tick's and no draw's, and a light and a sound have no
+  draw, so an unseen owner keeps its lights lit and its loops playing, and loses its sprites
+  ([Which draw reaches a unit's own manager](#which-draw-reaches-a-units-own-manager--read-and-measured)).
   ~~Who sets the manager's target point that bolts start from.~~ Answered: the
   gun, as it makes the round: the muzzle on the shooter's node 0
   ([29-weapons.md](29-weapons.md#a-beam-outlives-its-round--read-and-measured)).
@@ -2838,3 +2986,7 @@ Read one slot either way, none of the seven name witnesses agrees.
 - Snow and rain are **not** here. There is no FXID whose name mentions either,
   and `sky.wea`'s slots name the materials `SNOWFLAKE` and `RAIN_DROP`
   directly — see [10-sky.md](10-sky.md).
+- ~~**What a burst's fade below 0 draws.**~~ Answered: nothing, since nothing hands one over.
+  The renderer would wrap it into the alpha's byte, and type 10, the one particle past its age
+  of 1, is a lump of geometry whose draw reads no fade and whose +104 nothing reads
+  ([Type 10 is a lump of geometry](#type-10-is-a-lump-of-geometry--read-measured-and-seen)).

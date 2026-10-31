@@ -738,13 +738,35 @@ pub fn sync(
     weather: Option<&parkan_sim::weather::View>,
 ) {
     let quads: Vec<parkan_render::sprites::Quad> = play
-        .sprites(eye)
+        .sprites_through(eye, view_proj)
         .into_iter()
         .flat_map(|(look, s)| {
             use parkan_render::sprites::{
                 EFFECTS_LAYER, PLAIN_TINT, Quad, UNFOGGED_TINT, billboard, dome, framed, lengthwise, turned,
             };
             let tint = if s.unfogged { UNFOGGED_TINT } else { PLAIN_TINT };
+            // A type-10 block's lump is triangles: each goes in as a quad folded on its last
+            // corner, as a light's disc does (docs/11, "Type 10 is a lump of geometry").
+            if !s.facets.is_empty() {
+                return s
+                    .facets
+                    .iter()
+                    .map(|f| {
+                        let [a, b, c] = f.corners;
+                        let [ua, ub, uc] = f.uv;
+                        Quad {
+                            look,
+                            corners: [a, b, c, c],
+                            alpha: s.alpha,
+                            overlay: s.overlay,
+                            uv: Some([ua, ub, uc, uc]),
+                            depth: a.distance(eye),
+                            layer: EFFECTS_LAYER,
+                            tint: [f.shade, f.shade, f.shade, tint[3]],
+                        }
+                    })
+                    .collect::<Vec<_>>();
+            }
             // A type-3, 4 or 9 sprite is drawn with its own matrix: a quad across its x and y,
             // or a type-9 block's hemisphere with its pole on its z (docs/11, "A sprite's mode").
             if let Some(m) = s.matrix {

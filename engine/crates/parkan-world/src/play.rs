@@ -5176,10 +5176,49 @@ impl Play {
     /// [`Play::lens`] (docs/11, "An instance's level"): not at all once it is under 4 pixels
     /// on the screen, or under 10 on a building, and with fewer of its bursts' and streams'
     /// particles from 70 pixels down, or 120.
+    ///
+    /// Every owner counts as seen here; [`Play::sprites_through`] is the same through a camera.
     pub fn sprites(&self, eye: Vec3) -> Vec<(usize, Sprite)> {
-        self.fx.sprites_seen(self.hero.time_ms, eye, self.lens, |point| {
-            self.battle.combat.clear_line(&self.ground, eye, point)
-        })
+        self.fx.sprites_seen(
+            self.hero.time_ms,
+            eye,
+            self.lens,
+            |point| self.battle.combat.clear_line(&self.ground, eye, point),
+            |_, _| true,
+        )
+    }
+
+    /// [`Play::sprites`] through the camera `view_proj` draws with: an effect with `0x800`
+    /// draws only while its owner is seen (docs/11, "Which draw reaches a unit's own manager").
+    pub fn sprites_through(&self, eye: Vec3, view_proj: glam::Mat4) -> Vec<(usize, Sprite)> {
+        let planes = crate::fx::Planes::of(view_proj);
+        self.fx.sprites_seen(
+            self.hero.time_ms,
+            eye,
+            self.lens,
+            |point| self.battle.combat.clear_line(&self.ground, eye, point),
+            |owner, instance| self.owner_seen(owner, instance, &planes),
+        )
+    }
+
+    /// Whether `owner` hands its manager a pass of 1 through `planes`.
+    ///
+    /// The landscape's and the atmosphere's managers always do (`Terrain.dll:0x1001c921`,
+    /// `0x10070cd5`). A mesh's asks its agent's sphere, which a building culls with too
+    /// (`AniMesh.dll:0x10014c70`, `Terrain.dll:0x10058c5e`). The hero's own stands around the
+    /// camera in its own view and in front of it in the outer, so it is seen in both. A round
+    /// is taken at its own place, the sphere of a mesh that small.
+    fn owner_seen(&self, owner: Owner, instance: &parkan_sim::effects::Instance, planes: &crate::fx::Planes) -> bool {
+        match owner {
+            Owner::World | Owner::Lightning | Owner::Lode(_) | Owner::Turret(_) | Owner::Chassis(_) => true,
+            Owner::Round(..) => planes.hold(instance.frame.origin, 0.0),
+            Owner::Building(t, _) | Owner::Gun(t, _, _) | Owner::Shot(t, _) | Owner::Shield(t, _) => {
+                self.battle.combat.targets.get(t).is_none_or(|target| {
+                    let (centre, radius) = target.agent_sphere;
+                    planes.hold(centre, radius)
+                })
+            }
+        }
     }
 }
 

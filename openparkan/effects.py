@@ -728,7 +728,11 @@ class Emitter:
 
     @property
     def fade(self) -> tuple[float, float, float] | None:
-        """``(start, end, power)`` of the value this emitter draws with."""
+        """``(start, end, power)`` of the value this emitter draws with.
+
+        A type-10 block carries the three and is handed them, and its particle's draw reads
+        none (``Effect.dll:0x1000bd10``): it is a lump of geometry, whole to the end.
+        """
         at = {7: PARTICLE_FADE_AT, 10: PARTICLE_FADE_AT, 8: STREAM_FADE_AT,
               3: SPRITE_FADE_AT, 4: SPRITE_FADE_AT, 9: SPRITE_FADE_AT}.get(self.kind)
         if at is None or len(self.body) < at[2] + 4:

@@ -385,6 +385,25 @@ pub struct Sprite {
     /// them and its pole ends on the third. `None` where the mode needs an eye and none was
     /// given, and the quad is then the camera-facing one the fields above describe.
     pub matrix: Option<[Vec3; 3]>,
+    /// Drawn as these triangles, in the world, instead of a quad: a type-10 block's lump
+    /// ([`debris_shape`]). Empty on everything else.
+    pub facets: Vec<Facet>,
+}
+
+/// One triangle of a type-10 block's lump, in the world, with its corners' (u, v) across the
+/// material and how lit it is.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Facet {
+    pub corners: [Vec3; 3],
+    pub uv: [[f32; 2]; 3],
+    /// What its colour is multiplied by.
+    ///
+    /// STAND-IN: docs/11-effects.md#type-10-is-a-lump-of-geometry--read-measured-and-seen --
+    /// the game's lump is lit once, vertex by vertex, as it is first drawn, through the shade's
+    /// lighter (slot 32, `Terrain.dll:0x100290a0`) and the normals of the shape's table. Here
+    /// each facet takes one figure from how its own normal, as the frame stood before any spin,
+    /// faces up: fixed, as the game's is.
+    pub shade: f32,
 }
 
 /// A type-9 emitter's hemisphere, one of the shade's three (`Terrain.dll:0x10027a20`,
@@ -742,6 +761,354 @@ pub fn burst_fraction(since: f32, rate: f32) -> f32 {
 /// ends inside the window. Nothing is drawn for it: the stagger is the same every time.
 pub fn burst_spawn(life: f32, group: u32, groups: u32) -> f32 {
     (1.0 - life) * group as f32 / groups.max(1) as f32
+}
+
+/// One of the six lumps a type-10 particle may be (`Effect.dll:0x1000bf30`, the tables the
+/// static initialisers from `0x10009c30` fill and the indices at `0x1001e8c0`–`0x1001ea40`).
+/// Faces wind as the file gives them.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct DebrisShape {
+    pub vertices: &'static [[f32; 3]],
+    pub uv: &'static [[f32; 2]],
+    pub faces: &'static [[u16; 3]],
+    /// A new displacement is drawn every this many vertices, and those between share it
+    /// (`0x1000c42e`): so a rod's rings and a plate's pairs move whole.
+    pub every: usize,
+    /// What a vertex is multiplied by, once displaced (`0x1000c577`), and what the spin's
+    /// limit is divided by (`0x1000c229`).
+    pub scale: f32,
+    /// Whether it turns as it flies (the `+0x7c` its load sets, `0x1000c1b1`).
+    pub spins: bool,
+    /// The number the draw sets the level against, in place of the settings' own: the level
+    /// passes it over while it is the larger (`0x100015eb`–`0x10001612`).
+    pub detail: f32,
+}
+
+/// A tetrahedron.
+const TETRAHEDRON: DebrisShape = DebrisShape {
+    vertices: &[[0.0, 0.0, 0.6], [0.5, 0.0, -0.3], [-0.4, 0.3, -0.3], [-0.4, -0.3, -0.3]],
+    uv: &[[0.0, 0.0], [1.0, 0.0], [0.5, 0.5], [1.0, 1.0]],
+    faces: &[[0, 2, 1], [0, 1, 3], [0, 3, 2], [1, 2, 3]],
+    every: 1,
+    scale: 1.0,
+    spins: false,
+    detail: 0.0,
+};
+/// An octahedron.
+const OCTAHEDRON: DebrisShape = DebrisShape {
+    vertices: &[
+        [1.0, 0.0, 0.0],
+        [-1.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0],
+        [0.0, -1.0, 0.0],
+        [0.0, 0.0, 1.0],
+        [0.0, 0.0, -1.0],
+    ],
+    uv: &[[0.0, 0.0], [0.0, 0.0], [1.0, 0.0], [1.0, 0.0], [0.0, 1.0], [0.0, 1.0]],
+    faces: &[[0, 2, 4], [0, 4, 3], [0, 3, 5], [0, 5, 2], [1, 4, 2], [1, 2, 5], [1, 5, 3], [1, 3, 4]],
+    every: 1,
+    scale: 1.5,
+    spins: true,
+    detail: 1.0,
+};
+/// A cube.
+const CUBE: DebrisShape = DebrisShape {
+    vertices: &[
+        [1.0, 1.0, 1.0],
+        [-1.0, 1.0, 1.0],
+        [-1.0, -1.0, 1.0],
+        [1.0, -1.0, 1.0],
+        [1.0, 1.0, -1.0],
+        [-1.0, 1.0, -1.0],
+        [-1.0, -1.0, -1.0],
+        [1.0, -1.0, -1.0],
+    ],
+    uv: &[[0.0, 0.0], [0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0], [0.0, 1.0]],
+    faces: &[
+        [0, 1, 2],
+        [0, 2, 3],
+        [0, 4, 5],
+        [0, 5, 1],
+        [0, 3, 7],
+        [0, 7, 4],
+        [6, 2, 1],
+        [6, 1, 5],
+        [6, 7, 3],
+        [6, 3, 2],
+        [6, 5, 4],
+        [6, 4, 7],
+    ],
+    every: 1,
+    scale: 2.0,
+    spins: true,
+    detail: 2.0,
+};
+/// An icosahedron.
+const ICOSAHEDRON: DebrisShape = DebrisShape {
+    vertices: &[
+        [0.0, 0.89, 0.44],
+        [0.0, 0.0, 1.0],
+        [0.85, 0.27, 0.44],
+        [0.52, 0.72, -0.44],
+        [-0.52, 0.72, -0.44],
+        [-0.85, 0.27, 0.44],
+        [-0.52, -0.72, 0.44],
+        [0.52, -0.72, 0.44],
+        [0.85, -0.27, -0.44],
+        [0.0, -0.89, -0.44],
+        [0.0, 0.0, -1.0],
+        [-0.85, -0.27, -0.44],
+    ],
+    uv: &[
+        [0.0, 0.33],
+        [0.5, 0.0],
+        [0.2, 0.33],
+        [0.1, 0.66],
+        [0.9, 0.66],
+        [0.8, 0.33],
+        [0.6, 0.33],
+        [0.4, 0.33],
+        [0.3, 0.66],
+        [0.5, 0.66],
+        [0.5, 1.0],
+        [0.7, 0.66],
+    ],
+    faces: &[
+        [1, 2, 0],
+        [2, 3, 0],
+        [3, 4, 0],
+        [4, 5, 0],
+        [5, 1, 0],
+        [5, 6, 1],
+        [6, 7, 1],
+        [7, 2, 1],
+        [2, 8, 3],
+        [2, 7, 8],
+        [6, 9, 7],
+        [9, 8, 7],
+        [8, 10, 3],
+        [8, 9, 10],
+        [6, 11, 9],
+        [11, 10, 9],
+        [10, 4, 3],
+        [10, 11, 4],
+        [6, 5, 11],
+        [5, 4, 11],
+    ],
+    every: 1,
+    scale: 3.0,
+    spins: true,
+    detail: 3.0,
+};
+/// A three-sided rod, 6 long and 0.4 thick, in four rings.
+const ROD: DebrisShape = DebrisShape {
+    vertices: &[
+        [-0.1, -0.2, 3.0],
+        [0.2, 0.0, 3.0],
+        [-0.1, 0.2, 3.0],
+        [0.2, 0.0, 1.0],
+        [-0.1, 0.2, 1.0],
+        [-0.1, -0.2, 1.0],
+        [0.2, 0.0, -1.0],
+        [-0.1, 0.2, -1.0],
+        [-0.1, -0.2, -1.0],
+        [0.2, 0.0, -3.0],
+        [-0.1, 0.2, -3.0],
+        [-0.1, -0.2, -3.0],
+    ],
+    uv: &[
+        [0.0, 1.0],
+        [0.0, 0.0],
+        [1.0, 0.0],
+        [0.0, 1.0],
+        [1.0, 1.0],
+        [1.0, 0.0],
+        [1.0, 0.0],
+        [0.0, 0.0],
+        [1.0, 1.0],
+        [1.0, 1.0],
+        [0.0, 1.0],
+        [0.0, 0.0],
+    ],
+    faces: &[
+        [1, 3, 2],
+        [2, 3, 4],
+        [2, 4, 0],
+        [0, 4, 5],
+        [0, 5, 1],
+        [1, 5, 3],
+        [3, 6, 4],
+        [4, 6, 7],
+        [4, 7, 5],
+        [5, 7, 8],
+        [5, 8, 3],
+        [3, 8, 6],
+        [6, 9, 7],
+        [7, 9, 10],
+        [7, 10, 8],
+        [8, 11, 6],
+        [6, 11, 9],
+        [8, 10, 11],
+        [0, 1, 2],
+        [9, 11, 10],
+    ],
+    every: 3,
+    scale: 3.0,
+    spins: true,
+    detail: 3.0,
+};
+/// A plate, 2 across and 0.2 thick, eight squares about a middle.
+const PLATE: DebrisShape = DebrisShape {
+    vertices: &[
+        [0.0, 0.0, 0.1],
+        [0.0, 0.0, -0.1],
+        [1.0, -1.0, 0.1],
+        [1.0, -1.0, -0.1],
+        [0.0, -1.0, 0.1],
+        [0.0, -1.0, -0.1],
+        [-1.0, -1.0, 0.1],
+        [-1.0, -1.0, -0.1],
+        [-1.0, 0.0, 0.1],
+        [-1.0, 0.0, -0.1],
+        [-1.0, 1.0, 0.1],
+        [-1.0, 1.0, -0.1],
+        [0.0, 1.0, 0.1],
+        [0.0, 1.0, -0.1],
+        [1.0, 1.0, 0.1],
+        [1.0, 1.0, -0.1],
+        [1.0, 0.0, 0.1],
+        [1.0, 0.0, -0.1],
+    ],
+    uv: &[
+        [0.5, 0.5],
+        [0.5, 0.5],
+        [0.0, 0.0],
+        [1.0, 1.0],
+        [0.0, 0.5],
+        [1.0, 0.5],
+        [0.0, 1.0],
+        [1.0, 0.0],
+        [0.5, 1.0],
+        [0.5, 0.0],
+        [1.0, 1.0],
+        [0.0, 0.0],
+        [1.0, 0.5],
+        [0.0, 0.5],
+        [1.0, 0.0],
+        [0.0, 1.0],
+        [0.5, 0.0],
+        [0.5, 1.0],
+    ],
+    faces: &[
+        [0, 4, 2],
+        [1, 3, 5],
+        [0, 2, 16],
+        [1, 5, 7],
+        [0, 16, 14],
+        [1, 7, 9],
+        [0, 14, 12],
+        [1, 9, 11],
+        [0, 12, 10],
+        [1, 11, 13],
+        [0, 10, 8],
+        [1, 13, 15],
+        [0, 8, 6],
+        [1, 15, 17],
+        [0, 6, 4],
+        [1, 17, 3],
+        [3, 17, 16],
+        [16, 2, 3],
+        [17, 15, 14],
+        [14, 16, 17],
+        [15, 13, 12],
+        [12, 14, 15],
+        [13, 11, 10],
+        [10, 12, 13],
+        [11, 9, 8],
+        [8, 10, 11],
+        [9, 7, 6],
+        [6, 8, 9],
+        [7, 5, 4],
+        [4, 6, 7],
+        [5, 3, 2],
+        [2, 4, 5],
+    ],
+    every: 2,
+    scale: 3.0,
+    spins: true,
+    detail: 3.0,
+};
+
+/// The block's `+4` that takes the rods and plates; every other value takes the stones
+/// (`Effect.dll:0x10001b7a`). 143 of the 160 shipped blocks carry `0x10`, and 17 this.
+pub const DEBRIS_SPARS: u32 = 0x20;
+
+/// Which lump a particle is, from the block's `+4` and a uniform in 0..1 (`0x1000bfe8`–
+/// `0x1000c18d`): most of a burst is the small tetrahedra, seven in eight of the stones and
+/// fifteen in sixteen of the spars, with a larger one the odd time.
+pub fn debris_shape(kind: u32, draw: f32) -> DebrisShape {
+    if kind == DEBRIS_SPARS {
+        return if draw > 1.0 / 16.0 {
+            DebrisShape { detail: 1.0, ..TETRAHEDRON }
+        } else if draw > 1.0 / 32.0 {
+            ROD
+        } else {
+            PLATE
+        };
+    }
+    if draw > 1.0 / 8.0 {
+        TETRAHEDRON
+    } else if draw > 1.0 / 64.0 {
+        OCTAHEDRON
+    } else if draw > 1.0 / 512.0 {
+        CUBE
+    } else {
+        ICOSAHEDRON
+    }
+}
+
+/// The most a spinning lump turns at one draw, either way: π ÷ 4 over its shape's scale
+/// (`Effect.dll:0x1000ce90`, `0x1000c223`–`0x1000c286`). It is drawn once for the particle and
+/// kept: the quaternion it makes is the matrix `+0xc0` the draw multiplies in (`0x1000bc49`).
+pub const DEBRIS_SPIN: f32 = std::f32::consts::FRAC_PI_4;
+
+/// How many draws a second a lump's spin is reckoned at.
+///
+/// STAND-IN: docs/11-effects.md#type-10-is-a-lump-of-geometry--read-measured-and-seen -- the
+/// game turns a lump once per draw, not per second, so its tumbling follows the frame rate;
+/// the recordings run at 60 a second.
+pub const DEBRIS_DRAWS_A_SECOND: f32 = 60.0;
+
+/// What a block that names no material draws with, where the game draws a uniform pick of its
+/// material manager's whole list (`Effect.dll:0x10001ad4`–`0x10001b4f`).
+///
+/// STAND-IN: docs/11-effects.md#type-10-is-a-lump-of-geometry--read-measured-and-seen -- the
+/// looks a manager here holds are the ones the effects name, so the 25 blocks with no name
+/// take the stone's.
+pub const DEBRIS_ANY_MATERIAL: &str = "NE_Gibs_Stn";
+
+/// The material a type-10 block's particles draw with.
+pub fn debris_material(e: &Emitter) -> &str {
+    if e.resource.member.is_empty() { DEBRIS_ANY_MATERIAL } else { &e.resource.member }
+}
+
+/// A lump's vertices as a particle keeps them: each table vertex plus a displacement of ±half of
+/// it on each axis, the same displacement for `every` vertices running, times the shape's scale
+/// (`Effect.dll:0x1000c42a`–`0x1000c5ab`).
+fn debris_vertices(shape: &DebrisShape, rng: &mut Rng) -> Vec<Vec3> {
+    let mut moved = Vec3::ZERO;
+    shape
+        .vertices
+        .iter()
+        .enumerate()
+        .map(|(i, v)| {
+            let v = Vec3::from_array(*v);
+            if i % shape.every == 0 {
+                moved = Vec3::new(rng.spread(v.x), rng.spread(v.y), rng.spread(v.z));
+            }
+            (v + moved) * shape.scale
+        })
+        .collect()
 }
 
 /// The world's gravity, which a burst's fall is scaled by: 10.0, `IWorld` slot 4
@@ -1249,10 +1616,14 @@ impl Instance {
     ///   oldest particle left and where it is now;
     /// - a bolt (5): half its length about its middle (`0x10002b91`–`0x10002bc0`).
     ///
-    /// STAND-IN: docs/11-effects.md#an-instances-level--read-and-measured -- a moving
-    /// stream's radius takes a share of the distance it has come that is read only in
-    /// outline (`0x1001198b`–`0x10011a2d`): a quarter of it here. What a light answers is not
-    /// read, and it answers none here; and the shade's six planes are left to the renderer.
+    /// A stream on the move adds a quarter of the way it has come: half the distance from its
+    /// middle to where it is now (`0x1001198b`–`0x10011a2d`). A light answers nothing: neither
+    /// its load nor its update writes the sphere the emitter's constructor zeroed
+    /// (`0x1000f4b0`, `0x1000f6e0`), and a radius of 0 is passed over (`0x10008676`).
+    ///
+    /// STAND-IN: docs/11-effects.md#an-instances-level--read-and-measured -- the shade's six
+    /// planes, which an instance's sphere is tested against too (`0x10007e2f`), are left to
+    /// the renderer.
     pub fn sphere(&self, now_ms: f64) -> Option<(Vec3, f32)> {
         if !self.on {
             return None;
@@ -1328,7 +1699,10 @@ impl Instance {
             // STAND-IN: docs/11-effects.md#not-resolved -- type 1 is a light in the owner's
             // light manager; how the shade lights with its range and attenuation is not
             // read, and lights are not drawn.
-            if e.kind == EMITTER_LIGHT || e.kind == EMITTER_SOUND || e.resource.member.is_empty() {
+            if e.kind == EMITTER_LIGHT
+                || e.kind == EMITTER_SOUND
+                || (e.resource.member.is_empty() && e.kind != 10)
+            {
                 continue;
             }
             let first = out.len();
@@ -1343,7 +1717,8 @@ impl Instance {
                     3 | 9 => self.sprite(e, p, eye, age_ms, seconds, level, out),
                     4 => self.sprite(e, self.flare(e, p, eye), eye, age_ms, seconds, level, out),
                     5 => self.bolt(e, p, age_ms, seconds, out),
-                    7 | 10 => self.burst(e, i, p, age_ms, level, out),
+                    7 => self.burst(e, i, p, age_ms, level, out),
+                    10 => self.debris(e, i, p, level, out),
                     _ => {}
                 }
             }
@@ -1414,6 +1789,7 @@ impl Instance {
             dome: None,
             frame: frame.basis().map(|a| std::array::from_fn(|i| a[i] * size.to_array()[i] * self.scale)),
             matrix: None,
+            facets: Vec::new(),
         }
     }
 
@@ -1574,20 +1950,21 @@ impl Instance {
                 dome: None,
                 frame: None,
                 matrix: None,
+                facets: Vec::new(),
             });
         }
     }
 
-    /// A type 7 or 10 burst: **+0x24 groups of +0x28 particles** (`0x10001000`, `0x10001720`),
-    /// each fading +8 + (+12 − +8) × age^+16 (`0x100013c2`).
+    /// A type-7 burst: **+0x24 groups of +0x28 particles** (`0x10001000`, `0x10001720`), each
+    /// fading +8 + (+12 − +8) × age^+16 (`0x100013c2`).
     ///
     /// **A group has a spawn of its own and its particles share its age** (`0x1000135b`): group
     /// *i* leaves at [`burst_spawn`], (1 − +28) × *i* ÷ groups of the way through the window,
     /// and is (progress − that) ÷ +28 old. A group not yet out is not drawn (`0x10001376`), and
-    /// a **type-7** group past an age of 1 is not either (`0x1000137c`, on the flag its load
-    /// sets at `0x10001023`). A type-10 load clears that flag (`0x10001ab1`), so its debris
-    /// flies on past 1 for as long as the window is open, its channels running past their
-    /// high ends.
+    /// one past an age of 1 is not either (`0x1000137c`, on the flag its load sets at
+    /// `0x10001023`), so no fade here goes under the block's two ends, and all 1161 blocks' lie
+    /// in 0..1. The renderer would pass a fade under 0 and wrap it into the alpha's byte
+    /// (docs/11, "How an effect sprite is coloured"); nothing shipped hands it one.
     ///
     /// A particle runs from +44 to +56 in the frame and from +92 to +104 in size, each
     /// axis by its age raised to that axis's exponent — +80..+88 for the position,
@@ -1595,11 +1972,6 @@ impl Instance {
     /// end by ±half of the triple that follows it, +68 on the position and +116 on the
     /// size (`0x1000186a`, `0x1000195b`, the generator at `0x10002680`). And the group
     /// **falls** by [`BURST_FALL_AT`] × gravity ÷ 2 × the square of the seconds it has been out.
-    ///
-    /// STAND-IN: docs/11-effects.md#a-burst-is-groups-that-leave-one-after-another--read-and-measured
-    /// -- what a fade below 0 draws is not read. A type-10 block that fades 1 → 0 by the power
-    /// 4 is at 1 − age⁴ past its age of 1, and the renderer passes over a fade of exactly 0
-    /// alone (`Terrain.dll:0x1002887e`): here a fade at or under 0 draws nothing.
     fn burst(&self, e: &Emitter, index: usize, p: f32, age_ms: f32, level: u32, out: &mut Vec<Sprite>) {
         let groups = word(e, 36).min(BURST_CAP);
         let each = word(e, 40).min(BURST_CAP / groups.max(1));
@@ -1616,7 +1988,7 @@ impl Instance {
             let since = p - burst_spawn(life, group, groups);
             let age = since / life;
             let alpha = fade(e.f(8), e.f(12), e.f(16), age);
-            let shown = age >= 0.0 && (e.kind != 7 || age <= 1.0) && alpha > 0.0;
+            let shown = (0.0..=1.0).contains(&age) && alpha > 0.0;
             let phase = burst_fraction(since, e.f(32));
             let out_for = clocks.and_then(|b| b.out.get(group as usize)).copied().unwrap_or(0.0);
             for _ in 0..each {
@@ -1637,6 +2009,100 @@ impl Instance {
                 let mut sprite = self.quad(e, &self.frame, local, size, alpha, age_ms, phase);
                 sprite.centre.z -= fall * out_for * out_for;
                 out.push(sprite);
+            }
+        }
+    }
+
+    /// A type-10 block: its groups leave and age as a burst's do, and **each particle is a lump
+    /// of geometry**, a class of its own (`0x1ec` bytes, vtable `0x1001eb90`, its draw
+    /// `0x1000bd10`) that hands the shade a triangle list (slot 16, `Terrain.dll:0x10028500`)
+    /// where a burst's hands it a sprite. Its draw is handed the fade and the material's phase
+    /// as every particle's is, and reads neither: a lump is whole until its window shuts.
+    ///
+    /// Its load clears the flag that ends a group at an age of 1 (`0x10001ab1`), so it flies on
+    /// past 1, its place's channel running past its high end. Its size is **+92 and the size
+    /// jitter +116 alone, kept for good** (`0x10001d10`–`0x10001e06`): the particle's own size
+    /// slot is a bare `ret` (`0x1000d6d0`), so the +104 a burst grows to is read by nothing.
+    /// The shape, and the detail number the level is set against, are drawn at the load
+    /// ([`debris_shape`]), and each vertex is moved by ±half of itself on each axis
+    /// (`0x1000c42a`–`0x1000c551`) so no two lumps are alike. The spinning ones turn by the same
+    /// small angle about the same axis at each draw (`0x1000bc49`).
+    fn debris(&self, e: &Emitter, index: usize, p: f32, level: u32, out: &mut Vec<Sprite>) {
+        let groups = word(e, 36).min(BURST_CAP);
+        let each = word(e, 40).min(BURST_CAP / groups.max(1));
+        let life = e.f(28);
+        if life <= 0.0 {
+            return;
+        }
+        let fall = e.f(BURST_FALL_AT) * BURST_GRAVITY * 0.5;
+        let clocks = self.bursts.iter().find(|b| b.emitter == index);
+        let mut rng = Rng::new(stream_seed(self.seed, index as u32));
+        let mut lumps = Rng::new(stream_seed(detail_seed(self.seed), index as u32));
+        let table = word(e, 4);
+        let axes = self.frame.axes.map(|a| a * self.scale);
+        for group in 0..groups {
+            let since = p - burst_spawn(life, group, groups);
+            let age = since / life;
+            let out_for = clocks.and_then(|b| b.out.get(group as usize)).copied().unwrap_or(0.0);
+            for _ in 0..each {
+                // All of it is drawn at the load, shown or not, so a particle keeps what it got.
+                let spread = e.triple(68);
+                let high = e.triple(56);
+                let high: [f32; 3] = std::array::from_fn(|i| high[i] + rng.spread(spread[i]));
+                let sizes = (e.triple(92), e.triple(116));
+                let size = Vec3::from_array(std::array::from_fn(|i| sizes.0[i] + rng.spread(sizes.1[i])));
+                let shape = debris_shape(table, lumps.unit());
+                let vertices = debris_vertices(&shape, &mut lumps);
+                let axis = Vec3::new(lumps.spread(1.0), lumps.spread(1.0), lumps.spread(1.0)).normalize_or_zero();
+                let per_draw = lumps.spread(2.0 * DEBRIS_SPIN / shape.scale);
+                if age < 0.0 || level as f32 > shape.detail {
+                    continue;
+                }
+                let turn = if shape.spins {
+                    glam::Quat::from_axis_angle(axis, per_draw * out_for * DEBRIS_DRAWS_A_SECOND)
+                } else {
+                    glam::Quat::IDENTITY
+                };
+                let local = lerp3_axis(e.triple(44), high, shaped(age, e.triple(80)));
+                let mut centre = self.frame.point(local * self.scale);
+                centre.z -= fall * out_for * out_for;
+                let place = |v: Vec3| {
+                    let v = turn * (v * size);
+                    centre + axes[0] * v.x + axes[1] * v.y + axes[2] * v.z
+                };
+                let facets = shape
+                    .faces
+                    .iter()
+                    .map(|&[a, b, c]| {
+                        let at = [a, b, c].map(usize::from);
+                        let lit = |v: Vec3| axes[0] * v.x + axes[1] * v.y + axes[2] * v.z;
+                        let normal = lit(vertices[at[1]] - vertices[at[0]])
+                            .cross(lit(vertices[at[2]] - vertices[at[0]]))
+                            .normalize_or_zero();
+                        Facet {
+                            corners: at.map(|i| place(vertices[i])),
+                            uv: at.map(|i| shape.uv[i]),
+                            shade: 0.6 + 0.4 * normal.z.abs(),
+                        }
+                    })
+                    .collect();
+                out.push(Sprite {
+                    material: debris_material(e).to_string(),
+                    centre,
+                    along: Vec3::ZERO,
+                    width: 0.0,
+                    height: 0.0,
+                    alpha: 1.0,
+                    overlay: false,
+                    lengthwise: false,
+                    age_ms: 0.0,
+                    phase: 0.0,
+                    unfogged: false,
+                    dome: None,
+                    frame: None,
+                    matrix: None,
+                    facets,
+                });
             }
         }
     }
@@ -2750,6 +3216,99 @@ mod tests {
         // second one and the step of 0.1 s that brought it out, which its clock takes whole.
         assert_eq!(zs.len(), 2);
         assert!((zs[0] + 7.5 * 4.0).abs() < 1e-2 && (zs[1] + 7.5 * 1.21).abs() < 1e-2, "{zs:?}");
+    }
+
+    /// A debris block of one group of `each` particles, living a quarter of its window, fading
+    /// 1 → 0 by the power 4 as 111 of the 160 do, and growing from 0.1 to 9 as none does.
+    fn debris_block(each: u32, table: u32) -> Emitter {
+        let floats = [
+            (20, 0.0),
+            (24, 1.0),
+            (28, 0.25),
+            (8, 1.0),
+            (12, 0.0),
+            (16, 4.0),
+            (92, 0.1),
+            (96, 0.1),
+            (100, 0.1),
+            (104, 9.0),
+            (108, 9.0),
+            (112, 9.0),
+        ];
+        with_word(with_word(with_word(block(10, 208, &floats, "gibs"), 36, 1), 40, each), 4, table)
+    }
+
+    #[test]
+    fn a_lump_past_its_life_is_whole_where_its_fade_has_gone_under_0_and_it_keeps_its_size() {
+        let frame = Frame::along(Vec3::ZERO, Vec3::X, 1.0);
+        let fx = Instance::new(effect(TIME_ONCE, 4.0, 0, vec![debris_block(5, 0x10)]), frame, 1.0, 0.0, None, 3);
+        let at = |ms: f64| {
+            let mut out = Vec::new();
+            fx.sprites(ms, false, &mut out);
+            out
+        };
+        // A second in it is at the age of 1, and three seconds in it is 3 old, 1 - 3^4 = -80.
+        let (young, old) = (at(200.0), at(3000.0));
+        assert_eq!((young.len(), old.len()), (5, 5), "a type-10 group is not dropped at 1");
+        assert!(old.iter().all(|s| s.alpha == 1.0 && !s.facets.is_empty()), "the draw reads no fade");
+        // Nothing of the +104 of 9 reaches it: its extent stays that of the +92 of 0.1.
+        let extent = |s: &Sprite| {
+            s.facets.iter().flat_map(|f| f.corners).map(|c| c.distance(s.centre)).fold(0.0, f32::max)
+        };
+        for (y, o) in young.iter().zip(&old) {
+            assert!((extent(y) - extent(o)).abs() < 1e-3, "{} {}", extent(y), extent(o));
+            assert!(extent(o) < 0.1 * 3.0 * 1.5 * 3f32.sqrt(), "{}", extent(o));
+        }
+    }
+
+    #[test]
+    fn a_lump_is_drawn_from_the_shape_its_blocks_table_and_its_draw_pick() {
+        assert_eq!(debris_shape(0x10, 0.5).faces.len(), 4);
+        assert_eq!(debris_shape(0x10, 0.1).faces.len(), 8);
+        assert_eq!(debris_shape(0x10, 0.01).faces.len(), 12);
+        assert_eq!(debris_shape(0x10, 0.001).faces.len(), 20);
+        assert_eq!(debris_shape(0x20, 0.5).detail, 1.0, "the tetrahedron, at a detail of its own");
+        assert_eq!((debris_shape(0x20, 0.05).faces.len(), debris_shape(0x20, 0.05).every), (20, 3));
+        assert_eq!((debris_shape(0x20, 0.01).faces.len(), debris_shape(0x20, 0.01).every), (32, 2));
+        for shape in [TETRAHEDRON, OCTAHEDRON, CUBE, ICOSAHEDRON, ROD, PLATE] {
+            assert_eq!(shape.vertices.len(), shape.uv.len());
+            // A closed shape: every edge of every face is met once the other way.
+            for &[a, b, c] in shape.faces {
+                for (from, to) in [(a, b), (b, c), (c, a)] {
+                    let back = shape.faces.iter().filter(|f| {
+                        (0..3).any(|i| f[i] == to && f[(i + 1) % 3] == from)
+                    });
+                    assert_eq!(back.count(), 1, "{from} to {to} of {} faces", shape.faces.len());
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn the_level_passes_a_lump_over_by_its_shapes_detail_and_a_level_of_1_loses_the_tetrahedra() {
+        let frame = Frame::along(Vec3::ZERO, Vec3::X, 1.0);
+        let fx = Instance::new(effect(TIME_ONCE, 4.0, 0, vec![debris_block(400, 0x10)]), frame, 1.0, 0.0, None, 3);
+        let count = |level| {
+            let mut out = Vec::new();
+            fx.sprites_at(500.0, None, false, level, &mut out);
+            out.len()
+        };
+        let (whole, one, two) = (count(0), count(1), count(2));
+        assert_eq!(whole, 400);
+        assert!(one < whole / 4 && one > 0, "seven in eight are tetrahedra: {one}");
+        assert!(two < one, "{two} of {one}");
+    }
+
+    #[test]
+    fn a_lump_with_no_material_named_draws_where_a_burst_with_none_does_not() {
+        let frame = Frame::along(Vec3::ZERO, Vec3::X, 1.0);
+        let mut nameless = debris_block(2, 0x10);
+        nameless.resource.member.clear();
+        let fx = Instance::new(effect(TIME_ONCE, 4.0, 0, vec![nameless]), frame, 1.0, 0.0, None, 3);
+        let mut out = Vec::new();
+        fx.sprites(100.0, false, &mut out);
+        assert_eq!(out.len(), 2);
+        assert!(out.iter().all(|s| s.material == DEBRIS_ANY_MATERIAL));
     }
 
     /// `hero_laser_bullet`'s red bolt: 20 sprites at most, one per 50, 0.4 wide, fading 1 → 0.

@@ -1038,3 +1038,80 @@ fn c03_m02s_mine_glow_lights_the_vertices_about_it_and_a_lamp_its_owner() {
     assert!(lamps.iter().filter(|v| matches!(v.lit, Lit::Target(_))).count() > 50, "a building, mostly");
     assert!(lamps.iter().any(|v| v.lit == Lit::Hero), "and the hero's helm light the hero");
 }
+
+/// A building's `0x800` sprites go when the camera looks away from it, and it keeps its lights:
+/// the flag withholds a draw, and a light has none (docs/11, "Which draw reaches a unit's own
+/// manager"). A debris block's particle is a lump past its life, in a real effect.
+#[test]
+#[ignore = "needs the game install"]
+fn a_building_out_of_view_loses_its_flagged_sprites_and_keeps_its_lights() {
+    use glam::{Mat4, Vec3};
+    use parkan_formats::fxid::FX_PASS_ONLY;
+    use parkan_world::fx::Owner;
+    use parkan_world::textures::TextureStore;
+
+    let game = gamedir::find(None).expect("a Parkan install: set PARKAN_DIR");
+    let (mut play, _) = mission_02_play();
+    let mut store = TextureStore::open(&game).unwrap();
+    play.fx.resolve_looks(&mut store).unwrap();
+    for _ in 0..120 {
+        play.tick(1000.0 / 60.0, [0.0; 2]);
+    }
+    let now = play.hero.time_ms;
+    // A building that holds a flagged effect that draws, and the material one of them draws.
+    let (t, name) = play
+        .fx
+        .instances
+        .iter()
+        .find_map(|(owner, i)| match owner {
+            Owner::Building(t, _) if i.effect.header.flags & FX_PASS_ONLY != 0 => {
+                let mut out = Vec::new();
+                i.sprites(now, true, &mut out);
+                out.first().map(|s| (*t, s.material.clone()))
+            }
+            _ => None,
+        })
+        .expect("a building's lamp");
+    let (centre, radius) = play.battle.combat.targets[t].agent_sphere;
+    let eye = centre + Vec3::new(radius + 40.0, 0.0, 10.0);
+    let lens = Mat4::perspective_rh(1.7, 4.0 / 3.0, 0.5, 700.0);
+    let through = |at: Vec3| {
+        let view = Mat4::look_at_rh(eye, at, Vec3::Z);
+        play.sprites_through(eye, lens * view)
+            .into_iter()
+            .filter(|(_, s)| s.material == name && s.centre.distance(centre) < radius + 30.0)
+            .count()
+    };
+    let toward = through(centre);
+    assert!(toward > 0, "its lamp from in front of it");
+    assert_eq!(through(eye * 2.0 - centre), 0, "and none of the {toward} with the camera turned away");
+    // Its lights are asked of the instances, and no camera comes into it.
+    let mut lit = Vec::new();
+    for (_, i) in play.fx.instances.iter().filter(|(o, i)| {
+        o.target() == Some(t) && i.effect.header.flags & FX_PASS_ONLY != 0
+    }) {
+        i.lights(now, &mut lit);
+    }
+    assert!(!lit.is_empty(), "the building's lamps light what is about them, seen or not");
+}
+
+/// `exp_Hgr_bul`, a bullet on the ground, fades its debris 1 -> 0 by the power 4 and lives a
+/// quarter of its 1.5 s: past that its lumps are whole, four of them (docs/11, "Type 10 is a lump
+/// of geometry").
+#[test]
+#[ignore = "needs the game install"]
+fn a_shipped_debris_block_flies_on_whole_past_the_age_its_fade_reaches_0() {
+    use glam::Vec3;
+    use parkan_sim::effects::{Frame, Instance};
+    use parkan_world::fx::Fx;
+
+    let game = gamedir::find(None).expect("a Parkan install: set PARKAN_DIR");
+    let mut fx = Fx::open(&game).unwrap();
+    let template = fx.template("exp_Hgr_bul").expect("the effect");
+    let i = Instance::new(template, Frame::along(Vec3::ZERO, Vec3::Z, 1.0), 1.0, 0.0, None, 7);
+    let mut out = Vec::new();
+    i.sprites(1000.0, true, &mut out);
+    let lumps: Vec<_> = out.iter().filter(|s| !s.facets.is_empty()).collect();
+    assert_eq!(lumps.len(), 4, "L00's four, a second into 1.5");
+    assert!(lumps.iter().all(|s| s.alpha == 1.0 && s.material == "L00"));
+}
