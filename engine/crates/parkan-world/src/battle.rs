@@ -459,6 +459,7 @@ impl Battle {
         self.combat.kinds.push(RoundKind {
             name: record.to_owned(),
             top_speed: controller.triples[TRIPLE_TOP_SPEED][1],
+            side_speed: [controller.triples[TRIPLE_TOP_SPEED][0], controller.triples[TRIPLE_TOP_SPEED][2]],
             range: controller.bounds[0],
             radius,
             hit_points,

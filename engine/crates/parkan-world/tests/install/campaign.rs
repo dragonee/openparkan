@@ -648,21 +648,21 @@ fn c03_m02s_raider_lands_its_winged_ssm_on_the_bunker_from_afar_and_spends_none_
          with the raider {at:.0} m off, {short} having fallen short",
         point.distance(aimed_at)
     );
-    // The recording's missile is in the air with the raider 345 to 292 m off and strikes at the
-    // second figure, which puts its launch 365 to 390 m off (*derived*, at 45 m/s with and
-    // without the raider's own 11 m/s). Here its 7 s lock runs out 437 m off, the line first
-    // clears 425 to 423 m off, and each launcher fires when the 0.5 to 2 s wait the lock's end
-    // set, or the one that follows it if that ran out with the line still blocked, is up; the
-    // stroke is half a second. The two launchers hang a metre and a half either side of the
-    // turret the line is asked from, and the line has only just cleared the rise: either
-    // missile of the first pair may meet it, as those waits fall, and anything that moves the
-    // takts a little moves them. So the bars are on the first to leave and the first to land,
-    // and no more than the first pair falls short.
-    assert!(from > 290.0, "the first leaves {from:.0} m off the bunker");
+    // *Seen*, Part 6, on the bunker's own range readout: the pair leaves at 824.5 s with the
+    // raider about 405 m off, nothing meets the rise, and it strikes at 834.2 s with the raider
+    // about 290 m off (docs/29, "What the recording has of the raid"). The read lets the launch
+    // fall anywhere in the waits after the 7 s lock and the line, so the draw of the behaviour's
+    // stream decides it: over 32 draws the first leaves 396 to 433 m off. On 29 the pair clears
+    // the rise and lands with the raider 272 to 293 m off, and 3 leave 431 m off or more and lose
+    // the pair to it. This run's draw is one of the 29. A change that moves it onto one of the 3
+    // moves these bars for that reason alone; one that moves the 29 has found something.
+    assert!(from > 390.0, "the first leaves {from:.0} m off the bunker");
     assert!(from < 430.0, "and not before the line clears: {from:.0} m");
     assert!(point.distance(aimed_at) < 5.0, "it lands on the part aimed at: {point} against {aimed_at}");
-    assert!(at > 250.0, "with the raider still {at:.0} m off");
-    assert!(short <= 2, "{short} fell short");
+    // The 45 m/s holds a round to 9 s over the 405 m, where the raider's 13 m/s added to it would
+    // be 7, and the raider covers about 115 m of them (`Control.dll:0x10016810`).
+    assert!(at > 270.0 && at < 300.0, "with the raider {at:.0} m off, where the recording has 292");
+    assert_eq!(short, 0, "nothing of the pair meets the rise");
 }
 
 /// C03 Mission 02's raider outlives its own winged SSM. A hit names the object that fired it and

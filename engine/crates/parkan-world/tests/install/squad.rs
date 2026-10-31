@@ -1812,6 +1812,14 @@ fn c02_m01s_wingmen_follow_the_hero_over_the_bridge_and_keep_out_of_the_canyon()
     // M18 its planner puts warbots on `PBM_PLACE_PROTECT` there, and they shoot one of the two
     // followers apart before it reaches the deck. The progression goes, so no clan plans.
     play.progression = None;
+    // Nor is it a test of a fight. The enemy's units about the bridge fire on the two as they
+    // come, and a follower hit before the deck turns on who hit it and is gone (docs/15), which
+    // turns on how every round flies: a round held to its top speed (docs/29, "The round's
+    // start") hits one of them 20 s sooner. So only the two stay to think.
+    let player = play.player_clan;
+    let Play { robots, units, emplacements, .. } = &mut play;
+    robots.retain(|(t, _)| units[*t].clan == Some(player));
+    emplacements.retain(|(t, _)| units[*t].clan == Some(player));
     let graph = play.graph.clone().expect("KM_4 has an areal map");
     let hero_id = play.hero_id;
     // The player's two `21swlk1`, logical ids 9 and 10, brought to the south bank and told to

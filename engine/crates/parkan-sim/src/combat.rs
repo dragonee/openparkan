@@ -44,6 +44,9 @@ pub struct RoundKind {
     pub name: String,
     /// The controller's top speed along y.
     pub top_speed: f32,
+    /// Its top speed across its frame and up it, x and z of the same triple: 0 on 65 of the 66
+    /// rounds, and 2 on `bp_b_04` (docs/29, "The round's start").
+    pub side_speed: [f32; 2],
     /// File +108.
     pub range: f32,
     /// The collision radius: the mesh's stream-2 header sphere times the object's
@@ -741,7 +744,11 @@ impl Combat {
                     None => Some(target.aim),
                 };
                 if let Some(point) = point {
-                    steer(r, seeker, k.turn_rate, point, dt);
+                    // The turn comes down with the speed along its axis over its top
+                    // (`Control.dll:0x1000ce6c`-`0x1000ce98`).
+                    let along = r.velocity.dot(r.forward);
+                    let share = if k.top_speed > 0.0 { (along / k.top_speed).abs() } else { 1.0 };
+                    steer(r, seeker, k.turn_rate.map(|t| t * share), point, dt);
                 }
             }
             if k.mode == MODE_FALLING {
@@ -754,7 +761,14 @@ impl Combat {
                 let bleed = SIDEWAYS_BLEED * dt * 1000.0;
                 let toward_zero = |v: f32| if v.abs() <= bleed { 0.0 } else { v - bleed.copysign(v) };
                 let (along, x, z) = (r.velocity.dot(r.forward), r.velocity.dot(side), r.velocity.dot(up));
-                r.velocity = r.forward * along + side * toward_zero(x) + up * toward_zero(z);
+                // The integrator holds every axis of its frame to the top speed, in free flight
+                // too (`0x100158c4`-`0x100158f2`, `0x10016810`); a round's block is the authored
+                // one, kind 9 being left out of the recompute (`0x1000fca6`). So what it took of
+                // its shooter's velocity is gone at its first step, but for a shooter backing away.
+                let [sx, sz] = k.side_speed;
+                r.velocity = r.forward * along.clamp(-k.top_speed, k.top_speed)
+                    + side * toward_zero(x).clamp(-sx, sx)
+                    + up * toward_zero(z).clamp(-sz, sz);
             }
             r.previous = r.position;
             let moved = r.velocity * dt;
@@ -1816,9 +1830,28 @@ mod tests {
         let g = floor();
         let mut c = Combat { kinds: vec![laser()], ..Default::default() };
         c.kinds[0].top_speed = 10.0;
+        c.kinds[0].side_speed = [2.0, 2.0];
         c.fire(0, None, Vec3::new(10.0, 10.0, 30.0), Vec3::Y, Vec3::new(2.0, 0.0, 0.0), 1.0, None);
         c.tick(0.5, &g);
         let v = c.rounds[0].velocity;
         assert!((v.x - 0.5).abs() < 1e-4 && (v.y - 10.0).abs() < 1e-4, "{v}");
+    }
+
+    /// A winged SSM's 45 m/s is its top on its one axis: what a raider's 12 m/s adds as it leaves
+    /// is gone at its first step (`Control.dll:0x10016810`), which is how it takes the 9 s the
+    /// recording has it take from 405 m, where 57 m/s would take 7.
+    #[test]
+    fn a_round_takes_nothing_of_its_shooters_speed_past_its_own_top() {
+        let g = floor();
+        let mut c = Combat { kinds: vec![laser()], ..Default::default() };
+        c.kinds[0].top_speed = 45.0;
+        c.fire(0, None, Vec3::new(10.0, 10.0, 30.0), Vec3::Y, Vec3::new(5.0, 12.0, 1.0), 1.0, None);
+        c.tick(0.01, &g);
+        assert_eq!(c.rounds[0].velocity, Vec3::new(0.0, 45.0, 0.0));
+        // Backing away, a shooter's speed comes off it and nothing brings it back.
+        c.rounds.clear();
+        c.fire(0, None, Vec3::new(10.0, 10.0, 30.0), Vec3::Y, Vec3::new(0.0, -12.0, 0.0), 1.0, None);
+        c.tick(0.01, &g);
+        assert_eq!(c.rounds[0].velocity, Vec3::new(0.0, 33.0, 0.0));
     }
 }

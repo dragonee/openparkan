@@ -433,9 +433,22 @@ The round is created facing its direction with z up (`CreateObject` 9,
   `0x10015920`). It is set with `SetWorldSpeed` (`0x1002a4b4`).
   - `SetTangSpeed` behind it sets the **free-flight** byte (`0x100044a0`), and
     while that byte is set the integrator does not pull the velocity toward
-    the command (`0x100153f4`). So a round keeps its launch speed.
+    the command (`0x100153f4`). So a round is not sped up.
+  - **It is held to its top speed all the same**, on each axis of its own frame
+    (*read*). The integrator's last act, in free flight too, is the clamp to the
+    block at `+0x1b0` (`0x100158c4`–`0x100158f2`, `0x10016810`), skipped only for a
+    mirror (`+0x618`). A round's block is its authored one: the load copies it
+    (`0x10008ef0`) and the recompute leaves kind 9 out (`0x1000fca6`). 65 of the 66
+    rounds have a top speed of 0 across and up their frame, and `bp_b_04` has 2
+    (*measured*). So **what a round took of its shooter's velocity is gone at its
+    first step**, unless the shooter was backing away, which takes speed off it for
+    good. openparkan kept it, which sent a winged SSM from a raider at 57 m/s and
+    skewed by the raider's own swing, and now holds it.
   - A mode-0 round's sideways components of that velocity, in its own frame,
-    bleed off at 0.003 m/s per elapsed ms (`0x1000ceec`).
+    bleed off at 0.003 m/s per elapsed ms (`0x1000ceec`), which only `bp_b_04`
+    has any left for.
+  - A seeker's turn comes down with the round's speed along its axis over its top
+    (`0x1000ce6c`–`0x1000ce98`), the same 1 for any round not fired backing away.
   - A round whose command (property `0x20`) is already non-zero at spawn gets
     `SetTangAccel` with it too. No such round was found.
 - **Target:** the gun's target, through the round's interface `0x204` slot 16
@@ -1442,40 +1455,73 @@ before, lies at the origin's height and clears with it, at 106 m. The bunker's
 origin is under the lip of the plateau it is sunk into, and a line to it
 grazes the ground all the way in; the deflector stands on the roof, and the
 line to it clears as the raider tops a rise 423 m off and stays clear from
-there. **That accounts for the recording's launch from afar**: "Let's Play -
-Parkan: Iron Strategy, Part 6" (-yNnsqudMzw) has the raider 345 m off at 13:49.5
-with its missile in the air and 292 m off as it strikes at 13:54.2, which at the
-missile's 45 m/s, the raider closing at a steady 11.3 m/s, puts the launch 365
-to 390 m off (*derived*, with and without the raider's own speed added to the
-missile's). openparkan's raider, following all of the
-above, launches its first two about 416 m off, and the line
-at its first clearing passes the rise by about 0.2 m and the two launchers
-hang 1.7 m either side of the turret it is asked from, so a missile of the
-first pair may meet the rise 67 m ahead; on which side, in a run of it, turns on
-a metre or two of the raider's way. Whether the game's raider loses one the
-same way the recording does not show.
+there. **That accounts for the recording's launch from afar.**
 
-**What sets the launch** (*measured*, in that run; the free fire is *read*). Not the
-aiming score and not the round's range. The raider is in an attack, so its factors
-are free once its line is clear, and the launcher's gate has opened long before, at
-its value 8 of 500 m: the 7 s lock starts 498 m off and runs out **437 m** off, and
-the round would leave at once for all the range and the free fire have to say. What
-holds it is:
+**What the recording has of the raid** (*seen*, "Let's Play - Parkan: Iron Strategy,
+Part 6", -yNnsqudMzw, 13:40–13:54). The player is in the Small Bunker's manual
+control, so the target panel's range is the raider's distance from the bunker, and its
+sight is on the raider from 823 s on:
 
-1. the **lock's end at 437 m**, the moment the score first passes, which asks each
-   launcher's timer: each sets a wait of 0.5 to 2 s, and these two run 1.49 and 1.63 s;
-2. the **line clearing at 425 to 423 m**, which it must by the time the wait runs out,
-   else the wait is spent and another set (the timer is asked before the line, above);
-3. the **half second of its stroke**, the round appearing 416 m off.
+| time, s | 820 | 821 | 822 | 823 | 824 | 825 | 826 | 829 | 830 | 831 | 832 | 833 |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| m | 457 | 445 | 434 | 423 | 412 | 398 | 384 | 345 | 334 | 320 | 306 | 292 |
 
-So the read allows a launch from about 420 m, a wait that runs out on the clearing,
-out to 397 m: a first wait gone just before the clearing and 2 s more, which the
-raider covers at 11 m/s with the stroke's half second. The recording's 365 to 390 m
-lies 7 to 32 m beyond that, and what is left is not the fight module's unless the
-game's lock started later than 498 m. A relink would do that: any change of the pair
-puts the lock back (`0x1002a160`), and in the recording the raider passes the hero on
-its way, where openparkan's raider holds the building from the first pick. That is
-not established.
+- **The raider closes at 11 to 14 m/s**, 12.7 over the 13 s, not the steady 11.3 this page
+  once took from two of those figures.
+- **A pair leaves at 824.5 s**, with the raider about **405 m** off: at 10 frames a second, one
+  orange light beside the raider's marker at 824.5 s and two from 824.6 s, drawing away from it
+  as it walks, a yellow frame on them from 826.25 s, and by 829 s one ball with a grey trail.
+- **It strikes at 834.2 s**, the raider about **290 m** off, and the mission fails. So 405 m
+  took 9.7 s, 42 m/s: **45 m/s and no more**, and nothing like the 57 m/s the raider's own speed
+  would add ([The round's start](#the-rounds-start)).
+- **Nothing meets the rise.** A winged SSM's strike whites out the frame. The three flashes on
+  the raider's marker in those 11 s (825.3, 832.3 and 833.0 s) follow the bunker's own guns'
+  blue flares and carry its marker with them, so they are the player's hits; none stands between the raider
+  and the view, and nothing else flashes.
+- **Before 823 s** the sight is elsewhere and the panel on an animal, so a launch from behind
+  the rise is not excluded by this alone; the line does exclude it, which clears 423 m off.
+
+So the 365 to 390 m this page and the queue carried was *derived* from the strike with the
+raider's speed wrong and the missile's wrong, and the launch is 405 m. This is one raid. A scan
+of Part 6's and Part 6.5's key frames for the panel's red "Dangerous!" every 4 s finds no second
+one, but it is a weak search: of this raid's 14 s it catches none (its one hit near, 812 s, is
+before the panel holds the raider), and every other hit is a command screen or a red sky. So a
+first pair lost to the rise is not *seen*, and not excluded in a game's other draws.
+
+**What sets the launch** (*measured*; the free fire is *read*). Not the aiming score and not
+the round's range. The raider is in an attack, so its factors are free once its line is clear,
+and the launcher's gate has opened long before, at its value 8 of 500 m. What holds it is:
+
+1. the **7 s lock**, from 498 m to about 437 m in openparkan's run, the moment the score first
+   passes, which asks each launcher's timer: each sets a wait of 0.5 to 2 s;
+2. the **line clearing at 425 to 423 m**, which it must by the time the wait runs out, else
+   the wait is spent and another set (the timer is asked before the line, above);
+3. the **half second of the stroke**.
+
+So the read puts the launch where those waits fall, and the stream decides it. Over 32 draws of
+the behaviour's stream in openparkan, each launch of the first pair measured at C03 M02, **the
+first leaves 396 to 433 m off, a median of 415**, which has the recording's 405 in it:
+
+| of 32 | first leaves | of the first pair falling short | strikes with the raider |
+|---:|---|---|---|
+| 29 | 396 to 421 m | 0 | 272 to 293 m |
+| 3 | 431 to 433 m | 2 | 253 to 307 m, off the second pair |
+
+Three draws launch before the line to the roof has cleared the rise for a muzzle, 1.7 m aside and lower
+than the turret it is asked from. That a game's draw can do it is what the read says; the one
+raid watched did not.
+
+**The first pair and the raider's speed** (*measured*). A launch used to take the raider's
+velocity with it, and it swings as it tops the rise: 3 m/s across instead of the 10 of its aim, at
+one launch here. That skew and the extra 12 m/s took the first pair into the rise on 16 of 24
+draws, 12 of them losing one missile and 4 both, and the strike moved 60 m with it. Holding the round to its top
+speed leaves 3 of 32.
+
+**The second pair** (*read*). The launcher's interval is 13,000 ms and its stroke 667 ms
+(`e_gun_ml_18`), and the lock, put back as the stroke starts, runs out first, at 7 s: so the next
+pair leaves 13.7 s after the first, 180 to 190 m on, about 240 m off. By then the attack's next
+point, a random place inside the building's sphere every 8 to 16 s, may have the raider walking
+away, which is why a strike off the second pair can read further off than its launch.
 
 ### The lead is the turret's fastest gun — *read*, and *measured*
 
@@ -1719,12 +1765,13 @@ assembled nowhere, so "in the tree" and "assembled" are detected apart.
     the flags word's `0x80`, which 0 of the 275882 faces carry, and **the 20 m
     exception never fires on shipped ground**; the same scan finds 6102 with
     `0x2000`. openparkan asks a mesh's triangle flags only, and has it right;
-  - the 25 to 50 m between openparkan's first launch on C03 M02, 414 m off, and
-    the recording's, 365 to 390 m (*derived*): **narrowed**. It is the lock's end
-    and the line, not the free fire or the aiming score; the read's own reach runs
-    out to 397 m, 7 to 32 m short of the recording, and a later start of the lock
-    would cover those
-    ([What sets the launch](#the-line-every-gun-waits-on--read-and-measured)).
+  - ~~the 25 to 50 m between openparkan's first launch on C03 M02, 414 m off, and
+    the recording's, 365 to 390 m (*derived*)~~ — **there were none**. *Seen*, the pair
+    leaves about 405 m off and strikes 9.7 s later, the raider about 290 m off; the
+    derivation had the missile's speed and the raider's wrong. The read's launch is
+    spread by its waits, 396 to 433 m over 32 draws, and a strike lands 272 to 293 m off on 29 of
+    them, once a round is held to its top speed
+    ([What the recording has of the raid](#the-line-every-gun-waits-on--read-and-measured)).
 - ~~The turret's property `0xf00` (`Control.dll:0x10028bb0`), the share of its aim
   the turret factor's *θ* takes at stage 1, and the gun's report codes 2 to 8:
   openparkan stands a settled turret and a run-out lock in for them~~ — **read**:
