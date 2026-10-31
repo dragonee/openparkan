@@ -194,7 +194,10 @@ produces over what all of its consumers want.
 
 ## Research — *read*
 
-`M_Task_Research::OnBehaviourTakt` (`Behavior.dll:0x1002f730`) runs each tick.
+`M_Task_Research::OnBehaviourTakt` (`Behavior.dll:0x1002f730`) runs on the
+building's takt, every 64 to 127 ms
+([16-research.md](16-research.md#how-often-a-buildings-takt-runs--read)), and so
+does every other task a building runs.
 
 - **A research has three budgets** — ore and power, from the item's research
   costs in the `.trf`, and time — and the task computes **the smallest of its
@@ -206,9 +209,13 @@ produces over what all of its consumers want.
   `FreeTechnoNum` is above zero, starting a research decrements it and sets the
   ore and power budgets to zero.
 - **It draws `KPD × Use_Ore × dt` ore and `KPD × Use_Power × dt` power** each
-  tick, the ore capped by the institute's own buffer, and then requests the ore
-  still missing — half of it while more than 5 remains. `KPD` is logged by that
-  name: Russian *КПД*, efficiency.
+  takt, the ore capped by what the ore property holds, and then writes 0 over
+  that property and requests the ore still missing — half of it while more than 5
+  remains. So the property holds what the last step brought and **a takt's take
+  is all of it that research ever sees**: 0.44 × `KPD` × `Use_Ore` a second at the
+  most, and the clan pays for the rest
+  ([16-research.md](16-research.md#the-ore-a-centre-takes--read)). `KPD` is logged
+  by that name: Russian *КПД*, efficiency.
 - **`KPD` is the building's efficiency**, below. `0x100198e0` totals property
   `0xe00` over one list of the building's components; `0x10019880`, the
   `SetPowerUsage` call, writes property `0x500` on each of them.
@@ -241,8 +248,9 @@ research centre** — the enhanced one in `CAMPAIGN.00/Mission.04`, with 5.
 `FreeConstructionTime` leaves 5 on 10 objects, every one a factory that grants
 bots, and `FreeResearchTime` leaves 2 only on that same research centre. So a
 research takes at least two seconds on every map but one, and what sets its
-pace is ore and power: the ore fraction grows at `KPD × Use_Ore × dt` over the
-ore cost, the power fraction likewise.
+pace is ore and power: the ore fraction grows by what one takt in each
+distribution step takes, `KPD × Use_Ore × dt` at the most, over the ore cost, and
+the power fraction by `KPD × Use_Power × dt` every takt.
 
 `FreeConstructionTime`, by its values, is meant for the free bots, but no
 instruction reads `+0x9f0` — a search by displacement, not a proof.
@@ -1075,7 +1083,9 @@ starts digging about 41 s later, and the sphere lasts 41 s.
 - **A mine or a storage offers** `min(held, dt × KPD × Transfer_Ore_OffBoard)`
   (`0x1001a8c6`). That is **1 a second** on a small mine and on a small storage.
 - **Every other building asks** for its ore property's maximum less what it
-  now holds (`0x1001a1af`), or nothing when that is under 0.01.
+  now holds (`0x1001a1af`). When that is under 0.01 it asks for nothing and the
+  property is set straight to its maximum, from no holder (`0x1001a26b`): the
+  last hundredth of a research, whose request is all that is missing.
 - **The ore is shared out** as the step's two-tier formula above.
 
 **The construction task** keeps the factory's side of it
@@ -1095,6 +1105,12 @@ A request is at least 0.07 a takt and, early in a build, about 5. So in Mission
 
 The warehouse doubles the flow as well as buffering it, which is T03_H01's
 *"your Factory's production … will be limited by the Mine's parameters"*.
+
+A takt here is the building's, every 64 to 127 ms
+([16-research.md](16-research.md#how-often-a-buildings-takt-runs--read)), so two
+or three fall in a step, and the ones with nothing to take ask again for what
+they asked before. The request has no dt in it, so the pace does not turn on how
+often they come.
 
 ### A transport's round — *read*, and *seen*
 

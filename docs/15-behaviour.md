@@ -1037,7 +1037,11 @@ what the clan's research centres research from
 
 *Measured*: 2 of the 58 scripts call 41, `c4m2e2` and `scream`, each from
 `PBM_MAKE_RESEARCH_Start`. In the other seven that build by name the bytes are
-what the mission's tree ships, for the whole mission.
+what the mission's tree ships, for the whole mission. What the two come to, design
+by design, is in
+[16-research.md](16-research.md#what-function-41-does-for-a-clan--read-and-measured):
+`Enm2` of C04 M02 from 43 of the 77 records to 50, for 247.5 ore; `scream`'s clans
+from 9 to 16, for 30.
 
 **Function 65** asks the store whether the clan may build a design of a medium
 chassis or larger whose gun total is 105,000 or more (`0x100111d0`, the float

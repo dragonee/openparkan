@@ -375,14 +375,44 @@ pub fn researched(catalogue: &crate::designs::Catalogue, parts: &[String]) -> bo
     parts.iter().all(|p| catalogue.item(p).is_some_and(|i| i.in_tree() && i.available() && i.researched()))
 }
 
+/// The store's files, in the order the game's own listing of the directory gave them on this
+/// install -- `preload.lda` keeps it -- which is the names' order with their letters in upper
+/// case, `23sfly1e` ahead of `23_cpt1`.
+fn store_files(game: &Path) -> Result<Vec<String>> {
+    let dir = gamedir::resolve(game, AI_DIR).context("no UNITS\\UNITS\\AI")?;
+    let mut names: Vec<String> = std::fs::read_dir(&dir)?
+        .filter_map(|e| e.ok().map(|e| e.file_name().to_string_lossy().into_owned()))
+        .filter(|n| n.to_ascii_lowercase().ends_with(".dat"))
+        .collect();
+    names.sort_by_key(|n| n.to_ascii_uppercase());
+    Ok(names)
+}
+
+/// The store's records as a clan's research reads them: every part of every scheme, against
+/// the item of `tree` that researches it. Every record the store's fill makes is in it, a
+/// builder, a transport and a building as much as a warrior (`ai.dll:0x10010f90` walks them
+/// all). A scheme that will not parse has no record here.
+pub fn book(game: &Path, tree: &parkan_formats::research::Tree) -> Result<parkan_sim::research::Book> {
+    let mut records = Vec::new();
+    for name in store_files(game)? {
+        let path = format!("{AI_DIR}{name}");
+        let Some(unit) = gamedir::resolve(game, &path)
+            .and_then(|file| std::fs::read(file).ok())
+            .and_then(|data| objects::parse_unit(&data, &path).ok())
+        else {
+            continue;
+        };
+        let items =
+            unit.components.iter().map(|c| tree.item_for(&c.reference.member).map(|i| i.index)).collect();
+        records.push(parkan_sim::research::Record { file: path, items, may_build: false });
+    }
+    Ok(parkan_sim::research::Book { records, cursor: 0, everything: false })
+}
+
 impl Store {
     /// Load the store for a clan whose tree is `catalogue`, the factory's size setting the
     /// designer's grade: function 43 (`ai.dll:0x1000d54a`), which fills the records and then
-    /// marks the ones the clan may build.
-    ///
-    /// The records stand in the order the game's own listing of the directory gave them on
-    /// this install -- `preload.lda` keeps it -- which is the names' order with their letters
-    /// in upper case, `23sfly1e` ahead of `23_cpt1`. Equal scores keep it.
+    /// marks the ones the clan may build. Equal scores keep the records' order.
     ///
     /// A record's Type is the file's own class word, which is what the object built from it
     /// answers (`IGameObject` slot 14, `0x10010d67`), not the Type a designer would derive.
@@ -394,14 +424,8 @@ impl Store {
     ) -> Result<Store> {
         let strings = crate::resources::game_strings(game).unwrap_or_default();
         let mut designer = Designer::new(game, catalogue, grade);
-        let dir = gamedir::resolve(game, AI_DIR).context("no UNITS\\UNITS\\AI")?;
-        let mut names: Vec<String> = std::fs::read_dir(&dir)?
-            .filter_map(|e| e.ok().map(|e| e.file_name().to_string_lossy().into_owned()))
-            .filter(|n| n.to_ascii_lowercase().ends_with(".dat"))
-            .collect();
-        names.sort_by_key(|n| n.to_ascii_uppercase());
         let mut designs = Vec::new();
-        for name in names {
+        for name in store_files(game)? {
             let path = format!("{AI_DIR}{name}");
             let Some(unit) = gamedir::resolve(game, &path)
                 .and_then(|file| std::fs::read(file).ok())
@@ -438,6 +462,15 @@ impl Store {
     pub fn refresh(&mut self, catalogue: &crate::designs::Catalogue) {
         for d in self.designs.iter_mut().filter(|d| !d.researched) {
             d.researched = researched(catalogue, &d.parts);
+        }
+    }
+
+    /// The bytes as the clan's own [`Book`](parkan_sim::research::Book) last marked them. This
+    /// store is filled on the clan's first build order, the book as function 43 runs, and a
+    /// tree that has moved on since function 41 last ran is not read until it runs again.
+    pub fn mark(&mut self, book: &parkan_sim::research::Book) {
+        for d in &mut self.designs {
+            d.researched = book.may_build(&d.project.path);
         }
     }
 

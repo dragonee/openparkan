@@ -1756,11 +1756,13 @@ fn mission_04s_research_centre_opens_its_screen_and_researches_the_large_battle_
     play_for(&mut play, 2.0, |_| {});
     let progress =
         |play: &parkan_world::play::Play| play.research.clan(player).unwrap().state.progress[turret];
-    assert!((progress(&play) - 0.4).abs() < 0.01, "{}", progress(&play));
+    // Behind the clock by the building's takt at most, 127 ms of the 5 s (docs/16).
+    let kept = progress(&play);
+    assert!((0.37..=0.401).contains(&kept), "{kept}");
     cockpit.commander.research.click(&mut play, [70.0, 188.0]);
     assert!(!play.research_queued(turret));
     play_for(&mut play, 1.0, |_| {});
-    assert!((progress(&play) - 0.4).abs() < 0.01, "a cancel keeps the progress: {}", progress(&play));
+    assert_eq!(progress(&play), kept, "a cancel keeps the progress");
     let c = play.research.centres.iter().position(|c| c.target == centre).unwrap();
     assert_eq!(play.research.centres[c].grants.free_technologies, 4);
 
@@ -1772,7 +1774,10 @@ fn mission_04s_research_centre_opens_its_screen_and_researches_the_large_battle_
         play_for(&mut play, 1.0 / 60.0, |_| {});
         ticks += 1;
     }
-    assert!((ticks as f32 / 60.0 - 3.0).abs() < 0.05, "done after {ticks} ticks");
+    // The rest of the 5 s, to the first of the building's takts past it.
+    let rest = 5.0 * (1.0 - kept);
+    let took = ticks as f32 / 60.0;
+    assert!((rest - 0.01..rest + 0.15).contains(&took), "done after {took} s, of {rest} s");
     assert_eq!(play.research.centres[c].grants.free_technologies, 3);
     assert!(play.research.clan(player).unwrap().state.researched(turret));
     assert!(

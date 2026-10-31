@@ -36,6 +36,8 @@ pub struct Centre {
     pub grants: Grants,
     pub orders: Vec<usize>,
     pub task: Option<Task>,
+    /// The clock its task last read, `+0x50`: stamped as it starts and at each takt.
+    pub started_ms: f64,
 }
 
 /// What research keeps.
@@ -89,7 +91,7 @@ impl Research {
                 if let Some(s) = grant(FREE_RESEARCH_TIME) {
                     grants.free_time = s;
                 }
-                Centre { target: t, grants, orders: Vec::new(), task: None }
+                Centre { target: t, grants, orders: Vec::new(), task: None, started_ms: 0.0 }
             })
             .collect();
         Research { trees, full, centres, reported: 0, version: 0 }
@@ -133,7 +135,13 @@ impl Play {
             {
                 continue;
             }
-            let centre = Centre { target: t, grants: Grants::default(), orders: Vec::new(), task: None };
+            let centre = Centre {
+                target: t,
+                grants: Grants::default(),
+                orders: Vec::new(),
+                task: None,
+                started_ms: 0.0,
+            };
             self.research.centres.push(centre);
         }
     }
@@ -203,28 +211,59 @@ impl Play {
         }
     }
 
+    /// A task's end and its stop (`0x1002f400`): the ore property to 0 of 0, what it held with
+    /// it, and no power use.
     fn stop_research_draw(&mut self, t: usize) {
         if let Some(site) = self.economy.site_mut(t) {
             site.usage = 0.0;
         }
-        let held = self.economy.held(t);
-        self.economy.ore.insert(t, (held, 0.0));
+        self.economy.ore.insert(t, (0.0, 0.0));
     }
 
-    /// Every research centre's takt for this tick (`0x1002f730`): the first order's task runs
-    /// against its clan's tree, drawing `Use_Power` while it works and asking the distribution
-    /// for its ore; a task that is over ends its order and the next starts.
-    ///
-    /// STAND-IN: docs/16-research.md#not-established -- how often a building's takt runs is
-    /// not read: every tick.
-    pub fn tick_research(&mut self, dt_ms: f64) {
-        let dt = (dt_ms / 1000.0) as f32;
+    /// A clan's function 41 at the research centre that is target `t`: order 16 for the store's
+    /// record `record`, replacing what the centre had (`ai.dll:0x100111a1`), with the parts the
+    /// design still lacks as the task's list (`Behavior.dll:0x10023790`). With nothing to list
+    /// the game's task ends at its first takt, so here there is none.
+    pub(crate) fn order_design_research(&mut self, t: usize, record: usize) {
+        let Some(clan) = self.units.get(t).and_then(|u| u.clan) else { return };
+        let list = self
+            .progression
+            .as_ref()
+            .and_then(|p| p.desk(clan))
+            .map_or_else(Vec::new, |d| d.book.technologies(record, &d.state));
+        self.join_centres();
+        let Some(c) = self.research.centres.iter().position(|c| c.target == t) else { return };
+        while !self.research.centres[c].orders.is_empty() {
+            self.abort_research(c, 0);
+        }
+        let Some(&first) = list.first() else { return };
+        let now = self.hero.time_ms;
+        let centre = &mut self.research.centres[c];
+        centre.orders.push(first);
+        centre.task = Some(Task::with_list(list));
+        centre.started_ms = now;
+    }
+
+    /// Every research centre's order for this tick: a first order with no task yet starts one,
+    /// which stamps the clock (`0x1002f710`), and on the building's takt (`0x100054fd`) the task
+    /// runs (`0x1002f730`) over the time since against its clan's tree, drawing `Use_Power`
+    /// while it works and asking the distribution for its ore; a task that is over ends its
+    /// order and the next starts.
+    pub fn tick_research(&mut self, now: f64) {
         self.join_centres();
         for c in 0..self.research.centres.len() {
             let t = self.research.centres[c].target;
             let alive = self.battle.combat.targets.get(t).is_some_and(|x| x.alive);
             let Some(clan) = self.units.get(t).and_then(|u| u.clan).filter(|_| alive) else { continue };
             let Some(&item) = self.research.centres[c].orders.first() else { continue };
+            let centre = &mut self.research.centres[c];
+            if centre.task.is_none() {
+                centre.task = Some(Task::new(item));
+                centre.started_ms = now;
+            }
+            if self.economy.site(t).is_some_and(|s| !s.takt_due) {
+                continue;
+            }
             let rates = self.economy.site(t).map_or(Rates { kpd: 1.0, use_ore: 0.0, use_power: 0.0 }, |s| {
                 Rates { kpd: s.kpd(), use_ore: s.use_ore, use_power: s.use_power }
             });
@@ -234,7 +273,9 @@ impl Play {
                 continue;
             };
             let centre = &mut centres[c];
-            let task = centre.task.get_or_insert_with(|| Task::new(item));
+            let dt = ((now - centre.started_ms) / 1000.0) as f32;
+            centre.started_ms = now;
+            let Some(task) = centre.task.as_mut() else { continue };
             let takt = task.takt(&mut tree.state, &mut centre.grants, rates, dt, &mut held);
             let request = task.request;
             match takt {
@@ -263,6 +304,29 @@ impl Play {
     fn researched_changed(&mut self) {
         self.commander.researched = None;
         self.construction.costs.clear();
+    }
+
+    /// Hand each clan's research desk its tree as it now stands, which function 41 walks. A tree
+    /// moves only as a research completes.
+    pub(crate) fn sync_desks(&mut self) {
+        let Some(p) = self.progression.as_mut() else { return };
+        if p.desks_version == self.research.version {
+            return;
+        }
+        p.desks_version = self.research.version;
+        for clan in 0..self.research.trees.len() as i64 {
+            if let Some(tree) = self.research.clan(clan) {
+                p.set_tree(clan, &tree.state);
+            }
+        }
+    }
+
+    /// A centre's order, as the clan's takt asks whether it has nothing doing (docs/16, "When the
+    /// clan asks again"): its order list is the queue here, headed by a technology's or a
+    /// design's research, neither of which reads as idle.
+    pub(crate) fn centre_order(&self, t: usize) -> Option<i32> {
+        let busy = self.research.centres.iter().any(|c| c.target == t && !c.orders.is_empty());
+        busy.then_some(parkan_sim::research::ORDER_RESEARCH_DESIGN)
     }
 
     /// The game loop's check of the queued research (`iron3d.dll:0x10089a50`): each order 14 at

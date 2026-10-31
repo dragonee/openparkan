@@ -6,6 +6,10 @@ use parkan_formats::research::{AVAILABLE, IN_TREE, RESEARCHED, Tree};
 
 /// `ORDER_ROBOT_RESEARCH`: a technology on a research centre's queue (docs/31).
 pub const ORDER_RESEARCH: i32 = 14;
+/// Order 16, which `varset.var` does not declare: research what a design still lacks, by its
+/// `.dat`'s name, from a clan's function 41 (`ai.dll:0x10011147`, docs/16, "What an AI clan's
+/// tree gates").
+pub const ORDER_RESEARCH_DESIGN: i32 = 16;
 /// A research completes once its stored progress is within this of 1 (`0x1002fe16`).
 pub const DONE: f32 = 0.001;
 /// `FreeResearchTime` before a mission sets it (`Behavior.dll:0x10003a3c`, docs/23).
@@ -208,13 +212,19 @@ impl Task {
         Task { list: vec![item], current: None, request: 0.0 }
     }
 
+    /// The technologies an order 16 names, in the order it lists them (`SetTarget` with target
+    /// `0x205`, `Behavior.dll:0x10023790`).
+    pub fn with_list(list: Vec<usize>) -> Task {
+        Task { list, current: None, request: 0.0 }
+    }
+
     /// One takt of `dt` seconds (`0x1002f730`) against clan tree `state`, with the centre's
-    /// `grants` and `rates`, and the ore it holds `held`, from which it takes.
+    /// `grants` and `rates`, and `held` the centre's ore property.
     ///
-    /// STAND-IN: docs/16-research.md#not-established -- whether property `0x2000100`'s get is
-    /// the ore the centre holds or what the distribution delivered is not read: the take comes
-    /// out of what the economy says it holds, and the request is what it asks the next step for,
-    /// as a factory's build does.
+    /// What the property holds is what the distribution has brought it since its last takt, for
+    /// every takt writes 0 over it with the request as its most (`0x1002fc27`): the take reads
+    /// it and the rest is gone. Starting a technology (`0x1002f98d`) and ending the task
+    /// (`0x1002fa6d`) zero it too.
     pub fn takt(
         &mut self,
         state: &mut State,
@@ -228,6 +238,7 @@ impl Task {
             let Some(item) = self.list.iter().copied().find(|&i| !state.researched(i) && state.available(i))
             else {
                 self.request = 0.0;
+                *held = 0.0;
                 return Takt::Over;
             };
             let [power, ore] = if grants.free_technologies > 0 {
@@ -238,6 +249,7 @@ impl Task {
             };
             self.current = Some(Budget { item, cost: [grants.free_time, ore, power], got: [0.0; 3] });
             self.request = ore;
+            *held = 0.0;
         }
         let Some(mut budget) = self.current else { return Takt::Over };
         // Already researched, by another centre say: dropped (`"allready researched"`).
@@ -247,7 +259,7 @@ impl Task {
         }
         let old = budget.fraction();
         let take = (rates.kpd * rates.use_ore * dt).min(held.max(0.0));
-        *held -= take;
+        *held = 0.0;
         budget.got[1] += take;
         let missing = budget.cost[1] - budget.got[1];
         self.request = if missing <= 0.0 {
@@ -274,6 +286,97 @@ impl Task {
             return Takt::Researched(researched);
         }
         Takt::Working { request: self.request }
+    }
+}
+
+/// Whether every part of a design passes `test`; a part the tree does not list passes nothing
+/// (`IResearch` slot 2's −1, `ai.dll:0x1001161e`, `0x10011568`).
+fn every(items: &[Option<usize>], test: impl Fn(usize) -> bool) -> bool {
+    items.iter().all(|i| i.is_some_and(&test))
+}
+
+/// One record of a clan's design store as its research reads it: the scheme's file, the item
+/// each of its parts is researched by (`None`, a part the tree does not list), and the byte at
+/// `+0x104`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Record {
+    pub file: String,
+    pub items: Vec<Option<usize>>,
+    pub may_build: bool,
+}
+
+/// A clan's design store's research (`ai.dll:0x10010f90`, `0x10011100`, docs/15, "The byte at
+/// `+0x104` is the clan's research"): the records, the index at `+0xc`, which is the design it
+/// researches next, and the byte at `+0x25`, which says nothing is left to research.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Book {
+    pub records: Vec<Record>,
+    pub cursor: usize,
+    pub everything: bool,
+}
+
+/// What no design costs (`0x10010fca`, `0x4b18967f`): the walk's first best price.
+const NO_PRICE: f32 = 9_999_999.0;
+
+impl Book {
+    /// The walk (`0x10010f90`). A record whose byte is set is passed over: once allowed, always
+    /// allowed. For any other, a part out of the tree or not yet available leaves its byte
+    /// clear and is done with; the byte becomes whether every part is researched; and of the
+    /// designs left open the cheapest, first of an equal pair, goes to `+0xc`
+    /// (`0x100110a0`-`0x100110c3`). With none open `+0xc` keeps what it had.
+    pub fn refresh(&mut self, state: &State) {
+        self.everything = true;
+        let mut best = NO_PRICE;
+        for (i, r) in self.records.iter_mut().enumerate() {
+            if r.may_build {
+                continue;
+            }
+            self.everything = false;
+            if !every(&r.items, |p| state.available(p) && state.in_tree(p)) {
+                continue;
+            }
+            r.may_build = every(&r.items, |p| state.researched(p) && state.in_tree(p));
+            let price = Self::price(&r.items, state);
+            if price < best && !r.may_build {
+                best = price;
+                self.cursor = i;
+            }
+        }
+    }
+
+    /// `ArealMap.dll:CalcFullResearchCost` (`0x10016280`) as the walk reads it, its first
+    /// answer: the research ore of each part not researched, a part counted once. Every part
+    /// of a design the walk prices is available, so no parent enters it (`0x10016644`).
+    fn price(items: &[Option<usize>], state: &State) -> f32 {
+        Self::missing(items, state).into_iter().map(|i| state.cost(i)[1]).sum()
+    }
+
+    fn missing(items: &[Option<usize>], state: &State) -> Vec<usize> {
+        let mut out: Vec<usize> = Vec::new();
+        for i in items.iter().flatten().copied() {
+            if !state.researched(i) && !out.contains(&i) {
+                out.push(i);
+            }
+        }
+        out
+    }
+
+    /// The record function 41 orders researched (`0x10011100`), the one at `+0xc`, unless its
+    /// byte is set: then there is no order.
+    pub fn next(&self) -> Option<usize> {
+        self.records.get(self.cursor).filter(|r| !r.may_build).map(|_| self.cursor)
+    }
+
+    /// What an order 16 for record `record` lists (`Behavior.dll:0x10023790`): each part not
+    /// researched, in the scheme's order, once. It would add a part's unresearched parents
+    /// (`0x100235e0`), and a design the walk chooses has none.
+    pub fn technologies(&self, record: usize, state: &State) -> Vec<usize> {
+        self.records.get(record).map_or_else(Vec::new, |r| Self::missing(&r.items, state))
+    }
+
+    /// The byte of the record whose file is `file`.
+    pub fn may_build(&self, file: &str) -> bool {
+        self.records.iter().any(|r| r.may_build && r.file.eq_ignore_ascii_case(file))
     }
 }
 
@@ -332,10 +435,15 @@ mod tests {
         let mut grants = Grants::default();
         let rates = Rates { kpd: 7.0, use_ore: 1.0, use_power: 3.0 };
         let mut task = Task::new(1);
-        // One second with 100 ore held: time 1 of 2, power 21 of 12, ore 7 of 35.
+        // The first takt starts the technology, which zeroes the property: nothing to take.
+        let mut held = 100.0;
+        let takt = task.takt(&mut s, &mut grants, rates, 0.0, &mut held);
+        assert_eq!(held, 0.0, "`0x1002f98d`");
+        assert_eq!(takt, Takt::Working { request: 17.5 }, "35 missing, halved");
+        // One second with 100 ore arrived: time 1 of 2, power 21 of 12, ore 7 of 35.
         let mut held = 100.0;
         let takt = task.takt(&mut s, &mut grants, rates, 1.0, &mut held);
-        assert!((held - 93.0).abs() < 1e-4, "{held}");
+        assert_eq!(held, 0.0, "the takt writes 0 over what it did not take, `0x1002fc27`");
         assert_eq!(takt, Takt::Working { request: 14.0 }, "28 missing, halved");
         assert!((s.progress[1] - 0.2).abs() < 1e-6, "the ore's 7/35: {}", s.progress[1]);
         // With no ore the time and power run on and progress holds.
@@ -347,12 +455,95 @@ mod tests {
         task.takt(&mut s, &mut grants, rates, 1.0, &mut three);
         assert_eq!(three, 0.0);
         assert!((s.progress[1] - 10.0 / 35.0).abs() < 1e-5);
-        let mut plenty = 1000.0;
         let mut last = Takt::Over;
         for _ in 0..4 {
+            let mut plenty = 1000.0;
             last = task.takt(&mut s, &mut grants, rates, 1.0, &mut plenty);
         }
         assert_eq!(last, Takt::Researched(vec![1, 2, 3]));
+    }
+
+    /// A step brings a small centre 0.224 ore and the takt after it may take 0.1: the 0.124 is
+    /// burnt, the takts before the next step find nothing, and the clan pays for 0.224 a step
+    /// what research collects at 0.1 (docs/16, "The ore a centre takes").
+    #[test]
+    fn a_step_more_than_a_takt_may_take_is_burnt_and_the_next_takts_find_nothing() {
+        let mut s = chain();
+        let mut grants = Grants::default();
+        let rates = Rates { kpd: 1.0, use_ore: 1.0, use_power: 3.0 };
+        let mut task = Task::new(1);
+        let mut held = 0.0;
+        task.takt(&mut s, &mut grants, rates, 0.1, &mut held);
+        let (mut collected, mut paid) = (0.0, 0.0);
+        for _ in 0..10 {
+            // A distribution step's delivery, and the two takts that fall before the next.
+            held += 0.224;
+            paid += 0.224;
+            task.takt(&mut s, &mut grants, rates, 0.1, &mut held);
+            assert_eq!(held, 0.0);
+            task.takt(&mut s, &mut grants, rates, 0.1, &mut held);
+            collected += 0.1;
+        }
+        let got = task.current.unwrap().got[1];
+        assert!((got - collected).abs() < 1e-4, "{got}, of {paid} paid");
+    }
+
+    /// A book over [`chain`]'s tree: `granted` all researched, `open` needing the priced item 1
+    /// and `waits` the free item 2 behind it, `out` item 4, out of the tree, and `unknown` a
+    /// part the tree does not list.
+    fn book() -> Book {
+        let record = |file: &str, items: &[Option<usize>]| Record {
+            file: file.into(),
+            items: items.to_vec(),
+            may_build: false,
+        };
+        Book {
+            records: vec![
+                record("out", &[Some(0), Some(4)]),
+                record("unknown", &[Some(0), None]),
+                record("waits", &[Some(0), Some(2)]),
+                record("open", &[Some(0), Some(1), Some(1)]),
+                record("granted", &[Some(0)]),
+            ],
+            cursor: 0,
+            everything: false,
+        }
+    }
+
+    #[test]
+    fn a_refresh_marks_what_is_researched_and_points_at_the_cheapest_open_design_and_never_unmarks() {
+        let mut s = chain();
+        let mut b = book();
+        b.refresh(&s);
+        assert!(b.may_build("GRANTED") && !b.may_build("open"), "the file's case is not the key");
+        assert_eq!(b.next(), Some(3), "the open one; out of the tree and waiting are never chosen");
+        assert!(!b.everything);
+        assert_eq!(b.technologies(3, &s), [1], "each part once, and only what is not researched");
+        assert_eq!(Book::price(&b.records[3].items, &s), 35.0, "the research ore, once");
+
+        s.research(1);
+        b.refresh(&s);
+        assert!(b.may_build("open") && b.may_build("waits"), "the free item came with it");
+        // Nothing is open now: `+0xc` keeps the design it had, whose byte is set, so no order.
+        assert_eq!(b.cursor, 3);
+        assert_eq!(b.next(), None);
+        assert!(!b.everything, "`out` and `unknown` will never be researched");
+
+        // A byte once set stands, whatever the tree says of it.
+        s.bits[1] = 4;
+        b.refresh(&s);
+        assert!(b.may_build("open"));
+    }
+
+    #[test]
+    fn a_book_with_nothing_left_says_so_only_at_the_refresh_after_every_byte_is_set() {
+        let s = chain();
+        let granted = Record { file: "granted".into(), items: vec![Some(0)], may_build: false };
+        let mut b = Book { records: vec![granted], cursor: 0, everything: false };
+        b.refresh(&s);
+        assert!(!b.everything, "it was clear as the walk came to it");
+        b.refresh(&s);
+        assert!(b.everything);
     }
 
     #[test]
@@ -360,13 +551,19 @@ mod tests {
         let mut s = chain();
         let mut grants = Grants::default();
         let rates = Rates { kpd: 1.0, use_ore: 100.0, use_power: 100.0 };
-        let mut held = 1000.0;
-        Task::new(1).takt(&mut s, &mut grants, rates, 1.0, &mut held);
-        assert!((s.progress[1] - 0.5).abs() < 1e-6, "time 1 of 2");
+        // A takt to start it, and each after with the ore a step brought.
+        let mut takt = |task: &mut Task, dt: f32| {
+            let mut held = 1000.0;
+            task.takt(&mut s, &mut grants, rates, dt, &mut held)
+        };
+        let mut first = Task::new(1);
+        takt(&mut first, 0.0);
+        takt(&mut first, 1.0);
         let mut again = Task::new(1);
-        let first = again.takt(&mut s, &mut grants, rates, 0.5, &mut held);
-        assert!(matches!(first, Takt::Working { .. }));
-        assert!((s.progress[1] - 0.75).abs() < 1e-6, "{}", s.progress[1]);
-        assert!(matches!(again.takt(&mut s, &mut grants, rates, 0.5, &mut held), Takt::Researched(_)));
+        takt(&mut again, 0.0);
+        let working = takt(&mut again, 0.5);
+        assert!(matches!(working, Takt::Working { .. }));
+        let researched = takt(&mut again, 0.5);
+        assert!(matches!(researched, Takt::Researched(_)), "time 1 of 2, then the half left");
     }
 }

@@ -452,10 +452,12 @@ Each takt (`0x1002f730`):
 4. **Otherwise it accrues.** Take *old* as the smallest of three fractions:
    time collected over the time cost, ore over ore, and power over power. A
    zero cost's fraction is 1. Then:
-   - **Ore.** The take is `KPD × Use_Ore × dt`, held to what the centre holds
-     (property `0x2000100`), and it is added to the ore collected. The request
-     becomes the ore still missing: halved while more than 5 is missing, and 0
-     once none is (`0x1002fbdf`–`0x1002fc27`).
+   - **Ore.** The take is `KPD × Use_Ore × dt`, held to what the ore property
+     (`0x2000100`) holds, and it is added to the ore collected. The property is
+     then written **0**, whatever the take left, with the ore still missing as
+     its most, which is the request: halved while more than 5 is missing, and 0
+     once none is (`0x1002fbdf`–`0x1002fc27`;
+     [below](#the-ore-a-centre-takes--read)).
    - **Power and time.** Power collected grows by `KPD × Use_Power × dt`, and
      time by dt.
    - **Progress.** *new* is the smallest of the three fractions again. The
@@ -465,6 +467,108 @@ Each takt (`0x1002f730`):
      logs *"researched"*. It then completes the technology through the centre
      (`0x1002febf`), sets its progress to 1, and makes −1 current again. It
      returns 1, so the next takt starts the next id in its list, or ends.
+
+### How often a building's takt runs — *read*
+
+**Every 64 to 127 ms, on the first frame past its timer.** The chain, from the
+mission loop down:
+
+1. `iron3d.dll`'s loop calls `stdCalculateGame` (`World3D.dll:0x100139a0`) once a
+   pass, uncapped ([14-controls.md](14-controls.md#a-row-that-stays-down--read)).
+2. That runs the queue's slot 4 (`0x10006bf0`), which sends every object in the
+   registry message 6 with 1 and the clock (`0x10006c6f`).
+3. A building's object hands message 6 on to the agent it wraps
+   (`Terrain.dll:0x10057b55`), and the agent to its behaviour
+   (`AniMesh.dll:0x100013a1`).
+4. The behaviour's message 1 (`Behavior.dll:0x100059f5`) calls its slot 65
+   (`0x10006350`), which, once the behaviour is initialised (flag 2), calls
+   `MBehaviour::takt`, slot 55 (`0x10006386` → `0x10004c40`).
+5. That calls a building's takt, slot 57, for any Type with the top bit
+   (`0x100050a2` → `0x100054a0`), a neutral clan's excepted
+   ([31-packages.md](31-packages.md#which-objects-run-a-behaviour--read)).
+6. **The building's takt tests its timer `+0x930`** (`0x100054d4`), and only when
+   that has run out does it run the repair decision and **the task stack's takt**
+   (`0x100054fd` → `0x10034a30`), which calls the current task's slot 7
+   (`0x10034a56`) — here `M_Task_Research`, a factory's `M_Task_Construct` or a
+   mine's `M_Task_Mine` alike.
+
+The stack's takt has four callers, all in `0x10004c40` and its two takts
+(`0x10004db5`, `0x10005228`, `0x1000526d`, `0x100054fd`), and a building is on
+one of them. Its timer's words are 1 and 1 (`0x10003995`–`0x1000399c`), so when it
+runs out it is set to now + 64 ms + 64 ms × the low byte of a `rand()` ÷ 256
+(`0x1004c550`): **64 to 127 ms**, tested once a frame, restarted from the frame
+that saw it.
+
+**What that bounds.** dt is measured, so no time is lost: the task's clock is
+stamped as it starts (`0x1002f710`), and each takt takes all that has gone by.
+A research's time budget is only ever met late, by less than one gap. With the
+free 5 s, *progress + 0.001* reaches 1 at 4.995 s, so the takt that completes it
+falls between **4.995 s and about 5.12 s** after the order, a frame more at the
+most; and the check that says *"Research complete..."* runs once a pass of the
+game loop ([41-commander.md](41-commander.md#the-research-page-4--read-and-seen)).
+
+*Seen* in `training mission 4 teleport`, frame by frame at the recording's 30 a
+second: the row's button turns to the stop cross at 303.633 s, and the box
+*"Research complete... (Large Battle Turret)"* is up at 308.633 s: **5.00 s, to a
+frame**. That is a check and not a proof: it fits the bound, and a takt every
+frame would fit as well. What separates the two is the ore, next.
+
+### The ore a centre takes — *read*
+
+**Both, because the two are one thing.** Property `0x2000100` is a field of the
+behaviour: slots 18 and 19 (`0x100092c0`, `0x100093e0`) reach a list at `+0x5e8`,
+whose entries keep the value at `+0x14` and the most at `+8`, and the setter
+writes what it is given, unclamped (`0x100269e0`). So the get in the takt
+(`0x1002fbb4`) reads what the centre holds. But *what it holds* is only ever what
+the distribution has brought it since its last takt, because that takt wrote 0
+over it:
+
+| who writes a centre's ore property | at | value | most |
+|---|---|---:|---:|
+| the distribution step, what it was given | `0x1001a8b7` | held + received | — |
+| the same, with less than 0.01 wanted | `0x1001a26b` | its most, from no holder | — |
+| the behaviour's default capacity | `0x100087cb` | 0 | 0 |
+| the task's start of a technology | `0x1002f98d` | 0 | the ore cost |
+| **each takt, after the take** | `0x1002fc27` | **0** | the request |
+| the task's end, *"cannot research more..."* | `0x1002fa6d` | 0 | 0 |
+| the task's stop or destruction | `0x1002f423` | 0 | 0 |
+
+(*Read*, as a search: of the 68 pushes of `0x2000100` in `Behavior.dll`, the
+research task's are five, `0x1002f41d`, `0x1002f987`, `0x1002fa67`, `0x1002fbae`
+and `0x1002fc21`; the distributor's four that a building that holds no ore can
+reach are `0x1001a1af`, `0x1001a265`, `0x1001a870` and `0x1001a8b1`.)
+
+**The control is the factory**, which has the same want and the same 0: its build
+moves `min(request, held)` out and then writes 0 with the request as its most
+(`0x10015540`, `0x1002a604`; [23-economy.md](23-economy.md#ore-reaches-the-factory-at-one-a-second-from-each-holder--read)).
+The two differ in what bounds the take. A factory takes up to what it asked for,
+so nothing is lost. A centre takes up to `KPD × Use_Ore × dt`, and **what is over
+that is burnt**: the 0 is written whether the take emptied the property or not.
+
+**What the two timers make of that** (*derived*). A step comes every 192 to 255
+ms, a takt every 64 to 127, so each step's delivery is met by exactly one takt
+and the takts after it find 0. That takt's gap is what the take is bounded by, and a
+step falling at random lands in a gap of 99 ms on average (the gaps' mean, 95.5,
+plus their variance, 341, over it). So research collects at most
+
+```
+KPD × Use_Ore × 99 ms   each step of 223.5 ms   =   0.443 × KPD × Use_Ore a second
+```
+
+whatever the clan has, and it never sees the rest of what it paid for. Over the
+four grades (`Use_Ore` is 1 on `prof_institute`):
+
+| centre | `KPD` | the most it collects | from one small holder, 1 ore a second | from two, 2 a second |
+|---|---:|---:|---:|---:|
+| small, RC-17 | 1 | 0.44 a second | 0.44, and 0.56 burnt | 0.44, and 1.56 burnt |
+| medium, RC-30 | 3 | 1.33 | 1, none burnt | 1.33, and 0.67 burnt |
+| large, RC-47 | 5 | 2.2 | 1, none burnt | 2, none burnt |
+| enhanced, RC-67 | 7 | 3.1 | 1, none burnt | 2, none burnt |
+
+The request does not stop it: while more than 5 is missing it is half of what is
+missing, far above what a step brings. So a small centre with a mine and a
+warehouse pays about **4.5 ore for each one it collects**, and the 35 ore of a
+Large Battle Turret takes 79 s there however full the warehouse stands.
 
 ### Completing — *read*
 
@@ -497,12 +601,15 @@ is posted by the game loop's check of the queued orders
   rest of its budgets. A free one takes another of the centre's
   `FreeTechnoNum`.
 - **Without ore, only free research finishes.** An ore cost's fraction grows only
-  by what the centre holds, so on a map with no ore a paid technology never
-  completes.
+  by what the distribution brings, so on a map with no ore a paid technology
+  never completes.
 - **What sets the pace.** The time budget is fixed. `KPD` speeds only ore and
   power. Paid at an enhanced centre (`KPD` 7, `Use_Power` 3, `Use_Ore` 1), the
-  Large Battle Turret's 12 energy would take 12 ÷ 21 = 0.57 s and its 35 ore
-  5 s, with the ore on hand, against the default 2 s of time.
+  Large Battle Turret's 12 energy would take 12 ÷ 21 = 0.57 s, against the default
+  2 s of time, and its 35 ore 11 s at the most, the 3.1 a second
+  [above](#the-ore-a-centre-takes--read), and 35 s from one small holder. There is
+  no ore on hand to take at once: a centre holds what the last step brought it.
+  (This line once gave 5 s, `KPD × Use_Ore × dt` with the ore on hand.)
 
 ## What an AI clan's tree gates — *read*, and *measured*
 
@@ -533,9 +640,10 @@ A part the tree does not list at all fails both, slot 2 answering −1.
 research centre order 16 with a design's file name (`ai.dll:0x10011100`), and
 the design is the cheapest of those whose every part is *available* and in the
 tree but not yet all researched, priced by
-`ArealMap.dll:CalcFullResearchCost` (`0x10016280`, not read past its first
-node). A design with a part that is out of the tree, or one that is waiting on
-a prerequisite, is never chosen.
+`ArealMap.dll:CalcFullResearchCost` (`0x10016280`;
+[below](#what-function-41-does-for-a-clan--read-and-measured)). A design with a
+part that is out of the tree, or one that is waiting on a prerequisite, is never
+chosen.
 
 *Measured*, the 59 warrior designs of `UNITS\UNITS\AI\` against the nine trees
 of the clans whose scripts build by name:
@@ -574,6 +682,113 @@ destroyed under it ends the problem at the next takt as well — a critical unit
 lost, and `PBM_MAKE_RESEARCH` is the one code whose problem ends on its units
 gone whatever its drain (`ai.dll:0x100056c8`). The `ACTION_DESTROY` is dead
 weight: a building's shell answers its id for good.
+
+### Who marks an item researched — *read*, as a search
+
+Three things set the researched bit, and no script is one of them:
+
+- **the file**, `TRF1`'s 7s, granted as the mission loads;
+- **a research centre's completion** (`0x10023aa0`), which has two callers, the
+  takt at `0x1002febf` and itself at `0x10023b34`, and asks the tree's slot 7 at
+  `0x10023ac7`;
+- **a save's load**, slot 26 (`MisLoad.dll:0x100035f0`): it ORs the bit into every
+  index the save lists and then calls slot 7 on each (`0x1000365f`, and
+  `0x1000372f` for the other form of the file). Slot 26's one caller is the tree
+  object's own forwarder (`0x1000289f`, through `+0x130`).
+
+**The search.** 414 calls in the install go through `+0x1c`, and slot 7 can be
+reached no other way: the routine's address is in the table at `0x1000e18c` and
+nowhere else. Asked of each by what it calls on:
+- in `Behavior.dll`, 74, of which **one** loads its object from `+0x50`, the
+  behaviour's tree, and that is `0x10023ac7`;
+- in `ai.dll`, 36, on the object lists at `+0x35c`, `+0x3d8` and `+0x3dc`, and none on
+  the store's tree at `+0x20` or the pointer slot 10 hands out. So **no function of
+  the script table marks anything**;
+- in `iron3d.dll`, 116, with none on the player's tree at `0x1010c380`;
+- in `MisLoad.dll`, 4: slot 26's two, and two on the archive a file is read through
+  (`0x10003100`, `0x100041a6`);
+- the 11 in `World3D.dll` that `analysis/slotcalls.py` flags, for sitting in a function
+  that asks for interface `0x502`, are on an object being added, and push three
+  words, a kind of 0, 1 or 2 and a value, where slot 7 takes an index
+  (`0x10007f6e`, `AddObject`).
+
+The same search for slot 3, whose callers are known, finds them
+(`Behavior.dll:0x1002f7ed`, `ai.dll:0x10011629`). The engine loads no save, so of
+the three it has two.
+
+### What function 41 does for a clan — *read*, and *measured*
+
+**The walk** (`ai.dll:0x10010f90`) passes over a record whose byte is set; leaves
+clear one with a part out of the tree or not yet available; sets the byte of one
+whose parts are all researched; and prices the rest. **The price is ore alone**:
+`CalcFullResearchCost` answers two sums and the walk compares the first, `rfOreCost`
+(`ArealMap.dll:0x10016728`, `0x100110a0`), the research ore of each part not
+researched, a part counted once. The cheapest goes to the store's `+0xc`, the first
+of an equal pair; and with none open `+0xc` keeps what it had, which is how the
+clan stops: that record's byte is set by then, so `0x10011145` gives no order and
+function 41 answers 0.
+
+**The order** (`0x10011100`) is order 16, replacing, with target `0x205` and the
+scheme's path. `SetTarget` reads the file itself (`Behavior.dll:0x1002f5c9`) and
+hands the parts to `0x10023790`, which appends each one not researched to the
+task's list, in the scheme's order, once. So the takt researches them one after
+another, each with its own budgets and each taking a `FreeTechnoNum` if the centre
+has one. Nothing but `ACTION_NOTHING_DOING` tells the clan it is over.
+
+**The byte at `+0x25`, function 56**, says the walk found every byte set. It reads
+0 on both trees for good, since 27 records of `c4m2e2`'s are out of the tree and 61
+of `scream`'s wait on a parent no design asks for.
+
+*Measured*, the 77 records in store order against the two trees, each design
+researched whole before the next is priced:
+
+| `c4m2e2`, 43 may be built | ore | energy | what the order lists | what joins |
+|---:|---:|---:|---|---|
+| `32_l2` | 43 | 16 | Large Howitzer | `32_l2`, `AI_L2`, `AI_LT_21` |
+| `AI_LW_31` | 19.5 | 20 | Large Missile Lr | `AI_LW_31` |
+| `AI_LW_21` | 50 | 25 | a Large HQ Turret | `AI_LW_21`, an HQ |
+| `AI_LS_31` | 95 | 55 | a Large HQ Turret, Large Rail Gun | `AI_LS_31`, an HQ |
+| `AI_LT_31` | 40 | 25 | Large Blue Laser | `AI_LT_31`, an HQ |
+| | **247.5** | **141** | | **50 may be built, 27 never** |
+
+| `scream`, 9 may be built | ore | energy | what the order lists | what joins |
+|---:|---:|---:|---|---|
+| `swelbld1` | 5 | 8 | Small Red Laser | `swelbld1`, `sweltrn1`: a builder and a transport |
+| `23sfly1e` | 15 | 10 | Small Flying Chs | `23sfly1e`, `laser_c1`, `speed_c1` |
+| `laser_c2` | 10 | 2.5 | Small engine, with the free Large and Medium engines | `laser_c2`, `speed_c2` |
+| | **30** | **20.5** | | **16 may be built, 61 never** |
+
+`data.trf` reads the same as `scream.trf` on every line, and `c1m3e`, which reads
+it, never calls 41.
+
+**Function 65 stays 0.** None of the four designs with 105,000 of guns and a medium
+or large chassis (`lwing1`, `lwing2`, `mwelssm1`, `mwing1`) is among those 16, so
+`dLargeResearched` never turns on and `scream`'s `dLargeResearched == d1` block is
+dead on the shipped trees (*measured*). `scream` is the one caller.
+
+**Which clans it changes.** The 4 clans that run a script calling 41:
+
+| mission | clan | its centre | ore | from |
+|---|---|---|---|---|
+| C04 M02 | `Enm2`, `c4m2e2` | a small one, placed | a medium mine, no storage | `dTime3` on: 600 s on easy, 150 s on medium, 0 on hard |
+| Single.01 | `Enemy`, `scream` | a small one, placed | a small mine and a small storage | its first takt |
+| Single.02 | `enemy`, `enemy1`, `scream` | none placed | none placed | only once it has built them: a raise of `PBM_BUILDING_NEEDED` |
+
+**What it does to what they build** (*measured*, by the strength formula over the
+game's own floats). `scream` keeps its spread at 0, so its clans always take the
+best of `SELECT_BEST_COMBAT`: `12spd1`, a tiny spider, until the second order's 20
+ore in all, and `23sfly1e`, a Small Flyer, from the refresh after, with `laser_c1`
+and `laser_c2` behind it and the spider fourth. `Enm2`'s best two, all a hard level's
+spread reaches, are `AI_LS_21` and `AI_LT_10`; `32_l2` and `AI_L2` come in behind those
+for the first order's 43 ore, and `AI_LW_31`, worth 14,878, goes to the head for
+the second's 19.5, ahead of `AI_LS_21`. An order for a design does not build it: a
+factory is told at the clan's next want, a free mind permitting.
+
+The raise is at 0.52 and does not come first. The `_Start` pass stops at the first
+handler that will not start
+([15-behaviour.md](15-behaviour.md#the-planner-when-a-_start-runs-and-when-a-_continue--read-and-measured)),
+so a heavier want with no unit to send, `Enm2`'s capture at 0.55 say, keeps the
+research out of it until that want's life runs down: 25 takts, 175 s (*derived*).
 
 ## Mission 04's tree — *measured*, and *seen*
 
@@ -653,9 +868,12 @@ warbot and construct it in the Factory."*
    not researched. It takes a free technology while the centre has one (costs
    0), else the item's research energy and ore. Its time is the centre's
    `FreeResearchTime`. Set the centre's power use to `Use_Power`.
-3. **Each tick:**
+3. **On each of the building's takts, every 64 to 127 ms, with dt the time since
+   the last:**
    - add `min(KPD × Use_Ore × dt, ore held)` ore, `KPD × Use_Power × dt` power
      and dt time;
+   - set the ore held to 0, whatever it was, and ask the next step for the
+     request;
    - progress is the smallest of the three fractions, a zero cost counting as
      1;
    - keep the progress on the item, not on the task.
@@ -668,17 +886,29 @@ warbot and construct it in the Factory."*
 
 ### Not established
 
-- **The ore take.** Whether property `0x2000100`'s get is the centre's ore held
-  or what the distribution step has delivered. The name is
-  [23-economy.md](23-economy.md#research--read)'s reading.
-- **Who else completes a technology.** Only the takt and the routine itself call
+- ~~**The ore take.** Whether property `0x2000100`'s get is the centre's ore held
+  or what the distribution step has delivered.~~ **Read**: both, because each
+  takt writes 0 over the property after its take, so what it holds is what the
+  distribution brought since the last, and what is over the take is burnt: a
+  small centre collects 0.44 ore a second at the most
+  ([The ore a centre takes](#the-ore-a-centre-takes--read)).
+- ~~**Who else completes a technology.** Only the takt and the routine itself call
   `0x10023aa0` (*read*, as a search). Calls to the tree's slot 7 made through
-  its table, from a script or a save, were not searched.
+  its table, from a script or a save, were not searched.~~ **Read**, as a search:
+  a save's load, and nothing else
+  ([Who marks an item researched](#who-marks-an-item-researched--read-as-a-search)).
 - **What happens to a research when its centre is captured, upgraded or
   destroyed** mid-way. Not followed, on the task's side. On the plan's, an AI
   clan's `PBM_MAKE_RESEARCH` lets go of a centre it has lost at its next takt
   ([What an AI clan's tree gates](#what-an-ai-clans-tree-gates--read-and-measured)).
-- **How often a building's takt runs**, which fixes how late the message can be.
+- ~~**How often a building's takt runs**, which fixes how late the message can
+  be.~~ **Read**: on the first frame past a timer of 64 to 127 ms, so the message
+  comes at most about 0.13 s behind a research's time budget
+  ([How often a building's takt runs](#how-often-a-buildings-takt-runs--read)).
+- **What `ArealMap.dll:CalcFullResearchCost` adds for a part that is not yet
+  available**: its parents, through `0x10015fe0`, not followed. A design the
+  store's walk prices has every part available, so the price it reads is the
+  parts' alone.
 
 ## What is not read here
 

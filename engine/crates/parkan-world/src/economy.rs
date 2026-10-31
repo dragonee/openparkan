@@ -95,8 +95,13 @@ pub struct Site {
     /// What the building's repair decision last sent it: every repair system ships switched
     /// off (`Control.dll:0x10022ae0`, docs/26).
     pub repairing: bool,
-    /// When the building's takt next runs its repair decision.
+    /// When the building's takt timer next runs out, and when it last did.
     pub next_takt_ms: f64,
+    pub last_takt_ms: f64,
+    /// Whether it ran out this tick: the building's repair decision and its order's task run
+    /// on it (`Behavior.dll:0x100054d4`), and how long it was since it last did.
+    pub takt_due: bool,
+    pub takt_dt: f32,
 }
 
 impl Site {
@@ -348,6 +353,9 @@ impl Economy {
             repair,
             repairing: false,
             next_takt_ms: now,
+            last_takt_ms: now,
+            takt_due: false,
+            takt_dt: 0.0,
         });
     }
 }
@@ -403,12 +411,11 @@ impl Play {
         }
     }
 
-    /// The economy's tick at `now`, `dt` seconds after the last: every building's repair
-    /// decision and power tick that is due, the mines' takt, and every clan's distribution step
-    /// that is due.
+    /// The economy's tick at `now`, `dt` seconds after the last: every building's takt and power
+    /// tick that is due, the mines' takt, and every clan's distribution step that is due.
     pub fn tick_economy(&mut self, now: f64, dt: f32) {
         self.join_sites();
-        self.decide_repairs(now);
+        self.building_takts(now);
         // A building's power tick (`Control.dll:0x1002d340`): its efficiency component draws
         // 0.01 and its usage a second from its batteries, and KPD's level is what they serve;
         // then, on channel 0, its repair system what [`Repair::want`] says, and its points go to
@@ -444,7 +451,7 @@ impl Play {
                 f.level = site.level;
             }
         }
-        self.tick_mines(dt);
+        self.tick_mines();
         self.tick_transports(dt);
         let clans: BTreeSet<i64> =
             self.economy.sites.iter().filter_map(|s| self.units.get(s.target).and_then(|u| u.clan)).collect();
@@ -460,20 +467,28 @@ impl Play {
     }
 
     /// Each building's takt that is due, on its timer's 64 to 127 ms (`Behavior.dll:0x100054d4`,
-    /// the words 1 and 1 at `+0x930`): its repair decision (`0x10017c70`), a building needing
-    /// service under 90% of its life (docs/26, "What the AI does with the switch"). A neutral
-    /// clan's buildings run no takt (`0x10005070`).
-    fn decide_repairs(&mut self, now: f64) {
+    /// the words 1 and 1 at `+0x930`), which is tested once a frame: its repair decision
+    /// (`0x10017c70`), a building needing service under 90% of its life (docs/26, "What the AI
+    /// does with the switch"), and its order's task (`0x100054fd`, docs/16, "How often a
+    /// building's takt runs"). A neutral clan's buildings run no takt (`0x10005070`).
+    fn building_takts(&mut self, now: f64) {
         for i in 0..self.economy.sites.len() {
-            let site = &self.economy.sites[i];
-            if site.repair.is_none() || now < site.next_takt_ms {
+            self.economy.sites[i].takt_due = false;
+            if now < self.economy.sites[i].next_takt_ms {
                 continue;
             }
-            let t = site.target;
             let wait = TAKT_MS + self.economy.takt_rand.timer_share_ms(1);
-            self.economy.sites[i].next_takt_ms = now + wait;
+            let t = self.economy.sites[i].target;
+            let site = &mut self.economy.sites[i];
+            site.next_takt_ms = now + wait;
+            site.takt_dt = ((now - site.last_takt_ms) / 1000.0) as f32;
+            site.last_takt_ms = now;
             let standing = self.battle.combat.targets.get(t).is_some_and(|x| x.alive);
             if !standing || !self.thinks(self.units.get(t).and_then(|u| u.clan)) {
+                continue;
+            }
+            self.economy.sites[i].takt_due = true;
+            if self.economy.sites[i].repair.is_none() {
                 continue;
             }
             let condition = self.condition(t);
@@ -482,15 +497,16 @@ impl Play {
         }
     }
 
-    /// Every mine's takt of `dt` seconds (`0x1002cf60`): while its order digs, its running total
+    /// Every mine's takt that is due (`0x1002cf60`): while its order digs, its running total
     /// written over what it holds; with all ore mined the order ends and its draw stops.
-    fn tick_mines(&mut self, dt: f32) {
+    fn tick_mines(&mut self) {
         for i in 0..self.economy.sites.len() {
             let site = &self.economy.sites[i];
             let t = site.target;
-            if !site.digging || !self.battle.combat.targets.get(t).is_some_and(|x| x.alive) {
+            if !site.takt_due || !site.digging {
                 continue;
             }
+            let dt = site.takt_dt;
             // A building with no `Use_Power` digs at a KPD of 1.
             let kpd = if site.use_power > 0.0 { site.kpd() } else { 1.0 };
             let most = self.economy.most(t);
@@ -549,6 +565,7 @@ impl Play {
         // Ore.
         let mut offers = Vec::new();
         let mut wants = Vec::new();
+        let mut fills = Vec::new();
         for &i in &own {
             let s = &self.economy.sites[i];
             let (held, most) = self.economy.ore.get(&s.target).copied().unwrap_or((0.0, 0.0));
@@ -559,7 +576,15 @@ impl Play {
                 }
             } else if most - held >= WANT_FLOOR {
                 wants.push((s.target, most - held));
+            } else {
+                // Short of the floor it is set straight to its most, ore that no holder gives
+                // (`0x1001a26b`): the last hundredth of a research, whose request is what is
+                // missing.
+                fills.push((s.target, most));
             }
+        }
+        for (t, most) in fills {
+            self.economy.ore.insert(t, (most, most));
         }
         let offered: f32 = offers.iter().map(|o| o.1).sum();
         let asked: f32 = wants.iter().map(|w| w.1).sum();

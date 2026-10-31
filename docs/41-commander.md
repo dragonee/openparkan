@@ -739,8 +739,10 @@ Afterwards:
 **A research that finishes after its order is gone is never reported.** The task
 keeps its order through the takt after the one that completes
 ([16-research.md](16-research.md#the-takt)), so the check sees it as long as it
-runs between two of the centre's takts (*derived*; how often a building's takt
-runs was not read).
+runs between two of the centre's takts (*derived*). Those are 64 to 127 ms apart
+and the check runs once a pass of the loop
+([16-research.md](16-research.md#how-often-a-buildings-takt-runs--read)), so only a
+frame longer than that loses a report.
 
 ### Against the recording — *seen*
 

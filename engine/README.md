@@ -530,11 +530,14 @@ yet: the game menu's save page, and the shell behind *Load game* and *Quit game*
   bits and its stored progress. A research centre runs its queue of order 14s one at a
   time; a task takes a free technology while the centre has one (costing nothing), else
   the item's research energy and ore, with the centre's `FreeResearchTime` as its time.
-  Each takt adds `min(KPD × Use_Ore × dt, ore held)` ore, `KPD × Use_Power × dt` power and
-  dt time, and the item's progress grows by the smallest of the three fractions. At 1 −
-  0.001 the item is researched, what it unlocks opens, and every newly open free item is
-  researched at once. A captured centre researches from its new clan's tree. The
-  designer's part lists, the build rows and a building's price read the tree as it stands.
+  Each of the building's takts, every 64 to 127 ms, adds `min(KPD × Use_Ore × dt, ore held)`
+  ore, writing 0 over the rest, `KPD × Use_Power × dt` power and dt time, and the item's
+  progress grows by the smallest of the three fractions. At 1 − 0.001 the item is
+  researched, what it unlocks opens, and every newly open free item is researched at once.
+  A captured centre researches from its new clan's tree. The designer's part lists, the
+  build rows and a building's price read the tree as it stands. An AI clan's function 41
+  marks its store afresh and gives its centre order 16 for the cheapest design it can
+  research: on C04 M02 and the two single missions a clan comes to build what it researches.
 - The research panel, command mode's page 4 and the screen a player's research centre's
   pod opens (mode 5), as docs/41 reads it: the box with the selected item's name, its
   descendants and its part turning, or *No item selected*; the batch button, which
@@ -1553,7 +1556,7 @@ a row here. A row leaves this table when research closes it.
 | M6 | The order the resource manager looks a sound's name up in | the first descriptor that binds the name wins, the mission's own before `ui/game_resources.cfg`; every training message resolves to the member its briefing or tutorial descriptor names | [20](../docs/20-resources.md#what-this-does-not-say) |
 | M6 | How much a building weighs, for the mass a radar weighs (its figures are read for every other unit) | a building that runs no device is taken as seen to the rim: 71 of 76 weigh 20,000 kg or more, seen to 0.9995 of the range, and the mast and ruins weigh nothing | [25](../docs/25-sensors.md#who-the-rule-hides--measured) |
 | M6 | Whether a guided round's velocity turns with it | it is kept in the round's frame, as a machine's is, and turns with it | [29](../docs/29-weapons.md#guided-rounds-differ-in-how-hard-they-steer--read-and-measured) |
-| M6 | What the script functions other than 15, 19, 30, 31, 32, 34, 52, 59, 60 and 71 do in play | a script's other calls do nothing and answer 0; Missions 01 to 03's scripts call none. One of the unanswered is read rather than unknown — 69 sets the AI design pick's spread — and none of its 7 call sites names a destination, so answering 0 is what the corpus sees either way. 41 and 65 are read as well — the design store's research refresh and its order to a research centre, and its test for a winged missile's carrier — and not answered: no clan researches here, so a store marks what its clan may build once, as it loads. 57 is answered: it runs a line of `mission.cfg`'s `script` block through the console's `create`, `bcreate` and `death` ([15](../docs/15-behaviour.md#what-the-consoles-create-bcreate-and-death-do--read-and-measured)) | [15](../docs/15-behaviour.md#what-the-functions-do) |
+| M6 | What the script functions other than 15, 19, 30, 31, 32, 34, 52, 59, 60 and 71 do in play | a script's other calls do nothing and answer 0; Missions 01 to 03's scripts call none. One of the unanswered is read rather than unknown — 69 sets the AI design pick's spread — and none of its 7 call sites names a destination, so answering 0 is what the corpus sees either way. 41 and 56 are answered, the design store's research refresh with its order to a research centre and its nothing-left byte. 65, its test for a winged missile's carrier, is read and answers 0, which is what its one caller's clans see: none of the 16 designs `scream.trf` can reach has the guns ([16](../docs/16-research.md#what-function-41-does-for-a-clan--read-and-measured)). 57 is answered: it runs a line of `mission.cfg`'s `script` block through the console's `create`, `bcreate` and `death` ([15](../docs/15-behaviour.md#what-the-consoles-create-bcreate-and-death-do--read-and-measured)) | [15](../docs/15-behaviour.md#what-the-functions-do) |
 | M6 | String 6223's key | a repeated message says string 6170 alone | [34](../docs/34-progression.md#not-established) |
 | M6 | Whether scenery is among a radar's contacts | a target needs a unit record: trees and rocks are never listed | [25](../docs/25-sensors.md#the-players-target--read-and-measured) |
 | M6 | Which flag of the level's `+0xae4` object the ambient variations' day/night branch reads, and where the picker's two words start | night is when no celestial body is up; the words start at 0xace1 and 0x1234 | [34](../docs/34-progression.md#ambient-sound--read-and-measured) |
@@ -1611,8 +1614,6 @@ a row here. A row leaves this table when research closes it.
 | M12 | How a building made in play is drawn, and whether the landscape's drawing is cut under it | node by node from level 0 without a lightmap; the ground queries are cut under it, the landscape's drawing is not | [03](../docs/03-terrain.md#for-an-engine) |
 | M13 | What the game does when an HQ whose command view was reached from a bunker's is lost in that view: nothing read rolls mode 3 back (an HQ the hero boarded is the game frame's, rolled back to mode 0) | the view rolls back to the view below it | [40](../docs/40-command-mode.md#not-established) |
 | M13 | How the stack reads after Enter in telepresence aboard an HQ | the telepresence ends and mode 3 takes its place over the command view it came from | [40](../docs/40-command-mode.md#an-hqs-command-mode-mode-3--read-and-seen) |
-| M13 | Whether a research centre's ore property reads the ore it holds or what the distribution delivered | the take comes out of what the economy says it holds, and its request is what it asks the next step for, as a factory's build does | [16](../docs/16-research.md#not-established) |
-| M13 | How often a building's takt runs | a research centre's every tick | [16](../docs/16-research.md#not-established) |
 | M13 | The colour the research box's name is drawn in (`GAME_FONT`'s, as whatever drew before left it) | white, as the recording reads | [41](../docs/41-commander.md#not-established) |
 | M13 | The research box's clip 5 inside its frame, applied to its preview | the preview's view is not clipped | [41](../docs/41-commander.md#what-it-draws--read) |
 | M13 | What "a node reaching its last damage stage" takes out of the load (`0x10011920`) | a destroyed node's own weight and its armour; the devices on it stay | [24](../docs/24-motion.md#what-sets-the-live-limits--read) |

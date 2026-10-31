@@ -2185,7 +2185,7 @@ impl Play {
             self.tick_places(now);
             self.tick_economy(now, (dt_ms / 1000.0) as f32);
             self.tick_factories(dt_ms);
-            self.tick_research(dt_ms);
+            self.tick_research(now);
             self.check_research();
         }
         let mut events = std::mem::take(&mut self.pending_events);
@@ -3597,16 +3597,22 @@ impl Play {
         }
     }
 
-    /// Every factory's build for this tick: a bot that completes appears at its creation
-    /// vertex, of the factory's clan, and is given the escape (docs/36, "Production").
+    /// Every factory's build whose building's takt is due (docs/16, "How often a building's takt
+    /// runs"): a bot that completes appears at its creation vertex, of the factory's clan, and
+    /// is given the escape (docs/36, "Production").
     fn tick_factories(&mut self, dt_ms: f64) {
         for f in 0..self.factories.len() {
             // The build takes what the distribution brought, and asks the next step for its
             // request (docs/23, "Ore reaches the factory"); it draws `Use_Power` while its
             // power is still to collect.
             let t = self.factories[f].target;
+            let dt = match self.economy.site(t) {
+                Some(site) if site.takt_due => site.takt_dt,
+                Some(_) => continue,
+                None => (dt_ms / 1000.0) as f32,
+            };
             let mut held = self.economy.held(t);
-            let project = self.factories[f].takt((dt_ms / 1000.0) as f32, &mut held);
+            let project = self.factories[f].takt(dt, &mut held);
             let request = self.factories[f].build.as_ref().map_or(0.0, |b| b.request);
             self.economy.ore.insert(t, (held, request));
             let drawing = self.factories[f].drawing_power();
@@ -4531,6 +4537,13 @@ impl Play {
                 }
                 continue;
             }
+            // A clan's function 41 goes to the research centre.
+            if o.order.code == parkan_sim::research::ORDER_RESEARCH_DESIGN {
+                if let orders::Target::Select(record) = o.order.target {
+                    self.order_design_research(t, record as usize);
+                }
+                continue;
+            }
             let robot = self.robots.iter_mut().chain(self.emplacements.iter_mut()).find(|(rt, _)| *rt == t);
             if let Some((_, robot)) = robot
                 && robot.behaviour.insert_order(&o.order, o.insert)
@@ -4580,10 +4593,9 @@ impl Play {
     /// "Production"): its own design store picks a design of the robot type the order's
     /// parameter names, ranked by the `SELECT_*` its target carries and drawn over function
     /// 69's spread, and the factory starts it. The store is loaded on the first such order,
-    /// priced against that clan's own research tree, and that is when it marks the designs
-    /// the clan may build: the game marks them as function 43 loads the store and again each
-    /// time function 41 asks for a research, which no clan's script reaches here (docs/15,
-    /// "What the store holds").
+    /// priced against that clan's own research tree. The designs the clan may build are what its
+    /// desk last marked: the game marks them as function 43 loads the store and again each time
+    /// function 41 asks for a research (docs/15, "What the store holds"), and not at a pick.
     ///
     /// All nine scripts order to the end of the list. Behind a running build the order waits
     /// its turn (`Behavior.dll:0x10017936`), its design drawn now and its budgets and mind
@@ -4602,6 +4614,11 @@ impl Play {
             let store =
                 crate::factory::Store::load(&game, &mut self.assembly, catalogue, grade).unwrap_or_default();
             self.stores.insert(clan, store);
+        }
+        if let (Some(desk), Some(store)) =
+            (self.progression.as_ref().and_then(|p| p.desk(clan)), self.stores.get_mut(&clan))
+        {
+            store.mark(&desk.book);
         }
         // `SELECT_SMALLEST` makes no draw at all (`ai.dll:0x10010aab`).
         let draw = if mode == parkan_sim::planner::SELECT_SMALLEST {
@@ -4987,7 +5004,8 @@ impl Play {
                     speed: robot.map_or(0.0, |(_, r)| r.walker.limits.top_speed[1]),
                     order: robot
                         .and_then(|(_, r)| r.order.map(|o| o.code))
-                        .or_else(|| factory.filter(|f| !f.idle()).map(|_| orders::CONSTRUCT)),
+                        .or_else(|| factory.filter(|f| !f.idle()).map(|_| orders::CONSTRUCT))
+                        .or_else(|| self.centre_order(t)),
                 },
             ));
         }
@@ -5014,6 +5032,7 @@ impl Play {
             return;
         }
         self.refresh_contacts();
+        self.sync_desks();
         let mut at: HashMap<i32, Vec3> = self
             .units
             .iter()

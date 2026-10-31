@@ -655,8 +655,9 @@ fn c03_m02s_raider_lands_its_winged_ssm_on_the_bunker_from_afar_and_spends_none_
     // set, or the one that follows it if that ran out with the line still blocked, is up; the
     // stroke is half a second. The two launchers hang a metre and a half either side of the
     // turret the line is asked from, and the line has only just cleared the rise: either
-    // missile of the first pair may meet it. So the bars are on the first to leave and the first
-    // to land, and no more than the first pair falls short.
+    // missile of the first pair may meet it, as those waits fall, and anything that moves the
+    // takts a little moves them. So the bars are on the first to leave and the first to land,
+    // and no more than the first pair falls short.
     assert!(from > 290.0, "the first leaves {from:.0} m off the bunker");
     assert!(from < 430.0, "and not before the line clears: {from:.0} m");
     assert!(point.distance(aimed_at) < 5.0, "it lands on the part aimed at: {point} against {aimed_at}");
@@ -2443,4 +2444,165 @@ fn c04_m02s_ruins_clear_the_teleports_ground_and_put_it_down_standing_for_the_pl
         .collect();
     assert_eq!(hqs.len(), 3);
     assert!(hqs.iter().all(|&t| play.units[t].clan == Some(1)));
+}
+
+/// What C04 Mission 02's `Enm2` researches, on its script's own terms (docs/16, "What function 41
+/// does for a clan"): the cheapest open design by its research ore, whole, then the next, five
+/// orders and 247.5 ore in all, and then function 41 answers 0 and gives none. 43 of the store's
+/// 77 records come to 50. With nothing but the script running the centre has no order to be
+/// busy with, so the problem retires each takt and asks again; the tree moves only as this test
+/// moves it.
+#[test]
+#[ignore = "needs the game install"]
+fn c04_m02s_enemy_orders_the_cheapest_design_it_can_research_five_times_and_then_no_more() {
+    use parkan_sim::orders::Target;
+    use parkan_sim::research::ORDER_RESEARCH_DESIGN;
+    use parkan_world::progress::Progression;
+
+    let (mut p, m) = campaign_progression_at(gamedir::C04_MISSION_02, 2);
+    let enm2 = m.clans.iter().position(|c| c.name == "Enm2").unwrap() as i64;
+    // Power to spare: short of it the clan wants a generator at 0.55, and with no unit to send
+    // that want will not start, which ends the `_Start` pass ahead of the research at 0.52.
+    p.set_power(enm2, 100.0);
+    let mut now = 0.0;
+    let mut ordered = |p: &mut Progression| {
+        p.swept.clear();
+        p.orders.clear();
+        while !p.swept.contains(&enm2) {
+            now += 100.0;
+            p.tick(now, |_| None);
+        }
+        p.orders.iter().find(|o| o.order.code == ORDER_RESEARCH_DESIGN).map(|o| match o.order.target {
+            Target::Select(record) => record as usize,
+            other => panic!("{other:?}"),
+        })
+    };
+    let may_build =
+        |p: &Progression| p.desk(enm2).unwrap().book.records.iter().filter(|r| r.may_build).count();
+    assert_eq!(may_build(&p), 43, "as the tree ships");
+
+    let mut chain = Vec::new();
+    let mut state = p.desk(enm2).unwrap().state.clone();
+    let mut ore = 0.0;
+    for _ in 0..5 {
+        let record = (0..8).find_map(|_| ordered(&mut p)).expect("an order 16");
+        let book = &p.desk(enm2).unwrap().book;
+        let file = book.records[record].file.rsplit('\\').next().unwrap().to_owned();
+        for item in book.technologies(record, &state) {
+            ore += state.cost(item)[1];
+            state.research(item);
+        }
+        chain.push(file);
+        p.set_tree(enm2, &state);
+    }
+    assert_eq!(chain, ["32_l2.dat", "AI_LW_31.dat", "AI_LW_21.dat", "AI_LS_31.dat", "AI_LT_31.dat"]);
+    assert_eq!(ore, 247.5);
+
+    // The refresh that finds nothing open marks the last, and there is no order for it to give.
+    assert_eq!((0..4).find_map(|_| ordered(&mut p)), None);
+    assert_eq!(may_build(&p), 50);
+    let book = &p.desk(enm2).unwrap().book;
+    assert_eq!(book.next(), None);
+    assert!(!book.everything, "27 records have a part out of the tree, so function 56 stays 0");
+}
+
+/// `Enm2` waits for `dTime3`: 600 s of its seconds clock on the easy level, which each takt steps
+/// 7 on, and no order 16 before it.
+#[test]
+#[ignore = "needs the game install"]
+fn c04_m02s_enemy_orders_no_research_before_600_s_on_the_easy_level() {
+    use parkan_sim::research::ORDER_RESEARCH_DESIGN;
+
+    let (mut p, m) = campaign_progression_at(gamedir::C04_MISSION_02, 0);
+    let enm2 = m.clans.iter().position(|c| c.name == "Enm2").unwrap() as i64;
+    p.set_power(enm2, 100.0);
+    let mut now = 0.0;
+    let mut takts = 0;
+    let first = loop {
+        p.swept.clear();
+        p.orders.clear();
+        while !p.swept.contains(&enm2) {
+            now += 100.0;
+            p.tick(now, |_| None);
+        }
+        takts += 1;
+        if p.orders.iter().any(|o| o.order.code == ORDER_RESEARCH_DESIGN) {
+            break takts;
+        }
+        assert!(takts < 120, "no order in {takts} takts");
+    };
+    assert!((85..=88).contains(&first), "at takt {first}");
+}
+
+/// Single.01's `Enemy` with its small centre, its small mine and its storage, in play: three
+/// orders, 30 ore, and a clan that may build seven warriors and a spider at their head comes to
+/// twelve and a Small Flyer at their head. The 15 ore of its second order come at what one takt a
+/// step may take, 0.44 a second at the most, and not at the 2 a second its two holders give
+/// (docs/16, "The ore a centre takes").
+#[test]
+#[ignore = "needs the game install"]
+fn single_01s_enemy_researches_what_it_could_not_build_and_its_best_design_changes() {
+    use parkan_sim::planner::SELECT_BEST_COMBAT;
+
+    const WARRIOR: u32 = 0x0100_8000;
+    let mut play = campaign_play_at("MISSIONS/Single.01", Some(2));
+    let clan = play.clans.iter().position(|c| c.name == "Enemy").unwrap() as i64;
+    let book =
+        |play: &parkan_world::play::Play| play.progression.as_ref().unwrap().desk(clan).unwrap().book.clone();
+    assert_eq!(book(&play).records.iter().filter(|r| r.may_build).count(), 9);
+    assert!(book(&play).records[book(&play).next().unwrap()].file.ends_with("swelbld1.dat"));
+
+    let researched = |play: &parkan_world::play::Play| -> Vec<usize> {
+        let state = &play.research.clan(clan).unwrap().state;
+        (0..state.len()).filter(|&i| state.researched(i)).collect()
+    };
+    let mut known = researched(&play);
+    let mut found: Vec<(f32, Vec<String>)> = Vec::new();
+    let mut first_best = None;
+    let tick = 1000.0 / 30.0;
+    for step in 0..(110 * 30) {
+        play.tick(tick, [0.0; 2]);
+        let now = researched(&play);
+        if now != known {
+            let tree = &play.research.clan(clan).unwrap().tree;
+            let new =
+                now.iter().filter(|i| !known.contains(i)).map(|&i| tree.items[i].name.clone()).collect();
+            found.push((step as f32 / 30.0, new));
+            known = now;
+        }
+        if first_best.is_none()
+            && let Some(store) = play.stores.get(&clan)
+        {
+            first_best = store.ranked(WARRIOR, SELECT_BEST_COMBAT).first().map(|d| design_file(d));
+        }
+    }
+    eprintln!("found: {found:?}");
+    let names: Vec<&Vec<String>> = found.iter().map(|f| &f.1).collect();
+    assert_eq!(names.len(), 3, "{found:?}");
+    assert_eq!(names[0], &["Small Red Laser"]);
+    assert_eq!(names[1], &["Small Flying Chs"]);
+    assert!(
+        names[2].contains(&"Small engine".to_owned()) && names[2].len() == 3,
+        "with its two free: {found:?}"
+    );
+    let second = found[1].0 - found[0].0;
+    assert!(second > 15.0 / 0.6, "15 ore in {second} s");
+
+    let last = book(&play);
+    assert_eq!(last.records.iter().filter(|r| r.may_build).count(), 16);
+    assert_eq!(last.next(), None, "nothing is left to order");
+    assert!(!last.everything, "61 records wait on a parent no design asks for");
+    // None of the 16 has a winged missile's guns: function 65's 0 is what this clan sees.
+    assert!(last.records.iter().filter(|r| r.may_build).all(|r| {
+        !["lwing1.dat", "lwing2.dat", "mwelssm1.dat", "mwing1.dat"].iter().any(|n| r.file.ends_with(n))
+    }));
+
+    // Its store reads as the book marks: a tiny spider at the head before, a Small Flyer after.
+    assert_eq!(first_best.as_deref(), Some("12spd1.dat"));
+    let store = play.stores.get_mut(&clan).expect("its store is loaded");
+    store.mark(&last);
+    let ranked: Vec<String> =
+        store.ranked(WARRIOR, SELECT_BEST_COMBAT).iter().map(|d| design_file(d)).collect();
+    assert_eq!(ranked.len(), 12);
+    assert_eq!(ranked[0], "23sfly1e.dat", "{ranked:?}");
 }

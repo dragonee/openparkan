@@ -504,8 +504,10 @@ The start (slot 6, `0x10029ba0`) **reserves a mind and sets its budgets**
 
 What it refuses before that is [below](#what-the-start-refuses--read).
 
-**Each takt** the task's progress is min(time, ore, power) as fractions. The panel
-shows it × 100 as the bar's `"%d%%"`, rounded to the nearest (`fistp`).
+**Each takt**, the building's, every 64 to 127 ms
+([16-research.md](16-research.md#how-often-a-buildings-takt-runs--read)), the
+task's progress is min(time, ore, power) as fractions. The panel shows it × 100 as
+the bar's `"%d%%"`, rounded to the nearest (`fistp`).
 
 **The bot appears** (`0x1002a920`, when the three budgets are met):
 1. **The reservation is dropped**, and `FreeBotNum` is decremented if above zero

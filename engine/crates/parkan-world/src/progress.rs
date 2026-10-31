@@ -14,6 +14,7 @@ use parkan_formats::{gamedir, scr};
 use parkan_sim::orders::{self, Order, Target};
 use parkan_sim::planner::{self, Action, Candidate, Planner, Problem, Seen};
 use parkan_sim::progression::{self, ClanTakt, Notice, Progress};
+use parkan_sim::research::{Book, ORDER_RESEARCH_DESIGN, State};
 use parkan_sim::script::{Args, Host, Interpreter};
 
 use crate::console::{self, Command};
@@ -148,6 +149,28 @@ pub struct ClanScript {
     pub planner: Planner,
 }
 
+/// A clan's design store's research: its book, and its tree as `Play` last handed it. The store
+/// itself lives in the play and is filled on the first build order; this is all function 41 and
+/// function 56 read of it, and it is there from function 43 on, as the game's is.
+#[derive(Clone, Debug)]
+pub struct Desk {
+    pub book: Book,
+    pub state: State,
+}
+
+impl Desk {
+    /// The desk of a clan whose tree is the file `behaviour`, marked once, as function 43 marks
+    /// the store as it loads it (`ai.dll:0x1000d575`).
+    fn load(game: &Path, behaviour: &str) -> Option<Desk> {
+        let file = gamedir::resolve(game, behaviour)?;
+        let tree = parkan_formats::research::parse(&std::fs::read(file).ok()?, behaviour).ok()?;
+        let state = State::new(&tree);
+        let mut book = crate::factory::book(game, &tree).ok()?;
+        book.refresh(&state);
+        Some(Desk { book, state })
+    }
+}
+
 /// Whose script a run is for: the player clan's, or the clan of `others[i]`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Which {
@@ -202,6 +225,10 @@ pub struct Progression {
     /// counted them: the areal map keeps one counter for robots and one for buildings, each
     /// bumped before it is used (`ArealMap.dll:0x1002b305`, `0x1002b3e9`; docs/23).
     pub next_ids: (i32, i32),
+    /// Each clan's research desk, once its script has run function 43, by clan.
+    pub desks: Vec<Option<Desk>>,
+    /// The research tree version the desks last read.
+    pub desks_version: u64,
 }
 
 /// One line of a mission's `script` block: its key, `script1` and on, what the console makes
@@ -250,6 +277,8 @@ struct Answers<'a> {
     power: f32,
     /// The `dMax*` limits function 11 tests, as the script's variables stand.
     limits: Vec<(u32, usize)>,
+    /// The clan's research desk, which functions 41 and 56 read.
+    desk: Option<&'a mut Desk>,
 }
 
 impl Answers<'_> {
@@ -642,6 +671,27 @@ impl Host for Answers<'_> {
                 self.planner.store_loaded = true;
                 0
             }
+            // The clan's research order (`ai.dll:0x1000d4f0`): `ERROR` for no such object; the
+            // store marked afresh; order 16 for the design at its `+0xc`, replacing what the
+            // building had, 1. With that design's byte set there is no order, 0, which ends
+            // `PBM_MAKE_RESEARCH_Start` as solved. The order's own answer is not waited for, as
+            // function 15's is not: a building that has the file takes it (`0x1002f69f`).
+            41 => {
+                let id = args.dword(0) as i32;
+                if !self.progress.knows(id) {
+                    return planner::ERROR;
+                }
+                let Some(desk) = self.desk.as_deref_mut() else { return 0 };
+                desk.book.refresh(&desk.state);
+                let Some(record) = desk.book.next() else { return 0 };
+                let order = Order {
+                    code: ORDER_RESEARCH_DESIGN,
+                    parameter: 0,
+                    target: Target::Select(record as u32),
+                };
+                self.orders.push(ScriptOrder { id, order, insert: orders::INSERT_REPLACE });
+                ORDER_TAKEN
+            }
             // The strength standing within `f` of a place or an object, of that clan or the
             // enemy's for `ERROR`.
             //
@@ -696,6 +746,8 @@ impl Host for Answers<'_> {
                 0
             }
             52 => self.progress.owner(args.dword(0) as i32),
+            // The store's `+0x25`: its last walk found every byte set.
+            56 => self.desk.as_ref().map_or(0, |d| u32::from(d.book.everything)),
             // Channel 2 of the message callback (`ai.dll:0x1000e4f0`): the mission's `script%d`
             // line for the first value, run as a console command; the second value is never
             // read, and neither is the result (docs/15, "Channel 2 runs a line of the
@@ -794,8 +846,8 @@ impl Host for Answers<'_> {
             // functions the campaign's scripts need for their messages, objectives, orders,
             // targets and planning; any other call does nothing and answers 0. Left
             // unanswered: 16 and 17, the clan's resource totals a SuperAI asks for; 18 and 40, a building site and a mineral place, which want the place list
-            // function 43 loads; 41, 56 and 65, flags of that same object; and the fourteen
-            // no shipped script calls.
+            // function 43 loads; 65, whose yes no store its one caller's clans hold ever reaches
+            // (docs/15, "The byte at `+0x104`"); and the fourteen no shipped script calls.
             other => {
                 self.unanswered.insert(other);
                 0
@@ -972,6 +1024,8 @@ impl Progression {
             console_lines: console_lines(game, mission_dir)?,
             console: Vec::new(),
             next_ids: next_ids(mission.objects.iter().map(|o| o.logical_id)),
+            desks: vec![None; mission.clans.len()],
+            desks_version: 0,
         };
         me.run("Init");
         for i in 0..me.others.len() {
@@ -979,7 +1033,25 @@ impl Progression {
                 script.run_named("Init", host);
             });
         }
+        for (i, c) in mission.clans.iter().enumerate() {
+            if me.planner_of(i as i64).is_some_and(|p| p.store_loaded) {
+                me.desks[i] = Desk::load(game, &c.behaviour);
+            }
+        }
         Ok(me)
+    }
+
+    /// Clan `clan`'s research desk, once its script has run function 43.
+    pub fn desk(&self, clan: i64) -> Option<&Desk> {
+        usize::try_from(clan).ok().and_then(|c| self.desks.get(c)).and_then(Option::as_ref)
+    }
+
+    /// Hand clan `clan`'s desk its tree as it stands.
+    pub fn set_tree(&mut self, clan: i64, state: &State) {
+        let desk = usize::try_from(clan).ok().and_then(|c| self.desks.get_mut(c)).and_then(Option::as_mut);
+        if let Some(desk) = desk {
+            desk.state.clone_from(state);
+        }
     }
 
     /// Clan `clan`'s planner, when it runs a script.
@@ -1013,6 +1085,7 @@ impl Progression {
             console_lines,
             console,
             next_ids,
+            desks,
             ..
         } = self;
         let (script, handlers, planner, clan, clock) = match which {
@@ -1049,6 +1122,7 @@ impl Progression {
                 power: usize::try_from(clan).ok().and_then(|c| power.get(c)).copied().unwrap_or(0.0),
                 minds: free_minds.as_mut_slice(),
                 limits,
+                desk: usize::try_from(clan).ok().and_then(|c| desks.get_mut(c)).and_then(Option::as_mut),
             };
             run(script, &mut answers);
         }
