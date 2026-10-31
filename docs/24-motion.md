@@ -1410,8 +1410,9 @@ and its default normal joins the average like any other.
 **When it runs, and with what dt** (*read*). The pass is message `0x1c`, slot
 24 of the control system (`0x10007d03`), and its only caller is
 `0x1000cb80` → `0x1001a450` at `0x1000cb98`, for an agent of kind 4. So it runs
-**once a frame**, after the machine tick and the collision pass and before the
-push. Its dt is the frame's: the machine tick keeps the milliseconds since its
+**once a frame**, after the machine tick, the collision pass and the push that
+ends it ([Collision between objects](#collision-between-objects--read)). Its dt
+is the frame's: the machine tick keeps the milliseconds since its
 last at `+0xe8` (`0x1000bcfd`–`0x1000bd03`), and the fall reads that × 0.001
 (`0x1001b41b`, the float at `0x1003c018`). It is not the state step's length,
 and a frame in which no state step falls due still runs the contact.
@@ -2337,9 +2338,9 @@ across ten seconds, against 0.16 with the agent sphere). The recording shows it
 upright on its legs in the briefing and in play, and in **every** frame at
 60 fps as the hero walks up to it, with no frame sunk ("Let's Play - Parkan:
 Iron Strategy, Part 4", 1:43, 15:13–15:15); a quarter of a metre on a walker
-6 m tall is under what those frames resolve. Whether the game draws even that
-is not read: where the frame is drawn among the move, the pass, the contact
-and the push decides it ([Not established](#not-established)).
+6 m tall is under what those frames resolve, and the game does not draw even
+that: the frame is drawn after the contact has lifted the push back
+([Where the frame is drawn](#collision-between-objects--read)).
 
 **Doors** (*read*). `CBuilding` files each class-12 item as a door, with the
 nodes its channels play (`Terrain.dll:0x100583a2`–`0x100584e8`), and each
