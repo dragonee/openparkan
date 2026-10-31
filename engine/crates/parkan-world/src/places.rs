@@ -11,6 +11,7 @@ use parkan_formats::hallway::{self, HallWay, Vertex};
 use parkan_formats::mission::{self, Mission};
 use parkan_sim::behaviour::Dock;
 use parkan_sim::damage::{Life, raise_life_share};
+use parkan_sim::economy::ModuleRand;
 
 use crate::assembly::Assembly;
 use crate::buildings::Child;
@@ -171,11 +172,9 @@ impl PlacePart {
     }
 }
 
-/// One building's docks and teleport places.
-///
-/// STAND-IN: docs/27-ownership.md#the-places--read-and-measured -- only a dock, the main
-/// teleport's in and out places and the ore a loading or unloading place moves by itself are
-/// ticked here; a transport's round still keeps its own arrival.
+/// One building's docks, ore places and teleport places: every place the tick acts on. A pod
+/// and a creation node have no act in it (docs/27, "The places"), and a transport's arrival is
+/// its walker's place, not a place's cylinder (docs/32, "Transporting ore").
 #[derive(Clone, Debug, PartialEq)]
 pub struct Places {
     pub target: usize,
@@ -189,7 +188,7 @@ pub struct Places {
     /// When the set last ticked, which is the game time a dock's give is measured over; none
     /// before its first tick.
     last_ms: Option<f64>,
-    seed: u32,
+    rand: ModuleRand,
 }
 
 impl Places {
@@ -239,7 +238,7 @@ impl Places {
             landing,
             due_ms: 0.0,
             last_ms: None,
-            seed: 0x9e37_79b9 ^ target as u32,
+            rand: ModuleRand(1 + target as u32),
         })
     }
 
@@ -250,17 +249,14 @@ impl Places {
         (dt / 1000.0) as f32
     }
 
-    /// The next timer's length: 64 ms and a share of 64.
+    /// The next timer's length: 64 ms and the low byte of a `rand()` draw times 64 over 256
+    /// (`0x1004c569`), so 64 to 127 whole ms.
     ///
-    /// STAND-IN: docs/27-ownership.md#who-stands-in-a-place--read -- the game's generator
-    /// (`0x1004c550`) is not followed; a xorshift of its own gives the share.
+    /// STAND-IN: docs/27-ownership.md#who-stands-in-a-place--read -- the generator is the game's,
+    /// but its one stream steps at 111 other sites in the module, so no draw of it can be
+    /// reproduced here: each set draws from a stream of its own.
     fn period(&mut self) -> f64 {
-        let mut x = self.seed;
-        x ^= x << 13;
-        x ^= x >> 17;
-        x ^= x << 5;
-        self.seed = x;
-        TIMER_MS + TIMER_MS * f64::from(x % 1024) / 1024.0
+        TIMER_MS + self.rand.timer_share_ms(1)
     }
 }
 
@@ -320,6 +316,9 @@ impl Play {
             let candidates = self.place_candidates();
             for (k, point) in points.into_iter().enumerate() {
                 let Some(point) = point else { continue };
+                if self.place_on_damaged_node(t, self.places[i].part, self.places[i].places[k].vertex.joint) {
+                    continue;
+                }
                 if now >= self.places[i].places[k].due_ms {
                     let period = self.places[i].period();
                     let place = &mut self.places[i].places[k];
@@ -396,6 +395,14 @@ impl Play {
                 _ => {}
             }
         }
+    }
+
+    /// Whether the tick passes a place over whole (`0x10018b55`-`0x10018b83`): its node's value,
+    /// `IAnimation` slot 16, is not 0. Its occupants are not refreshed and nothing is done to them.
+    fn place_on_damaged_node(&self, t: usize, part: usize, joint: u32) -> bool {
+        let life =
+            self.battle.combat.targets.get(t).and_then(|x| x.parts.get(part)).and_then(|p| p.life.as_ref());
+        crate::capture::node_value(life, joint as usize) != 0
     }
 
     /// Every dock a refit of unit `t` may go to (docs/27, "What sends a bot to a dock"): the
@@ -578,16 +585,22 @@ impl Play {
 
     /// Whether `clan` holds every generator on the map, and at least one.
     fn holds_every_generator(&self, clan: i64) -> bool {
-        // STAND-IN: docs/27-ownership.md#teleport-in-0x8000--read -- whether a destroyed
-        // generator stays in `World3D.dll`'s queue 3 is not read; the live ones are asked.
+        // Queue 3 holds a generator until it is deleted, and one that dies is only marked: its
+        // owner word reads 0xfffe, nobody's, and ends the walk (docs/27, "Teleport in").
         let generators: Vec<Option<i64>> = self
             .units
             .iter()
             .zip(&self.battle.combat.targets)
-            .filter(|(u, x)| u.type_word == BUILDING_GENERATOR && x.alive)
-            .map(|(u, _)| u.clan)
+            .enumerate()
+            .filter(|(g, (u, _))| {
+                u.type_word == BUILDING_GENERATOR && !self.deleted.get(*g).is_some_and(|d| *d)
+            })
+            .map(|(_, (u, x))| {
+                let marked = x.parts.first().and_then(|p| p.life.as_ref()).is_some_and(|l| l.marked);
+                if x.alive && !marked { u.clan } else { None }
+            })
             .collect();
-        !generators.is_empty() && generators.iter().all(|c| *c == Some(clan))
+        every_generator_held(&generators, clan)
     }
 
     /// An in place's byte (`0x10018bb7`–`0x10018c6c`): its teleport's clan is not neutral and
@@ -613,6 +626,13 @@ impl Play {
             self.says.extend(says);
         }
     }
+}
+
+/// The in place's power walk (`0x10018d9d`-`0x10018dee`) over each generator still in queue 3,
+/// by its owner, `None` for one whose word reads `0xfffe`: another's owner ends it, and at least
+/// one must be `clan`'s.
+fn every_generator_held(generators: &[Option<i64>], clan: i64) -> bool {
+    !generators.is_empty() && generators.iter().all(|c| *c == Some(clan))
 }
 
 #[cfg(test)]
@@ -681,13 +701,27 @@ mod tests {
     }
 
     #[test]
-    fn the_timer_runs_64_to_128_ms() {
+    fn the_timer_runs_64_to_127_whole_ms() {
         let mut p =
             Places::of(&HallWay { vertices: vec![vertex(PLACE_TELEPORT_IN)], links: Vec::new() }, 3, 0)
                 .expect("a place");
-        for _ in 0..100 {
+        let mut seen = std::collections::BTreeSet::new();
+        for _ in 0..4000 {
             let ms = p.period();
-            assert!((TIMER_MS..TIMER_MS * 2.0).contains(&ms), "{ms}");
+            assert_eq!(ms.fract(), 0.0, "{ms}");
+            seen.insert(ms as u32);
         }
+        assert_eq!(seen.first(), Some(&64));
+        assert_eq!(seen.last(), Some(&127));
+        assert_eq!(seen.len(), 64);
+    }
+
+    #[test]
+    fn a_dead_generator_stays_in_the_queue_and_ends_the_power_walk() {
+        let (mine, theirs) = (1, 2);
+        assert!(every_generator_held(&[Some(mine), Some(mine)], mine));
+        assert!(!every_generator_held(&[], mine), "at least one");
+        assert!(!every_generator_held(&[Some(mine), Some(theirs)], mine));
+        assert!(!every_generator_held(&[Some(mine), None], mine), "a word of 0xfffe is nobody's");
     }
 }

@@ -1161,6 +1161,8 @@ impl Play {
                 }
                 robot.order = Some(leave);
                 robot.behaviour.order(&leave);
+                // From that building: its escape has no 20-second check (`0x1002c219`).
+                self.construction.ways.leaving.insert(*t, None);
             }
         }
     }

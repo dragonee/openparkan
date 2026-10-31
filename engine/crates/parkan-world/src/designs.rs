@@ -997,6 +997,10 @@ pub struct Assembled {
     pub payload: f32,
     pub top_speed: f32,
     pub devices: Vec<control::Component>,
+    /// For each device, the component whose records brought it and the node in that component's
+    /// own mesh it sits on. A fitted part's re-parse keeps the slot's node (docs/28, "A fitted
+    /// part takes over its slot"), which is why this is apart from the record's own.
+    pub homes: Vec<(usize, i32)>,
     pub nodes: Vec<NodeMass>,
 }
 
@@ -1127,6 +1131,7 @@ impl Weigher {
                     payload: controller.payload,
                     top_speed: controller.triples[control::TRIPLE_TOP_SPEED][1],
                     devices: Vec::new(),
+                    homes: Vec::new(),
                     nodes: Vec::new(),
                 });
             }
@@ -1137,6 +1142,7 @@ impl Weigher {
                 let masses = self.node_masses(assembly, &member, i == 0);
                 let a = out.as_mut()?;
                 first_device.insert(i, a.devices.len());
+                a.homes.extend(controller.components.iter().map(|d| (i, d.node)));
                 a.devices.extend(controller.components.iter().cloned());
                 a.nodes.extend(if i == 0 { masses } else { masses.into_iter().skip(1).collect() });
             } else if tag == INTERNAL_TAG

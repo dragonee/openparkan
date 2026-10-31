@@ -1004,13 +1004,8 @@ fn c02_m04s_bridge_rays_run_the_span_and_sweep_around_the_decks_axis() {
             .collect()
     };
     // The arms carrying them turn with them, and the scene has to draw the bridge node by
-    // node to show it: the part takes no damage, so without [`Building::plays_nodes`] it is
-    // drawn as one model at its placement and the rays sweep round arms that stand still.
+    // node to show it, or the rays sweep round arms that stand still.
     let target = object_target(&play, &m, "e_bridge.dat");
-    assert!(
-        play.battle.combat.targets[target].parts.iter().all(|p| p.life.is_none()),
-        "a bridge half takes no damage, so nothing else makes the scene draw it node by node"
-    );
     let half = play.buildings.iter().find(|b| b.target == target).expect("the half is a building");
     assert!(half.plays_nodes(), "and its items play its nodes");
     assert!(play.drawn_by_node(target), "so the scene draws it node by node");
@@ -1456,6 +1451,16 @@ fn c02_m04s_light_tower_rebuilds_its_turret_and_then_its_guns_one_by_one() {
     let guns = [2, 3];
     assert!(part(&play, turret).nodes[socket].hidden() && guns.iter().all(|&g| gone(&play, g)));
     assert!(broken(&play) >= 2, "its cannons silent");
+
+    // All that is about 5% of the tower, which holds 290,002 in its own nodes: above the 90% a
+    // building's repair decision wants, the system stays off (docs/26, "On C02 M04's plateau
+    // Light Tower"). The rest of it shot down would turn it on, and it stays on.
+    for _ in 0..30 {
+        tick(&mut play);
+    }
+    assert!(!play.economy.site(tower).unwrap().repairing, "95% of its life: not yet");
+    assert!(gone(&play, guns[0]));
+    play.economy.site_mut(tower).unwrap().repairing = true;
 
     // Each part whole in turn, the next untouched until then.
     let mut done: Vec<(usize, f64)> = Vec::new();

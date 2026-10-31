@@ -157,7 +157,7 @@ pub const GEAR_RIGHT: i32 = 0x40;
 pub const GROUND_FACTOR: f32 = 1.0;
 
 /// One node the machine's weight counts: which part and node, its density × level-0 volume,
-/// its area, its `.ndp` flags, and whether it came with the root.
+/// its area, the mass of the devices on it, its `.ndp` flags, and whether it came with the root.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct HeftNode {
     pub part: usize,
@@ -165,6 +165,9 @@ pub struct HeftNode {
     pub weight: f32,
     pub area: f32,
     pub volume: f32,
+    /// Every device on this node, fitted parts' in their slots: the weigh adds a device's mass
+    /// to its node's record (`Control.dll:0x1000fc31`), so it leaves with the node.
+    pub devices: f32,
     pub flags: i32,
     pub root: bool,
 }
@@ -179,7 +182,9 @@ pub struct Heft {
     pub nodes: Vec<HeftNode>,
     /// Armour's weight over area: the fitted armour's value 0.
     pub per_area: f32,
-    /// Every device's mass (record +0x1c), the fitted parts' in their slots.
+    /// The mass of the devices on no node this list holds (record +0x1c): a part with no mesh
+    /// to hang them on. *Measured*: none of the 6752 devices of the shipped assemblies names a
+    /// node its model has not got, so this is for a design the data does not ship.
     pub devices: f32,
     /// Each engine's value 0 and the root node it sits on.
     pub engines: Vec<(f32, usize)>,
@@ -202,20 +207,48 @@ impl Heft {
                     weight: m.density * m.volume,
                     area: m.area,
                     volume: m.volume,
+                    devices: 0.0,
                     flags: m.flags,
                     root: p == root,
                 });
             }
         }
+        // Parts come in the components' order, each external one with a mesh a part (`parts`).
+        let mut next = 0;
+        let part_of: Vec<Option<usize>> = unit
+            .components
+            .iter()
+            .map(|c| {
+                let hit = c.is_external()
+                    && parts.get(next).is_some_and(|p| p.record.eq_ignore_ascii_case(&c.reference.member));
+                hit.then(|| {
+                    next += 1;
+                    next - 1
+                })
+            })
+            .collect();
+        let hosts: Vec<(i32, i32)> = parts.iter().map(|p| (p.host, p.node)).collect();
+        let mut loose = 0.0;
+        for (device, &(component, node)) in assembled.devices.iter().zip(&assembled.homes) {
+            let home = part_of.get(component).copied().flatten().and_then(|p| device_home(&hosts, root, p, node));
+            match home.and_then(|(p, n)| nodes.iter_mut().find(|h: &&mut HeftNode| h.part == p && h.node == n)) {
+                Some(h) => h.devices += device.mass,
+                None => loose += device.mass,
+            }
+        }
+        let engines = assembled
+            .devices
+            .iter()
+            .zip(&assembled.homes)
+            .filter(|(d, _)| d.type_id == ENGINE_TYPE)
+            .map(|(d, &(_, node))| (d.values[0], usize::try_from(node).unwrap_or(0)))
+            .collect();
         Heft {
             payload: assembled.payload,
             nodes,
             per_area: assembled.of_type(crate::designs::ARMOUR_TYPE).last().map_or(0.0, |d| d.values[0]),
-            devices: assembled.devices.iter().map(|d| d.mass).sum(),
-            engines: assembled
-                .of_type(ENGINE_TYPE)
-                .map(|d| (d.values[0], usize::try_from(d.node).unwrap_or(0)))
-                .collect(),
+            devices: loose,
+            engines,
         }
     }
 
@@ -223,12 +256,7 @@ impl Heft {
     ///
     /// E is Σ engines' value 0 × their node's condition, times the mean of the two sides'
     /// running gear, each side its nodes' mean life, 1 with none (`0x10012a40`). r is the spare
-    /// payload over the payload: payload + the root's body − everything's weight, never below 0
-    /// (`0x1000fc51`), 0 with no payload.
-    ///
-    /// STAND-IN: docs/24-motion.md#what-sets-the-live-limits--read -- a node that "reaches its
-    /// last damage stage" (`0x10011920`) is taken as one destroyed, and what leaves the totals
-    /// with it is its own weight and armour; the devices on it stay.
+    /// payload over the payload, 0 with no payload (docs/24, "What sets the live limits").
     pub fn factors(&self, root: usize, life: impl Fn(usize, usize) -> (f32, bool)) -> (f32, f32) {
         let side = |mask: i32| {
             let lives: Vec<f32> =
@@ -237,30 +265,41 @@ impl Heft {
         };
         let drive: f32 = self.engines.iter().map(|&(value, node)| value * life(root, node).0).sum();
         let e = drive * (side(GEAR_LEFT) + side(GEAR_RIGHT)) / 2.0;
-        let (total, body) = self.weight(&life);
-        let r = if self.payload != 0.0 { (self.payload + body - total).max(0.0) / self.payload } else { 0.0 };
+        let r = if self.payload != 0.0 { self.load(&life).1 / self.payload } else { 0.0 };
         (e, r)
     }
 
-    /// What the machine weighs, kg, and what of that is the root's own body: every live node's
-    /// density x volume, armour's weight over its area, and every device's mass
-    /// (`Control.dll:0x1000fac0`).
-    fn weight(&self, life: impl Fn(usize, usize) -> (f32, bool)) -> (f32, f32) {
-        let (mut total, mut body) = (self.devices, 0.0);
-        for n in self.nodes.iter().filter(|n| !life(n.part, n.node).1) {
-            total += n.weight + self.per_area * n.area;
-            if n.root {
-                body += n.weight;
-            }
+    /// Everything a node's record holds at `+0x20` (`Control.dll:0x1000fac0`): its density x
+    /// volume, armour's weight over its area and the mass of the devices on it.
+    fn on_node(&self, n: &HeftNode) -> f32 {
+        n.weight + self.per_area * n.area + n.devices
+    }
+
+    /// What the machine weighs, kg, and its spare payload (`+0x538`, `+0x4d8`).
+    ///
+    /// The weigh sets the spare at load: payload + the root's body − everything's weight, never
+    /// below 0 (`0x1000fc51`), and counts every node whatever its state. A node's last stage
+    /// then moves both by what its record holds (`0x10011920`, undone as it comes back): the
+    /// total down by all of it, and the spare up by all of it, a root node's own density x
+    /// volume excepted, which never counted against the payload. So a unit loaded past its
+    /// payload has every kilo it loses to spend at once, from a spare of 0: 10 of the 382
+    /// shipped assemblies (docs/24, "What sets the live limits").
+    fn load(&self, life: impl Fn(usize, usize) -> (f32, bool)) -> (f32, f32) {
+        let whole: f32 = self.devices + self.nodes.iter().map(|n| self.on_node(n)).sum::<f32>();
+        let body: f32 = self.nodes.iter().filter(|n| n.root).map(|n| n.weight).sum();
+        let (mut total, mut spare) = (whole, (self.payload + body - whole).max(0.0));
+        for n in self.nodes.iter().filter(|n| life(n.part, n.node).1) {
+            total -= self.on_node(n);
+            spare += self.on_node(n) - if n.root { n.weight } else { 0.0 };
         }
-        (total, body)
+        (total, spare)
     }
 
     /// The machine's mass, kg: control `+0x538`, which the weigh sums and property `0x7c`
     /// hands out (`Control.dll:0x1000e0ac`). A colliding pair shares its push by the squares
     /// of the two (docs/24, "Collision between objects").
     pub fn mass(&self, life: impl Fn(usize, usize) -> (f32, bool)) -> f32 {
-        self.weight(life).0
+        self.load(life).0
     }
 
     /// The three things a radar weighs (`Control.dll:0x1000dcc0`, docs/25, "What a target gives
@@ -275,16 +314,32 @@ impl Heft {
         power: Option<&crate::power::Power>,
         shield: f32,
     ) -> [f32; 3] {
-        let mass = self.mass(life);
+        let mass = self.mass(&life);
         let Some(p) = power else { return [mass, 0.0, 0.0] };
-        let area: f32 = self.nodes.iter().map(|n| n.area).sum();
-        let volume: f32 = self.nodes.iter().map(|n| n.volume).sum();
+        // A node its last stage has hidden has taken its area and volume with it (`0x10011a70`).
+        let standing = || self.nodes.iter().filter(|n| !life(n.part, n.node).1);
+        let area: f32 = standing().map(|n| n.area).sum();
+        let volume: f32 = standing().map(|n| n.volume).sum();
         let electronics = area * (p.asks[0] + p.asks[2] + p.asks[5]);
         let drive = volume * (p.asks[0] + p.asks[3] + p.asks[4]);
         let camouflage = if p.camouflaged { (1.0 - p.cuts[3]).max(0.0) } else { 1.0 };
         let cut = |i: usize, signature: f32| signature * (1.0 - p.cuts[i] * shield).max(0.0) * camouflage;
         [cut(0, mass), cut(1, electronics), cut(2, drive)]
     }
+}
+
+/// The part and node a device of part `p` on its own node `node` hangs on in the merged model
+/// (`Control.dll:0x10009081`, `0x10009090`), with `hosts` each part's host and the host's node
+/// it attaches to: a root's stands as it is; another part's node 0 is merged away, so a device
+/// on it hangs on the node that part attaches to, up the chain.
+fn device_home(hosts: &[(i32, i32)], root: usize, p: usize, node: i32) -> Option<(usize, usize)> {
+    let (mut p, mut node) = (p, node);
+    while node == 0 && p != root {
+        let &(host, on) = hosts.get(p)?;
+        p = usize::try_from(host).ok()?;
+        node = on;
+    }
+    Some((p, usize::try_from(node).ok()?))
 }
 
 #[derive(Clone)]
@@ -1485,7 +1540,16 @@ mod tests {
 
     #[test]
     fn a_unit_gives_away_its_mass_its_asks_and_what_its_shield_and_camouflage_leave() {
-        let node = HeftNode { part: 0, node: 0, weight: 100.0, area: 5.0, volume: 2.0, flags: 0, root: true };
+        let node = HeftNode {
+            part: 0,
+            node: 0,
+            weight: 100.0,
+            area: 5.0,
+            volume: 2.0,
+            devices: 0.0,
+            flags: 0,
+            root: true,
+        };
         let heft = Heft { nodes: vec![node], devices: 900.0, ..Heft::default() };
         let mut power = crate::power::Power {
             batteries: Vec::new(),
@@ -1532,7 +1596,79 @@ mod tests {
     }
 
     fn node(part: usize, node: usize, weight: f32, area: f32, flags: i32) -> HeftNode {
-        HeftNode { part, node, weight, area, volume: 0.0, flags, root: part == 0 }
+        HeftNode { part, node, weight, area, volume: 0.0, devices: 0.0, flags, root: part == 0 }
+    }
+
+    #[test]
+    fn a_nodes_last_stage_takes_the_devices_on_it_out_of_the_load() {
+        // The heft below with its 1,500 kg of devices on nodes: 900 on the turret's node 1,
+        // 600 on the chassis's node 2.
+        let mut h = heft();
+        h.devices = 0.0;
+        h.nodes[3].devices = 900.0;
+        h.nodes[2].devices = 600.0;
+        let whole = |_: usize, _: usize| (1.0, false);
+        assert_eq!(h.mass(whole), 3500.0, "the same total as with them loose");
+        assert!((h.factors(0, whole).1 - 0.375).abs() < 1e-6);
+        // The turret's node gone: its 500, its 100 of armour and the 900 on it.
+        let turret = |p: usize, n: usize| (1.0, (p, n) == (1, 1));
+        assert_eq!(h.mass(turret), 2000.0);
+        assert!((h.factors(0, turret).1 - (1500.0 + 1500.0) / 4000.0).abs() < 1e-6);
+        // A root node gone: its weight leaves the total and not the spare, which never paid
+        // for it; its armour and the 600 on it come back to the spare.
+        let wheel = |p: usize, n: usize| (1.0, (p, n) == (0, 2));
+        assert_eq!(h.mass(wheel), 3500.0 - 200.0 - 100.0 - 600.0);
+        assert!((h.factors(0, wheel).1 - (1500.0 + 700.0) / 4000.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn a_hidden_nodes_area_and_volume_leave_what_a_radar_weighs() {
+        // `0x10011a70`, `0x10011a80`: with no power to ask with only the mass shows, so ask with a
+        // draw of 1 on the first channel, which both figures count.
+        let mut h = heft();
+        h.nodes[3].volume = 10.0;
+        h.nodes[0].volume = 30.0;
+        let power = crate::power::Power {
+            batteries: Vec::new(),
+            repair: None,
+            engines: Vec::new(),
+            detection: None,
+            cuts: [0.0; 4],
+            camouflaged: false,
+            asks: [1.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+            levels: [1.0; 6],
+            devices: Vec::new(),
+            next_ms: 0.0,
+            last_ms: 0.0,
+        };
+        let whole = h.signature(|_, _| (1.0, false), Some(&power), 0.0);
+        assert_eq!((whole[1], whole[2]), (250.0, 40.0));
+        let gone = h.signature(|p, n| (1.0, (p, n) == (1, 1)), Some(&power), 0.0);
+        assert_eq!((gone[1], gone[2]), (200.0, 30.0));
+        assert_eq!(gone[0], whole[0] - 600.0, "its 500 and its 100 of armour");
+    }
+
+    #[test]
+    fn an_overloaded_units_spare_counts_from_the_0_it_was_held_to() {
+        // `0x1000fc51` holds the spare to 0 at the weigh, and `0x10011920` adds to it from there.
+        let mut h = heft();
+        h.nodes[3].devices = 9000.0;
+        h.devices = 0.0;
+        let whole = |_: usize, _: usize| (1.0, false);
+        assert_eq!(h.factors(0, whole).1, 0.0);
+        // A leg gone: 100 of its armour alone comes back, though the unit is still 6,000 over.
+        let leg = |p: usize, n: usize| (1.0, (p, n) == (0, 1));
+        assert!((h.factors(0, leg).1 - 100.0 / 4000.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn a_device_on_a_parts_node_0_hangs_on_the_node_that_part_attaches_to() {
+        // The chassis, a turret on its node 7, a gun on the turret's node 3.
+        let hosts = [(-1, -1), (0, 7), (1, 3)];
+        assert_eq!(device_home(&hosts, 0, 0, 0), Some((0, 0)), "the root's own node 0 stands");
+        assert_eq!(device_home(&hosts, 0, 1, 2), Some((1, 2)));
+        assert_eq!(device_home(&hosts, 0, 1, 0), Some((0, 7)));
+        assert_eq!(device_home(&hosts, 0, 2, 0), Some((1, 3)));
     }
 
     /// A chassis of 1,000 kg body over nodes 0–2, the gear on 1 (left) and 2 (right), a turret

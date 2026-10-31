@@ -5407,6 +5407,139 @@ BOMB_TURRETS = ("e_tur_lb_06", "e_tur_lt_06")
 ANY_DISTANCE_FLAGS = 0x18
 
 
+def check_what_a_nodes_stage_moves(check, game: Path) -> None:
+    """What a node's last stage takes out of the load, and which nodes can read as damaged.
+
+    docs/24-motion.md, "What sets the live limits"; docs/31-packages.md, "The escape";
+    docs/27-ownership.md, "Teleport in".
+    """
+    shop = units.Workshop(game)
+    count = 0
+    devices = massed = on_zero = off_zero = off_model = overloaded = 0
+    kg_zero = kg_off = 0.0
+    for dat in sorted(p for p in (game / "UNITS").rglob("*") if p.suffix.lower() == ".dat"):
+        try:
+            unit = objects.load_unit(dat)
+        except (objects.ObjectFormatError, OSError):
+            continue
+        parents = unit.parents()
+        nodes = 0
+        sites: list[list] = []
+        first: dict[int, int] = {}
+        at: dict[int, tuple[int, int]] = {}
+        for i, c in enumerate(unit.components):
+            member = c.ref.member.lower()
+            record, ctl = shop.library.get(member), shop.armoury.controller(member)
+            if record is None or ctl is None or (i and not sites and 0 not in first):
+                continue
+            if i == 0 or record.tag == objects.EXTERNAL_TAG:
+                # A part's node 0 is the node it attaches to; its others follow on the list.
+                base = 0 if i == 0 else nodes - 1
+                hook = 0
+                if i and parents[i] in at:
+                    pbase, phook = at[parents[i]]
+                    hook = phook if c.attach_node == 0 else pbase + c.attach_node
+                at[i] = (base, hook)
+                first[i] = len(sites)
+                sites.extend([d.mass, d.node + base if d.node or i == 0 else hook]
+                             for d in ctl.components)
+                weights = shop._node_weights(record, i == 0)
+                nodes += len(weights) if i == 0 else max(0, len(weights) - 1)
+            elif record.tag == objects.INTERNAL_TAG and ctl.components and parents[i] in first:
+                slot = first[parents[i]] + c.attach_node
+                if 0 <= slot < len(sites):
+                    sites[slot][0] = ctl.components[0].mass
+        if not nodes:
+            continue
+        count += 1
+        devices += len(sites)
+        off_model += sum(1 for _, n in sites if not 0 <= n < nodes)
+        for mass, n in sites:
+            massed += mass > 0
+            on_zero += mass > 0 and n == 0
+            off_zero += mass > 0 and n != 0
+            kg_zero += mass if n == 0 else 0.0
+            kg_off += mass if n != 0 else 0.0
+        load = shop.weigh(unit)
+        overloaded += bool(load and load.over)
+    check("UNITS: a node's last stage takes the devices on it out of the load",
+          (count, devices, massed, on_zero, off_zero, off_model, overloaded)
+          == (382, 6752, 3175, 1843, 1332, 0, 10),
+          f"{count} assemblies, {devices} devices, {massed} with a mass: {on_zero} on node 0, "
+          f"which dies with the unit, and {off_zero} off it, {kg_off:,.0f} of "
+          f"{kg_zero + kg_off:,.0f} kg; {off_model} name a node the model has not got; "
+          f"{overloaded} are loaded past their payload, whose spare starts from the 0 it is "
+          f"held to")
+
+    fortif = NResArchive.open(game / "fortif.rlb")
+    tally: Counter[str] = Counter()
+    for entry in fortif:
+        if entry.tag != "MESH":
+            continue
+        raw = fortif.read(entry)
+        graph = objmesh.read_path_graph(NResArchive(raw, entry.name))
+        if graph is None or not graph.nodes:
+            continue
+        model = objmesh.parse(raw, entry.name)
+        stages = [max(1, _stage_count(n)) for n in model.nodes]
+        joints = Counter(v.b for v in graph.nodes)
+        tally["ways"] += 1
+        tally["model nodes"] += len(stages)
+        tally["staged nodes"] += sum(s > 1 for s in stages)
+        tally["joints"] += len(joints)
+        tally["staged joints"] += sum(stages[j] > 1 for j in joints)
+        tally["vertices"] += len(graph.nodes)
+        tally["on staged"] += sum(n for j, n in joints.items() if stages[j] > 1)
+        for vertex in graph.nodes:
+            if vertex.a & (0xf8 | 0xc600):
+                tally["places"] += 1
+                tally["places on staged"] += stages[vertex.b] > 1
+        for i, node in enumerate(model.nodes):
+            index = node.slot_index[0]
+            if index == objmesh.NO_SLOT or index >= len(model.slots):
+                continue
+            slot = model.slots[index]
+            faces = model.face_normal[slot.first_triangle:slot.first_triangle + slot.triangle_count]
+            if any(n[2] > 0.173648 for n in faces):
+                tally["floors"] += 1
+                tally["floors with no vertex"] += i not in joints
+    check("fortif.rlb: only a node of more than one stage can read as damaged, "
+          "and few places ride one",
+          dict(tally) == {"ways": 29, "model nodes": 484, "staged nodes": 112, "joints": 180,
+                          "staged joints": 41, "vertices": 1056, "on staged": 331, "places": 47,
+                          "places on staged": 16, "floors": 390, "floors with no vertex": 211},
+          f"{dict(tally)}: IAnimation slot 16 answers the stage held below the count, so 0 on "
+          f"the other {tally['model nodes'] - tally['staged nodes']} nodes however hurt, and "
+          f"MHallWay slot 27 answers -1 on a floor with no vertex on it")
+
+    ctl = {e.name.lower(): control.parse(fortif.read(e)) for e in fortif if e.tag == "CTLD"}
+    kills = {n for n, c in ctl.items() if any(r.action == control.ACT_KILL for r in c.references)}
+    member = {e.name.lower(): e for e in fortif}
+    rows = objects.parse_damage(fortif.read(member["fr_l_gener.ndp"]), "fr_l_gener.ndp")
+    gener = objmesh.parse(fortif.read(member["fr_l_gener.msh"]), "fr_l_gener.msh")
+    names = frozenset(p.name.lower() for p in all_archives(game))
+    elsewhere: Counter[str] = Counter()
+    for path in all_archives(game):
+        archive = NResArchive.open(path)
+        for entry in archive:
+            if entry.tag.upper().startswith("CTL"):
+                try:
+                    parsed = control.parse(archive.read(entry), names)
+                except control.ControlFormatError:
+                    continue
+                elsewhere[path.name.lower()] += sum(r.action == control.ACT_KILL
+                                                    for r in parsed.references)
+    check("fortif.rlb: nothing aimed at a generator can kill it",
+          len(ctl) == 30 and not kills and rows[0].durability == 1.0
+          and gener.nodes[0].slot_index[0] == objmesh.NO_SLOT
+          and elsewhere["fortif.rlb"] == 0 and elsewhere["weapon.rlb"] >= 63,
+          f"{len(kills)} of {len(ctl)} building controllers carry action 17, and the generator's "
+          f"node 0 has {rows[0].durability:g} hit point and no level-0 slot: no round strikes "
+          f"it and a blast meets a sphere of radius 0; only the wreck's burn comes to it, "
+          f"last.  Control: the same count over the install "
+          f"finds the action where it is known to be, {dict(+elsewhere)}")
+
+
 def check_blasts(check, game: Path) -> None:
     """Which explosions are blasts, and what the data puts between one and its firer.
 
@@ -29420,7 +29553,8 @@ def run(game: Path) -> int:
         check_render_state, check_shade, check_light_highlights, check_debris_and_the_pass, check_blend_depth,
         check_minimap_agreement, check_arealmap,
         check_grid, check_missions, check_scale, check_objects, check_poses, check_lod,
-        check_damage, check_blasts, check_node_stages, check_scenery_life,
+        check_damage, check_blasts, check_node_stages, check_what_a_nodes_stage_moves,
+        check_scenery_life,
         check_effects, check_effect_timing, check_sprite_modes, check_sounds, check_draw_order,
         check_music,
         check_actions,

@@ -375,8 +375,8 @@ impl Building {
     }
 
     /// Whether any of its items plays a node of its mesh, so the part has to be drawn node
-    /// by node rather than as one model at rest: the energy bridge takes no damage, and
-    /// without this its three turning arms stand still while the rays hung on them sweep.
+    /// by node rather than as one model at rest: without this the energy bridge's three turning
+    /// arms stand still while the rays hung on them sweep.
     pub fn plays_nodes(&self) -> bool {
         let door = self.doors.iter().map(|d| &d.item);
         door.chain(self.pod.iter().map(|p| &p.item))

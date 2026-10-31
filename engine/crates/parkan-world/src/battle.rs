@@ -114,7 +114,9 @@ fn read(assembly: &mut Assembly, r: &ResourceRef) -> Option<Vec<u8>> {
 }
 
 fn table(assembly: &mut Assembly, record: &str) -> Option<Vec<NodeDamage>> {
-    let slot = assembly.library.get(record)?.slot_with_suffix("ndp")?.clone();
+    // A building's root is a FORT record, and its table is on the record that one names, as
+    // its controller is: `fr_b_plant` to `bu_b_plant`.
+    let slot = assembly.library.record_slot(assembly.library.get(record), "ndp", 0)?;
     ndp::parse(&read(assembly, &slot)?, &slot.member).ok()
 }
 

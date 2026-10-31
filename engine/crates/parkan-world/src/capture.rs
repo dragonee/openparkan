@@ -9,7 +9,8 @@ use std::rc::Rc;
 use glam::Vec3;
 use parkan_formats::hallway::{self, HallWay, LINK_FLYER_ONLY, LINK_SHUT, Link, PLACE_POD};
 use parkan_formats::mission::KIND_BUILDING;
-use parkan_sim::behaviour::Places;
+use parkan_sim::behaviour::{Places, Task};
+use parkan_sim::orders::{self, Order};
 use parkan_sim::path::{CORNER_CLEARANCE, ESCAPE_SPEED, ESCAPE_SPEED_ANIMAL, LEAVE_SPEED, Refusal, Way};
 
 use crate::construction::placed;
@@ -39,8 +40,35 @@ pub const WAY_DOOR_STEP: f32 = 20.0;
 #[derive(Clone, Debug, Default)]
 pub struct Ways {
     hall_ways: HashMap<String, Rc<HallWay>>,
-    /// A unit's target: the building target it was last sent into along the hall way.
+    /// A unit's target: the building target it was last sent into along the hall way, or was
+    /// made in, or was put on a vertex of: the building its walker's place holds a vertex of
+    /// (docs/31, "The escape").
     pub entered: HashMap<usize, usize>,
+    /// A unit's target, while it escapes: when its escape began, and none for one from a named
+    /// building, which has no 20-second check.
+    pub leaving: HashMap<usize, Option<f64>>,
+}
+
+/// How long an escape with no target walks on a building before it is put on the building's
+/// hall way (the float at `Behavior.dll:0x1005960c`, tested at `0x1002c222`).
+pub const LEAVE_TOO_LONG_MS: f64 = 20_000.0;
+
+/// `IAnimation` slot 16 for a node (`AniMesh.dll:0x100057f0`): its stage held below its count, 0
+/// on a node with a single stage however hurt it is, and on a node no life knows of.
+pub fn node_value(life: Option<&parkan_sim::damage::Life>, node: usize) -> usize {
+    life.and_then(|l| l.nodes.get(node)).map_or(0, parkan_sim::damage::NodeLife::block)
+}
+
+/// `MHallWay` slot 27 (`ArealMap.dll:0x1000be50`): of the vertices on node `joint`, whatever their
+/// flags, the one nearest `at` in all three axes. None when no vertex is on it.
+pub fn nearest_on_joint(h: &HallWay, points: &[Option<Vec3>], joint: usize, at: Vec3) -> Option<usize> {
+    h.vertices
+        .iter()
+        .enumerate()
+        .filter(|(_, v)| v.joint as usize == joint)
+        .filter_map(|(i, _)| Some((i, points.get(i).copied().flatten()?.distance(at))))
+        .min_by(|a, b| a.1.total_cmp(&b.1))
+        .map(|(i, _)| i)
 }
 
 /// What a change of owner says to the player (`0x100a48a0`): with the player's clan the taker,
@@ -169,7 +197,7 @@ impl Play {
     }
 
     /// Target `t`'s hall-way vertices in the world, through their nodes' poses.
-    fn hall_way_points(&mut self, t: usize) -> Option<(Rc<HallWay>, Vec<Option<Vec3>>)> {
+    pub fn hall_way_points(&mut self, t: usize) -> Option<(Rc<HallWay>, Vec<Option<Vec3>>)> {
         let h = self.hall_way(t)?;
         let part = self.battle.combat.targets.get(t)?.parts.first()?;
         let points = h.vertices.iter().map(|v| crate::factory::vertex_world(v, part)).collect();
@@ -302,10 +330,12 @@ impl Play {
 
     /// The way out of building `t` for a unit at `from` bound for `to`: from its nearest
     /// hall-way vertex along the links it may cross ([`crosses`]) to the exit that makes the
-    /// way to `to` shortest, counting the rest straight.
+    /// way to `to` shortest, counting the rest straight. The hall way is the one path a building
+    /// has: the walker's search starts from the vertex its place holds (docs/31, "The escape").
     ///
-    /// STAND-IN: docs/31-packages.md#the-escape--read -- the building's own paths an escape is
-    /// routed out by ("LEAVE IS TOO !!!") are not read: the hall way's.
+    /// STAND-IN: docs/31-packages.md#which-paths-a-unit-leaves-a-building-by--read-and-measured
+    /// -- the vertex the walker's place holds is not kept along a walk; the one nearest the unit
+    /// stands for it.
     pub fn way_out(&mut self, t: usize, from: Vec3, to: Vec3, flyer: bool) -> Option<Vec<Vec3>> {
         let (h, points) = self.hall_way_points(t)?;
         let near = |i: &usize| points[*i].map_or(f32::INFINITY, |p| p.distance(from));
@@ -472,6 +502,79 @@ impl Play {
         Some((outside, inner))
     }
 
+    /// The building a robot stands on and its part and node: the face the ground contact holds
+    /// names them, and the placement hangs the unit there (`Terrain.dll:0x10025fc0`), so they are
+    /// its parent and its joint (docs/31, "The node test").
+    pub(crate) fn standing_on(&self, r: usize) -> Option<(usize, usize, usize)> {
+        let (b, face) = self.robots.get(r)?.1.walker.ground.and_then(|h| h.solid)?;
+        if self.units.get(b)?.kind != KIND_BUILDING {
+            return None;
+        }
+        let node = self.ground.solids.get(b)?.nodes.iter().find(|n| n.faces.contains(&face))?;
+        Some((b, node.part, node.node))
+    }
+
+    /// Robot `r` put on the vertex of building `b`'s hall way nearest it on node `joint` of its
+    /// root part (`Behavior.dll:0x1002c41f`, `0x10006c8d`), as the "Teleport to" in its log says:
+    /// its translation written, its walk cleared, and the vertex in its walker's place
+    /// (`0x1003c3d0`). False where no vertex is on that node, and it stays.
+    pub(crate) fn put_on_way(&mut self, r: usize, b: usize, part: usize, joint: usize) -> bool {
+        let at = self.robots[r].1.walker.body.position;
+        let Some((h, points)) = self.hall_way_points(b) else { return false };
+        let vertex = (part == 0).then(|| nearest_on_joint(&h, &points, joint, at)).flatten();
+        let Some(point) = vertex.and_then(|v| points[v]) else { return false };
+        let (t, robot) = &mut self.robots[r];
+        let w = &mut robot.walker;
+        w.body.position = point;
+        w.from = (point, w.body.yaw);
+        w.ground = None;
+        robot.wizard.clear();
+        self.construction.ways.entered.insert(*t, b);
+        true
+    }
+
+    /// The takt of an escape with no target (`Behavior.dll:0x1002c216`-`0x1002c5df`): one that has
+    /// walked for more than 20 s and still stands on a building is put on the building's hall
+    /// way where it can be ("LEAVE IS TOO !!!"), and starts over from where it then is.
+    pub(crate) fn escape_too_long(&mut self, r: usize) {
+        let t = self.robots[r].0;
+        let robot = &self.robots[r].1;
+        if !matches!(robot.behaviour.task(), Task::Leave { .. }) {
+            self.construction.ways.leaving.remove(&t);
+            return;
+        }
+        let now = robot.time_ms;
+        let idle = robot.wizard.idle(now);
+        let since = *self.construction.ways.leaving.entry(t).or_insert(Some(now));
+        if idle || since.is_none_or(|s| now - s <= LEAVE_TOO_LONG_MS) {
+            return;
+        }
+        let Some((b, part, node)) = self.standing_on(r) else { return };
+        self.put_on_way(r, b, part, node);
+        self.construction.ways.leaving.insert(t, Some(now));
+        let robot = &mut self.robots[r].1;
+        robot.wizard.clear();
+        if let Some(task) = robot.behaviour.tasks.last_mut() {
+            *task = Task::Leave { goal: None };
+        }
+    }
+
+    /// A unit's behaviour flag `0x10` switched back on, as the player lets go of it or raises its
+    /// auto-driver level from 0 (`Behavior.dll:0x10006c8d`-`0x10006f48`): standing on a building
+    /// it is put on the building's hall way and given an escape from that building, first; where
+    /// no vertex is on its node it is given nothing.
+    pub fn escape_on_release(&mut self, t: usize) {
+        let Some(r) = self.robots.iter().position(|(rt, _)| *rt == t) else { return };
+        let Some((b, part, node)) = self.standing_on(r) else { return };
+        if !self.put_on_way(r, b, part, node) {
+            return;
+        }
+        let id = self.units[b].logical_id;
+        let leave = Order { code: orders::LEAVE, parameter: 0, target: orders::Target::LogicId(id) };
+        self.robots[r].1.behaviour.insert_order(&leave, orders::INSERT_TO_START);
+        self.construction.ways.leaving.insert(t, None);
+    }
+
     /// Whether robot target `t` flies, and so may cross a hall-way link only a flyer crosses.
     fn flies(&self, t: usize) -> bool {
         self.robots.iter().find(|(rt, _)| *rt == t).is_some_and(|(_, r)| r.flyer)
@@ -616,6 +719,34 @@ impl Play {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_nearest_vertex_is_asked_of_the_units_own_joint_in_all_three_axes() {
+        let v = |x: f32, joint: u32| parkan_formats::hallway::Vertex { position: [x, 0.0, 0.0], flags: 0, joint };
+        let h = HallWay { vertices: vec![v(0.0, 1), v(5.0, 2), v(9.0, 2)], links: Vec::new() };
+        let points: Vec<Option<Vec3>> =
+            vec![Some(Vec3::new(1.0, 0.0, 0.0)), Some(Vec3::new(5.0, 0.0, 9.0)), Some(Vec3::new(9.0, 0.0, 0.0))];
+        let at = Vec3::new(1.0, 0.0, 0.0);
+        assert_eq!(nearest_on_joint(&h, &points, 1, at), Some(0));
+        // The nearer across the ground stands 9 up, so the farther one wins; vertex 0 is off the joint.
+        assert_eq!(nearest_on_joint(&h, &points, 2, at), Some(2));
+        assert_eq!(nearest_on_joint(&h, &points, 3, at), None, "no vertex on that node");
+    }
+
+    #[test]
+    fn a_nodes_value_is_its_stage_held_below_its_count() {
+        use parkan_sim::damage::Life;
+        let mut life = Life::new(&[], vec![None, Some(0)], vec![false, false], 1.0, 1.0).staged(&[1, 3], &[]);
+        assert_eq!(node_value(Some(&life), 1), 0, "whole");
+        life.nodes[1].stage = 2;
+        assert_eq!(node_value(Some(&life), 1), 2, "hurt");
+        life.nodes[1].stage = 3;
+        assert_eq!(node_value(Some(&life), 1), 2, "gone: held below 3");
+        life.nodes[0].stage = 1;
+        assert_eq!(node_value(Some(&life), 0), 0, "a node of one stage reads whole, even gone");
+        assert_eq!(node_value(None, 0), 0, "no life");
+        assert_eq!(node_value(Some(&life), u32::MAX as usize), 0, "the place word's no node");
+    }
     use crate::play::RELATION_ALLIED;
     use parkan_formats::hallway::{Link, Vertex};
 

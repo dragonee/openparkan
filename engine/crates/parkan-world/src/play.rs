@@ -1398,11 +1398,7 @@ impl Play {
     /// stage -- rather than as one model built whole at its placement.
     ///
     /// A target that takes damage is (docs/26, "What a damaged node, a destroyed part and a
-    /// dead unit draw"), and so is a building whose own items play its nodes. The second is
-    /// what the energy bridge needs: it takes no damage, and drawn whole its three turning
-    /// arms stand still while the rays hung on them sweep round without them. *Measured*: of
-    /// the buildings the 29 missions place, the ones this brings in and life does not are the
-    /// two bridge halves, the generators, the small Main Teleport and a ruin.
+    /// dead unit draw"), and so is a building whose own items play its nodes.
     pub fn drawn_by_node(&self, t: usize) -> bool {
         self.battle.combat.targets.get(t).is_some_and(|x| x.parts.iter().any(|p| p.life.is_some()))
             || self.buildings.iter().any(|b| b.target == t && b.plays_nodes())
@@ -1884,10 +1880,14 @@ impl Play {
                 {
                     let robot = &mut self.robots[r].1;
                     robot.auto_driver = (robot.auto_driver + 1) % 3;
+                    let raised = robot.auto_driver == 1;
                     if robot.auto_driver != 0 {
                         robot.walker.body.command = [0.0; 3];
                     }
                     self.take_as_level(r);
+                    if raised {
+                        self.escape_on_release(t);
+                    }
                 }
                 false
             }
@@ -2786,6 +2786,7 @@ impl Play {
             robot.target_point = None;
             let current = self.targets.current;
             self.hero.relink(current);
+            self.escape_on_release(d.target);
         }
     }
 
@@ -3645,10 +3646,10 @@ impl Play {
             let made = if self.free_minds(clan) > 0 { self.spawn(&project, clan, at, 0.0) } else { None };
             if let Some(unit) = made {
                 // The bot is made at the factory's creation vertex, inside it (docs/36, "The
-                // bot appears"), so it walks out along the building's own paths, as the
-                // escape's 20-second check routes out a unit still on a building ("LEAVE IS
-                // TOO !!!", docs/31, "The escape"). Without it the escape's straight line
-                // would run into a wall.
+                // bot appears"), and the creator hands its walker that vertex for its place
+                // (variable 0x801, `Behavior.dll:0x1001e153`, docs/31, "The escape"), so the
+                // escape's walk starts along the hall way. Without it the escape's straight
+                // line would run into a wall.
                 if place.is_some() {
                     self.construction.ways.entered.insert(unit, t);
                 }
@@ -4659,6 +4660,7 @@ impl Play {
     fn behave(&mut self, r: usize, dt_ms: f64, seen: &[Sighting], world: &[Contact], fights: bool) {
         let t = self.robots[r].0;
         self.escape_off_building(r);
+        self.escape_too_long(r);
         let sensed = self.radar_ids(r, false, world);
         let others = self.seen_by(t, seen, &sensed);
         let type_word = self.units[t].type_word;
@@ -4919,17 +4921,19 @@ impl Play {
 
     /// The unit takt's escape (`Behavior.dll:0x10005408`, docs/31, "The escape"): a unit with
     /// no order but its stop, standing on a live building that is not a ruin, is given the
-    /// escape, replacing.
-    ///
-    /// STAND-IN: docs/31-packages.md#the-escape--read -- the node test (a unit on a damaged
-    /// node of the building is left be) is not modelled: every node counts as whole.
+    /// escape, replacing; unless the node it stands on reads a non-zero value
+    /// (`0x1000539a`-`0x100053a7`), which only a node of more than one stage can.
     fn escape_off_building(&mut self, r: usize) {
-        let (_, robot) = &self.robots[r];
-        let Some((b, _)) = robot.walker.ground.and_then(|h| h.solid) else { return };
+        let Some((b, part, node)) = self.standing_on(r) else { return };
+        let robot = &self.robots[r].1;
         if robot.behaviour.task() != Task::Stop
-            || self.units.get(b).is_none_or(|u| u.kind != KIND_BUILDING || u.type_word == BUILDING_RUINE)
+            || self.units.get(b).is_none_or(|u| u.type_word == BUILDING_RUINE)
             || !self.battle.combat.targets.get(b).is_some_and(|x| x.alive)
         {
+            return;
+        }
+        let life = self.battle.combat.targets[b].parts.get(part).and_then(|p| p.life.as_ref());
+        if crate::capture::node_value(life, node) != 0 {
             return;
         }
         let leave = orders::Order { code: orders::LEAVE, parameter: 0, target: orders::Target::NotDefined };
@@ -5444,11 +5448,13 @@ fn turret_alive(robot: &Robot, target: &Target) -> bool {
 }
 
 /// A node's condition, its life over its maximum (docs/23, "What a value id is"), and whether
-/// it is destroyed; a part that takes no damage is whole.
+/// its last stage has hidden it, which is what takes it out of the load (`0x10011920`): a part
+/// still in the air has not been yet, and a building's never-hidden shell never is. A part that
+/// takes no damage is whole.
 pub fn node_share(life: Option<&parkan_sim::damage::Life>, node: usize) -> (f32, bool) {
     match life.and_then(|l| l.nodes.get(node)) {
-        Some(l) if l.max > 0.0 => ((l.life / l.max).clamp(0.0, 1.0), l.destroyed),
-        Some(l) => (if l.destroyed { 0.0 } else { 1.0 }, l.destroyed),
+        Some(l) if l.max > 0.0 => ((l.life / l.max).clamp(0.0, 1.0), l.hidden()),
+        Some(l) => (if l.destroyed { 0.0 } else { 1.0 }, l.hidden()),
         None => (1.0, false),
     }
 }
@@ -5557,6 +5563,30 @@ mod tests {
             portals: Rc::default(),
             host: None,
         }
+    }
+
+    /// `0x100118cd`-`0x100118e2`: only the last stage's hiding takes a node out of the load, so a
+    /// part still flying off and a building's shell, both at 0 life, keep their weight.
+    #[test]
+    fn only_a_node_its_last_stage_has_hidden_leaves_the_load() {
+        use parkan_sim::damage::Life;
+        let mut life = Life::new(&[], vec![None, Some(0), Some(0)], vec![false; 3], 1.0, 1.0)
+            .staged(&[1, 1, 1], &[false, false, true]);
+        for n in &mut life.nodes {
+            n.max = 100.0;
+            n.life = 100.0;
+        }
+        assert_eq!(node_share(Some(&life), 1), (1.0, false));
+        // At 0 life it is knocked off, and flies for three seconds.
+        life.lose(1, 100.0);
+        life.takt(0.0);
+        assert_eq!(node_share(Some(&life), 1), (0.0, false), "in the air");
+        life.takt(1.0e9);
+        assert_eq!(node_share(Some(&life), 1), (0.0, true), "down, and hidden");
+        // A shell at 0 life is never hidden.
+        life.lose(2, 100.0);
+        life.takt(1.0e9);
+        assert_eq!(node_share(Some(&life), 2), (0.0, false), "the shell stays");
     }
 
     /// `iron3d.dll:0x10063699`: the hero put out of a bot faces (F.x, −F.y), F the unit vector

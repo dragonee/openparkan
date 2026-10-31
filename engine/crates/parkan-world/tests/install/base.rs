@@ -1988,3 +1988,174 @@ fn c03_m01s_effects_take_their_level_from_their_owners_class_and_their_size_in_p
     assert!(whole >= 20 && drawn(3) == 0, "{whole} {}", drawn(3));
     assert!(drawn(2) < drawn(1) && drawn(1) < whole, "{} of {whole}, then {}", drawn(1), drawn(2));
 }
+
+/// Mission 03's first walker with no task but `task`, stood on a floor of a building, on a node
+/// a hall-way vertex rides and more than a metre from the nearest of them: its index, and the
+/// building's target, and the part and node under it.
+fn stood_in_a_building(
+    play: &mut parkan_world::play::Play,
+    task: parkan_sim::behaviour::Task,
+) -> (usize, usize, usize, usize) {
+    let r = (0..play.robots.len())
+        .find(|&r| {
+            let animal = play.units[play.robots[r].0].type_word & parkan_world::play::CLASS_ANIMAL != 0;
+            !play.robots[r].1.flyer && !animal
+        })
+        .expect("a walker");
+    let buildings: Vec<usize> = play.buildings.iter().map(|b| b.target).collect();
+    for b in buildings {
+        let Some((h, points)) = play.hall_way_points(b) else { continue };
+        for (i, p) in points.iter().enumerate() {
+            let Some(p) = *p else { continue };
+            for offset in [glam::Vec3::X, glam::Vec3::Y, -glam::Vec3::X, -glam::Vec3::Y] {
+                let robot = &mut play.robots[r].1;
+                let w = &mut robot.walker;
+                w.body.position = p + offset * 3.0 + glam::Vec3::Z * 2.0;
+                w.ground = None;
+                w.follow_ground(&play.ground);
+                let Some((on, face)) = w.ground.and_then(|h| h.solid) else { continue };
+                if on != b {
+                    continue;
+                }
+                let node = play.ground.solids[b].nodes.iter().find(|n| n.faces.contains(&face)).unwrap();
+                let (part, joint) = (node.part, node.node);
+                if part != 0 || joint != h.vertices[i].joint as usize {
+                    continue;
+                }
+                w.from = (w.body.position, w.body.yaw);
+                robot.wizard.clear();
+                robot.behaviour.tasks = vec![task];
+                return (r, b, part, joint);
+            }
+        }
+    }
+    panic!("no floor by a vertex");
+}
+
+#[test]
+#[ignore = "needs the game install"]
+fn an_escape_still_on_a_building_after_20_s_is_put_on_the_nearest_vertex_of_its_node_and_starts_over() {
+    use parkan_sim::behaviour::Task;
+    use parkan_world::capture::{LEAVE_TOO_LONG_MS, nearest_on_joint};
+
+    let (mut play, _) = mission_03_play();
+    let (r, b, _, node) = stood_in_a_building(&mut play, Task::Leave { goal: None });
+    let t = play.robots[r].0;
+    let at = play.robots[r].1.walker.body.position;
+    let (h, points) = play.hall_way_points(b).expect("its hall way");
+    let vertex = nearest_on_joint(&h, &points, node, at).expect("a vertex on its node");
+    let point = points[vertex].unwrap();
+    assert!(point.distance(at) > 1.0, "not there already: {point} from {at}");
+
+    // Within the 20 s it walks: its first takt takes a point, and the clock starts.
+    play.tick(1000.0 / 60.0, [0.0; 2]);
+    assert!(matches!(play.robots[r].1.behaviour.task(), Task::Leave { goal: Some(_) }));
+    let now = play.robots[r].1.time_ms;
+    let near = play.robots[r].1.walker.body.position;
+    assert!(near.truncate().distance(at.truncate()) < 1.0, "{near} from {at}");
+
+    // Past them: the "Teleport to", and a new point about where it now stands.
+    play.construction.ways.leaving.insert(t, Some(now - LEAVE_TOO_LONG_MS - 1.0));
+    play.tick(1000.0 / 60.0, [0.0; 2]);
+    let there = play.robots[r].1.walker.body.position;
+    assert!(there.truncate().distance(point.truncate()) < 0.5, "at {there}, the vertex at {point}");
+    assert_eq!(play.construction.ways.entered.get(&t), Some(&b), "its walker's place holds the vertex");
+    assert!(matches!(play.robots[r].1.behaviour.task(), Task::Leave { .. }));
+    let clock = play.construction.ways.leaving[&t].expect("the clock runs again");
+    assert!(play.robots[r].1.time_ms - clock < 100.0, "from {clock}");
+}
+
+#[test]
+#[ignore = "needs the game install"]
+fn a_unit_with_no_order_is_left_be_on_a_node_that_shows_its_damage_and_escapes_a_whole_one() {
+    use parkan_sim::behaviour::Task;
+
+    let (mut play, _) = mission_03_play();
+    let (r, b, part, node) = stood_in_a_building(&mut play, Task::Stop);
+    let hurt = {
+        let life = play.battle.combat.targets[b].parts[part].life.as_mut().expect("the building's life");
+        let n = &mut life.nodes[node];
+        n.stages = 2;
+        n.stage = 1;
+        n.life = n.max * 0.4;
+        n.block()
+    };
+    assert_eq!(hurt, 1);
+    play.tick(1000.0 / 60.0, [0.0; 2]);
+    assert_eq!(play.robots[r].1.behaviour.task(), Task::Stop, "left be");
+
+    // A single stage reads whole however hurt: the test cannot hold on it.
+    let life = play.battle.combat.targets[b].parts[part].life.as_mut().unwrap();
+    life.nodes[node].stages = 1;
+    life.nodes[node].stage = 1;
+    play.tick(1000.0 / 60.0, [0.0; 2]);
+    assert!(matches!(play.robots[r].1.behaviour.task(), Task::Leave { .. }), "given the escape");
+}
+
+#[test]
+#[ignore = "needs the game install"]
+fn letting_go_of_a_bot_on_a_buildings_floor_puts_it_on_the_hall_way_with_an_escape_from_that_building() {
+    use parkan_sim::behaviour::Task;
+    use parkan_world::capture::nearest_on_joint;
+
+    let (mut play, _) = mission_03_play();
+    let (r, b, _, node) = stood_in_a_building(&mut play, Task::Stop);
+    let t = play.robots[r].0;
+    let at = play.robots[r].1.walker.body.position;
+    let (h, points) = play.hall_way_points(b).unwrap();
+    let point = points[nearest_on_joint(&h, &points, node, at).unwrap()].unwrap();
+    play.escape_on_release(t);
+    assert_eq!(play.robots[r].1.walker.body.position, point);
+    assert!(matches!(play.robots[r].1.behaviour.task(), Task::Leave { .. }));
+    assert_eq!(play.construction.ways.leaving.get(&t), Some(&None), "from that building: no 20 s");
+
+    // Off a building there is nothing to leave.
+    let (mut play, _) = mission_03_play();
+    let robot = &mut play.robots[r].1;
+    robot.behaviour.tasks = vec![Task::Stop];
+    robot.walker.ground = None;
+    let t = play.robots[r].0;
+    let before = play.robots[r].1.walker.body.position;
+    play.escape_on_release(t);
+    assert_eq!(play.robots[r].1.walker.body.position, before);
+    assert_eq!(play.robots[r].1.behaviour.task(), Task::Stop);
+}
+
+#[test]
+#[ignore = "needs the game install"]
+fn a_building_takes_its_nodes_hit_points_from_the_table_its_fort_record_names() {
+    // 74 of the install's 76 building files root on a FORT record, whose `.ndp` is on the record
+    // it names (`fr_b_plant` to `bu_b_plant`), and the life system is built from that table.
+    let (play, _) = mission_03_play();
+    let mut buildings = 0;
+    for b in &play.buildings {
+        let life = play.battle.combat.targets[b.target].parts[0].life.as_ref();
+        assert!(life.is_some_and(|l| l.building && l.full() > 0.0), "target {} has no life", b.target);
+        buildings += 1;
+    }
+    assert!(buildings > 0);
+}
+
+#[test]
+#[ignore = "needs the game install"]
+fn every_devices_mass_sits_on_a_node_of_its_unit_and_the_total_is_the_weighs() {
+    let (mut play, _) = mission_03_play();
+    let robots: Vec<(usize, parkan_world::robot::Heft)> =
+        play.robots.iter().map(|(t, r)| (*t, r.heft.clone())).collect();
+    let mut weigher = parkan_world::designs::Weigher::default();
+    let mut carried = 0;
+    for (t, heft) in robots {
+        let path = play.commander.paths[t].clone();
+        let unit = play.assembly.unit(&path).expect("the unit's file");
+        let assembled = weigher.assemble(&mut play.assembly, &unit.components).expect("a root controller");
+        assert_eq!(heft.devices, 0.0, "{path}: a device on no node");
+        let on_nodes: f32 = heft.nodes.iter().map(|n| n.devices).sum();
+        let all: f32 = assembled.devices.iter().map(|d| d.mass).sum();
+        assert!((on_nodes - all).abs() < 0.01, "{path}: {on_nodes} of {all}");
+        let total = assembled.load().0;
+        let mass = heft.mass(|_, _| (1.0, false));
+        assert!((mass - total).abs() <= total * 1e-4, "{path}: {mass} against {total}");
+        carried += heft.nodes.iter().filter(|n| n.devices > 0.0 && (n.part, n.node) != (0, 0)).count();
+    }
+    assert!(carried > 0, "some unit carries a device off its node 0");
+}
