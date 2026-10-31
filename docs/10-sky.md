@@ -361,7 +361,6 @@ pieces come together, each from a different file:
   else — which is a **material** name, and the material names both a texture
   and a **cell** of it ([above](#a-material-picks-a-sub-image-as-well-as-a-texture)).
 - **How big.** The keyframe's first two floats, its extent across and up.
-
 - **What colour.** One for all four corners: the sprite's stream block gives its
   diffuse as `CSun +0x95c` with a stride of 0 (`0x1007cd98`–`0x1007cdaa`), which
   is property 5, **slot 17**, and its specular as the `0xff000000` at `+0x960`
@@ -372,9 +371,40 @@ pieces come together, each from a different file:
   the commonest of the rest are a mauve `(130, 115, 162)`, an orange
   `(255, 74, 0)` and a pale `(255, 235, 210)`. Its alpha is the one the flare's
   lift of the main light reads ([below](#the-lens-flare)), 255 on 197 of the 656
-  and 50 or less on 249; **whether that alpha reaches the sprite's blend is not
-  checked against a frame**, and the engine still draws a body in its texture's
-  own colours.
+  and 50 or less on 249.
+- **And the colour and the alpha both reach the frame.** The constructor gives the
+  sprite's material block render phase **2** (`0x1007cabf`, the shade's slot 7,
+  `0x10042850`, whose `+0x192c` is 2 on a device with that phase and 1 otherwise,
+  `0x10041198`–`0x100411ad`); slot 16 of the shade copies the block to the item
+  (`0x1002852f`), and the item's `+0xc8` is what `SetPhase` is handed (`0x10030386`). Phase 2
+  is `Ngi32.dll`'s records 2 and 3 (`0x10034cb0`, `0x10034b30`), and either way the stage
+  **modulates both**: colour texture × diffuse, alpha texture × diffuse. So under the
+  material's blend 4 the disc is
+
+  ```
+  frame = T.rgb × slot 17's rgb × a + frame behind × (1 − a)        a = T.a × slot 17's alpha
+  ```
+
+  which is what the keyframes are written for: on C00 M01 the sun comes up an orange at 50
+  of 255 and stands (255, 245, 230) at 255 by mid-morning. A black slot 17 never paints a
+  black disc (*measured*): of its 84 keyframes the 54 at 255 lie outside every body's start
+  and lifetime, and the 30 others carry an alpha of 0. (By that window, start and lifetime,
+  12 of 541 are black inside one and 72 of 115 outside; the 31 of 576 above was counted some
+  other way, which was not recovered.) The flare's two blocks take the same phase (`0x1007cbc4`, `0x1007ccc9`), which is the control: its intensity
+  is an alpha on its vertices and nothing else (below), and it would do nothing otherwise.
+
+  *Seen*: C02 M03's sun at briefing time 10 s, slot 17 at (228, 239, 39) and 114 of 255
+  between its keyframes, against "Part 4" (Qqs8_i9IeUU, 0:42), mean colours over the same
+  areas with the video's own matrix, the sky's as the control. Before, the engine drew the
+  texture's own colours:
+
+  | area | recording | before | after |
+  |---|---|---|---|
+  | the disc's core | (143, 183, 34) | (202, 238, 147) | (142, 185, 34) |
+  | its lower edge | (136, 173, 36) | (203, 226, 159) | (143, 181, 36) |
+  | its left limb | (114, 161, 33) | (149, 199, 78) | (123, 170, 34) |
+  | the brightest pixel in it | (162, 192, 44) | (255, 255, 255) | (163, 192, 39) |
+  | the sky to the right | (106, 152, 35) | (109, 154, 38) | (109, 154, 38) |
 
 The cell is the piece that is easy to miss and impossible to miss twice.
 `ENV_SUN_3` names `SUN1.0`, which holds **four** bodies; a quad taking the whole
@@ -2652,11 +2682,15 @@ which is what the game does.
   seven times their mean as green alone; no light, no texture and nothing of
   the HUD; and it skips the lens flare. *Seen* once, for 0.7 s of Part 4.5
   ([What the infrared does to a frame](#what-the-infrared-does-to-a-frame--read-and-seen)).
-- **Whether slot 17's alpha reaches a body's sprite.** The sprite's four
+- ~~**Whether slot 17's alpha reaches a body's sprite.** The sprite's four
   vertices carry slot 17's colour (`0x1007cd98`), alpha and all, and the alpha
   is 50 of 255 or less on 249 of the 656 keyframes; what the device does with
   it is not checked against a frame, and the engine draws a body in its
-  texture's own colours
+  texture's own colours.~~ **It does, and the colour with it**: `CSun` gives the
+  sprite render phase 2 (`0x1007cabf`), whose stage multiplies both the texture's
+  colour and its alpha by the vertex's, under blend 4. *Seen* on C02 M03's sun at
+  114 of 255: the disc's core is (143, 183, 34) in the recording and (142, 185, 34)
+  in the engine now, where it was (202, 238, 147)
   ([The sun and the moon are drawn](#the-sun-and-the-moon-are-drawn)).
 - ~~**The line a room's mesh is asked along.** The room test's second half
   (`AniMesh.dll:0x10010550`) counts crossings along the direction at the mesh's

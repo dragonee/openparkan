@@ -587,6 +587,16 @@ pub fn infrared(c: Rgb) -> Rgb {
     [0.0, green.min(255.0) / 255.0, 0.0]
 }
 
+/// The colour on a body's four corners, which the texture is multiplied by, its alpha with the
+/// texture's and its colour with the texture's: slot 17, whole (`Terrain.dll:0x1007cd98`), under
+/// the render phase `CSun`'s constructor gives the sprite (`0x1007c9d6`, the shade's slot 7,
+/// `+0x192c`: 2 on a device that has it, `0x1004119b`), whose stage 0 modulates both
+/// (`Ngi32.dll:0x10034cb0`). The infrared's filter keeps the alpha (`0x1004f900`).
+pub fn body_colour(sky: &Sky, infrared_on: bool) -> [f32; 4] {
+    let [r, g, b] = if infrared_on { infrared(sky.body_tint) } else { sky.body_tint };
+    [r, g, b, sky.sun_boost]
+}
+
 /// What the sky's and the sun's draws leave of a frame's colours.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Seen {
@@ -1030,6 +1040,17 @@ mod tests {
         assert!(aloft(525.0 - 38.0).is_empty(), "down at its stop");
         // The moon runs its own arc over its own 300 s.
         assert_eq!(aloft(600.0 - 56.0)[0].0, Body::Moon);
+    }
+
+    #[test]
+    fn a_bodys_corners_carry_slot_17_alpha_and_all() {
+        let mut sky = at(&day(vec![sky_keyframe(0, 0, 1.0)]), at_seconds(0, 0.0)).unwrap();
+        // C00 M01's sun at 00:30: an orange at 50 of 255.
+        sky.body_tint = [1.0, 40.0 / 255.0, 0.0];
+        sky.sun_boost = 50.0 / 255.0;
+        assert_eq!(body_colour(&sky, false), [1.0, 40.0 / 255.0, 0.0, 50.0 / 255.0]);
+        // The infrared's filter takes the colour and keeps the alpha: 7 x 0.33 x 295 = 681, held.
+        assert_eq!(body_colour(&sky, true), [0.0, 1.0, 0.0, 50.0 / 255.0]);
     }
 
     #[test]

@@ -112,26 +112,17 @@ pub fn world(game: &Path, loaded: &Loaded) -> Result<World> {
     Ok(World { store, terrain, objects, atmosphere, body_textures, body_cells, sky_layers, flare_looks })
 }
 
-/// The bodies to draw this frame: each one up, along its own arc, with its slot's texture.
-/// With the camera's `infrared` on the sprite's colour, slot 17's, goes through the shader
-/// component's filter and comes out green (`Terrain.dll:0x1007d945`-`0x1007d968`).
-///
-/// STAND-IN: docs/10-sky.md#the-sun-and-the-moon-are-drawn -- the sprite's four vertices carry
-/// slot 17's colour (`0x1007cd98`), which is read; whether its alpha reaches the blend, and so
-/// how the disc looks at the 50 of 255 many keyframes give it, is not checked against a frame,
-/// and outside the infrared the sprite is drawn in its texture's own colours.
+/// The bodies to draw this frame: each one up, along its own arc, with its slot's texture. The
+/// sprite's colour is slot 17's, alpha and all (`Terrain.dll:0x1007cd98`), which the render phase
+/// multiplies into the texture's colour and the texture's alpha (docs/10-sky.md, "The sun and the
+/// moon are drawn"); with the camera's `infrared` on it goes through the shader component's
+/// filter and comes out green (`0x1007d945`-`0x1007d968`).
 pub fn body_sprites(world: &World, seconds: f64, infrared: bool) -> Vec<parkan_render::body::Sprite> {
     let Some(a) = world.atmosphere.as_ref() else {
         return Vec::new();
     };
     let sky = parkan_sim::sky::at(a, parkan_sim::sky::position(a, seconds));
-    let tint = match (&sky, infrared) {
-        (Some(s), true) => {
-            let [r, g, b] = parkan_sim::sky::infrared(s.body_tint);
-            [r, g, b, 1.0]
-        }
-        _ => [1.0; 4],
-    };
+    let tint = sky.as_ref().map_or([1.0; 4], |s| parkan_sim::sky::body_colour(s, infrared));
     parkan_sim::sky::bodies_aloft(a, seconds)
         .into_iter()
         .map(|(body, progress)| parkan_render::body::Sprite {
