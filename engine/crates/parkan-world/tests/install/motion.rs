@@ -206,15 +206,96 @@ fn the_hero_crosses_mission_01s_bridge_on_its_deck() {
     assert!(path.last().unwrap().y > 800.0, "and off the far end: {}", path.last().unwrap());
 }
 
-/// A unit the Wizard drives is held by a slope as the player's own machine is: the engine's
-/// stand-in (docs/24, "Ground and slope"). The game is read to pass the brake over while a
-/// written velocity stands, so a driven machine is never braked; the engine brakes it, since its
-/// local path does not keep an AI unit off such a face. A written velocity replaces the
-/// machine's own at the top of every step, so the brake's pull never built up on one: an AI
-/// unit walked up this face at 8 m/s where the same chassis under the player does not move.
+/// What holds a machine the AI drives off a slope is where it is sent, not a brake (docs/24,
+/// "Ground and slope"). The AI's own control path, from the order on: a warbot told to go from the
+/// foot of Tut_1's 40 degree face to the plateau over it is routed by the walkable areals, every
+/// point of its walk on ground under the cone but for what the areals themselves hold, with
+/// nothing braking it; and it gets there.
 #[test]
 #[ignore = "needs the game install"]
-fn a_slope_past_the_cone_holds_a_wizard_driven_unit_as_it_holds_the_player() {
+fn the_ai_is_kept_off_a_face_past_the_cone_by_the_areals_it_walks_with_no_brake_on_it() {
+    use glam::Vec3;
+    use parkan_sim::orders::{self, Order, Target};
+    use parkan_world::factory::Project;
+
+    let (mut play, _) = mission_01_play();
+    let graph = play.graph.clone().expect("Tut_1 has an areal map");
+    let hit = play.ground.below(125.0, 1050.0, 1.0e5).expect("ground at (125, 1050)");
+    let cone = 0.6f32.to_degrees();
+    assert!(hit.normal.z.acos().to_degrees() > cone, "a face past the cone");
+    assert!(!graph.usable(125.0, 1050.0), "on an areal no walker is sent to");
+    // Two walkable places the straight line between which runs over ground past the cone, and
+    // which the areals join.
+    let open = |p: Vec3| graph.usable(p.x, p.y) && !graph.in_footprint(p.x, p.y);
+    let steep = |play: &parkan_world::play::Play, a: Vec3, b: Vec3| {
+        (0..=64).any(|s| {
+            let p = a.lerp(b, s as f32 / 64.0);
+            play.ground.below(p.x, p.y, 1.0e5).is_some_and(|h| h.normal.z.acos().to_degrees() > cone)
+        })
+    };
+    let (lo, hi) = play.ground.bounds();
+    let spot = |i: usize, j: usize| {
+        Vec3::new(lo[0] + (hi[0] - lo[0]) * i as f32 / 48.0, lo[1] + (hi[1] - lo[1]) * j as f32 / 48.0, 0.0)
+    };
+    let spots: Vec<Vec3> = (1..48).flat_map(|i| (1..48).map(move |j| (i, j))).map(|(i, j)| spot(i, j)).collect();
+    let spots: Vec<Vec3> = spots.into_iter().filter(|&p| open(p)).collect();
+    let (foot, top) = spots
+        .iter()
+        .flat_map(|&a| spots.iter().map(move |&b| (a, b)))
+        .find(|&(a, b)| {
+            (60.0..300.0).contains(&a.distance(b))
+                && steep(&play, a, b)
+                && graph.route(a, b, &[], None, 1.5, 2, &mut || 0.0).is_ok()
+        })
+        .expect("two places with a rise past the cone between them");
+
+    let project = Project {
+        path: "UNITS\\UNITS\\PREBLD\\tut3_p1.dat".into(),
+        name: "SSW-X Warrior".into(),
+        type_word: 0x0100_8000,
+        chassis_size: 2,
+        ore: 0.0,
+        power: 0.0,
+        lines: Vec::new(),
+        sphere: None,
+    };
+    let t = play.spawn(&project, play.player_clan, foot, 0.0).expect("the SSW-X");
+    fn walker(play: &parkan_world::play::Play, t: usize) -> &parkan_sim::machine::Walker {
+        &play.robots.iter().find(|(rt, _)| *rt == t).unwrap().1.walker
+    }
+    assert_eq!(walker(&play, t).controller.mode, 2, "a chassis the brake would act on");
+    let from = walker(&play, t).body.position;
+    let order = Order { code: orders::GO, parameter: 0, target: Target::Place(top.to_array()) };
+    let robot = &mut play.robots.iter_mut().find(|(rt, _)| *rt == t).unwrap().1;
+    assert!(robot.behaviour.insert_order(&order, orders::INSERT_REPLACE));
+    robot.order = Some(order);
+
+    let (mut steep, mut ticks, mut reached) = (0, 0, None);
+    for tick in 0..(180 * 60) {
+        play.update_input();
+        play.tick(1000.0 / 60.0, [0.0; 2]);
+        let w = walker(&play, t);
+        let p = w.body.position;
+        ticks += 1;
+        if w.body.ground_normal.z.acos().to_degrees() > cone {
+            steep += 1;
+        }
+        if p.truncate().distance(top.truncate()) < 20.0 {
+            reached = Some(tick as f32 / 60.0);
+            break;
+        }
+    }
+    eprintln!("{from} to {top}: {reached:?} s, {steep} of {ticks} ticks on a face past the cone");
+    assert!(reached.is_some(), "it gets there, round the face");
+    assert!((steep as f32) < ticks as f32 * 0.02, "and is on such a face for {steep} of {ticks} ticks");
+}
+
+/// A written velocity is not braked (`Control.dll:0x1001566b`, body `+0x1a8`), so the same chassis
+/// that gets nowhere up a face past the cone under the player's keys walks up it under a Wizard's
+/// point: that is the read, and why the areals have the holding of it.
+#[test]
+#[ignore = "needs the game install"]
+fn a_slope_past_the_cone_holds_the_player_and_passes_a_written_velocity_over() {
     use glam::Vec3;
     let (mut play, _) = mission_01_play();
     assert_eq!(play.hero.walker.controller.mode, 2, "the hero's chassis is one that brakes");
@@ -248,7 +329,7 @@ fn a_slope_past_the_cone_holds_a_wizard_driven_unit_as_it_holds_the_player() {
     }
     let driven = play.hero.walker.body.position.truncate().distance(start.truncate());
     assert!(keyed < 2.0, "the player gets nowhere up it: {keyed} m in 6 s");
-    assert!(driven < 2.0, "and nor does a unit the Wizard drives: {driven} m in 6 s");
+    assert!(driven > 20.0, "and a written velocity walks up it: {driven} m in 6 s");
 }
 
 #[test]
@@ -909,16 +990,101 @@ fn c02_m01s_warbots_cross_the_canyon_by_its_bridge_and_are_never_sent_down_into_
     assert!(robot.behaviour.insert_order(&order, orders::INSERT_REPLACE));
     robot.order = Some(order);
     let (mut lowest, mut crossed) = (f32::MAX, false);
+    // A go that ends at a place stands a patrol about it, so where it is at the end is that
+    // patrol's; what matters is that it got there.
+    let mut reached = false;
     for _ in 0..(90 * 60) {
         play.tick(1000.0 / 60.0, [0.0; 2]);
         let p = at(&play);
         lowest = lowest.min(p.z);
         crossed |= (620.0..700.0).contains(&p.y) && p.z > 55.0;
+        reached |= p.truncate().distance(north.truncate()) < 30.0;
     }
-    let end = at(&play);
     assert!(crossed, "over the deck");
     assert!(lowest > 35.0, "never below the banks: {lowest}");
-    assert!(end.truncate().distance(north.truncate()) < 30.0, "and on to its goal: {end}");
+    assert!(reached, "and on to its goal");
+}
+
+/// A place in a stone's box is no node of the search: a walk to one is refused, and a walker
+/// standing in one walks out on its own once idle, at 7 m/s, past the box's nearest corner
+/// (`Behavior.dll:0x1003e81d`, docs/24, "Walking out"). Then it can be sent anywhere again. A
+/// walker shoved 30 m off its walk plans it again from where it stands (`0x1003f3a0`), where
+/// without that it would make straight back for the next point on the old line.
+#[test]
+#[ignore = "needs the game install"]
+fn c02_m02s_walker_is_refused_a_stones_box_walks_out_of_it_and_replans_when_shoved_off_its_walk() {
+    use glam::Vec3;
+    use parkan_sim::orders::{self, Order, Target};
+    use parkan_world::play::Play;
+
+    let mut play = campaign_play(gamedir::C02_MISSION_02);
+    let graph = play.graph.clone().expect("Mission.02 has an areal map");
+    let t = play.units.iter().position(|u| u.logical_id == 10).expect("unit 10");
+    let at = |play: &Play| play.robots.iter().find(|(rt, _)| *rt == t).unwrap().1.walker.body.position;
+    let middle = Vec3::new(997.0, 1010.0, 60.0);
+    assert!(graph.usable(middle.x, middle.y) && graph.in_footprint(middle.x, middle.y));
+
+    // Refused from outside, where the walkable word alone would let it go.
+    let start = at(&play);
+    assert!(!graph.in_footprint(start.x, start.y), "{start}");
+    assert!(play.route(t, start, middle).is_empty(), "a goal in a stone's box");
+
+    // Put in the box under an order to stand still: it walks out all the same, and stays out.
+    let order = Order { code: orders::STAYGROUND, parameter: 0, target: Target::NotDefined };
+    {
+        let Play { robots, ground, .. } = &mut play;
+        let robot = &mut robots.iter_mut().find(|(rt, _)| *rt == t).unwrap().1;
+        robot.behaviour.insert_order(&order, orders::INSERT_REPLACE);
+        robot.order = Some(order);
+        robot.wizard.clear();
+        put(&mut robot.walker, ground, middle);
+    }
+    let out = play.graph.as_ref().unwrap().leave_hole(middle).expect("a way out of the box");
+    let mut left = None;
+    for tick in 0..(60 * 60) {
+        play.update_input();
+        play.tick(1000.0 / 60.0, [0.0; 2]);
+        let p = at(&play);
+        if !graph.in_footprint(p.x, p.y) {
+            left = Some(tick as f32 / 60.0);
+            break;
+        }
+    }
+    let left = left.unwrap_or_else(|| panic!("still in the box at {}, going for {out}", at(&play)));
+    eprintln!("out of the box in {left} s, its point {out}");
+    assert!(left > 0.1, "it takes a while");
+
+    // Sent on, and shoved aside on the way.
+    let from = at(&play);
+    let goal = (1..200)
+        .map(|k| from + Vec3::new(0.0, -2.0 * k as f32, 0.0))
+        .rfind(|p| graph.usable(p.x, p.y) && !graph.in_footprint(p.x, p.y))
+        .expect("somewhere to go");
+    let order = Order { code: orders::GO, parameter: 0, target: Target::Place(goal.to_array()) };
+    {
+        let robot = &mut play.robots.iter_mut().find(|(rt, _)| *rt == t).unwrap().1;
+        robot.behaviour.insert_order(&order, orders::INSERT_REPLACE);
+        robot.order = Some(order);
+    }
+    for _ in 0..(4 * 60) {
+        play.update_input();
+        play.tick(1000.0 / 60.0, [0.0; 2]);
+    }
+    let walk = play.robots.iter().find(|(rt, _)| *rt == t).unwrap().1.walk;
+    assert!(walk.is_some(), "a walk held");
+    let before = play.walk_seed;
+    let shoved = at(&play) + Vec3::new(30.0, 0.0, 0.0);
+    {
+        let Play { robots, ground, .. } = &mut play;
+        let robot = &mut robots.iter_mut().find(|(rt, _)| *rt == t).unwrap().1;
+        put(&mut robot.walker, ground, shoved);
+    }
+    for _ in 0..(3 * 60) {
+        play.update_input();
+        play.tick(1000.0 / 60.0, [0.0; 2]);
+    }
+    // A plan draws from the search's random source: the walk was planned again.
+    assert_ne!(play.walk_seed, before, "it plans again");
 }
 
 /// Mission.02's laser walker, `mwlk1e`, logical id 10, patrols past `s_stone_07` in the middle of

@@ -525,22 +525,13 @@ impl Walker {
             // is not negative, which is the horizontal velocity having no component along the
             // normal's own horizontal part -- moving uphill, or exactly across the slope
             // (docs/24, "Ground and slope").
-            if along.x * normal.x + along.y * normal.y <= 0.0 {
+            // The brake is passed over while a velocity has been written since the command last
+            // was (`0x1001566b`, body `+0x1a8`: `SetTangSpeed` sets it at `0x100044f1`, the
+            // command's setter clears it at `0x1000442b`), so a machine the Wizard drives is never
+            // braked. The walkable areals keep it off such faces (docs/24, "Ground and slope").
+            if self.drive.is_none() && along.x * normal.x + along.y * normal.y <= 0.0 {
                 let factor = motion::slope_factor(normal.z, self.controller.cone);
-                // STAND-IN: docs/24-motion.md#ground-and-slope--read -- the brake is read to be
-                // passed over while a velocity has been written since the command last was
-                // (`0x1001566b`, body `+0x1a8`: `SetTangSpeed` sets it at `0x100044f1`, the
-                // command's setter clears it at `0x1000442b`), so a machine the Wizard drives is
-                // never braked. Here a driven machine still is, the ground's fraction taken off
-                // the written velocity whole: without it an AI unit walks up a 40 degree slope
-                // at 8 m/s, and a small warbot sent into Mission 03's Small Bunker never reaches
-                // its dock, since the local path that would keep it off such faces is a stand-in
-                // of its own (docs/24, "Not established").
-                if self.drive.is_some() {
-                    self.body.velocity = self.body.velocity.map(|v| v * factor);
-                } else {
-                    motion::brake(&mut self.body.velocity, factor, &self.limits, step);
-                }
+                motion::brake(&mut self.body.velocity, factor, &self.limits, step);
             }
         }
 

@@ -159,9 +159,19 @@ pub struct Wizard {
     segment: Option<Segment>,
     /// The velocity last written, which the next segment starts from.
     last_velocity: Vec3,
+    /// Whether the segment runs to the stop, which is no point of the walker's.
+    to_stop: bool,
+    /// The last point dropped since the walker last asked.
+    passed: Option<Vec3>,
 }
 
 impl Wizard {
+    /// Where the last point dropped since the last asking stood: the walker counts itself there
+    /// (`Behavior.dll:0x1003c6a6`-`0x1003c6e8`), and measures how far off the machine is from it.
+    pub fn take_passed(&mut self) -> Option<Vec3> {
+        self.passed.take()
+    }
+
     /// Slot 17: points appended to those held.
     pub fn give(&mut self, points: impl IntoIterator<Item = Point>) {
         self.points.extend(points);
@@ -177,6 +187,8 @@ impl Wizard {
         self.points.clear();
         self.stop = None;
         self.segment = None;
+        self.to_stop = false;
+        self.passed = None;
     }
 
     /// Nothing left to follow at `now_ms`.
@@ -191,10 +203,17 @@ impl Wizard {
     /// and the heading the heading curve's at t + dt ([`Segment::facing_at`]).
     pub fn takt(&mut self, now_ms: f64, position: Vec3, forward: Vec3, dt_ms: f64) -> Drive {
         if self.segment.is_none_or(|s| now_ms >= s.to.time_ms) {
-            while self.points.front().is_some_and(|p| p.time_ms <= now_ms) {
-                self.points.pop_front();
+            // The head stays in the Wizard's list until its time has passed, so the point it has
+            // been running to is the one the walker finds dropped (`Wizard.dll:0x10002d69`).
+            if let Some(segment) = self.segment.filter(|_| !self.to_stop) {
+                self.passed = Some(segment.to.position);
             }
-            let next = self.points.pop_front().or_else(|| self.stop.take());
+            while self.points.front().is_some_and(|p| p.time_ms <= now_ms) {
+                self.passed = self.points.pop_front().map(|p| p.position);
+            }
+            let point = self.points.pop_front();
+            self.to_stop = point.is_none() && self.stop.is_some();
+            let next = point.or_else(|| self.stop.take());
             self.segment = next.map(|to| Segment {
                 from: position,
                 from_velocity: self.last_velocity,
@@ -321,9 +340,10 @@ fn moving(span: Vec3, flags: u32) -> Vec3 {
 /// The points a walker hands the Wizard for a walk from `from` to `to` at `speed`,
 /// starting at `now_ms`, and the stop it ends in.
 ///
-/// STAND-IN: docs/24-motion.md#not-established -- the local path and its obstacle contours
-/// are not read: the trajectory is the straight line, cut into at least three points a second
-/// or more apart, each at the walk's velocity. A walker's walk is measured and timed across the
+/// STAND-IN: docs/24-motion.md#the-local-path--read -- the game gives a walker's leg one point,
+/// at its end (`Behavior.dll:0x1003a60f`); here the trajectory is the straight line, cut into at
+/// least three points a second or more apart, each at the walk's velocity, so a walker that has
+/// fallen 10 behind plans again sooner. A walker's walk is measured and timed across the
 /// ground, since its points neither let it climb nor sink: a point above the ground under it,
 /// as a hall way's vertex over a bridge's deck is, does not slow it.
 pub fn straight_walk(from: Vec3, to: Vec3, speed: f32, now_ms: f64, flags: u32) -> (Vec<Point>, Point) {
@@ -361,10 +381,11 @@ pub fn straight_walk(from: Vec3, to: Vec3, speed: f32, now_ms: f64, flags: u32) 
 /// other, the whole at least three points. With `rest` the stop is the last point itself, at
 /// rest.
 ///
-/// STAND-IN: docs/31-packages.md#not-established -- how the walker's path joins a building's
-/// hall way (`MGraph`), and how it brings a unit to rest on a place in it, are not read: the
-/// hall way's vertices are handed on as legs, and a way in stops on its last vertex rather than
-/// half its velocity beyond it.
+/// STAND-IN: docs/24-motion.md#how-a-walk-joins-a-hall-way--read-and-measured -- the game's
+/// hall-way trajectory (`Behavior.dll:0x1003fde0`, "TrajectoryInBuilding"), which times a point
+/// with the machine's turn and pull-away and waits at a door, is not followed: the hall way's
+/// vertices are handed on as legs, and a way in stops on its last vertex rather than half its
+/// velocity beyond it.
 pub fn path_walk(
     from: Vec3,
     path: &[Vec3],
@@ -508,6 +529,37 @@ mod tests {
         assert!((points[0].time_ms - f64::from(first) * 100.0).abs() < 1e-3);
         assert!(points.iter().all(|p| p.flags == 0 && (p.velocity.length() - 10.0).abs() < 1e-4));
         assert_eq!((stop.velocity, stop.heading, stop.flags), (Vec3::ZERO, points[2].heading, 1));
+    }
+
+    #[test]
+    fn the_wizard_keeps_the_point_it_runs_to_until_its_time_is_up_and_never_counts_the_stop_passed() {
+        // `Wizard.dll:0x10002d69`: the walker finds a point dropped only once its time has passed
+        // (`Behavior.dll:0x1003c6a6`), whether or not the machine got there.
+        let (points, stop) = straight_walk(Vec3::ZERO, Vec3::new(0.0, 40.0, 0.0), 10.0, 0.0, GROUND_POINT);
+        assert_eq!(points.len(), 4);
+        let mut w = Wizard::default();
+        w.give(points);
+        w.stop_at(stop);
+        let dt = 1000.0 / 60.0;
+        let held = Vec3::ZERO;
+        let mut t = 0.0;
+        let mut passed = Vec::new();
+        while t < 7000.0 {
+            w.takt(t, held, Vec3::Y, dt);
+            if let Some(p) = w.take_passed() {
+                passed.push((t, p));
+            }
+            t += dt;
+        }
+        assert_eq!(passed.len(), 4, "{passed:?}");
+        assert!((passed[0].0 - 1000.0).abs() < dt * 1.5, "the first a second in: {passed:?}");
+        assert_eq!(passed[3].1, Vec3::new(0.0, 40.0, 0.0), "the last on the leg's end, and no stop after it");
+        // A clear forgets it.
+        w.give([Point { position: Vec3::X, velocity: Vec3::X, heading: Vec3::X, time_ms: t + 1.0, flags: 0 }]);
+        w.takt(t, held, Vec3::Y, dt);
+        w.takt(t + 2.0, held, Vec3::Y, dt);
+        w.clear();
+        assert_eq!(w.take_passed(), None);
     }
 
     #[test]

@@ -93,6 +93,9 @@ pub const SHIELD_FLASH_MODE: u32 = parkan_formats::fxid::TIME_ONCE;
 /// float at `0x10059974`): a compiled 15, not the profile's `FlyNearLandHeight`, whose one
 /// reader nothing calls (docs/24, "A flyer's walk points").
 pub const FLIGHT_CLEARANCE: f32 = 15.0;
+/// How far across the ground a walker may be from a point the Wizard has passed before it plans
+/// its walk again (`Behavior.dll:0x1003c82a`).
+pub const OFF_TRACK: f32 = 10.0;
 /// What the ground under a walk point is taken to be over a building, a tree or a stone: its top
 /// face and this much more (`Behavior.dll:0x100148a5`, the float at `0x100595bc`).
 pub const OVER_OBSTACLE: f32 = 100.0;
@@ -430,6 +433,9 @@ pub struct Play {
     pub weather: Option<crate::weather::Weather>,
     /// The walker's search's random source (docs/24, "The global path").
     pub walk_seed: u32,
+    /// The speed of the walk out of a hole or off a non-walkable areal the route just gave, set
+    /// by [`Play::route`] and taken by the behaviour's takt; the walk's own, not the unit's.
+    pub walk_out: Option<f32>,
     /// The random source an animal's flight heights draw from (docs/24, "A flyer's walk
     /// points"), kept apart from the search's so an animal's walk does not move anyone's route.
     pub flight_seed: u32,
@@ -1289,6 +1295,7 @@ impl Play {
             reserved: HashMap::new(),
             weather: None,
             walk_seed: 0x2545_f491,
+            walk_out: None,
             flight_seed: 0x9e37_79b9,
             grazing: std::cell::RefCell::default(),
         };
@@ -4669,7 +4676,10 @@ impl Play {
         let refitting = matches!(self.robots[r].1.behaviour.task(), Task::Reload { .. });
         let docks = if refitting || condition.needs_service(false) { self.docks_for(t) } else { Vec::new() };
         let graph = &self.graph;
-        let usable = |x: f32, y: f32| graph.as_ref().is_none_or(|g| g.usable(x, y));
+        // What the walker takes: an areal it may be sent to, and no hole in it (docs/24, "A goal
+        // in a hole").
+        let usable =
+            |x: f32, y: f32| graph.as_ref().is_none_or(|g| g.usable(x, y) && !g.in_footprint(x, y));
         let grazing = &self.grazing;
         let (_, robot) = &mut self.robots[r];
         let now = robot.time_ms;
@@ -4699,9 +4709,69 @@ impl Play {
             robot.walker.limits.top_speed[1].abs(),
             robot.walker.controller.triples[1][1].abs(),
         );
+        let on_solid = robot.walker.ground.and_then(|h| h.solid).is_some();
+        let mut walk = takt.walk;
+        // The walker's book-keeping (`Behavior.dll:0x1003c5c0`, `0x1003f3a0`): a point passed
+        // more than 10 from the machine across the ground, and it plans the walk it holds again
+        // from where it stands. A walk the task gives this takt is planned anyway.
+        //
+        // STAND-IN: docs/24-motion.md#dropping-the-points-a-unit-has-passed--read -- while its
+        // place is on a building the game's bar is the unit's sphere's radius, at least 2.5
+        // (`0x1003c855`), over points its hall-way trajectory times with the machine's turn and
+        // pull-away in them (`0x1003fde0`). The engine's hall-way points carry the plain walk's
+        // times, and a walker under way from rest falls that far behind every one of them and
+        // never gets off a bridge's foot, so the bar stays 10. An animal does not plan again,
+        // under the stand-in that holds its height (docs/24, "A flyer's walk points").
+        let off = robot.wizard.take_passed().is_some_and(|p| p.truncate().distance(at.truncate()) > OFF_TRACK)
+            && !animal;
+        match walk {
+            Walk::Keep if off && !robot.walking_out => walk = robot.walk.unwrap_or(Walk::Keep),
+            Walk::Keep => {}
+            Walk::Clear if robot.walking_out => {}
+            Walk::Clear => robot.walk = None,
+            _ => robot.walk = Some(walk),
+        }
+        // Walking out (walker `+0x164`): what is asked meanwhile waits until it is out.
+        if robot.walking_out {
+            if robot.wizard.idle(now) {
+                robot.walking_out = false;
+                walk = robot.walk_parked.take().unwrap_or(walk);
+            } else {
+                if !matches!(walk, Walk::Keep | Walk::Clear) {
+                    robot.walk_parked = Some(walk);
+                }
+                walk = Walk::Keep;
+            }
+        }
+        // A walker idle in a hole or on an areal no link leaves walks out, whatever its task but
+        // a shutdown (`0x1003dde0`), once it is able to move at all (`0x100051b0`-`0x100051d8`).
+        let idle_out = !flyer
+            && !robot.walking_out
+            && !on_solid
+            && matches!(walk, Walk::Keep | Walk::Clear)
+            && robot.wizard.idle(now)
+            && top > 0.5
+            && top > low
+            && robot.behaviour.task() != Task::Shutdown;
+        let refusal = idle_out
+            .then(|| {
+                let g = graph.as_ref()?;
+                if g.in_footprint(at.x, at.y) {
+                    Some(parkan_sim::path::Refusal::Obstacle)
+                } else if g.areal_at(at.x, at.y).is_some() && !g.usable(at.x, at.y) {
+                    Some(parkan_sim::path::Refusal::Stranded)
+                } else {
+                    None
+                }
+            })
+            .flatten();
         // A walk's legs: those it takes as a walker's are cut, and a flyer's in the open, taken
         // one point at a time.
-        let legs = match takt.walk {
+        let legs = match walk {
+            Walk::Keep | Walk::Clear if refusal.is_some() => {
+                let out: Vec<Vec3> = self.walk_out_of(t, at, refusal.expect("tested"));
+                Some((out, Vec::<Vec3>::new(), 1.0, false))
+            }
             Walk::Keep => None,
             Walk::Clear => Some((Vec::new(), Vec::new(), 0.0, false)),
             Walk::To(goal, share) | Walk::Level(goal, share) if flyer => {
@@ -4710,7 +4780,7 @@ impl Play {
                 // point is given its height over what lies under it (docs/24, "A flyer's walk
                 // points") -- unless the place keeps its own, follow's, when the cut points
                 // stay on the straight line to it (`0x1003a6bc`-`0x1003a726`).
-                let level = matches!(takt.walk, Walk::Level(..));
+                let level = matches!(walk, Walk::Level(..));
                 let mut hall = self.legs_to(t, at, goal);
                 let open: Vec<Vec3> = match hall.pop() {
                     Some(end) => {
@@ -4753,9 +4823,26 @@ impl Play {
         let (_, robot) = &mut self.robots[r];
         match legs {
             None => {}
-            Some((hall, open, _, _)) if hall.is_empty() && open.is_empty() => robot.wizard.clear(),
+            Some((hall, open, _, _)) if hall.is_empty() && open.is_empty() => {
+                // The walk refused: its next takt stops the machine from where it is, half its
+                // velocity on, a second later (`Behavior.dll:0x1003d31e`, `0x1003d7f0`).
+                let moving = walk != Walk::Clear && !robot.wizard.idle(now);
+                let velocity = robot.walker.body.to_world(Vec3::from_array(robot.walker.body.velocity));
+                robot.wizard.clear();
+                if moving {
+                    robot.wizard.stop_at(parkan_sim::wizard::Point {
+                        position: at + velocity * 0.5,
+                        velocity: Vec3::ZERO,
+                        heading: velocity,
+                        time_ms: now + parkan_sim::wizard::STOP_AFTER_MS,
+                        flags: if flyer { 1 } else { GROUND_POINT | 1 },
+                    });
+                }
+            }
             Some((legs, open, share, inside)) => {
-                let speed = walk_speed(share * top, top, low, SPEED_MAXIMUM_FACTOR);
+                let out = self.walk_out.take();
+                robot.walking_out = out.is_some();
+                let speed = out.unwrap_or_else(|| walk_speed(share * top, top, low, SPEED_MAXIMUM_FACTOR));
                 // A walker's points run along the ground; a flyer's follow each point's height,
                 // down to the hall way's vertices inside a building.
                 let flags = if flyer { 0 } else { GROUND_POINT };

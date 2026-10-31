@@ -17,7 +17,7 @@ use parkan_formats::cpt::{self, ControlPoint};
 use parkan_formats::mesh::NO_SLOT;
 use parkan_formats::mission::{Mission, Value};
 use parkan_formats::pose::{IDENTITY, Pose, multiply, rotate};
-use parkan_sim::behaviour::Behaviour;
+use parkan_sim::behaviour::{Behaviour, Walk};
 use parkan_sim::damage::GroundDamage;
 use parkan_sim::device::{Item, Motion};
 use parkan_sim::ground::{Ground, up_bound};
@@ -322,6 +322,13 @@ pub struct Robot {
     pub flyer: bool,
     /// The points it follows, and what it does with its orders, when the AI drives it.
     pub wizard: Wizard,
+    /// The walk its walker holds, the goal and speed at `MWalker` `+0xb8` and `+0xdc`, which it
+    /// plans again whenever a point passed lies too far off (docs/24, "Dropping the points").
+    pub walk: Option<Walk>,
+    /// Whether it is walking out of a hole or off a non-walkable areal, walker `+0x164`, and the
+    /// walk asked for meanwhile, which waits until it is out (`Behavior.dll:0x1003bb97`).
+    pub walking_out: bool,
+    pub walk_parked: Option<Walk>,
     /// Its auto-driver level, the unit record's `+0x9c`: 0 as the record is bound
     /// (`iron3d.dll:0x10074dd2`), then what a unit page's drive button (`0x1008495a`), the Y
     /// key in modes 1 and 2 (`0x10075fc0`) or an HQ's 3 → 1 (`0x10063b20`) last wrote. A take
@@ -812,6 +819,9 @@ impl Robot {
             object,
             flyer,
             wizard: Wizard::default(),
+            walk: None,
+            walking_out: false,
+            walk_parked: None,
             auto_driver: 0,
             sensors_taken: false,
             behaviour: Behaviour::new((object as u32).wrapping_mul(2_654_435_761)),

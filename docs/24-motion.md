@@ -886,6 +886,34 @@ hero.
   carry triangle flag 2. Of those steep enough for the brake to bite, tilted past
   24.1° where (1 + cos 0.6) ÷ 2 takes its factor under 1, 479 carry the flag and
   8378 do not.
+- **What holds a machine the AI drives is where it is sent** (*measured*). Nothing
+  brakes it, so nothing stands between it and a face past the cone but the walker's
+  places, and the walkable areals are flat. Of the level-0 land faces off water whose
+  centre lies on an areal, across all 33 maps:
+
+  | areal's first word | faces | past the 0.6 rad cone | past 24.1°, where the factor bites | flat area past the cone |
+  |---|---:|---:|---:|---:|
+  | 1, walkable | 21700 | 85 (0.39%) | 368 | 0.03% of 42.1 million m² |
+  | 0, the control | 150291 | 75804 (50.4%) | 104497 | 37.8% of 136.6 million m² |
+
+  A leg between neighbouring areals' centres says the same, sampled every 4 m: 11803
+  walkable-to-walkable legs, 1006 km, of which 3.5 km (0.35%) lie past the cone and 192
+  legs touch it at all; 75388 legs between non-walkable areals, the control, 6470 km,
+  of which 48.6% do. The walker refuses a goal on word 0, links none of those areals
+  and walks out of one when it finds itself on one
+  ([Walking out](#walking-out--read)), and a point it has passed more than 10 m off
+  plans the walk again
+  ([Dropping the points](#dropping-the-points-a-unit-has-passed--read)), so a machine
+  held up on a rise does not stand pushing at it.
+  **The engine brakes no written velocity now, as read**, and neither symptom it was
+  held back for comes through the AI's own control path. The 40° face of Tut_1 at
+  (125, 1050) that an AI unit "walked up" was a velocity a test wrote into the body:
+  it does still, 61 m in 6 s, but that face lies on an areal of word 0 and no walk is
+  sent there. A warbot ordered between two walkable places on Tut_1 291 m apart with a
+  rise past the cone on the straight line between them gets there in 23.8 s, on a face
+  past the cone for 0 of 1429 ticks. With only the brake taken off the engine as it stood
+  before this page's walker sections (the control), 22.7 s and 0 of 1364, and a small
+  warbot's refit reaches Mission 03's bunker dock all the same.
 
 *Measured:* all 509 mode-0 controllers keep the default cone of 1.57079; all
 16 mode-2 controllers carry 0.6 rad (34°); the six mode-3 controllers carry
@@ -3910,14 +3938,14 @@ that edge, the point is the crossing. Otherwise it is one of the edge's ends
 moved 3 along it (`0x10036cc5`): the one that makes the way through it,
 from the last point to the goal, shortest.
 
-**Off a non-walkable areal** (`0x1003dde0`). A walker whose search cannot
-start because the areal under it has no links logs "Cannot leave Non-Walkable
-Areal" (`0x1003e2dc`). It then tries 50 random points in a square about
-itself, of half-width 30 (`0x1003e2f4`). Each round adds 3 to the half-width,
-while it stays under 500 (`0x1003e400`). It takes the first point on a
-walkable areal, empties its queues and goes there. With none it logs
-"Warbot is absolutely in non-walkable". The square doubles its half-width on
-every try for a unit whose slot 14 answers `0x20000000`.
+**Off a non-walkable areal** (`0x1003dde0`). A walker idle on an areal with
+word 0 logs "Cannot leave Non-Walkable Areal" (`0x1003e2dc`). It then tries 50
+random points in a square about itself, of half-width 30 (`0x1003e2f4`). Each
+round adds 3 to the half-width, while it stays under 500 (`0x1003e400`). It takes
+the first point on a walkable areal, empties its queues and goes there straight,
+not by the search ([Walking out](#walking-out--read)). With none it logs "Warbot
+is absolutely in non-walkable". The square doubles its half-width on every try
+for an animal, a unit whose slot 14 answers `0x20000000`.
 
 **The areals are not all convex** (*measured*). 10,441 of the 34,662 areals
 turn back by more than 0.6° at some corner, many by a right angle. A
@@ -3931,33 +3959,203 @@ it, and none across but over the bridge.
 
 ### Dropping the points a unit has passed — *read*
 
-`MWalker::ClearMoverReachedPoint` (`Behavior.dll:0x1003cfd0`, which names
-itself in its own log line at `0x1003d16e`) is the walker's book-keeping when
-the mover has eaten part of the trajectory. The trajectory is the list at
-`+0x11c`, `0x48` bytes a record, `+0x114` records long; the mover's own count
-sits at `MBehaviour` `+0x250`.
+**The shipped game does not run `MWalker::ClearMoverReachedPoint`.** Two routines
+keep this book, and a switch picks between them at each of its readers: the static
+`0x1005d378`, 1 in the file, which `Behavior.ini`'s `UseWizard` overwrites
+(`0x1000349d`). The shipped file says `UseWizard = 1`, so the live routine is
+**`0x1003c5c0`**, which asks the Wizard how many points it still holds (slot 4). The
+one that names itself in its log line (`0x1003cfd0`, `0x1003d16e`) counts the mover's
+points at `MBehaviour` `+0x250` instead, and runs only with the switch off. This page
+read the second as though it were the game. Both do steps 1 to 5; only the first does
+what follows them. It runs from the unit's takt (`0x10005202`) and first thing in the
+walker's own (`0x1003d3d2`).
+
+The trajectory is the list at `+0x11c`, `0x48` bytes a record, `+0x114` records long.
 
 1. **It gives up the place it was holding.** If the walker's `+0x88` is a
    building id rather than −1, it finds that object, asks its hall way
    (interface `0x303`) who holds vertex `+0x8c` (slot 9) and, if that is this
    unit's own id (`MBehaviour` slot 12), sets the vertex free — slot 10 with
-   −1 (`0x1003d059`).
-2. **Nothing more happens while the mover is not behind** — `+0x250` at least
-   `+0x114` returns at once (`0x1003d064`).
-3. Otherwise *n* = `+0x114` − `+0x250` records come off the **front** of the
-   list. Before they go, the last of them becomes the walker's own place: its
-   position into `+0x6c`, and the record's `+0x28`, `+0x2c`, `+0x30` and
-   `+0x34` into `+0x78`, `+0x7c`, `+0x88` and `+0x8c` — so the building and
-   vertex the walker now counts itself at are the last passed point's.
+   −1 (`0x1003c654`).
+2. **Nothing more happens while the Wizard is not behind** — its count at least
+   `+0x114` goes straight to the tail (`0x1003c6a0`).
+3. Otherwise *n* = `+0x114` − the count records come off the **front** of the
+   list. The Wizard keeps the point it is running to at the head of its own list
+   until that point's time has passed (`Wizard.dll:0x10002d69`), so these are points
+   whose time is up, whether or not the unit got there. Before they go, the last of
+   them becomes the walker's own place: its position into `+0x6c`, and the record's
+   `+0x28`, `+0x2c`, `+0x30` and `+0x34` into `+0x78`, `+0x7c`, `+0x88` and `+0x8c`
+   — so the building and vertex the walker now counts itself at are the last passed
+   point's.
 4. **Every place the dropped stretch had booked is handed back**, record by
    record, by the same three calls as step 1 on each whose `+0x30` is a
-   building id (`0x1003d0c5`–`0x1003d14c`).
-5. The list then drops its first *n* (`0x1003d161`), and what is left, if
+   building id (`0x1003c706`–`0x1003c785`).
+5. The list then drops its first *n* (`0x1003c7b1`), and what is left, if
    anything, gives the walker its next point at `+0x90`.
 
 So a unit that walks on does not hold the hall-way places behind it, and a
 walker replanned part way along keeps the place it has reached rather than the
 one it set out from.
+
+**A point passed too far off plans the walk again** (`0x1003c800`–`0x1003c8a8`).
+With points dropped, the walker measures across the ground from the machine to the
+place it now counts itself at. The bar is 10; while that place, or the one it held
+before, is on a building it is the radius of the unit's sphere (`0x10016050`, from
+interface `0x20`), and never less than 2.5 (the float at `0x10059fd0`). Within the bar
+it zeroes its counter `+0x2c` (`0x1003cf21`). Past it the counter goes up, and **the
+unit's takt, after the task's tick, answers any counter above 0** with
+`MWalker::SetTarget` on the goal and speed the walker holds, `+0xb8` and `+0xdc`
+(`0x1003f3a0`, `0x1003f41b`–`0x1003f435`). So a unit shoved, held up or left behind by
+its own clock more than 10 m from a point due plans its whole way afresh, with fresh
+draws of the search's random factor, from where it stands.
+
+**"RESET PATH !!!" is a second, rarer answer** (`0x1003ca34`). The counter reaches 2
+only where two calls drop an off point with no `0x1003f3a0` between, which the takt's
+branches allow. It empties everything, stops the Wizard, and, for a unit on a building
+that is not a bridge (its parent's kind 3, Type other than `0x80001000`), logs *"Teleport
+to"* and **puts the unit on its hall way's nearest vertex** of the joint it stands on
+(`MHallWay` slot 27, `ArealMap.dll:0x1000be50`, the nearest in three dimensions; the move
+at `0x1003ccbb`), with that building and vertex as its place. Then it calls `SetTarget`
+and the takt again.
+
+**The engine** plans again as read, on the first off point, at 10 on a building too, since
+its hall-way points carry the plain walk's times and a walker pulling away from rest falls
+2.5 behind every one of them; and it has neither the teleport nor a booking of hall-way places. An animal does not plan again, under the stand-in that
+holds its height ([A flyer's walk points](#a-flyers-walk-points--read-and-measured)).
+
+### How a unit's place comes onto a building — *read*
+
+**The search sets out from the place the walker counts itself at.** `SetTarget`
+builds the start of its search from the unit's position, the areal under it, and the
+walker's `+0x88` and `+0x8c` (`0x1003bfae`–`0x1003bfc0`). With a building id there the
+start is a node of kind 6, that vertex (`0x100422d0`), whatever the position says.
+
+Those two words change in the dropper's step 3, from the last point passed, and in the
+teleport above. So **a unit's place comes onto a building by the Wizard passing a point
+the search put on it**, or by being teleported there. Standing on a building's floor is
+not it: a unit that has walked up a ramp of its own accord counts itself on the areals.
+That no third writer exists was read in the walker's own routines, not swept for: a sweep
+for `+0x88` over `Behavior.dll` finds other objects' fields beside it.
+
+**The first node gives no point** (the walk from index 1, `0x100369b3`). A unit planned
+again part way along a hall way goes from where it stands to the next vertex and never
+back to the one it counts itself at.
+
+**The engine** gives the first node no point, as read, and takes the way's nearest vertex
+for the one held, its points carrying no vertex: a stand-in.
+
+### How a walk joins a hall way — *read*, and *measured*
+
+**There is no join: one search runs over both.** A place on a building is a node of
+kind 6, its building and vertex (`0x100422d0`), so `MakeInsideDest`'s place ends the
+same A\* that crosses the areals. The kinds of a node's low nibble, read where a node
+maps to a graph record (`0x10043220`) and where a point resolves
+(`ArealMap.dll:0x10024110`):
+
+| kind | what | a node of the search |
+|---:|---|---|
+| 1 | a whole areal | yes (the areal map's slot `0xc4`) |
+| 2 | a sub-areal of a broken one | yes |
+| 3 | a hall way's exit, by its place in the exit list | yes (the hall way's slot `0x58`) |
+| 6 | a hall way's vertex | yes |
+| 8, 9, 10 | a broken areal's ground in no sub-areal; a hole; an inflated contour | **no** |
+
+An areal holds an exit of kind 3 at a cost of 1 (`ArealMap.dll:0x10023666`), and the
+search goes on from there. **So the exit a capturer takes is the search's**: the first to
+generate the goal, under the search's early stop (`0x10043011`), its random factor and a
+hall way that costs three times its length and five. Nothing weighs the exits against
+each other, and two walks to one pod may come in by different doors.
+
+**The waypoints** (the step from an areal or sub-areal to kind 3, `0x100381f4`):
+
+1. It finds the exit's vertex, and the first entry of kind 6 in that vertex's link list
+   (`0x1003833a`), a list in the file's link order, whatever the link's flags
+   (`ArealMap.dll:0x1000a348`).
+2. **Its approach is 3 beyond the exit, on the line from that vertex**: the exit + 3 × the
+   unit vector from the vertex to the exit, in three dimensions (`0x10038381`–`0x10038490`).
+3. It routes to the approach across the areal, going round the areal's own contour where
+   the straight line leaves it (`0x10041a00`, through `0x100416b0` and `0x100418c0`).
+4. It queues the approach twice, the second carrying the building and vertex. A place with
+   a building goes to the hall-way trajectory (`0x1003a4ff` → `0x1003fde0`, *"TrajectoryInBuilding"*),
+   which takes its position from the vertex itself (`0x1003fe6a`), so the unit then walks
+   to the exit.
+
+From there a step between vertices of one building queues the next vertex; a step off an
+exit onto an areal queues the exit's own position with the areal's ids, no approach
+(`0x100385c0`–`0x10038722`); a step between two buildings' vertices queues the far one
+(`0x10038a4f`). A step that fits none logs *"Code is under contruction..."* and the
+search's answer fails (`0x10038771`).
+
+**Mission 04's helicopter**, measured on the engine's search as read, from the factory's
+corner vertex 9 to its pod over 1000 plans: 971 come in by exit 67, 21 by the exit beside it at (732, 1023), and 8 by the one at (823, 959). The recording's goes by exit
+67, at (733.1, 1022.2) ([31-packages.md](31-packages.md#against-the-recording--seen)).
+
+**A flyer hovers at its corner** (*read*). Its walk to a corner of the outer ring builds a
+place of word `+0x14` 0 (`0x10001981`), so the corner's point stands at the ground under it
++ 15 ([A flyer's walk points](#a-flyers-walk-points--read-and-measured)); nothing on that
+walk sends it lower. The recording does not say otherwise and cannot: from 118 s to 150 s it
+shows the commander's map and the unit panel, whose page reads *"Max. speed: 51 kph"* and whose
+picture does not show the helicopter (*seen*), and the next thing on screen is the hero's
+cockpit. So the touch-down half closes by the read alone. A flyer's search needs a walkable
+areal to start from, which is what the corner's filter gives it: the ring keeps only vertices
+on walkable areals. The engine stood it at the ground + 15 already.
+
+**A flyer against the walls outside the hall way** is a walker: `SetTarget` clears `+0x28`
+when either place is on a building (`0x1003bfcc`), so its points are the search's, across the
+areals to the approach, raised since all of them are places of word 0, and nothing about them
+knows the building is there. An areal's own edges are all that turn a leg, and the leg to
+exit 67 skirts the factory's west side because the search's areals run there.
+
+**The engine** does this: `Graph::route_into` is the one search, with the approach, for a
+walker and a flyer. A stand-in remains where the read leaves off. An exit standing more than
+20 over the ground under it is no exit to a walker, which has no way up a building's ramps in
+the areals; and a walker whose way off the areals would meet the wall goes round the ground
+contour, where the game's would walk into it and plan again once 10 m from a point due. With
+no way the search will give, as for a unit past a vertex's gate, the old way in stands: the
+hall way's shortest from the door that makes the whole way shortest.
+
+### Walking out — *read*
+
+A walker has two walks that are not the search's. Each comes from `0x1003dde0`, which the
+unit's takt runs either side of its task's tick (`0x1000520e`, `0x1000523a`), and only with
+its three queues empty, on no building (`+0x88` −1) and walking out of nothing yet (`+0x164`
+clear); a shutdown skips it (`0x1003de10`, order 19). The takt runs it only for a unit able to
+move, whose live top speed is over 0.5 and over its floor (`0x100051b0`–`0x100051d8`).
+
+- **Off a non-walkable areal** ("Cannot leave Non-Walkable Areal", `0x1003e2dc`), not for a
+  flyer. The point is above ([The global path](#the-global-path--read-and-measured)); an
+  animal, a unit whose slot 14 answers `0x20000000`, doubles the square before every try. The
+  walker does not search for it: it queues the place twice and builds the trajectory itself
+  (`0x1003e7d5`–`0x1003e80b`), **straight at 12 m/s, 20 for an animal** (`0x1003e7c1`,
+  `0x1003e7b5`), whatever the unit's own speed.
+- **Out of a hole** ("Leave Obstacle !!!!!!!!", `0x1003e81d`): a place of kind 9 or 10. From
+  the contour's corner nearest the unit, **5 along the sum of the outward unit normals of its
+  two edges** (`0x1003e9a2`–`0x1003ea92`), 7.1 m at a right angle, queued the same way
+  (`0x1003f0c0`) at **7 m/s** (`0x1003f37a`).
+
+Either sets `+0x164`, and **what is asked meanwhile waits**: `SetTarget` keeps the goal and
+sets `+0x54` (`0x1003bb99`), and the dropper's tail hands it back once the queues have run dry
+(`0x1003cf5f`).
+
+A flyer has one of its own (`0x1003eacb`). Idle under task 0 or 1 and standing on a building,
+it takes the first of 20 random points on a walkable areal at 70 m to a bound of 100, the bound
+5 more each round up to 700, and goes there at 12, its point 50 up from where it is. The engine
+has its own escape off a building and not this walk.
+
+**A goal in a hole.** A place of kind 8, 9 or 10 maps to no node (`0x10043220` answers 0), and
+the search refuses a null start or end before anything else (`0x1002091c`, `0x1002092c`). So
+`SetTarget`, which tests only the areal's word, ends up answering 0, and a walk into a tree's or
+a stone's box is refused as one over a canyon is. *"Finish is inside ObstacleContour"*
+(`0x10039337`) guards a state the search has already ruled out. A unit standing in one fails its
+search the same way, and walks out once idle.
+
+**When the search fails** `SetTarget` has already emptied the three queues and set `+0xb4`, and
+answers 0 (`0x1003c0a7`). The walker's next takt stops the Wizard: the machine's own position +
+half its velocity, at rest, a second on (`0x1003d31e`, `0x1003d7f0`). What follows is the task's:
+a go fails its order (*"Target is unreachable... Fail GoOrder"*, `0x1002b631`), the capture lands
+first ([31-packages.md](31-packages.md#the-capture-tick-by-tick--read)), and so on. The
+walker does not retry. **The engine** stops the machine the same way once a walk it held is
+refused, and its tasks go on as they did: no task but those that test a place first hears of it.
 
 ### A tree or a stone cuts the areals it stands on — *read*, and *measured*
 
@@ -4012,12 +4210,43 @@ the goal crosses the edge, the point is the crossing. Otherwise it is an end
 moved 0.2 × the edge's length in. A second point is pushed into the next
 node, 0.2 at a time up to 2.
 
-**The local path.** Its generator takes a sub-areal's polygon as the outline
-and every hole of the broken areal as an obstacle (`0x10039002`–`0x10039089`).
-An unbroken areal gives it none. It logs a start or a finish inside an
-obstacle contour (`0x10039365`, `0x10039337`). A walker whose place is in a
-hole or an inflated contour logs "Leave Obstacle !!!!!!!!" and fetches that
-contour to walk out of (`0x1003e81d`).
+#### The local path — *read*
+
+The generator (`0x10038e00`, from the takt at `0x1003d719`) takes the head of the
+global queue as its finish, and the place the last leg ended as its start. Its outline
+is the sub-areal's polygon or the whole areal's, and its obstacles every hole of a broken
+areal (`0x10039002`–`0x10039089`); an unbroken areal gives it none, and a leg across one
+that is not convex still has the outline to turn by. It logs a start or a finish inside
+an obstacle contour (`0x10039365`, `0x10039337`).
+
+1. **Each pass** tests the line from start to finish against the outline and every
+   obstacle (`0x100223b0`, which counts crossings and logs an odd count as an error) and
+   keeps the nearest crossing. A flyer takes no contours (walker `+0x28`, `0x10039156`).
+2. **A clear line** queues the finish locally, moves the start to it, and takes the
+   global finish again (`0x100394cb`–`0x10039571`).
+3. **A hit** chooses a way about that contour by which run is shorter
+   (`0x10022650` for the outline, `0x10022540` for an obstacle), and walks its corners
+   in that sense from the crossing until the corner where the line from the start no
+   longer falls inside (`0x10039652`–`0x10039716`).
+4. **The new finish stands off that corner by the sum of the unit normals of its two
+   edges** (`0x100397b4`–`0x1003986c`), √2 at a right angle, less on a shallow corner. It
+   is logged, not moved, if that falls out of the outline or into an obstacle
+   (`0x100398d3`, `0x10039910`).
+5. It ends when the start is within 3 of the global finish across the ground
+   (`0x1003a1f0`), and after 100 passes logs *"Infinite Cycle detected in LocalPath
+   generator"* and queues the finish straight (`0x1003a27f`).
+
+**The size of the unit plays no part**: the routine's only calls on the behaviour are for
+the areal map, and no read of `+0x960`, of a radius or of a sphere stands in it. A big unit
+rounds a corner the same 1.4 m off as a small one, and the collision pass answers for the
+rest. What it takes for a corner is the footprint's, which is a tree's whole box, so
+the trunk stands well inside.
+
+The engine walks the piece's triangles pulled straight rather than this, a stand-in, and
+keeps the read's √2 off a corner of ground it may not cross.
+
+A walker whose place is in a hole or an inflated contour logs "Leave Obstacle !!!!!!!!"
+and fetches that contour to walk out of ([Walking out](#walking-out--read)).
 
 ***Ballen's Crossing*'s central stone** (*measured*). On C02 M02,
 `s_stone_07` stands at (1026, 1031). Its box, 68.6 × 56.3 m, reaches off to
@@ -4054,26 +4283,62 @@ patrol runs past it.
   **read** for the spin integrator: the spin triple is a fraction, and a step
   turns the hull by spin × the live turn rate × dt (`0x10014b56`,
   [30-turrets.md](30-turrets.md#the-hull-follows-the-turret--read-and-measured)).
-  That the Wizard writes the same triple is not traced. The slope brake, at
-  least, is read to pass a written velocity over, body `+0x1a8`
-  ([Ground and slope](#ground-and-slope--read)); the engine still brakes a
-  driven machine, a stand-in, its local path not keeping an AI unit off such
-  faces.
+  That the Wizard writes the same triple is not traced. ~~The slope brake, at
+  least, is read to pass a written velocity over, body `+0x1a8`; what does the
+  holding when it does is not established~~ — **measured** 2026-10-31: the areals
+  do, 85 of 21700 walkable land faces lying past the cone against 75804 of 150291
+  others, and the engine no longer brakes a driven machine
+  ([Ground and slope](#ground-and-slope--read)).
 - ~~The areal search (`MGraph`: algorithm, costs, and what the land answers for
   `0x303`)~~ — **read**
   ([The global path](#the-global-path--read-and-measured)), and how a tree or a
   stone cuts the areals it stands on
   ([read](#a-tree-or-a-stone-cuts-the-areals-it-stands-on--read-and-measured)).
-  Still open: how the local path goes round its obstacle contours, and whether
-  it widens them by the unit's size (a straight leg across an areal that is
-  not convex can leave the walkable areals); how a walker in a hole walks out
-  of it, and what it does with a goal in one; whether every scenery object
-  reaches the areal map's slot 3, and a box for a mesh of several parts;
-  whether the search measures a sub-areal from its centre; ~~how the walker drops the points a
-  unit has passed (`MWalker::ClearMoverReachedPoint`, `0x1003cfd0`)~~ — **read**
-  ([below](#dropping-the-points-a-unit-has-passed--read)); how the walker goes to the point
-  it finds off a non-walkable areal, how a unit's place comes to be on a
-  building's map object and which vertex the search starts from; ~~who calls
+  ~~How the local path goes round its obstacle contours, and whether it widens
+  them by the unit's size~~ — **read** 2026-10-31: round the nearest contour the
+  line hits, by the shorter way about it, past each corner by the sum of its two
+  edges' unit normals, √2 at a right angle; it reads nothing of the unit
+  ([The local path](#the-local-path--read)). The engine walks an areal's triangles
+  pulled straight, a stand-in, and keeps √2 off a corner where it kept the unit's
+  radius.
+  ~~How a walker in a hole walks out of it, and what it does with a goal in
+  one~~ — **read**: from the nearest corner, 5 along the two edges' outward normals
+  at 7 m/s, once idle; a goal in one is no node of the search, which fails
+  ([Walking out](#walking-out--read)). ~~A box for a mesh of several parts~~ —
+  **measured**: none arises, all 401 trees and stones the 29 missions place, of
+  71 kinds, being one part; the box is the one mesh's header box
+  (`AniMesh.dll:0x10014620`). Whether every scenery object reaches the areal map's
+  slot 3 is **narrowed**: `CLandscape`'s `+4` interface calls it with each object,
+  2 to add and 3 to remove
+  ([11-effects.md](11-effects.md#which-draw-reaches-a-units-own-manager--read-and-measured)),
+  and slot 3 itself keeps out only what is not of kind 10 and what a gate on its
+  own global refuses (`ArealMap.dll:0x1001f697` → `0x10014580`), which is not read.
+  ~~Whether the search measures a sub-areal from its centre~~ — **read**: the estimate
+  (`0x100431c0`, through `0x100430d0`) asks the areal map's slot `0xc8`
+  (`ArealMap.dll:0x1001ea60`) for a node's centre, a whole areal's the record's and a
+  sub-areal's by its own index, its vertices' average, above; the engine measures a piece
+  from the record while its areal is one piece and from its triangles' centre once cut
+  apart, a stand-in.
+  ~~How the walker drops the points a
+  unit has passed (`MWalker::ClearMoverReachedPoint`, `0x1003cfd0`)~~ — **read**,
+  and that routine is the branch `UseWizard = 1` does not take: `0x1003c5c0` does
+  it, and plans the walk again from a point passed more than 10 m off
+  ([below](#dropping-the-points-a-unit-has-passed--read)). ~~How the walker goes to the point
+  it finds off a non-walkable areal~~ — **read**: straight, no search, at 12 m/s,
+  20 for an animal ([Walking out](#walking-out--read)). ~~What it does when its
+  search fails~~ — **read**: nothing of its own, the queues already empty and the
+  Wizard stopped; the task decides
+  ([Walking out](#walking-out--read)). ~~How a unit's place comes to be on a
+  building's map object and which vertex the search starts from~~ — **read**: by
+  the Wizard passing a point the search put there or by the teleport, and the
+  search starts from that vertex, giving it no point
+  ([How a unit's place comes onto a building](#how-a-units-place-comes-onto-a-building--read)).
+  ~~How a walk to a door gets past the building's own walls~~ — **narrowed**: it
+  does not, by any read step. The search's leg runs across the areal to a point 3
+  beyond the exit ([How a walk joins a hall way](#how-a-walk-joins-a-hall-way--read-and-measured)),
+  and a walker held at a wall plans again once 10 m from a point due. Whether that
+  is enough in the game is not established; the engine's way round the ground
+  contour remains a stand-in. ~~Who calls
   `MHallWay` slot 11 (`0x1000b390`, which links a building's exits)~~ —
   **read**: `OnAddStatic` and `OnRemoveStatic` alone, on every building
   ([Who relinks a hall way](#who-relinks-a-hall-way--read)); ~~what a
@@ -4113,8 +4378,11 @@ patrol runs past it.
   ([A flyer's walk points](#a-flyers-walk-points--read-and-measured)); the
   recording's medusas fly in their fight
   ([34-progression.md](34-progression.md#the-medusas--read-and-measured)).
-- Whether the walker's clear (`0x1003c540`) also empties the points the Wizard
-  already holds. `ClearWizardPath` is logged at `0x10040e3b`.
+- ~~Whether the walker's clear (`0x1003c540`) also empties the points the Wizard
+  already holds. `ClearWizardPath` is logged at `0x10040e3b`.~~ — **read** 2026-10-31:
+  not itself. It sets `+0xb4`, and the walker's next takt asks the Wizard its count,
+  empties it if it holds any (slots 4 and 18, `0x1003d327`–`0x1003d33d`) and gives it the
+  stop (`0x1003d342`).
 - ~~**What lets a mover past a face flagged `0x20`.** The collision's own two
   filters take a triangle mask of 4 (`0x1001dbad`, `0x1001dbce`), and a round's
   takes `0x24`. The shipped data needs `0x20` passed: `fr_e_brige` flags its

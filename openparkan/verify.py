@@ -1882,6 +1882,40 @@ def check_arealmap(check, game: Path) -> None:
           round(shares[0][0] * 100) == 3 and round(shares[-1][0] * 100) == 53,
           f"from {shares[0][0]:.1%} on {shares[0][1]} to {shares[-1][0]:.1%} on {shares[-1][1]}")
 
+    # What keeps a walker off a slope when nothing brakes it: docs/24, "Ground and slope".  The
+    # same count over the other areals is the control: it finds half of them past the cone.
+    cone = math.degrees(0.6)
+    past = {True: [0, 0], False: [0, 0]}
+    for d, am in loaded:
+        land = landmesh.load(d / "Land.msh")
+        for face in land.lod_faces(0):
+            if land.is_water(face):
+                continue
+            p, q, r = (land.positions[i] for i in land.faces[face])
+            x, y = (p[0] + q[0] + r[0]) / 3, (p[1] + q[1] + r[1]) / 3
+            hit = next((am.areals[i] for i in am.areals_at(x, y)
+                        if _inside(am.areals[i].vertices, x, y)), None)
+            u = (q[0] - p[0], q[1] - p[1], q[2] - p[2])
+            v = (r[0] - p[0], r[1] - p[1], r[2] - p[2])
+            n = (u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0])
+            length = math.sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2])
+            if hit is None or length == 0:
+                continue
+            side = past[bool(hit.flags[0])]
+            side[0] += 1
+            side[1] += math.degrees(math.acos(min(1.0, abs(n[2]) / length))) >= cone
+    check("Land.map: a walkable areal's ground is under the 0.6 rad cone, and the others' is not",
+          past[True] == [21700, 85] and past[False] == [150291, 75804],
+          f"past it: {past[True][1]} of {past[True][0]} walkable faces, "
+          f"{past[False][1]} of {past[False][0]} of the others")
+
+    # Which of the walker's two book-keepings runs: docs/24, "Dropping the points".
+    switches = [line.split("=")[1].strip()
+                for line in (game / "Behavior.ini").read_text(errors="replace").splitlines()
+                if line.startswith("UseWizard")]
+    check("Behavior.ini: UseWizard is 1, so MWalker::ClearMoverReachedPoint is the branch not taken",
+          switches == ["1"], f"{switches}")
+
     # KM_4, The Iron Monster: the canyon under the bridge is not walkable, the banks are.
     km4 = next((am for d, am in loaded if d.name == "KM_4"), None)
     if km4 is not None:

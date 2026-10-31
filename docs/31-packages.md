@@ -871,9 +871,14 @@ agree with the recording.
 
 ### Not established
 
-- How the walker's path joins the hall way (`MGraph`), and so which exit a
+- ~~How the walker's path joins the hall way (`MGraph`), and so which exit a
   capturer takes. The hall way's shortest way from the nearest exit is a
-  stand-in.
+  stand-in.~~ — **read** 2026-10-31: there is one search over the areals and the
+  hall ways together, so the exit is the first its early stop and random factor
+  reach the goal by, and the walk comes to it by a point 3 beyond it on the line
+  from its first link; a flyer does the same, hovering at its corner at the ground
+  + 15 and taking no touch-down there
+  ([24-motion.md](24-motion.md#how-a-walk-joins-a-hall-way--read-and-measured)).
 - How high a flyer's points are put, and so whether it touches down at its
   corner or hovers there. ~~`Movement_FlyHeight` 40 and `FlyNearLandHeight` 15~~
   are ruled out: their only reader, `Behavior.dll:0x100153a0`, is never called

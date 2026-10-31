@@ -76,6 +76,18 @@ refused a goal on one that does not; the engine's strings call the others
 *Non-Walkable*. Only 3% to 53% of a map's area is walkable. See
 [24-motion.md](24-motion.md#the-global-path--read-and-measured).
 
+**A walkable areal is flat ground** (*measured*). Of the level-0 land faces off water
+whose centre lies on an areal, across all 33 maps, 85 of 21700 on word 1 are tilted past
+0.6 rad, the cone a mode-2 chassis brakes at, against 75804 of 150291 on word 0. The game
+never brakes a machine the AI drives, so this word is what keeps one off a slope
+([24-motion.md](24-motion.md#ground-and-slope--read)).
+
+**A point resolves to one of six kinds** (*read*, `ArealMap.dll:0x10024110`): none (0), an
+unbroken areal (1), or, on a broken one, a sub-areal (2), a hole (9), an inflated contour (10),
+or else the broken areal itself (8). Only 1 and 2 are nodes of the walker's search, beside a
+hall way's exits (3) and vertices (6); a goal or a unit on 8, 9 or 10 has no way anywhere
+([24-motion.md](24-motion.md#how-a-walk-joins-a-hall-way--read-and-measured)).
+
 **The areal count is not in the payload.** It lives in the NRes directory
 entry's element-count field at offset +4 — see [01-nres.md](01-nres.md), which
 this discovery corrected.
@@ -122,6 +134,8 @@ Six checks in `uv run openparkan verify`, over all 33 maps:
 - **3% to 53% of a map's area is walkable** — from 2.6% on `Mission.03.bis`
   to 53.3% on `ILKON`; and on KM_4 the canyon floor under the bridge is not,
   while both banks are.
+- **A walkable areal's ground is under the 0.6 rad cone, and the others' is
+  not** — 85 of 21700 land faces past it against 75804 of 150291.
 
 Two more sit with the ground checks: **the four flag words take only the
 values above** — 34662 areals — and **a lake areal holds only water and

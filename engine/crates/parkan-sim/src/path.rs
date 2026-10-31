@@ -54,6 +54,24 @@ pub const ESCAPE_TRIES: usize = 50;
 pub const ESCAPE_REACH: f32 = 30.0;
 pub const ESCAPE_GROWTH: f32 = 3.0;
 pub const ESCAPE_LIMIT: f32 = 500.0;
+/// The walk off a non-walkable areal is taken at this, whatever the unit's own speed
+/// (`Behavior.dll:0x1003e7c1`), and an animal's at [`ESCAPE_SPEED_ANIMAL`] (`0x1003e7b5`).
+pub const ESCAPE_SPEED: f32 = 12.0;
+pub const ESCAPE_SPEED_ANIMAL: f32 = 20.0;
+/// A walker idle inside a hole walks to a point this far out along the sum of the outward
+/// normals of the edges at the hole's nearest corner (`0x1003ea66`-`0x1003ea92`), at
+/// [`LEAVE_SPEED`] (`0x1003f37a`).
+pub const LEAVE_REACH: f32 = 5.0;
+pub const LEAVE_SPEED: f32 = 7.0;
+/// A walk onto a hall way's exit from the areals makes first for a point this far beyond the
+/// exit, on the line from the first vertex it links to (`Behavior.dll:0x100383c7`-`0x10038466`).
+pub const EXIT_APPROACH: f32 = 3.0;
+/// A unit within this many approaches of an exit is taken to have passed the approach.
+pub const APPROACH_PASSED: f32 = 2.0;
+/// The local path goes round a corner of its outline or of a hole by the sum of the unit normals
+/// of the two edges there, and reads nothing of the unit (`0x100397b4`-`0x1003986c`): √2 at a
+/// right angle, which is what a walk through an areal's triangles keeps off such a corner.
+pub const CORNER_CLEARANCE: f32 = std::f32::consts::SQRT_2;
 
 /// A triangle of an areal: its corners counter-clockwise, and across each edge (corner k to
 /// k + 1) the triangle there.
@@ -163,9 +181,35 @@ pub struct Way {
     pub points: Vec<Vec3>,
     pub flags: Vec<u32>,
     pub links: Vec<(usize, usize)>,
+    /// Each vertex's first link in the file's order, whoever may cross it, as the vertex's own
+    /// list holds them (`ArealMap.dll:0x1000a348`-`0x1000a380`): the vertex it names. Empty, a
+    /// vertex's first of `links` stands for it.
+    pub first: Vec<Option<usize>>,
     /// The building's own size class, its property `0x201`: what a [`VERTEX_BUILDING_SIZE`]
     /// vertex measures the unit against.
     pub size: u8,
+}
+
+impl Way {
+    /// The point a walk off the areals makes for on its way to exit `v`: [`EXIT_APPROACH`] on
+    /// from the exit, away from the first vertex it links to, in the three dimensions
+    /// (`Behavior.dll:0x10038381`-`0x10038490`). The exit itself where it links to nothing.
+    pub fn approach(&self, v: usize) -> Option<Vec3> {
+        let at = *self.points.get(v)?;
+        let first = self.first.get(v).copied().flatten().or_else(|| {
+            self.links.iter().find_map(|&(a, b)| {
+                if a == v {
+                    Some(b)
+                } else if b == v {
+                    Some(a)
+                } else {
+                    None
+                }
+            })
+        });
+        let out = first.and_then(|n| self.points.get(n)).map_or(Vec3::ZERO, |&n| (at - n).normalize_or_zero());
+        Some(at + out * EXIT_APPROACH)
+    }
 }
 
 /// Why the walker has no path to give.
@@ -176,7 +220,11 @@ pub enum Refusal {
     Goal,
     /// The unit stands on an areal no link leaves.
     Stranded,
-    /// The search ran out of links, or of nodes, short of the goal.
+    /// The unit stands in a hole cut out of a walkable areal, which is no node of the search
+    /// (`Behavior.dll:0x10043220`, its kinds 8, 9 and 10).
+    Obstacle,
+    /// The search ran out of links, or of nodes, short of the goal, or the goal lies in a hole,
+    /// which is no node either.
     NoWay,
 }
 
@@ -204,6 +252,8 @@ pub struct Graph {
     of_areal: Vec<Vec<usize>>,
     /// Whether scenery was cut out of an areal.
     broken: Vec<bool>,
+    /// The footprints cut out, each counter-clockwise.
+    holes: Vec<[Vec2; 4]>,
     pieces: Vec<Piece>,
     /// Each triangle's piece.
     piece_of: Vec<usize>,
@@ -310,6 +360,7 @@ impl Graph {
             triangles,
             of_areal,
             broken,
+            holes: Vec::new(),
             pieces: Vec::new(),
             piece_of: Vec::new(),
             fans: Vec::new(),
@@ -412,7 +463,8 @@ impl Graph {
     /// cut into the triangles, what lies inside goes, and each areal's triangles that still hang
     /// together make a piece. A piece is measured from its areal's record centre while the areal
     /// is one piece, and from its triangles' centre once it falls apart, where a sub-areal is
-    /// measured from its vertices' average.
+    /// measured from its vertices' average. Two footprints that overlap stay two holes here,
+    /// where the game makes one contour of their union.
     pub fn carve(&mut self, footprints: &[[Vec2; 4]]) {
         if footprints.is_empty() {
             return;
@@ -430,6 +482,7 @@ impl Graph {
                 f
             })
             .collect();
+        self.holes.extend_from_slice(&polygons);
         for f in &polygons {
             let corners: Vec<Option<Vec3>> = f.iter().map(|&p| self.insert_point(p)).collect();
             for k in 0..4 {
@@ -678,38 +731,41 @@ impl Graph {
             })
     }
 
-    /// The nearest walkable ground to `p` in a footprint, `clearance` on out from the
-    /// footprint's edge where that is walkable too, and the triangle it stands in.
-    fn off_footprint(&self, p: Vec2, clearance: f32) -> Option<(usize, Vec2)> {
-        let d = |t: usize| self.triangles[t].nearest(p).distance_squared(p);
-        let t = (1..=12).find_map(|rings| {
-            self.near(p, rings)
-                .into_iter()
-                .filter(|&t| self.walkable(self.triangles[t].areal))
-                .min_by(|&x, &y| d(x).total_cmp(&d(y)))
-        })?;
-        let edge = self.triangles[t].nearest(p);
-        let out = edge + (edge - p).normalize_or_zero() * clearance;
-        let beyond = self
-            .near(out, 1)
-            .into_iter()
-            .find(|&u| self.walkable(self.triangles[u].areal) && self.triangles[u].holds(out, 1e-3));
-        Some(beyond.map_or((t, edge), |u| (u, out)))
+    /// The node the search starts from for a unit at `from`: the piece under it, or the nearest
+    /// vertex of the way `aboard` names.
+    ///
+    /// STAND-IN: docs/24-motion.md#how-a-units-place-comes-onto-a-building--read -- the search
+    /// starts from the vertex the unit counts itself at, the last point it passed
+    /// (`Behavior.dll:0x1003bfae`, walker `+0x88` and `+0x8c`); points here carry no vertex, so a
+    /// unit on a way's building takes the way's nearest.
+    fn start_node(&self, from: Vec3, ways: &[Way], aboard: Option<usize>) -> Result<Node, Refusal> {
+        let nearest = aboard.and_then(|w| {
+            let points = &ways.get(w)?.points;
+            (0..points.len())
+                .min_by(|&a, &b| points[a].distance_squared(from).total_cmp(&points[b].distance_squared(from)))
+                .map(|v| Node::Vertex(w, v))
+        });
+        if let Some(node) = nearest {
+            return Ok(node);
+        }
+        if self.in_footprint(from.x, from.y) {
+            return Err(Refusal::Obstacle);
+        }
+        match self.triangle_at(from.truncate()) {
+            Some(t) if self.walkable(self.triangles[t].areal) => Ok(Node::Piece(self.piece_of[t])),
+            _ => Err(Refusal::Stranded),
+        }
     }
 
     /// The points a walker that does not fly passes from `from` to `goal`, the last `goal`
-    /// itself. The search starts from the piece under `from`, or from the nearest vertex of the
-    /// way `aboard` names, and ends at the piece under `goal`. `random` gives a number in 0..1
-    /// for each link tried; `clearance` is how far a walk through an areal's triangles keeps off
-    /// ground that is not walkable.
+    /// itself. The search starts from [`Graph::start_node`] and ends at the piece under `goal`.
+    /// `random` gives a number in 0..1 for each link tried; `clearance` is how far a walk through
+    /// an areal's triangles keeps off ground that is not walkable.
     ///
-    /// STAND-IN: docs/24-motion.md#not-established -- how a unit's place comes to stand on a
-    /// building's map object, and which of its vertices the search starts from, are not read:
-    /// a unit on a way's building takes the way's nearest vertex. Nor is what the walker does
-    /// with a goal inside a footprint ("Finish is inside ObstacleContour",
-    /// `Behavior.dll:0x10039337`), nor how one inside a footprint leaves it ("Leave Obstacle",
-    /// `0x1003e81d`): a goal inside one is moved to the nearest ground outside it, `clearance`
-    /// on where that is walkable, and a unit inside one sets out from the nearest piece.
+    /// A goal in a hole is no node of the search (`Behavior.dll:0x10043220` answers 0 for its
+    /// kinds 8, 9 and 10, and the search refuses a null end at `0x1002092e`), so the walker finds
+    /// no way to it; the log line "Finish is inside ObstacleContour" (`0x10039337`) is the local
+    /// path's guard against a state that never arises.
     #[allow(clippy::too_many_arguments)]
     pub fn route(
         &self,
@@ -721,40 +777,65 @@ impl Graph {
         size: u8,
         random: &mut dyn FnMut() -> f32,
     ) -> Result<Vec<Vec3>, Refusal> {
-        let nearest = |w: usize, p: Vec3| {
-            let points = &ways.get(w)?.points;
-            (0..points.len())
-                .min_by(|&a, &b| points[a].distance_squared(p).total_cmp(&points[b].distance_squared(p)))
-                .map(|v| Node::Vertex(w, v))
-        };
         let areal = match self.areal_at(goal.x, goal.y) {
             Some(a) if self.walkable(a) => a,
             _ => return Err(Refusal::Goal),
         };
-        let (goal, end) = match self.of_areal[areal]
+        let start = self.start_node(from, ways, aboard)?;
+        let end = self.of_areal[areal]
             .iter()
             .copied()
             .find(|&t| self.triangles[t].holds(goal.truncate(), 1e-3))
-        {
-            Some(t) => (goal, Node::Piece(self.piece_of[t])),
-            None => {
-                let (t, p) = self.off_footprint(goal.truncate(), clearance).ok_or(Refusal::Goal)?;
-                (p.extend(self.triangles[t].height(p)), Node::Piece(self.piece_of[t]))
-            }
-        };
-        let start = match aboard.and_then(|w| nearest(w, from)) {
-            Some(node) => node,
-            None => match self.triangle_at(from.truncate()) {
-                Some(t) if self.walkable(self.triangles[t].areal) => Node::Piece(self.piece_of[t]),
-                _ if self.in_footprint(from.x, from.y) => {
-                    let (t, _) = self.off_footprint(from.truncate(), 0.0).ok_or(Refusal::Stranded)?;
-                    Node::Piece(self.piece_of[t])
-                }
-                _ => return Err(Refusal::Stranded),
-            },
-        };
+            .map(|t| Node::Piece(self.piece_of[t]))
+            .ok_or(Refusal::NoWay)?;
         let nodes = self.search(start, end, ways, size, random).ok_or(Refusal::NoWay)?;
         Ok(self.walk(&nodes, from, goal, ways, clearance))
+    }
+
+    /// The points a walker passes from `from` to vertex `vertex` of way `way`, a place on a
+    /// building (`Behavior.dll:0x100422d0`, a node of kind 6): the one search over the areals
+    /// and the hall ways together, so the exit it comes in by is the search's, and the exit's
+    /// approach ([`Way::approach`]) before it.
+    #[allow(clippy::too_many_arguments)]
+    pub fn route_into(
+        &self,
+        from: Vec3,
+        way: usize,
+        vertex: usize,
+        ways: &[Way],
+        aboard: Option<usize>,
+        clearance: f32,
+        size: u8,
+        random: &mut dyn FnMut() -> f32,
+    ) -> Result<Vec<Vec3>, Refusal> {
+        let goal = *ways.get(way).and_then(|w| w.points.get(vertex)).ok_or(Refusal::Goal)?;
+        let start = self.start_node(from, ways, aboard)?;
+        let nodes = self.search(start, Node::Vertex(way, vertex), ways, size, random).ok_or(Refusal::NoWay)?;
+        let mut legs = self.walk(&nodes, from, goal, ways, clearance);
+        // The goal's vertex is the last node, and its point the walk's end already.
+        if legs.len() >= 2 && legs[legs.len() - 1] == legs[legs.len() - 2] {
+            legs.pop();
+        }
+        Ok(legs)
+    }
+
+    /// Where a walker idle in a hole goes ("Leave Obstacle", `Behavior.dll:0x1003e81d`), and so
+    /// a walker in the hole that `from` lies in: from the hole's corner nearest it, across the
+    /// ground, [`LEAVE_REACH`] along the sum of the outward unit normals of the corner's two
+    /// edges (`0x1003e9a2`-`0x1003ea92`). None outside every hole.
+    pub fn leave_hole(&self, from: Vec3) -> Option<Vec3> {
+        let p = from.truncate();
+        let hole = self.holes.iter().find(|f| inside_convex(&f[..], p))?;
+        let n = hole.len();
+        let k = (0..n).min_by(|&a, &b| hole[a].distance(p).total_cmp(&hole[b].distance(p)))?;
+        let outward = |a: Vec2, b: Vec2| {
+            let e = (b - a).normalize_or_zero();
+            Vec2::new(e.y, -e.x)
+        };
+        let out = outward(hole[(k + n - 1) % n], hole[k]) + outward(hole[k], hole[(k + 1) % n]);
+        let at = hole[k] + out * LEAVE_REACH;
+        let z = self.triangle_at(at).map_or(from.z, |t| self.triangles[t].height(at));
+        Some(at.extend(z))
     }
 
     /// A node's centre, as the search's estimate measures from it: a piece's centre at height 0,
@@ -963,18 +1044,18 @@ impl Graph {
     }
 
     /// The points along `nodes` from `from` to `goal`: each step's waypoint, a vertex's point,
-    /// and the goal.
+    /// and the goal. The first node gives no point of its own, whatever it is
+    /// (`Behavior.dll:0x100369b3`, the walk from the second), so a unit planned again part way
+    /// along a way goes on from where it stands; a step from the areals onto an exit passes its
+    /// approach first ([`Way::approach`]), and one off an exit its own point
+    /// (`0x100385c0`-`0x10038722`).
     ///
-    /// STAND-IN: docs/24-motion.md#not-established -- how the walker drops the points a unit has
-    /// already passed (`MWalker::ClearMoverReachedPoint`) is not read: a way's first vertex is
-    /// left out while the unit stands no farther from the next vertex than it does, so a unit
-    /// part way along a way, planned again, goes on rather than back.
-    ///
-    /// STAND-IN: docs/24-motion.md#not-established -- how the local path goes round its obstacle
-    /// contours is not read. A straight leg across an areal that would leave the walkable ground,
-    /// as a leg across one that is not convex or across a footprint cut out of it can, walks
-    /// through its piece's triangles instead, pulled straight, `clearance` off each vertex that
-    /// touches ground that is not walkable.
+    /// STAND-IN: docs/24-motion.md#the-local-path--read -- the local path runs from each waypoint
+    /// back to where the unit is, round the first contour the line hits, by the way about it
+    /// with the shorter run (`0x10039103`-`0x1003a1fd`). A straight leg across an areal that
+    /// would leave the walkable ground, as a leg across one that is not convex or across a
+    /// footprint cut out of it can, here walks through its piece's triangles instead, pulled
+    /// straight, `clearance` off each vertex that touches ground that is not walkable.
     fn walk(&self, nodes: &[Node], from: Vec3, goal: Vec3, ways: &[Way], clearance: f32) -> Vec<Vec3> {
         let allowed = |t: usize| self.walkable(self.triangles[t].areal);
         let exposed = |v: usize| self.outside[v] || self.fans[v].iter().any(|&t| !allowed(t));
@@ -989,16 +1070,10 @@ impl Graph {
         };
         let mut out = Vec::new();
         let mut at = from;
-        let mut across = None;
-        match nodes.first() {
-            Some(&Node::Piece(a)) => across = Some(a),
-            // A unit aboard a way steps onto it first.
-            Some(&Node::Vertex(w, v)) => {
-                at = ways[w].points[v];
-                out.push(at);
-            }
-            None => {}
-        }
+        let mut across = match nodes.first() {
+            Some(&Node::Piece(a)) => Some(a),
+            _ => None,
+        };
         for pair in nodes.windows(2) {
             match (pair[0], pair[1]) {
                 (Node::Piece(a), Node::Piece(b)) => {
@@ -1007,7 +1082,21 @@ impl Graph {
                     at = point;
                     across = Some(b);
                 }
-                (_, Node::Vertex(w, v)) => {
+                (Node::Piece(_), Node::Vertex(w, v)) => {
+                    let exit = ways[w].points[v];
+                    // STAND-IN: docs/24-motion.md#how-a-units-place-comes-onto-a-building--read --
+                    // a unit that has passed the approach counts itself on the exit, and plans on
+                    // from it; here a unit that near the exit, its place not being kept, does not
+                    // go back for the approach.
+                    if at != from || at.truncate().distance(exit.truncate()) > EXIT_APPROACH * APPROACH_PASSED {
+                        let approach = ways[w].approach(v).unwrap_or(exit);
+                        leg(&mut out, at, approach, across);
+                    }
+                    out.push(exit);
+                    at = exit;
+                    across = None;
+                }
+                (Node::Vertex(..), Node::Vertex(w, v)) => {
                     let point = ways[w].points[v];
                     leg(&mut out, at, point, across);
                     at = point;
@@ -1017,16 +1106,6 @@ impl Graph {
             }
         }
         leg(&mut out, at, goal, across);
-        let vertex =
-            |p: &Vec3| nodes.iter().any(|n| matches!(*n, Node::Vertex(w, v) if ways[w].points[v] == *p));
-        let flat = |a: &Vec3, b: &Vec3| a.truncate().distance(b.truncate());
-        while out.len() >= 2
-            && vertex(&out[0])
-            && vertex(&out[1])
-            && flat(&from, &out[1]) <= flat(&out[0], &out[1])
-        {
-            out.remove(0);
-        }
         out
     }
 
@@ -1192,14 +1271,15 @@ impl Graph {
     /// Where a walker on an areal no link leaves goes (`Behavior.dll:0x1003e2dc`): the first of
     /// 50 random points in a square about it, of half-width 30 and 3 more each round while under
     /// 500, that lies on a walkable areal; none past that ("Warbot is absolutely in
-    /// non-walkable").
-    ///
-    /// STAND-IN: docs/24-motion.md#the-global-path--read -- the square's doubling for a unit
-    /// whose slot 14 answers `0x20000000` is not modelled.
-    pub fn escape(&self, from: Vec3, random: &mut dyn FnMut() -> f32) -> Option<Vec3> {
+    /// non-walkable"). An `animal`, a unit whose slot 14 answers `0x20000000`, doubles the
+    /// square's half-width before every try (`0x1003e30b`-`0x1003e318`).
+    pub fn escape(&self, from: Vec3, animal: bool, random: &mut dyn FnMut() -> f32) -> Option<Vec3> {
         let mut reach = ESCAPE_REACH;
         loop {
             for _ in 0..ESCAPE_TRIES {
+                if animal {
+                    reach *= 2.0;
+                }
                 let (u, v) = (random(), random());
                 let p = Vec2::new(from.x + (u - 0.5) * reach * 2.0, from.y + (v - 0.5) * reach * 2.0);
                 if self.usable(p.x, p.y) {
@@ -1456,6 +1536,7 @@ mod tests {
             points: vec![exit, end],
             flags: vec![VERTEX_ANY_SIZE | VERTEX_EXIT, VERTEX_ANY_SIZE | VERTEX_JOIN],
             links: vec![(0, 1)],
+            first: Vec::new(),
             size: 2,
         };
         let ways = [
@@ -1473,14 +1554,81 @@ mod tests {
         // Halves 50 apart do not join.
         let apart = [ways[0].clone(), half(Vec3::new(35.0, 25.0, 0.0), Vec3::new(74.0, 25.0, 5.0))];
         assert_eq!(graph.route(from, goal, &apart, None, 2.0, 2, &mut fixed(0.0)), Err(Refusal::NoWay));
-        // A unit on the deck sets out from its nearest vertex, or from the next once it stands no
-        // farther from that; a goal over the deck is refused, the wall being under it.
-        let aboard = graph.route(Vec3::new(25.5, 25.0, 5.0), goal, &ways, Some(1), 2.0, 2, &mut fixed(0.0));
-        assert_eq!(aboard.map(|l| l[0]), Ok(ways[1].points[1]));
-        let past = graph.route(Vec3::new(27.0, 25.0, 5.0), goal, &ways, Some(1), 2.0, 2, &mut fixed(0.0));
-        assert_eq!(past.map(|l| l[0]), Ok(ways[1].points[0]), "the joining end is behind it");
+        // The search's first node gives no point (`Behavior.dll:0x100369b3`), so a unit on the deck
+        // walks on to the next vertex whichever side of the one it counts itself at it stands,
+        // and never back to that one; a goal over the deck is refused, the wall being under it.
+        for x in [25.5, 27.0] {
+            let aboard = graph.route(Vec3::new(x, 25.0, 5.0), goal, &ways, Some(1), 2.0, 2, &mut fixed(0.0));
+            assert_eq!(aboard.map(|l| l[0]), Ok(ways[1].points[0]), "on from {x}");
+        }
         let onto = graph.route(from, Vec3::new(25.0, 25.0, 5.0), &ways, None, 2.0, 2, &mut fixed(0.0));
         assert_eq!(onto, Err(Refusal::Goal));
+    }
+
+    #[test]
+    fn a_walk_onto_an_exit_passes_three_out_along_its_first_link_and_a_walk_off_one_its_own_point() {
+        // A way with its exit at (25, 15, 0) and the building's inside to the north, one link to a
+        // vertex 10 on and a second to one east of the exit; the wall of squares 11 to 13 under it.
+        let graph = Graph::new(squares(5, 5, &[]));
+        let way = Way {
+            points: vec![Vec3::new(25.0, 15.0, 0.0), Vec3::new(25.0, 25.0, 0.0), Vec3::new(35.0, 15.0, 0.0)],
+            flags: vec![VERTEX_ANY_SIZE | VERTEX_EXIT, VERTEX_ANY_SIZE, VERTEX_ANY_SIZE],
+            links: vec![(0, 1), (0, 2)],
+            first: vec![Some(1), Some(0), Some(0)],
+            size: 2,
+        };
+        assert_eq!(way.approach(0), Some(Vec3::new(25.0, 12.0, 0.0)), "beyond the exit from its first link");
+        // A link the unit may not cross still names the way out: the vertex's list holds them all.
+        let shut = Way { links: vec![(0, 2)], ..way.clone() };
+        assert_eq!(shut.approach(0), Some(Vec3::new(25.0, 12.0, 0.0)));
+        // With no list, its first link it may cross.
+        assert_eq!(Way { first: Vec::new(), ..way.clone() }.approach(0), Some(Vec3::new(25.0, 12.0, 0.0)));
+
+        let ways = [way];
+        let from = Vec3::new(25.0, 5.0, 0.0);
+        let legs = graph.route_into(from, 0, 1, &ways, None, 2.0, 2, &mut fixed(0.0)).expect("a way in");
+        assert_eq!(
+            legs[legs.len() - 3..],
+            [Vec3::new(25.0, 12.0, 0.0), ways[0].points[0], ways[0].points[1]],
+            "the approach, the exit and the vertex inside: {legs:?}"
+        );
+        // From the vertex inside, out by the exit's own point, with no approach.
+        let out = graph
+            .route(ways[0].points[1], Vec3::new(5.0, 5.0, 0.0), &ways, Some(0), 2.0, 2, &mut fixed(0.0))
+            .expect("a way out");
+        assert_eq!(out[0], ways[0].points[0], "{out:?}");
+        assert!(!out.contains(&Vec3::new(25.0, 12.0, 0.0)), "{out:?}");
+    }
+
+    #[test]
+    fn the_exit_a_way_in_takes_is_the_searchs_over_the_areals_and_the_hall_way_together() {
+        // Two exits: one at the unit's feet, two links of hall way from the vertex, and one
+        // farther off across the areals, a step from it. The hall way's 3 × length + 5 decides
+        // (`ArealMap.dll:0x1000a1dd`) where the plain distance would not.
+        let graph = Graph::new(squares(5, 5, &[]));
+        let (a, b) = (VERTEX_ANY_SIZE | VERTEX_EXIT, VERTEX_ANY_SIZE);
+        let way = Way {
+            points: vec![
+                Vec3::new(5.0, 5.0, 0.0),
+                Vec3::new(15.0, 15.0, 0.0),
+                Vec3::new(25.0, 25.0, 0.0),
+                Vec3::new(25.0, 28.0, 0.0),
+            ],
+            flags: vec![a, b, b, a],
+            links: vec![(0, 1), (1, 2), (3, 2)],
+            first: Vec::new(),
+            size: 2,
+        };
+        // Straight, by the near exit it is 2 + 28.3 = 30.3 and by the far one 32.5 + 3 = 35.5.
+        let from = Vec3::new(5.0, 7.0, 0.0);
+        let legs = graph.route_into(from, 0, 2, &[way.clone()], None, 2.0, 2, &mut fixed(0.0)).unwrap();
+        assert!(legs.contains(&way.points[3]) && !legs.contains(&way.points[0]), "{legs:?}");
+        // A unit too big for the vertex's gate finds no way in at all.
+        let gated = Way { flags: vec![a, b, 0, a], ..way };
+        assert_eq!(
+            graph.route_into(from, 0, 2, &[gated], None, 2.0, 3, &mut fixed(0.0)),
+            Err(Refusal::NoWay)
+        );
     }
 
     #[test]
@@ -1493,6 +1641,7 @@ mod tests {
             points: vec![Vec3::new(15.0, 25.0, 0.0), Vec3::new(25.0, 25.0, 5.0), Vec3::new(35.0, 25.0, 0.0)],
             flags: vec![VERTEX_ANY_SIZE | VERTEX_EXIT, middle, VERTEX_ANY_SIZE | VERTEX_EXIT],
             links: vec![(0, 1), (1, 2)],
+            first: Vec::new(),
             size,
         };
         let (from, goal) = (Vec3::new(5.0, 25.0, 0.0), Vec3::new(45.0, 25.0, 0.0));
@@ -1627,7 +1776,7 @@ mod tests {
     }
 
     #[test]
-    fn a_walker_sent_into_a_footprint_stops_outside_it_and_one_inside_walks_out() {
+    fn a_goal_in_a_footprint_is_no_node_of_the_search_and_a_walker_in_one_walks_out_past_its_corner() {
         let mut graph = Graph::new(squares(5, 5, &[]));
         let stone = rectangle([22.0, 22.0], [28.0, 28.0]);
         // Two footprints that overlap cut as one.
@@ -1635,16 +1784,25 @@ mod tests {
         sound(&graph);
         assert!((cover(&graph, 12) - (100.0 - 36.0 - 9.0 + 4.0)).abs() < 1e-3, "{}", cover(&graph, 12));
 
+        // A place in a hole has no node, so the search fails and the walker has no way there
+        // (`Behavior.dll:0x10043220`, `0x1002092e`).
         let from = Vec3::new(5.0, 25.0, 0.0);
-        let legs = graph.route(from, Vec3::new(23.0, 25.0, 0.0), &[], None, 2.0, 2, &mut fixed(0.0)).unwrap();
-        let last = *legs.last().unwrap();
-        assert!(!enters(from, &legs, stone, 1e-3), "{legs:?}");
-        assert!(last.truncate().distance(Vec2::new(20.0, 25.0)) < 1e-3, "2 in from the stone's edge: {last}");
+        assert_eq!(
+            graph.route(from, Vec3::new(23.0, 25.0, 0.0), &[], None, 2.0, 2, &mut fixed(0.0)),
+            Err(Refusal::NoWay)
+        );
 
-        let inside = Vec3::new(24.0, 25.0, 0.0);
-        let legs =
-            graph.route(inside, Vec3::new(5.0, 25.0, 0.0), &[], None, 2.0, 2, &mut fixed(0.0)).unwrap();
-        assert_eq!(legs.last(), Some(&Vec3::new(5.0, 25.0, 0.0)));
+        // Nor can one set out from a hole: it walks out first, from the corner nearest it, 5 on
+        // along the sum of the two edges' outward unit normals (`0x1003e9a2`-`0x1003ea92`).
+        let inside = Vec3::new(23.0, 25.0, 0.0);
+        assert_eq!(
+            graph.route(inside, Vec3::new(5.0, 25.0, 0.0), &[], None, 2.0, 2, &mut fixed(0.0)),
+            Err(Refusal::Obstacle)
+        );
+        let out = graph.leave_hole(Vec3::new(23.0, 24.0, 0.0)).expect("a way out");
+        assert!((out.truncate() - Vec2::new(17.0, 17.0)).length() < 1e-3, "{out}");
+        assert_eq!(graph.leave_hole(Vec3::new(10.0, 10.0, 0.0)), None, "in no hole");
+        assert!(graph.route(out, Vec3::new(5.0, 25.0, 0.0), &[], None, 2.0, 2, &mut fixed(0.0)).is_ok());
     }
 
     #[test]
@@ -1654,9 +1812,14 @@ mod tests {
         let from = Vec3::new(25.0, 25.0, 0.0);
         // Its square's right edge is off the map and its middle on the wall, however far out.
         let mut draws = [1.0, 0.5, 0.5, 0.5].into_iter().cycle();
-        assert_eq!(graph.escape(from, &mut || draws.next().unwrap()), None);
+        assert_eq!(graph.escape(from, false, &mut || draws.next().unwrap()), None);
         // The first try lands off the map at x −5; the second 15 left, on walkable ground.
         let mut draws = [0.0, 0.5, 0.25, 0.5].into_iter();
-        assert_eq!(graph.escape(from, &mut || draws.next().unwrap()), Some(Vec3::new(10.0, 25.0, 0.0)));
+        assert_eq!(graph.escape(from, false, &mut || draws.next().unwrap()), Some(Vec3::new(10.0, 25.0, 0.0)));
+        // An animal's square doubles before every try, from 60, so the draw that lands a walker
+        // on the ground lands it off the map every time.
+        let mut draws = [0.25, 0.5].into_iter().cycle();
+        assert_eq!(graph.escape(from, false, &mut || draws.next().unwrap()), Some(Vec3::new(10.0, 25.0, 0.0)));
+        assert_eq!(graph.escape(from, true, &mut || draws.next().unwrap()), None);
     }
 }

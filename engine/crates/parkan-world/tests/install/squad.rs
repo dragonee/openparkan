@@ -1612,6 +1612,36 @@ fn the_hero_button_rolls_mission_04s_hq_view_back_to_foot_and_a_lost_hq_puts_the
     assert!(!play.hero_away());
 }
 
+/// The door the helicopter takes into Mission 04's factory is the search's, over the areals and the
+/// hall way together (docs/24, "How a walk joins a hall way"), its random factor drawn afresh for
+/// each plan; the recording's goes by exit 67, at (733.1, 1022.2).
+#[test]
+#[ignore = "needs the game install"]
+fn mission_04s_helicopter_comes_into_the_factory_by_the_exit_the_search_draws_past_its_approach() {
+    use std::collections::BTreeMap;
+
+    let (mut play, m) = mission_04_play();
+    let heli = object_target(&play, &m, "tut4_f1.dat");
+    let plant = object_target(&play, &m, "lplant01.dat");
+    let pod = glam::Vec3::new(750.02, 950.70, 41.5);
+    let corner = glam::Vec3::new(734.3, 892.0, 60.0);
+    let mut exits: BTreeMap<(i32, i32), usize> = BTreeMap::new();
+    const PLANS: usize = 1000;
+    for _ in 0..PLANS {
+        let (outside, inner) = play.search_in(heli, plant, corner, pod).expect("a way in");
+        let exit = inner[0];
+        *exits.entry((exit.x.round() as i32, exit.y.round() as i32)).or_default() += 1;
+        // The last point off the areals is the approach, 3 from the exit, raised as any place of
+        // word 0 is: a flyer's over the ground or a building under it.
+        let approach = outside.last().expect("an approach");
+        assert!(approach.truncate().distance(exit.truncate()) <= 3.01, "{approach} to {exit}");
+    }
+    eprintln!("exits over {PLANS} plans: {exits:?}");
+    assert_eq!(exits.values().sum::<usize>(), PLANS);
+    let by_67 = exits.get(&(733, 1022)).copied().unwrap_or(0);
+    assert!(by_67 > 0, "exit 67, the recording's, is among them: {exits:?}");
+}
+
 #[test]
 #[ignore = "needs the game install"]
 fn mission_04s_helicopter_searches_out_the_factory_and_the_research_centre_landing_at_their_corners() {
@@ -1848,8 +1878,10 @@ fn c02_m01s_wingmen_follow_the_hero_over_the_bridge_and_keep_out_of_the_canyon()
     let hero = play.hero.walker.body.position;
     for &t in &bots {
         let p = at(&play, t);
+        // Within the order's own 50: a follower is always on its way to a fresh spot, and a
+        // spot in a tree's box is passed over for the next, which a walk may have to go round.
         assert!(
-            p.truncate().distance(hero.truncate()) < 40.0,
+            p.truncate().distance(hero.truncate()) < 50.0,
             "unit {} follows over the bridge: {p}",
             play.units[t].logical_id
         );

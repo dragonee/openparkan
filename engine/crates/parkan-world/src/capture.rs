@@ -10,7 +10,7 @@ use glam::Vec3;
 use parkan_formats::hallway::{self, HallWay, LINK_FLYER_ONLY, LINK_SHUT, Link, PLACE_POD};
 use parkan_formats::mission::KIND_BUILDING;
 use parkan_sim::behaviour::Places;
-use parkan_sim::path::{Refusal, Way};
+use parkan_sim::path::{CORNER_CLEARANCE, ESCAPE_SPEED, ESCAPE_SPEED_ANIMAL, LEAVE_SPEED, Refusal, Way};
 
 use crate::construction::placed;
 use crate::play::{
@@ -268,8 +268,10 @@ impl Play {
     /// ramps, which the areal map does not carry, so the unit goes round to a door at ground
     /// level instead. With no such door left it takes the nearest anyway, as it did before.
     ///
-    /// STAND-IN: docs/31-packages.md#not-established -- how the walker joins the hall way is
-    /// not read: straight to that vertex, then along the links.
+    /// STAND-IN: docs/24-motion.md#how-a-walk-joins-a-hall-way--read-and-measured -- this is no
+    /// walk of the game's, which has the one search ([`Play::search_in`]). It stands for a unit
+    /// already by a vertex, its place on the building not being kept, and where the search gives
+    /// no way, as past a vertex's gate: straight to that vertex, then along the links.
     pub fn way_in(&mut self, t: usize, from: Vec3, goal: Vec3, flyer: bool) -> Option<Vec<Vec3>> {
         let (h, points) = self.hall_way_points(t)?;
         let near = |i: &usize| points[*i].map_or(f32::INFINITY, |p| p.distance(goal));
@@ -333,47 +335,71 @@ impl Play {
             .collect();
         bridges
             .into_iter()
-            .filter_map(|t| {
-                let (h, points) = self.hall_way_points(t)?;
-                let kept: Vec<usize> = (0..points.len()).filter(|&i| points[i].is_some()).collect();
-                let index = |i: u32| kept.iter().position(|&k| k == i as usize);
-                let way = Way {
-                    points: kept.iter().filter_map(|&i| points[i]).collect(),
-                    flags: kept.iter().map(|&i| h.vertices[i].flags).collect(),
-                    links: h
-                        .links
-                        .iter()
-                        .filter(|l| l.flags() == 0)
-                        .filter_map(|l| Some((index(l.start)?, index(l.end)?)))
-                        .collect(),
-                    size: self.units[t].designation.size_class,
-                };
-                Some((t, way))
-            })
+            .filter_map(|t| Some((t, self.way_of(t, false)?)))
             .collect()
+    }
+
+    /// Building `t`'s hall way in the world as the search links it for a unit that does or does
+    /// not fly: each vertex that has a point, the links it may cross, and each vertex's first
+    /// link whoever may cross it.
+    fn way_of(&mut self, t: usize, flyer: bool) -> Option<Way> {
+        let (h, points) = self.hall_way_points(t)?;
+        let kept: Vec<usize> = (0..points.len()).filter(|&i| points[i].is_some()).collect();
+        let index = |i: u32| kept.iter().position(|&k| k == i as usize);
+        let mut first = vec![None; kept.len()];
+        for link in &h.links {
+            if let (Some(a), Some(b)) = (index(link.start), index(link.end)) {
+                first[a] = first[a].or(Some(b));
+                first[b] = first[b].or(Some(a));
+            }
+        }
+        Some(Way {
+            points: kept.iter().filter_map(|&i| points[i]).collect(),
+            flags: kept.iter().map(|&i| h.vertices[i].flags).collect(),
+            links: h
+                .links
+                .iter()
+                .filter(|l| crosses(l, flyer))
+                .filter_map(|l| Some((index(l.start)?, index(l.end)?)))
+                .collect(),
+            first,
+            size: self.units[t].designation.size_class,
+        })
     }
 
     /// The points robot target `t` walks from `from` to `goal` across the ground: the walker's
     /// global path for a unit that does not fly, straight for a flyer or on a map with no areal
     /// map (docs/24, "The global path"). A goal the walker refuses, or one it finds no way to,
-    /// gives none, and the unit holds; a unit on an areal no link leaves makes for the nearest
-    /// walkable ground first.
+    /// gives none, and the unit holds, its queues emptied as `SetTarget` empties them first and
+    /// the walker's next takt stops it (`Behavior.dll:0x1003d31e`). A unit in a hole, or on an
+    /// areal no link leaves, walks straight out at the walk's own speed, which [`Play::walk_out`]
+    /// names, its way on to the goal left until it is there (docs/24, "Walking out").
     ///
-    /// STAND-IN: docs/24-motion.md#the-global-path--read -- how the walker goes to the point it
-    /// finds off a non-walkable areal is not read: straight. What the walker does when its search
-    /// fails is not read: it holds, its queues emptied as `SetTarget` empties them first. The
-    /// game's `rand()` is not followed: a 32-bit xorshift of the play's own.
+    /// STAND-IN: docs/24-motion.md#the-global-path--read -- the game's `rand()` is not followed:
+    /// a 32-bit xorshift of the play's own.
     pub fn route(&mut self, t: usize, from: Vec3, goal: Vec3) -> Vec<Vec3> {
         match self.walker_search(t, from, goal) {
             None => vec![goal],
             Some(Ok(legs)) => legs,
-            Some(Err(Refusal::Stranded)) => {
-                let Play { graph, walk_seed, .. } = self;
-                let graph = graph.as_ref().expect("a search ran");
-                graph.escape(from, &mut || xorshift(walk_seed)).into_iter().collect()
-            }
             Some(Err(Refusal::Goal | Refusal::NoWay)) => Vec::new(),
+            Some(Err(refusal)) => self.walk_out_of(t, from, refusal),
         }
+    }
+
+    /// The walk out of what `refusal` says robot target `t` stands in, the speed set in
+    /// [`Play::walk_out`].
+    pub(crate) fn walk_out_of(&mut self, t: usize, from: Vec3, refusal: Refusal) -> Vec<Vec3> {
+        let animal = self.units[t].type_word & crate::play::CLASS_ANIMAL != 0;
+        let Play { graph, walk_seed, walk_out, .. } = self;
+        let Some(graph) = graph.as_ref() else { return Vec::new() };
+        let (point, speed) = if refusal == Refusal::Obstacle {
+            (graph.leave_hole(from), LEAVE_SPEED)
+        } else {
+            let speed = if animal { ESCAPE_SPEED_ANIMAL } else { ESCAPE_SPEED };
+            (graph.escape(from, animal, &mut || xorshift(walk_seed)), speed)
+        };
+        *walk_out = point.map(|_| speed);
+        point.into_iter().collect()
     }
 
     /// The walker's global search for robot target `t` from `from` to `goal` (`MWorldGraph`,
@@ -384,8 +410,7 @@ impl Play {
         if robot.flyer || self.graph.is_none() {
             return None;
         }
-        let (clearance, standing) =
-            (robot.collision.1, robot.walker.ground.and_then(|h| h.solid).map(|s| s.0));
+        let standing = robot.walker.ground.and_then(|h| h.solid).map(|s| s.0);
         let size = robot.size_class;
         let ways = self.bridge_ways();
         let on = |b: Option<usize>| b.and_then(|b| ways.iter().position(|(w, _)| *w == b));
@@ -393,7 +418,58 @@ impl Play {
         let ways: Vec<Way> = ways.into_iter().map(|(_, w)| w).collect();
         let Play { graph, walk_seed, .. } = self;
         let graph = graph.as_ref().expect("tested above");
-        Some(graph.route(from, goal, &ways, aboard, clearance, size, &mut || xorshift(walk_seed)))
+        Some(graph.route(from, goal, &ways, aboard, CORNER_CLEARANCE, size, &mut || xorshift(walk_seed)))
+    }
+
+    /// The search's way for robot target `t` from `from` into building `b`, to the hall-way
+    /// vertex nearest `goal`, over the areals and the hall ways together, each vertex's gate
+    /// and link flags as they stand for it: the points up to its approach, then the rest. For a
+    /// flyer the first part's points are raised as the walker raises any place of word 0
+    /// (docs/24, "How a walk joins a hall way").
+    ///
+    /// STAND-IN: docs/24-motion.md#how-a-walk-joins-a-hall-way--read-and-measured -- what a
+    /// walker does with an exit on an upper storey is not read: for one, an exit standing more
+    /// than [`WAY_DOOR_STEP`] over the ground under it is no exit. The areal map carries no way up
+    /// a building's own ramps.
+    pub fn search_in(&mut self, t: usize, b: usize, from: Vec3, goal: Vec3) -> Option<(Vec<Vec3>, Vec<Vec3>)> {
+        let (_, robot) = self.robots.iter().find(|(rt, _)| *rt == t)?;
+        let (size, flyer) = (robot.size_class, robot.flyer);
+        let standing = robot.walker.ground.and_then(|h| h.solid).map(|s| s.0);
+        self.graph.as_ref()?;
+        let mut way = self.way_of(b, flyer)?;
+        if !flyer {
+            for (v, flags) in way.flags.iter_mut().enumerate() {
+                let p = way.points[v];
+                let level = self
+                    .ground
+                    .below(p.x, p.y, p.z + WAY_DOOR_STEP)
+                    .is_some_and(|g| g.point.z >= p.z - WAY_DOOR_STEP);
+                if !level {
+                    *flags &= !PLACE_EXIT;
+                }
+            }
+        }
+        let bridges = self.bridge_ways();
+        let aboard = standing.and_then(|s| bridges.iter().position(|(w, _)| *w == s));
+        let mut ways: Vec<Way> = bridges.into_iter().filter(|(w, _)| *w != b).map(|(_, w)| w).collect();
+        let at = ways.len();
+        let vertex = (0..way.points.len())
+            .min_by(|&i, &j| way.points[i].distance(goal).total_cmp(&way.points[j].distance(goal)))?;
+        ways.push(way);
+        let Play { graph, walk_seed, .. } = self;
+        let graph = graph.as_ref()?;
+        let legs = graph
+            .route_into(from, at, vertex, &ways, aboard, CORNER_CLEARANCE, size, &mut || xorshift(walk_seed))
+            .ok()?;
+        // The first point on the way itself is the exit, its approach just before it.
+        let exit = legs.iter().position(|p| ways[at].points.contains(p))?;
+        let (mut outside, inner) = (legs[..exit].to_vec(), legs[exit..].to_vec());
+        if flyer {
+            for p in &mut outside {
+                p.z = self.flight_height(p.x, p.y, false);
+            }
+        }
+        Some((outside, inner))
     }
 
     /// Whether robot target `t` flies, and so may cross a hall-way link only a flyer crosses.
@@ -467,8 +543,16 @@ impl Play {
     }
 
     /// The legs of a walk for robot target `t` at `from` into the building of logic id `id`, to
-    /// the place at `goal` — its pod or one of its docks: the way round the building to the door
-    /// its way in starts at, then that way in; or straight there.
+    /// the place at `goal` — its pod or one of its docks: the search's way over the areals and
+    /// the hall way together ([`Play::search_in`]), and with none that search will give, the way
+    /// round the building to the door its shortest way in starts at, then that way in; or
+    /// straight there.
+    ///
+    /// STAND-IN: docs/24-motion.md#not-established -- how a walk to a door gets past the
+    /// building's own walls, which cut no areal, is not read: the game's walker goes straight
+    /// across its areal to the exit's approach, and plans again once a point it has passed lies
+    /// more than 10 from it. Here a walker whose way off the areals would run into a wall goes
+    /// round the building's ground contour first ([`Play::way_round`]).
     ///
     /// STAND-IN: docs/31-packages.md#each-tick-slot-7-0x10030300--read -- what the walker does
     /// with the pod handed to it again while it stands there is not read: within 1.5 of it, the
@@ -491,14 +575,34 @@ impl Play {
         }
         // A flyer goes over the walls; a walker goes round them where its way to the door
         // would run into one, and straight at it where the way is clear.
-        let walled = !flyer
-            && self
-                .ground
-                .solids
-                .get(b)
-                .is_some_and(|s| s.present && parkan_sim::solid::blocked(from, way[0], s));
-        let round = if walled { self.way_round(b, from, way[0]) } else { Vec::new() };
-        let (start, rest) = round.split_first().map_or((way[0], Vec::new()), |(s, r)| (*s, r.to_vec()));
+        let blocked = |play: &Play, a: Vec3, b_at: Vec3| {
+            !flyer
+                && play
+                    .ground
+                    .solids
+                    .get(b)
+                    .is_some_and(|s| s.present && parkan_sim::solid::blocked(a, b_at, s))
+        };
+        let searched = self.search_in(t, b, from, goal);
+        if let Some((outside, inner)) = &searched {
+            let mut at = from;
+            let clear = outside.iter().all(|&p| {
+                let open = !blocked(self, at, p);
+                at = p;
+                open
+            });
+            if clear {
+                return outside.iter().chain(inner).copied().collect();
+            }
+        }
+        // The search's own way in where it found one, its approach gone round to.
+        let (door, way) = match searched {
+            Some((outside, inner)) => (outside.last().copied().unwrap_or(inner[0]), inner),
+            None => (way[0], way),
+        };
+        let walled = blocked(self, from, door);
+        let round = if walled { self.way_round(b, from, door) } else { Vec::new() };
+        let (start, rest) = round.split_first().map_or((door, Vec::new()), |(s, r)| (*s, r.to_vec()));
         let mut legs = self.route(t, from, start);
         if legs.is_empty() {
             return Vec::new();
