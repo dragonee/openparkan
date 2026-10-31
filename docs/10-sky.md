@@ -539,6 +539,19 @@ used to say: the colour handed to the light manager (`0x1007eb9e`) is
 `lerp(c, 5c, gate1² × gate2 × slot 17's alpha / 255)` (`0x1007ea14`), so a
 sun on the view axis lights the scene at up to five times its colour.
 
+**And it needs a clear line to the body** — *read*, found 2026-10-31 by tracing the face
+filters [07-objects.md](07-objects.md#the-filters-the-first-enumeration-could-not-see--read)
+could not see. The draw asks the world's slot 7 for the first face from half a metre out of
+the eye (`0x1007e2a0`–`0x1007e3f4`, the direction made unit by `g_FastProc`'s `+0x34`, the 0.5
+at `0x1009a1fc`) towards a point along the body's way (`0x1007dd5c`–`0x1007dd8c`,
+`0x1007de64`), with a request of its own, {`0x41a`, 0, 0, 0, 0, `0x20`}, kept at `CSun +0x9c8`
+(`0x1007c8d7`–`0x1007c913`) and translated into the query's filter (`0x1007e377`–`0x1007e3a1`).
+Any face takes the flare away and the lift with it: the answer's 0 goes to the same plain
+colour the infrared takes (`0x1007e4ca`, `0x1007e7d4`, `0x1007eba3`). So a sun behind a hill,
+a building or a tree throws no flare and lights the scene at its own colour. How far the
+point stands is half a figure this round did not finish tracing (`ebp − 0x60c`); the engine
+asks 10000 along, past every map's edge, a stand-in.
+
 **Only a scene camera's own frame gets it.** `RenderFlare` returns at any
 camera type but 0 (`0x1007d558`), and the sun's draw returns at once in a
 camera of type 2, body and all (`0x1007d8f6`): the water's mirror has no flare

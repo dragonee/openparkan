@@ -113,8 +113,10 @@ find.
   The enumeration that closed it went from the write instead, and only on the
   stack: follow `esp` through every function, so that `[esp + k]` names one
   slot wherever it is stored to, and print the eight words of every block
-  handed to a call at a face-query slot (`analysis/filters.py`; 31 filters,
-  [07-objects.md](07-objects.md#who-fills-a-face-querys-filter--read)). The
+  handed to a call at a face-query slot (`analysis/filters.py`; 31 filters, and three
+  in `Terrain.dll` that it passed over because that unoptimised module's constructors
+  do not look like constructors,
+  [07-objects.md](07-objects.md#the-filters-the-first-enumeration-could-not-see--read)). The
   same shape **off** the stack separates nothing again: whole dwords stored at
   k + `0x10` to k + `0x1c` off one register or a static, with a constant
   carrying 2 or 16 in the last two, is 126 of 6819 runs, 94 of them in

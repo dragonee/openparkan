@@ -137,6 +137,30 @@ pub fn body_sprites(world: &World, seconds: f64, infrared: bool) -> Vec<parkan_r
 
 pub use parkan_world::play::Play;
 
+/// How far along the sun's ray the line is asked: past every map's edge.
+///
+/// STAND-IN: docs/10-sky.md#the-lens-flare -- the ray's far end is half a length off the eye
+/// along the body's way (`Terrain.dll:0x1007dd5c`-`0x1007dd8c`), and which of the view's figures
+/// that length is (`ebp - 0x60c`) is not traced; nothing stands past this one.
+const SUN_RAY: f32 = 10_000.0;
+
+/// Whether the eye sees the body up: the sun's draw asks the world for the first face on the
+/// line from half a metre out of the eye towards it (`Terrain.dll:0x1007e4c2`), with a request
+/// of its own that shuts out no triangle flag (docs/07, "Who fills a face query's filter"), the
+/// effects' view test's. A face there takes the flare and its lift of the light away. With no
+/// world to ask, the line is clear.
+pub fn sun_line_clear(world: &World, play: Option<&Play>, seconds: f64, eye: Vec3) -> bool {
+    use parkan_sim::sky as atm;
+    let (Some(a), Some(play)) = (world.atmosphere.as_ref(), play) else {
+        return true;
+    };
+    let Some(&(body, progress)) = atm::bodies_aloft(a, seconds).first() else {
+        return true;
+    };
+    let toward = body.direction(progress).normalize_or_zero();
+    play.battle.combat.clear_line(&play.ground, eye + toward * 0.5, eye + toward * SUN_RAY)
+}
+
 /// The lights, fog and dome colours at `seconds` into the mission, seen from `eye`
 /// looking along `forward` with a field of view `field` radians across; `None` without an
 /// atmosphere.
@@ -158,6 +182,7 @@ pub fn lighting(
     forward: Vec3,
     field: f32,
     infrared: bool,
+    line_clear: bool,
 ) -> Option<(parkan_render::frame::Lighting, Vec<[f32; 4]>)> {
     use parkan_render::frame::Light;
     use parkan_sim::sky as atm;
@@ -171,7 +196,7 @@ pub fn lighting(
     // No shipped section has the sun and the moon up at once; where two bodies are up,
     // the first started lights the scene.
     let toward = atm::bodies_aloft(a, seconds).first().map(|&(body, progress)| body.direction(progress));
-    let seen = sky.seen(heading, toward, forward, infrared);
+    let seen = sky.seen_along(heading, toward, forward, infrared, line_clear);
     let lights = match toward {
         // CSun sets both directions every takt (Terrain.dll:0x1007ed40): the first light
         // travels the way the body's light does, the second the opposite way.
@@ -218,14 +243,20 @@ pub fn sky_layers(world: &World, seconds: f64) -> parkan_render::dome::Layers {
 
 /// This frame's lens flare, or `None` where no body is up -- or while the camera's
 /// `infrared` is on, when the sun's draw passes over the whole of it
-/// (`Terrain.dll:0x1007e7ee`-`0x1007e7f9`).
+/// (`Terrain.dll:0x1007e7ee`-`0x1007e7f9`), or where a face stands on the sun's ray
+/// (`0x1007e7d4`, [`sun_line_clear`]).
 ///
 /// The second of its two gates is here, on how high the body stands (`docs/10-sky.md`,
 /// "The lens flare"); the first is on the view, so the renderer takes it from the camera
 /// the frame is actually drawn with.
-pub fn flare(world: &World, seconds: f64, infrared: bool) -> Option<parkan_render::flare::Flare> {
+pub fn flare(
+    world: &World,
+    seconds: f64,
+    infrared: bool,
+    line_clear: bool,
+) -> Option<parkan_render::flare::Flare> {
     use parkan_sim::sky as atm;
-    if infrared {
+    if infrared || !line_clear {
         return None;
     }
     let a = world.atmosphere.as_ref()?;

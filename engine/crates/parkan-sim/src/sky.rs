@@ -620,6 +620,20 @@ impl Sky {
     /// flare's lift of the main light (`0x1007e7ee`-`0x1007e7f9`), handing the light manager
     /// the plain colour instead (`0x1007eba3`). The lights' own colours are not filtered.
     pub fn seen(&self, heading: f32, toward: Option<Vec3>, view: Vec3, infrared: bool) -> Seen {
+        self.seen_along(heading, toward, view, infrared, true)
+    }
+
+    /// [`Sky::seen`], with whether the sun's ray reached the body: stopped on a face it takes
+    /// the flare and the flare's lift of the main light away (`Terrain.dll:0x1007e4c2`, read at
+    /// `0x1007e7d4`), the same jump the infrared takes to the plain colour.
+    pub fn seen_along(
+        &self,
+        heading: f32,
+        toward: Option<Vec3>,
+        view: Vec3,
+        infrared: bool,
+        line_clear: bool,
+    ) -> Seen {
         let through = |c: Rgb| if infrared { self::infrared(c) } else { c };
         let fog = through(self.fog_colour(heading));
         let rim = self.dome_colours(fog).len() - DOME_SEGMENTS;
@@ -633,11 +647,11 @@ impl Sky {
             })
             .collect();
         let lights = match toward {
-            Some(_) if infrared => [self.sun_light, self.second_light],
+            Some(_) if infrared || !line_clear => [self.sun_light, self.second_light],
             Some(toward) => sun_lights(self, toward, view),
             None => [[0.0; 3]; 2],
         };
-        Seen { fog, dome, lights, flare: toward.is_some() && !infrared }
+        Seen { fog, dome, lights, flare: toward.is_some() && !infrared && line_clear }
     }
 
     /// The fog colour looking along `heading`, radians from +y towards +x
@@ -1040,6 +1054,20 @@ mod tests {
         assert!(aloft(525.0 - 38.0).is_empty(), "down at its stop");
         // The moon runs its own arc over its own 300 s.
         assert_eq!(aloft(600.0 - 56.0)[0].0, Body::Moon);
+    }
+
+    #[test]
+    fn a_face_on_the_suns_ray_takes_the_flare_and_its_lift_away() {
+        let mut sky = at(&day(vec![sky_keyframe(0, 0, 1.0)]), at_seconds(0, 0.0)).unwrap();
+        sky.sun_light = [0.5, 0.2, 0.0];
+        sky.second_light = [0.3, 0.3, 0.4];
+        sky.sun_boost = 1.0;
+        let clear = sky.seen_along(0.0, Some(SUN_DIRECTION), SUN_DIRECTION, false, true);
+        assert!(clear.flare);
+        assert!((clear.lights[0][0] - 2.5).abs() < 1e-4, "{:?}", clear.lights);
+        let stopped = sky.seen_along(0.0, Some(SUN_DIRECTION), SUN_DIRECTION, false, false);
+        assert!(!stopped.flare);
+        assert_eq!(stopped.lights, [[0.5, 0.2, 0.0], [0.3, 0.3, 0.4]], "the plain colours");
     }
 
     #[test]

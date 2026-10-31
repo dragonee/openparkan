@@ -823,12 +823,15 @@ fn screenshot(loaded: &scene::Loaded, game: &Path, args: &Args, out: &Path) -> R
     // The camera's infrared is the view's flag `0x20`, which the hero's N turns; the briefing
     // runs before any input does.
     let infrared = briefing.is_none() && play.as_ref().is_some_and(|p| p.infrared());
-    if let Some((lighting, colours)) = scene::lighting(&world, seconds, eye, forward, field, infrared) {
+    let line_clear = scene::sun_line_clear(&world, play.as_ref(), seconds, eye);
+    if let Some((lighting, colours)) =
+        scene::lighting(&world, seconds, eye, forward, field, infrared, line_clear)
+    {
         renderer.set_lighting(lighting);
         renderer.set_dome_colours(colours);
         renderer.set_sky_layers(scene::sky_layers(&world, seconds));
         renderer.set_body_sprites(&gpu.device, scene::body_sprites(&world, seconds, infrared));
-        renderer.set_flare(&gpu.device, scene::flare(&world, seconds, infrared));
+        renderer.set_flare(&gpu.device, scene::flare(&world, seconds, infrared, line_clear));
     }
     if let Some(p) = play.as_mut() {
         // The weather as a frame drawn a tick before left it, so a raindrop has the length the
@@ -931,7 +934,8 @@ fn screenshot(loaded: &scene::Loaded, game: &Path, args: &Args, out: &Path) -> R
                 // The HUD's model views are cameras of their own, and the infrared is the scene
                 // camera's flag alone: it is cleared before anything else is drawn
                 // (`Terrain.dll:0x1008481a`).
-                let lighting = scene::lighting(&world, seconds, eye, forward, field, false).map(|l| l.0);
+                let lighting =
+                    scene::lighting(&world, seconds, eye, forward, field, false, line_clear).map(|l| l.0);
                 if let Some(v) = &view {
                     scene::draw_hud(
                         &mut renderer,
@@ -1834,17 +1838,19 @@ impl App {
             ),
         };
         let infrared = self.briefing.is_none() && self.play.as_ref().is_some_and(|p| p.infrared());
+        let line_clear = scene::sun_line_clear(&self.world, self.play.as_ref(), seconds, eye);
         if let Some((lighting, colours)) =
-            scene::lighting(&self.world, seconds, eye, forward, field, infrared)
+            scene::lighting(&self.world, seconds, eye, forward, field, infrared, line_clear)
         {
             r.renderer.set_lighting(lighting);
             r.renderer.set_dome_colours(colours);
             r.renderer.set_sky_layers(scene::sky_layers(&self.world, seconds));
             r.renderer.set_body_sprites(&r.gpu.device, scene::body_sprites(&self.world, seconds, infrared));
-            r.renderer.set_flare(&r.gpu.device, scene::flare(&self.world, seconds, infrared));
+            r.renderer.set_flare(&r.gpu.device, scene::flare(&self.world, seconds, infrared, line_clear));
         }
         // The HUD's model views are cameras of their own: no infrared reaches them.
-        let lighting = scene::lighting(&self.world, seconds, eye, forward, field, false).map(|l| l.0);
+        let lighting =
+            scene::lighting(&self.world, seconds, eye, forward, field, false, line_clear).map(|l| l.0);
         let view_proj = match self.play.as_mut() {
             Some(play) => {
                 let briefing = self.briefing.as_ref();

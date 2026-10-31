@@ -986,8 +986,10 @@ the install and flag 16 in one, both the push-out's
 
 #### Who fills a face query's filter — *read*
 
-**31 filters are filled in the install, in seven modules, and 29 of them carry
-neither flag.** `analysis/filters.py` follows `esp` through every function
+**34 filters are filled in the install, in seven modules, and 32 of them carry
+neither flag.** Three of the 34 came in 2026-10-31 and are read
+[below](#the-filters-the-first-enumeration-could-not-see--read); the listing's own count is
+31. `analysis/filters.py` follows `esp` through every function
 (depth zero at every `ret` on 16048 of 17081) so that a store names the same
 stack slot wherever it is made, and lists every call at a face-query slot with
 the eight words of the block it is handed.
@@ -1012,7 +1014,9 @@ building's to its parts (`Terrain.dll:0x1005ae9f`, `0x1005af13`, `0x1005b1bd`)
 and the landscape's slot 7 (`0x10021a09`, `0x10021aa0`), both with the batch
 mask narrowed and the triangle words as they came. Two more are the
 landscape's own translating wrappers (`0x1001e280`, `0x1001e400`, slots 11 and
-5 of table `0x1009a3c4`), for which no caller was found.
+5 of table `0x1009a3c4`), ~~for which no caller was found~~ of which the first has
+one caller and the second none
+([below](#the-filters-the-first-enumeration-could-not-see--read)).
 
 **The filters**, by the triangle words they carry:
 
@@ -1023,12 +1027,12 @@ landscape's own translating wrappers (`0x1001e280`, `0x1001e400`, slots 11 and
 | 0, 4 and **2** unless the mover's flags carry 8 | 1 | the pair's face filter, the push-out's fourth argument (`0x1001dbce`, `0x1001e007`) |
 | **`0x10`**, the caller's | 1 | the door test, inside the push-out: a copy of that fourth argument (`AniMesh.dll:0x1000dba2`) with `0x10` required (`0x1000dbba`) |
 | 0, 8 | 3 | the walker's ground queries into the world's slot 10 (`Control.dll:0x100195a0`; the ground contact `0x1001a450`, twice) |
-| 0, 0 | 23 | everything else |
+| 0, 0 | 26 | everything else |
 
 - **0, 8 excludes nothing on a mesh.** 8 is a landscape surface class there
   ([26-damage.md](26-damage.md#the-query-record-and-what-a-round-excludes--read-and-measured));
   as a triangle flag it is on 0 of 241887 faces.
-- **The 23 that carry nothing** are every sight and every placement:
+- **The 26 that carry nothing** are every sight and every placement:
   - `Control.dll`: the pair's small-face query (`0x1001de0b`), the guns' sight
     (`0x1002a610`), the ground contact's query into slot 8 (`0x1001aa8e`) and
     `0x10013180`;
@@ -1040,8 +1044,10 @@ landscape's own translating wrappers (`0x1001e280`, `0x1001e400`, slots 11 and
     `0x10021490`;
   - `Effect.dll`: an effect's view test (`0x10007d10`);
   - `Terrain.dll`: `CheckMaxBasementAngle` (`0x10014c60`), the strike
-    (`0x10071d70`) and a **static** filter at `0x100a6038`, filled by its
-    initialiser (`0x10040e90`) and handed on at `0x1004669c`;
+    (`0x10071d70`), a **static** filter at `0x100a6038`, filled by its
+    initialiser (`0x10040e90`) and handed on at `0x1004669c`, and the three
+    [below](#the-filters-the-first-enumeration-could-not-see--read): the sun's ray, the
+    four rays of `CShade::EndDraw`, and the face under a building's corner;
   - `AniMesh.dll`: `0x1000b050`, and interface `0x20` slot 7 (`0x10010550`).
 - So **a sight ray strikes glass and leaves**, flags 4 and `0x20`, which a
   round passes; and no query but the push-out's can tell a floor or a door's
@@ -1061,10 +1067,101 @@ and found (above); of the other 159 arguments at those slots that are not on
 the stack, 138 are static addresses in six of `Behavior.dll`'s setting readers
 (two looked at: the names `Patrol_Place_SpeedPercent` and `Type`), one is a
 field of a resource entry (`AniMesh.dll:0x10003936`), and 20 are values loaded
-from a field, which were not read one by one. A sweep for the fill itself —
-whole dwords stored at k + `0x10` to k + `0x1c` off one base that is not the
+from a field, ~~which were not read one by one~~ **none of which is a filter**
+([below](#the-filters-the-first-enumeration-could-not-see--read)). A sweep for the fill
+itself — whole dwords stored at k + `0x10` to k + `0x1c` off one base that is not the
 stack, with a constant carrying 2 or 16 in a triangle word — does not
 discriminate ([09-method.md](09-method.md#searches-that-do-not-discriminate-so-nobody-repeats-them)).
+
+##### The filters the first enumeration could not see — *read*
+
+**What separates a query from the rest of its slot's calls is how it takes its object.**
+A face query takes it in `ecx`; `analysis/filters.py receivers` sorts every call at the six
+offsets by that, and a call through `[ecx + k]`, or one that pushes last the pointer it read
+its table out of, gives its slot an object on the stack and hands the query's second pushed
+word to something that is not a filter. The control is the blocks and copies the listing
+already had: of the 28 at the slots that take it so, 23 have the object in `ecx`, 5 reach it by
+a path the tracker does not follow, and **0 push it**; the push-out, interface `0x25` slot 3,
+is the one query that does take its object on the stack (`AniMesh.dll:0x1000d410`), as the
+collision pair hands it (`Control.dll:0x1001e007`).
+
+**The 20 values loaded from a field are these, and not one is a filter**:
+
+| sites | what it is called on | what the word is |
+|---|---|---|
+| `iron3d.dll:0x1001525a`, `0x100154ad`, `0x1001a797`, `0x1001eb0d`, `0x1004566b`, `0x1006aa97`, `0x1006aaea`, `0x1009a024`, `0x1009a448`, `0x1009b9ab`, `0x1009f3e0` | a font's slot 6, a text's width ([35-hud.md](35-hud.md)), on the stack | a string's start, its length after it |
+| `Terrain.dll:0x1005854f`, `0x100585be` | `IItemManager` slot 6, a building's item ([24-motion.md](24-motion.md)) | the door's or the computer's item, switch word 2 after it |
+| `Behavior.dll:0x10025377` | `IItemManager` slot 6, the `+0x68` a `QueryInterface` for `0x202` fills (`0x10005ce6`) | the gun an order names, `CIS_SINGLEFIGHT` after it |
+| `Terrain.dll:0x1007d056`, `0x1007d071` | the light manager's slot 6 (`0x10080190`) | `CSun`'s two lights, enabled |
+| `Effect.dll:0x1000f465`, `0x1000f4a3` | the same | an effect's light, disabled |
+| `Control.dll:0x10025d05` | the effect manager's slot 8, the shield's hit ([26-damage.md](26-damage.md)) | the instance, a pointer to its scale after it |
+| `Ngi32.dll:0x1000911b` | `IDirect3DDevice7`'s `SetRenderTarget`, index 8 | the surface |
+
+The sort leaves seven more of the slots' calls to read, among the 267 the listing calls
+*other* because their word is neither a block nor a loaded field. Five are not filters: the
+sky clock's (`Terrain.dll:0x1006fad9`), a class of `iron3d.dll`'s own slot on itself, handed
+what a name's lookup returns (`0x10068a7f`, `0x1006907c`), and a window message's two halves
+(`0x100a0f95`, `0x100a0fb3`). The two in `Terrain.dll` that are left **are** filters, which
+`shaped` passed over: this module's
+constructors are unoptimised, each store through a local of its own, so the tracker's
+`CTORS` does not take them for constructors and the block shows no stores:
+
+- **The sun's ray** (`0x1007e4c2`, the world's slot 7 on `CSun +0x18`) from half a metre out of
+  the eye towards the body, its request a six-word record `CSun`'s constructor fills
+  (`+0x9c8`, `0x1007c8d7`–`0x1007c913`) and three translators copy (`0x10022a20`, `0x1007f3b0`,
+  `0x1007f660`): {`0x41a`, 0, 0, 0, 0, 8, **0, 0**}, the outer camera's first word, in the
+  effects' view test's shape. A face on it takes the flare and its lift of the main light
+  away ([10-sky.md](10-sky.md#the-lens-flare)).
+- **The four rays of `CShade::EndDraw`** (`0x10052d60`, the world's slot 7 again), by a
+  six-word constructor (`0x100551d0`, `0x10052ce1`) and two stores: {2, 0, 0, 0, 0, `0x8008`,
+  **0, 0**}. What they test is not read.
+
+**The wrappers.** The table they stand in is `QueryInterface` 1 of the landscape, at its own
+`+0x13c` (`0x1001a1d6`, id 1 through the byte table `0x1001a357`), and each takes its object on
+the stack with six words after it and returns with `ret 0x1c` (`0x1001e3f9`). So a caller
+pushes seven. Over the install's calls at their two offsets, what pushes seven is:
+
+| slot | offset | calls in all | pushing seven |
+|---|---|---:|---|
+| 11, `0x1001e280` | `+0x2c` | 344 | **1**, `Terrain.dll:0x1001a413` |
+| 5, `0x1001e400` | `+0x14` | 658 | 3, and none its: `iron3d.dll:0x100243b6`, `0x100aa7c1` and `services.dll:0x1001e242`, each with its object in `ecx`, a stream's character conversion (*inferred*) |
+
+Neither is reached any other way: no direct call or jump in the module and no other dword
+in it holds either address, and of the install's five tail jumps through those offsets four
+have their object in `ecx` (`iron3d.dll:0x1006973e`, `services.dll:0x10005c9c`, `0x10006455`,
+`0x10011973`) and the fifth forwards three words (`World3D.dll:0x1000a4e9`, `ret 0xc`). The
+search's control is its own result: slot 11's one caller is what it found. That caller, `0x1001a3b0`, asks for the face under a point and has
+two callers of its own, both `PlaceBuilding`'s (`0x1000b162`, the contour's point, *"Contour
+of building ran out of landscape"*; `0x1000ee99`, the first corner,
+[03-terrain.md](03-terrain.md)). Its request is {`0xfff`, 0, 0, 0, 0, 0}: the first word a
+static its initialiser makes all twelve classes (`0x100229c0`, `0x100a5a10`), which is the
+file's 0 until then. **Slot 5 has no caller in the install.**
+
+What a wrapper adds is the translation. It takes a six-word request whose last two words are a
+required and an excluded mask in the engine's 32-bit form, and makes both the filter's words
+of them: the surface words by one routine (`0x10022b00`: 1 to 1, 8 to 2, `0x10` to 4,
+`0x20` to 8, `0x1000` to `0x10`, `0x4000` to `0x20`, 2 to `0x40`, and on) and the triangle words
+by another (`0x10022a60`, the mapping named nowhere else):
+
+| full mask bit | triangle flag |
+|---:|---:|
+| `0x100` | 1 |
+| `0x8000` | 2, the floor |
+| `0x10000` | 4, glass |
+| `0x40000` | 8 |
+| `0x80000` | `0x10`, a door's leaf |
+| `0x80` | `0x20` |
+
+which is the compact-word frame [03-terrain.md](03-terrain.md) took from fparkan, for the
+six bits it does not compact. Nothing in the install hands either translator a request with a
+triangle bit: of the three requests, the landscape's and `EndDraw`'s carry 0 there, and the
+sun's excluded `0x20` is a surface bit, 8.
+
+**So the line closes.** Flag 2 is in one filter in the install and flag `0x10` in one, as the
+first enumeration said; the three it could not see carry neither, and no value loaded from a
+field is a filter. **The engine** agreed on what a filter carries; what it did not have is
+the sun's ray at all, which it now asks through the effects' clear line
+([10-sky.md](10-sky.md#the-lens-flare)).
 
 **The engine** agrees on all of them: a round's and the outer camera's line
 pass `0x24` (`parkan_sim::hit::ROUND_SKIPS_FACE`), the sights pass nothing

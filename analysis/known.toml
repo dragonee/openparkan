@@ -29483,3 +29483,59 @@ kind = "function"
 name = "queue slot 12: the world's root, the first object slot 13 lists for 1"
 read = true
 doc = "docs/26-damage.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1007cabf"
+kind = "site"
+name = "CSun constructor: the body's material block takes the shade's slot 7, render phase 2 where the device has it, so slot 17's colour and alpha both modulate the sprite"
+read = true
+doc = "docs/10-sky.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10042850"
+kind = "function"
+name = "CShade slot 7: +0x192c, 2 where the device has render phase 2, else 1"
+read = true
+doc = "docs/10-sky.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1007e4c2"
+kind = "site"
+name = "CSun draw: the sun's ray, world slot 7 from the eye towards the body; a face takes the flare and its lift of the main light away (0x1007e7d4)"
+read = true
+doc = "docs/10-sky.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10052d60"
+kind = "site"
+name = "CShade::EndDraw: four rays into the world's slot 7, filter {2, 0, 0, 0, 0, 0x8008, 0, 0} by the six-word constructor 0x100551d0"
+read = true
+doc = "docs/07-objects.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1001a3b0"
+kind = "function"
+name = "the face under a point, for PlaceBuilding: request {0xfff, 0, 0, 0, 0, 0} through interface 1 slot 11, the one call of the wrapper 0x1001e280"
+read = true
+doc = "docs/07-objects.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10022a60"
+kind = "function"
+name = "a full 32-bit face mask to a triangle flag word: 0x100 1, 0x8000 2, 0x10000 4, 0x40000 8, 0x80000 0x10, 0x80 0x20"
+read = true
+doc = "docs/07-objects.md"
+
+[[entry]]
+module = "Ngi32.dll"
+at = "0x10034cb0"
+kind = "datum"
+name = "render phase table record 2's triples: phase 2, one stage, colour and alpha both texture x diffuse"
+read = true
+doc = "docs/10-sky.md"

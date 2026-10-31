@@ -15,6 +15,7 @@ register was set, or one of the small constructors' pushed arguments.
 
     uv run --group analysis python analysis/filters.py check      # is the tracker to be believed
     uv run --group analysis python analysis/filters.py queries    # every call at a face-query slot
+    uv run --group analysis python analysis/filters.py receivers  # how each hands over its object
     uv run --group analysis python analysis/filters.py closure    # how those slots were found
     uv run --group analysis python analysis/filters.py at Control.dll 0x1001da6b
     uv run --group analysis python analysis/filters.py into AniMesh.dll:0x10008120:1
@@ -42,6 +43,10 @@ the collision pair's three (`0x1001dd24`, `0x1001de0b`, `0x1001e007`), which it 
 What it cannot see is a filter filled somewhere other than the stack and passed as a loaded
 pointer.  A static one shows as a pushed address (one does: `Terrain.dll:0x100a6038`); one
 kept in an object would not, and the sweep for such a fill does not discriminate (docs/09).
+Nor does it see a block filled by a constructor it does not know, and `Terrain.dll`'s, stored
+through a local, are not known: `receivers` sorts the rest by how each call hands over its
+object, which leaves few enough to read (docs/07, "The filters the first enumeration could
+not see").
 
 See ../docs/09-method.md.  This recovers which calls the engine makes and what data they pass;
 no code is copied out of it.
@@ -79,6 +84,8 @@ class Call:
     arg_at: list                # the address of each push
     pops: int                   # bytes the tracker took the callee to pop
     known: bool                 # whether that count was read from the callee's `ret`
+    base: str = ""              # the register the slot is read through, for a call through one
+    receiver: tuple = ()        # where that register's table was loaded from: the object called
 
 
 @dataclass
@@ -173,6 +180,7 @@ class Tracker:
                      and ins_list[0].op_str == "ebp" and ins_list[1].mnemonic == "mov"
                      and ins_list[1].op_str == "ebp, esp")
         reg: dict[str, tuple] = {r: ("in", r) for r in REGS}
+        tables: dict[str, tuple] = {}   # a register holding a table -> what it was read out of
         written: set[str] = set()
         stack: list = []            # (depth after the push, at, origin, is a save)
         label_depth: dict[int, int] = {}
@@ -287,8 +295,12 @@ class Tracker:
                 taken = taken[::-1]
                 target = f"{direct:#x}" if direct is not None else ins.op_str.replace(
                     "dword ptr ", "")
+                base = ""
+                if ops[0].type == X.X86_OP_MEM and ops[0].mem.base:
+                    base = ins.reg_name(ops[0].mem.base)
                 fr.calls.append(Call(a, target, direct, reg["ecx"], reg["edx"],
-                                     [t[2] for t in taken], [t[1] for t in taken], pops, known))
+                                     [t[2] for t in taken], [t[1] for t in taken], pops, known,
+                                     base, tables.get(base, ())))
                 depth -= pops
                 stack = [s for s in stack if s[0] <= depth]
                 since = len(stack)
@@ -315,6 +327,12 @@ class Tracker:
                 if ops[0].type == X.X86_OP_REG:
                     name = ins.reg_name(ops[0].reg)
                     if name in REGS:
+                        tables.pop(name, None)
+                        if ops[1].type == X.X86_OP_MEM and ops[1].mem.base \
+                                and not ops[1].mem.disp and not ops[1].mem.index:
+                            source = ins.reg_name(ops[1].mem.base)
+                            if source in reg:
+                                tables[name] = reg[source]
                         reg[name] = origin(ops[1], ins)
                         written.add(name)
                     elif name in SUB:
@@ -713,6 +731,65 @@ def queries(verbose: bool) -> int:
     return 0
 
 
+def passed(c: Call) -> str:
+    """How a call through a slot hands over its object: in `ecx`, on the stack, or not seen.
+
+    A face query takes its object in `ecx`.  A call through `[ecx + k]` has its table in `ecx`, so
+    whatever it calls is not given an object there; the same goes for one that pushes last the
+    pointer it read its table out of.
+    """
+    if c.base == "ecx":
+        return "stack"
+    if c.receiver:
+        if c.args and c.args[0] == c.receiver:
+            return "stack"
+        if c.ecx == c.receiver:
+            return "ecx"
+    return "unseen"
+
+
+def receivers() -> int:
+    """Every call at a face-query slot, by what its filter argument is and how its object goes.
+
+    The control is the filter blocks and their copies: all of those must say `ecx`.
+    """
+    loaded = trackers()
+    for offset, nargs, index, what in QUERIES:
+        needle = f"+ {offset:#x}]"
+        counts: dict[tuple[str, str], int] = {}
+        listed = []
+        for name, tr in loaded.items():
+            for f in tr.m.functions():
+                fr = tr.frame(f.at)
+                for c in fr.calls:
+                    if c.direct is not None or not c.target.startswith("[e") \
+                            or not c.target.endswith(needle) or not fr.ok \
+                            or len(c.args) != nargs:
+                        continue
+                    o = c.args[index - 1]
+                    if o[0] == "imm" and not (tr.m.section_of(o[1]) and not tr.m.in_text(o[1])):
+                        kind = "constant"
+                    elif o[0] == "local":
+                        text = row(tr, fr, o[1], c.at)
+                        kind = "filled" if "->0x1c" in text or shaped(tr, fr, o[1], c.at) \
+                            else "local"
+                    elif o[0] == "frame" and o[1] >= 4:
+                        kind = "param"
+                    else:
+                        kind = "loaded"
+                    how = passed(c)
+                    counts[(kind, how)] = counts.get((kind, how), 0) + 1
+                    if kind in ("loaded", "local") and how != "stack":
+                        listed.append(f"  {name}:{c.at:#x} in {fr.at:#x} {how}: {show(o)} "
+                                      f"[{', '.join(brief(a) for a in c.args)}] "
+                                      f"ecx={brief(c.ecx)} edx={brief(c.edx)}")
+        print(f"##### +{offset:#x}, argument {index} of {nargs} ({what})")
+        for key in sorted(counts):
+            print(f"  {key[0]:9s} object {key[1]:7s} {counts[key]:4d}")
+        print("\n".join(listed))
+    return 0
+
+
 def trackers(names=cov.MODULES):
     return {name: Tracker(mod) for name, mod in cov.load(names).items()}
 
@@ -736,6 +813,8 @@ def main(argv: list[str]) -> int:
                   f"x {len(tr.ctors)}")
         print(f"{total} functions, {total - bad} verified, {bad} not")
         return 0
+    if cmd == "receivers":
+        return receivers()
     if cmd == "bad":
         name = argv[2]
         tr = trackers((name,))[name]
