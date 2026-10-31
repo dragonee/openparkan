@@ -444,13 +444,13 @@ slot `0xfffe`) is taken by nobody.
 | fn | uses | arguments | does |
 |---:|---:|---|---|
 | 15 | 236 | *id*, order, insert, parameter, four floats, target kind, target… | build an order packet and give it to the unit: result 1 taken, 0 refused, **5 no such unit**. The unit is found by logical id through the clan areal map's slot 7, as for 52, so **any clan's** unit takes it; a place's two words become the packet's float x and y (`0x10008054`, [34-progression.md](34-progression.md#what-the-scripts-ask--read-and-measured-1)). The packet is [31-packages.md](31-packages.md)'s. Before it reads an operand it tests who is asking: a SuperAI started as the local player's, with 1 and not 2, gives the order only if its clan is number 0 (`0x1000809c`; function 28 the same, `0x1000ba49`) |
-| 14 | 53 | `UNIT_ANY_UNIT` type · `UNIT_ANY_CAPTURER` · `UNIT_ANY_NEAREST_CAPTURER` target kind, target | pick a unit: one of a type, a capturer, or the capturer that reaches the target soonest by distance over its live top speed (IControl 145, `0x100091b0`) |
+| 14 | 53 | `UNIT_ANY_UNIT` type · `UNIT_ANY_CAPTURER` · `UNIT_ANY_NEAREST_CAPTURER` target kind, target | pick a unit: one of a type, a capturer, or the capturer that reaches the target soonest by distance over its live top speed (IControl 145, `0x100091b0`). A capturer here is a `ROBOT_BATTLEUNIT` by exact Type, of size class 1 or 2 (`0x10008cfb`, `0x10008db9`, `0x10009050`): a small builder may capture if ordered to, and no script's pick names one |
 | 13 | 2 | `UNIT_FREE_UNIT`/`_FREE_CAPTURER`/`_ANY_UNIT`, type | pick a free unit of a type, a free capturer, or one free or on a lighter problem |
 | 51 | 39 | *id*, `TRUE`/`FALSE` | reserve a unit from every problem, or free it: it writes the unit's problem word, `0xfffe` or −1, and nothing else (`0x1000e0d9`, `0x1000e0be`), so the problem the unit was on goes on counting it |
 | 34 | 29 | type | how many entries of the running clan's own SuperAI list (`+0x8c`) have **exactly** that type and a logical id; a building is on the list (`0x10009c30`, [34-progression.md](34-progression.md#what-the-scripts-ask--read-and-measured-1)) |
 | 31 | 48 | *clan*, class mask | how many of clan *clan*'s units have a type sharing a bit with the mask: the entries of that clan's SuperAI unit list (`0x10055398[clan] +0x8c`) whose logical id is set ([34-progression.md](34-progression.md)) |
 | 38 | 13 | *clan*, `FREE_UNITS`/`ALL_UNITS` | the summed strength of that clan's battle units |
-| 11 | 11 | type | 1 when the clan already has as many of the type as its `dMax*` variable allows, or when a per-type counter the brain keeps (`+0x3e0`..`+0x3f8`) is set. The seven counters are stepped as a building is filed on the clan's list, one for each of the Types `0x80000004`, `…08`, `…10`, `…40`, `0x80100000`, `0x80200000` and `0x80000400` (`0x1000194f`–`0x100019a9`, slot 4's event 2); what lowers them is not followed |
+| 11 | 11 | type | 1 when the clan has as many of the type as its `dMax*` variable allows, or **has ever had** as many filed on its list as that type's own bar ([below](#function-11s-two-bars--read-and-measured)) |
 | 49 | 9 | — | the clan's free minds |
 | 39 | 1 | *id* | 1 when the id names an object |
 | 52 | 47 | *id* | the object's **owner**, its slot 17: a clan's index, 65534 once destroyed; `ERROR` only when no object answers the id. The object is the system areal map's by logical id, asked through the clan areal map's slot 7 ([34-progression.md](34-progression.md#what-the-scripts-ask--read-and-measured)) |
@@ -485,6 +485,16 @@ so far — the least defended, not the nearest. 44 and 67 score without picking.
 An earlier reading of this page called the score a distance and these functions
 "the nearest"; it was wrong.
 
+**Functions 37 and 67 pass no radius, because they carry their own** (*read*): each
+hands `0x10006130` the float 250 and the clan's own number (`0x1000cf9d`–`0x1000cfb3`,
+`0x1000ef7a`–`0x1000ef90`). That routine's clan word is a filter: at −1 it takes
+any clan the table has hostile and never the asker's, and at a number that clan's
+alone (`0x100061d8`–`0x1000620d`). So these two measure the **guard a building
+has**, not who is against it, which is what their use wants: each of the five
+raises `PBM_BUILDING_PROTECT` with the figure as its third parameter, 37's when it
+falls under `dBuildingProtectHits`, and that `_Start` gathers only
+`dBuildingProtectHits − p3`.
+
 | fn | uses | arguments | does |
 |---:|---:|---|---|
 | 19 | 58 | x out, y out, clan out | write the base's centre and the clan's number into the three — it reads the base, it does not place it |
@@ -498,8 +508,8 @@ An earlier reading of this page called the score a distance and these functions
 | 71 | 9 | *f*, type, strength out | the enemy object whose type word is **exactly** that type with the least held against it; `ERROR` when the enemy holds none |
 | 64 | 3 | *f*, strength out | the enemy inside the base radius with the least about it |
 | 47 | 8 | range, strength out | an enemy within range of the base that no `PBM_BASE_DEFENCE` is raised for: the hero if one is there, else the strongest |
-| 37 | 3 | strength out | the clan's own building with the least held against it |
-| 67 | 2 | strength out | the clan's factory, and the strength about it |
+| 37 | 3 | strength out | the clan's own building with the least **of the clan's own strength** within 250 of it (`0x1000cedf`) |
+| 67 | 2 | strength out | the first factory on the clan's list, and the clan's own strength within 250 of it (`0x1000eec7`) |
 | 10, 46, 55 | — | … | an areal-map entry of another clan; the base radius; a bounds test |
 
 **Economy.**
@@ -535,6 +545,61 @@ The callback's channel 0 is the mission's message switch, and its six kinds are
 manager and plays `VOICE_OBJ_COMPLETE`; `OBJECTIVE_FAILED` fetches 5041;
 `OBJECTIVE_PROGRESS` updates the objective the value numbers; `MESSAGE_INFO`
 hands its value to `iron3d.dll:0x10094e30`; `CLAN_HERO_KILLED` does nothing.
+
+#### Function 11's two bars — *read*, and *measured*
+
+The handler (`0x1000c5e7`) counts the entries of the clan's list with exactly
+that type and an id (`0x100060e0`), starts from a limit of `0xffffffff`
+(`0x1000c62e`), and switches on the type. It answers 1 when the count reaches the
+limit, compared unsigned (`0x1000c837`), or when a word the SuperAI keeps for that
+type has reached a bar of its own:
+
+| type | limit | word | bar |
+|---|---|---|---:|
+| `ROBOT_BUILDER` | `dMaxBuilder` (`+0x870`) | — | — |
+| `ROBOT_TRANSPORT` | `dMaxTransport` (`+0x874`) | — | — |
+| `BUILDING_MINE` | `dMaxMine` (`+0x884`) | `+0x3e0` | 1 |
+| `BUILDING_STORAGE` | `dMaxStorage` (`+0x87c`) | `+0x3e4` | 1 |
+| `BUILDING_PLANT` | `dMaxPlant` (`+0x878`) | `+0x3e8` | 1 |
+| `BUILDING_HANGAR` | none | `+0x3ec` | 1 |
+| `BUILDING_TOWER_MEDIUM` | `dMaxTower` (`+0x880`) | `+0x3f0` | 3 |
+| `BUILDING_TOWER_LARGE` | `dMaxTower` (`+0x880`) | `+0x3f4` | 1 |
+| `BUILDING_INSTITUTE` | none | `+0x3f8` | 1 |
+
+Any other type answers 0 and skips the compare (`0x1000c825`): so does
+`ROBOT_BATTLEUNIT`, which is why a clan's warbots are bounded by its minds alone.
+
+**Nothing lowers the seven words.** They are the SuperAI's, as `ebx` is in slot 4's
+event 2 (`0x10001880`), and so the brain's `+0x364`..`+0x37c`, where this page
+named them wrongly as the brain's. A search of `.text`'s raw bytes for each of the
+fourteen displacements, in both coordinates, finds three things that address them:
+**the seven `inc`s** of event 2 (`0x10001964`–`0x100019a9`), **the seven reads** of
+function 11 (`0x1000c733`–`0x1000c810`), and **the constructor's seven zeros**
+(`0x10005814`–`0x10005838`). The other hits are stack slots and the plain 1000 of
+`0x3e8`. No `lea` reaches them, and the save's AI state does not carry them: slot
+19 and its reader do not address them, where the same bytes find `+0x854`, the
+clock (`0x10002399`, `0x10002510`). The control is `+0x3d8` beside them, 65 sites
+by the same search, and `+0x3dc`, 6. A clan's next SuperAI, after a load, starts at
+zero and counts what is filed then; that filing is not followed here.
+
+So each word counts **what was ever filed**, not what stands. A building lost
+leaves the first count, its list entry's id going to −1 (`0x10003fc0`), and stays
+in the second; one taken back is filed again and steps it again, event 2 skipping
+only an id already on the list (`0x100018d8`). A clan that has once held a mine, a
+storage, a factory, an Outpost, a research centre or a large tower does not ask
+for another, whatever `dMax*` it sets and even if it no longer holds one, and it
+stops at three medium towers.
+
+*Measured*: of the 11 calls, 8 are `PBM_ROBOT_NEEDED_Start`'s, on robot types no
+bar applies to, and 3 can meet a bar: `PBM_BUILDING_NEEDED_Start` in `c4m2e2` and
+`scream`, and `scream`'s `Problems0` on `BUILDING_MINE`. Those two scripts run
+four clans. C04 M02's clan 2 is placed with a research centre, a factory, a mine
+and one medium tower; Single.01's clan 1 with a research centre, a factory, a
+storage and a mine; Single.02's clans 1 and 2 with none of them. So Single.01's
+enemy, its mine or factory lost, does not rebuild it, and Single.02's, once it has
+built one, does not build a second. No script writes `dMaxMine`, `dMaxPlant`,
+`dMaxStorage` or `dMaxTower`; the 4 writes of a `dMax*` are `dMaxBuilder`'s, three
+to 0 and `scream`'s to 2.
 
 ## Channel 2 runs a line of the mission's `script` block — *read*, and *measured*
 
@@ -1120,7 +1185,10 @@ Whether the recording is of another build of the game is not something the
 install can answer.
 
 The two recordings also agree on every count they share: *MTW-3*, *LWW-8*,
-*MWW-21*. Whether Part 6.5 starts from a save of Part 6's is not established.
+*MWW-21*. ~~Whether Part 6.5 starts from a save of Part 6's is not established.~~
+**It does not** (*seen*): Part 6.5 opens on the campaign menu at 0:08, picks *The
+Convoy* at 0:20, and plays its briefing at 0:37, with the hero on foot from 1:50.
+The agreement is two runs of one mission, not one run.
 
 **What the names are** is not in doubt: the letters are the object's size
 class, its chassis type and its Type, and the number one more than a count its
@@ -1128,15 +1196,17 @@ clan keeps ([35-hud.md](35-hud.md#name-and-status--read-and-seen)), so *MTW* is
 a medium tracked warrior and only `m_stopper`, `m_dblhow` and `41mtrk1` of the
 44 are one.
 
-**One more thing the read gives that the recordings do not show.** From the
+**One more thing the read gives, which the recordings do not contradict.** From the
 takt after the player takes one of `Enm1`'s buildings, the clan — whose every
 warbot is too large to capture — asks for a robot at 0.801 by `SELECT_FASTEST`,
 and that want takes the build problem over for as long as the clan has no
 capturer ([What ends a problem](#what-ends-a-problem--read-and-measured)). Its
 seven fastest are small flyers, `speed_c4` at 27.6 m/s down to `laser_cpt` at
 24.6, none of them an `AI_*` file. The mission's first objective has the player
-take `Enm1`'s generator, and neither recording names an `Enm1` flyer. Whether
-one was built and not looked at, or none was, is *not established*.
+take `Enm1`'s generator, and neither recording names an `Enm1` flyer. ~~Whether
+one was built and not looked at, or none was, is *not established*.~~ **None could
+be**: the capture takes the clan's ore or its factory, and its free bot is long
+spent ([The capture want, run](#the-capture-want-run--read-run-and-seen)).
 
 So the read stands as it was, and what it gives on this install's files is not
 what was recorded: the kinds and their shares are those of a store with the
@@ -1467,7 +1537,8 @@ The standing problem's weight is compared with the new raise's:
 - **the new one is lighter**: nothing. Not the life, not a field;
 - **the new one weighs as much or more**: the standing problem takes the new
   weight (`0x10005bdf`) and the new **`p3`** (`0x10005bf7`), and its `+0x24`
-  takes its `+0x28` again (`0x10005070`).
+  has its `+0x28` **added** (`0x10005070`), so a 25 / 24 raised every takt gains
+  one a takt, and stands two more takts or so once the raising stops.
 
 So a heavier want **takes the standing problem over**: its place in the
 `_Start` pass's order, and its third parameter — the `SELECT_*` of a
@@ -1636,10 +1707,15 @@ Each unit the record counts has its problem word cleared and is handed to
 `0x10003e80`, and then the array is freed, the count zeroed and the groups
 cleared. `0x10003e80` gives the unit **order 9, `ORDER_ROBOT_REPARE`, with
 target `0x204`, not defined, replacing its orders** — only when the brain's
-`+0x380` is 2, an AI's clan and not the local player's. So an enemy warbot
-whose problem has ended goes to refit, whatever it was doing; and so does the
-factory a build's problem held, which is by then idle. What `M_Task_Reload`
-makes of a building is not read.
+`+0x380` is 2, an AI's clan and not the local player's, and only when the
+unit's id is not negative (`test ecx, ecx`, `js` at `0x10003ea3`). So an enemy
+warbot whose problem has ended goes to refit, whatever it was doing. **A building
+is given nothing**: its logical id carries the top bit, 568 of 568 placed objects
+that are not units against 0 of 296 units
+([The top bit](#the-top-bit-is-class_building--measured-and-read)). This page had
+the factory given the order and asked what `M_Task_Reload` would make of it; the
+routine's third test was the answer, and `M_Task_Reload` never sees a building by
+this road.
 
 **A unit's leaving** (`0x10004010`, three callers: a unit lost, a unit attached
 elsewhere, a group released). The entry it had becomes a hole, −1; **the count
@@ -1681,7 +1757,7 @@ which no script calls, and function 65's routine, which marks a
   order. The other 40 either gathered nothing or let their group go again
   (`fn24`) before they returned.
 - **12 of the 14 `PBM_BUILDING_INF_CAPTURE_Start` can leave a problem nothing
-  ends** (*derived*). With no capturer to send they raise `PBM_ROBOT_NEEDED` by
+  ends** (*derived*, and [run](#the-capture-want-run--read-run-and-seen)). With no capturer to send they raise `PBM_ROBOT_NEEDED` by
   `SELECT_FASTEST`, set `ST_SOLVING` and return — ahead of the two `fn27` calls
   at the handler's end — and no `_Continue` files an action. The problem is
   raised 1 / 0 and its capturers are attached `UNIT_NORMAL`, so it has no
@@ -1702,9 +1778,73 @@ empty, the action is true, and the problem is retired and the factory let go;
 draws the next design. And a factory captured or destroyed is a critical unit
 lost: test 5 ends the problem at the next takt.
 
+**A problem's life running out under a build leaves the build alone** (*read*). It
+is the one way a factory is let go with a build under way: a heavier want has taken
+the problem over and stopped raising, and the lighter raises do not add to its
+life. The factory is given no order, so its `M_Task_Construct` runs on. The want
+raised again makes a new problem, and that `_Start` gives `fn15(…, INSERT_ORDER_TO_END,
+…)`, as all 9 do: the order joins the list behind the running task
+(`Behavior.dll:0x10017936`, started at once only if it is the list's one entry,
+`0x10017948`), with its design drawn as it is given. It starts when the running one
+ends, and takes its budgets and its mind then. So the list can hold more than one
+build, and `ACTION_NOTHING_DOING` is false until it is empty.
+
 The queue line this answers supposed that nothing but the actions ends a
 problem a handler left solving. Three other things in the same step do, and a
 solving problem that holds no unit does not last a takt if it has a drain.
+
+### The capture want, run — *read*, *run*, and *seen*
+
+**Who is told** (*read*). `MBehaviour::Capture` (`Behavior.dll:0x10008e40`), for a
+building, empties the order list and the task stack (`0x10008f11`, `0x10008f26`),
+and then hands the behaviour's slot at `+0xcc` (`0x1000d580`) a record whose first
+word is 7 (`0x10008f87`), while `+0x4c` still holds the **old** clan's SuperAI: the
+new one is written after it (`0x10008fa0`). So `Fort_Captured` runs in the clan
+that has just lost the building, with its id in `dCurrentSender`. The new clan's
+list gets its entry from the building's record first (`iron3d.dll:0x10032ffa`); the
+old clan's takes it off at its next takt.
+
+**The derivation holds, run in play** on C03 M02 with `Enm1`
+(`c03_m02s_capture_want_stands_and_its_flyer_is_drawn_and_never_built`). Its
+`PBM_BUILDING_INF_CAPTURE` stands 1 / 0 with no action from the takt after the
+capture to the end of the run, and asks at 0.801 by `SELECT_FASTEST` every takt it
+has no capturer. What becomes of the asking depends on what the clan has left:
+
+| `Enm1` has | what the want does | |
+|---|---|---|
+| no free mind | `PBM_ROBOT_NEEDED_Start` answers `ST_SOLVED` at once (node 1) | its six minds fill inside four minutes; nothing stands but the capture problem |
+| a build under way, no ore | takes the problem over, weight and `SELECT_*`, and the problem stands | the design already drawn is the one in the factory |
+| a free mind, an idle factory, no ore | a flyer is drawn and ordered, and stands at no ore | `speed_cpt` in one run, 90.5 ore; `FreeBotNum` is spent on the clan's first build |
+| no factory | `_Start` raises `PBM_BUILDING_NEEDED`, which is dead in `c3m2e`, and returns unstarted | it holds back every lighter problem, as above |
+
+**So the flyer is wanted and is not made, because the capture has taken what makes
+it.** `Enm1` holds three buildings: a generator, a mine and a factory, and no storage.
+Whichever of them the player takes, a paid build cannot finish. The factory taken,
+there is nothing to build in. The mine taken, the distribution has no holder to draw
+ore from. The generator taken, the mine's 24 of battery are flat inside half a
+minute, a mine under a KPD of 0.1 **sets what it holds to 0**
+([23-economy.md](23-economy.md), `Behavior.dll:0x1002cff6`), and at a KPD of 0 it
+offers none anyway (`0x1001a8c6`). The control is the same clan left alone, its
+two placed warbots become six inside four minutes.
+
+**The recordings agree** (*seen*, the map panel's icons turning from red to the
+player's blue, looked at either side of each *"Building is captured"*):
+
+| recording | `Enm1`'s buildings taken | |
+|---|---|---|
+| Part 6 | generator 44:16, mine 44:54, factory 52:55 | no mine and no ore for the last 8:01 the factory stood |
+| Part 6.5 | **factory first**, 13:00, its generator still red at 13:10; the other two by 21:30 | no factory to ask |
+
+Of the 1392 lines the earlier OCR of the target panels holds for the two parts,
+59 name a small flyer, and every one of the 59 is a *Comm. Center* or a *Builder*;
+**none is a *Warrior***. The highest count of `Enm1`'s either part names is *MWW-23*,
+first named at 46:42. Whether it was out before 44:16 is not established, and what
+the factory held for those 8:01 is not shown: the recording cannot show ore. That
+the game's want stands is read and is seen only by what does not happen.
+
+`Enm2`'s small wheeled warbots are capturers, and its generator goes back to it in
+both parts ([34-progression.md](34-progression.md)); whether by this want or by its
+timed `PBM_BUILDING_CAPTURE` is not separated.
 
 ## Reading a script
 
@@ -2132,13 +2272,21 @@ capturer — which is why the table stops one call deep.
   medium wheeled, 3 large wheeled and 1 large tracked, which is the same draw
   over a store **without the `AI_*` files** — three, two, one and one in
   seven. What remains is whether the recorded game's `UNITS\UNITS\AI\` holds
-  them, which the install cannot say, and whether `Enm1` builds the small
-  flyers the read gives it once it has lost a building ([`Enm1`'s builds,
+  them, which the install cannot say ([`Enm1`'s builds,
   against the read](#enm1s-builds-against-the-read--read-measured-and-not-explained)).
-- **What a building makes of the order its problem lets it go with**, order 9
-  on a factory, and whether a build under way is dropped for it: the factory is
-  idle whenever a shipped script's problem lets it go by an action, and not
-  when the problem's life runs out under it.
+  ~~And whether `Enm1` builds the small flyers the read gives it once it has lost a
+  building.~~ It wants them and cannot make them: the capture takes its ore or its
+  factory ([The capture want, run](#the-capture-want-run--read-run-and-seen)).
+- ~~**What a building makes of the order its problem lets it go with**, order 9
+  on a factory, and whether a build under way is dropped for it.~~ A building is
+  never given it: `0x10003e80` passes over a negative id (`0x10003ea3`), and a
+  build under way runs on, the next order waiting behind it ([Letting units
+  go](#what-ends-a-problem--read-and-measured)).
+- ~~**What lowers function 11's per-type counters.**~~ Nothing: seven `inc`s, seven
+  reads and the constructor's zeros are all that address them. They count what was
+  ever filed ([Function 11's two bars](#function-11s-two-bars--read-and-measured)).
+- ~~**What functions 37 and 67 measure over**, neither taking a radius.~~ The clan's
+  **own** strength within 250 ([Places and targets](#what-the-functions-do)).
 - ~~**Channel 2 of the message callback** (function 57), and the `+0x41c` count
   function 69 stores.~~ Both are now read. Channel 2 runs `mission.cfg`'s
   `script`*a* as a debug-console command, and the 14 calls name only lines

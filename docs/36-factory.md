@@ -620,13 +620,13 @@ with `FreeBotNum` 50 to 101, the other five with 1, so C03 M02's `Enm2`, on
 that ordered it holds the factory as its critical unit and stands until the
 factory has nothing doing, which the clan's takt tests at its head — an empty
 order list, or one headed by order 1, 18 or 19. The takt after the bot is made
-the problem is retired and the factory let go, with order 9,
-`ORDER_ROBOT_REPARE`, replacing, in an AI's clan (`ai.dll:0x10003e80`); the
-want is raised and drawn again in that same takt
+the problem is retired and the factory let go, with no order: `ai.dll:0x10003e80`
+passes over a building's negative id (`0x10003ea3`). The want is raised and drawn
+again in that same takt
 ([15-behaviour.md](15-behaviour.md#what-ends-a-problem--read-and-measured)).
 The one way a factory is let go **with a build under way** is its problem's
-life running out under it, and what `M_Task_Reload`, given to a factory to
-replace its orders, does to that build is not read.
+life running out under it, and that build runs on, the next `_Start`'s order
+waiting behind it (`Behavior.dll:0x10017936`).
 
 ## Mission 02 — *measured*, *derived* and *seen*
 
@@ -721,7 +721,8 @@ replace its orders, does to that build is not read.
    - A plant that changes owner drops its build (*seen*: C02 Mission 01's
      enemy Factory, taken from its pod while building, opens on the mission's
      prebuilt *SWW-X Warrior* with nothing in production — "Let's Play - Parkan:
-     Iron Strategy, Part 3", 9:36). How the capture ends order 12 is not read.
+     Iron Strategy, Part 3", 9:36). `MBehaviour::Capture` empties the order list
+     and the task stack (`Behavior.dll:0x10008f11`, `0x10008f26`).
 5. **While up**, the mission runs on, the `Mission` handler included; neither the
    screen nor the designer pauses anything. The designer draws no world behind
    it, and puts the hero's night sight out. The pod's green glass stays around

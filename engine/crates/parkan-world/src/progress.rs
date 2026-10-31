@@ -49,15 +49,20 @@ pub const CAPTURE_RANK: [u32; 5] = [0x8000_0002, 0x8000_0010, 0x8000_0004, 0x800
 /// other building's.
 pub const WORTH_GENERATOR: f32 = 0.04;
 pub const WORTH_FACTORY: f32 = 0.05;
-/// The `dMax*` variables function 11 tests a type against, with the type each one bounds.
-pub const LIMITS: [(&str, u32); 6] = [
+/// The `dMax*` variables function 11 tests a type against, with the type each one bounds. The
+/// one `dMaxTower` bounds both towers (`ai.dll:0x1000c7be`, `0x1000c7e4`).
+pub const LIMITS: [(&str, u32); 7] = [
     ("dMaxBuilder", planner::ROBOT_BUILDER),
     ("dMaxTransport", planner::ROBOT_TRANSPORT),
     ("dMaxMine", 0x8000_0004),
     ("dMaxPlant", 0x8000_0010),
     ("dMaxStorage", 0x8000_0008),
     ("dMaxTower", 0x8010_0000),
+    ("dMaxTower", 0x8020_0000),
 ];
+/// How far about a building of its own functions 37 and 67 measure the clan's own strength
+/// (`ai.dll:0x1000cfa4`, `0x1000ef81`).
+pub const OWN_STRENGTH_RADIUS: f32 = 250.0;
 
 /// Whom a line is from, which heads its message box (`iron3d.dll:0x1007f750`, docs/35-hud.md,
 /// "The message box"): the game's own lines are kind 2, the System's; a script's message
@@ -377,17 +382,15 @@ impl Answers<'_> {
         self.ai || self.clan == 0
     }
 
-    /// Hand on the units the planner's problems have let go (`ai.dll:0x100050f0`): each one
+    /// Hand on the units the planner's problems have let go (`ai.dll:0x100050f0`): each robot
     /// an object still answers is given order 9, `ORDER_ROBOT_REPARE`, with no target,
     /// replacing what it had (`0x10003e80`) — in an AI's clan alone, the test being the
     /// word its SuperAI was started with. So a warbot whose problem has ended goes to refit.
-    ///
-    /// STAND-IN: docs/15-behaviour.md#what-ends-a-problem--read-and-measured -- a building
-    /// is given the same order, and what `M_Task_Reload` makes of one on a factory is not
-    /// read: the play hands it to robots alone.
+    /// A building's logical id carries the top bit and the routine leaves a negative id alone
+    /// (`js` at `0x10003ea3`): a factory let go keeps its build and what stands behind it.
     fn let_go(&mut self) {
         for id in std::mem::take(&mut self.planner.released) {
-            if self.ai && self.progress.knows(id) {
+            if self.ai && id >= 0 && self.progress.knows(id) {
                 let order = Order { code: planner::RELEASE_ORDER, parameter: 0, target: Target::NotDefined };
                 self.orders.push(ScriptOrder { id, order, insert: orders::INSERT_REPLACE });
             }
@@ -474,16 +477,14 @@ impl Host for Answers<'_> {
                 self.let_go();
                 0
             }
-            // 1 when the clan already holds as many of the type as its `dMax*` allows.
-            //
-            // STAND-IN: docs/15-behaviour.md#what-the-functions-do -- the second half of the
-            // test, a per-type counter the brain keeps at `+0x3e0`..`+0x3f8`, is not read; a
-            // type no `dMax*` bounds — every robot the scripts build is `ROBOT_BATTLEUNIT`,
-            // which none does — answers `FALSE`.
+            // 1 when the clan holds as many of the type as its `dMax*` allows, or has ever had
+            // as many filed on its list as the type's own bar (`0x1000c5e7`).
             11 => {
                 let type_word = args.dword(0);
                 let held = self.progress.count_type(self.clan, type_word);
-                u32::from(self.limits.iter().any(|&(t, max)| t == type_word && held >= max))
+                let max = self.limits.iter().find(|&&(t, _)| t == type_word).map(|&(_, max)| max);
+                let filed = self.progress.filed(self.clan, type_word);
+                u32::from(planner::at_limit(type_word, held, max, filed))
             }
             // The clan's power available less demanded, the distributor's totals at its last
             // step as the HUD reads them (`Behavior.dll:0x10019e80`, docs/23). A clan's first
@@ -592,21 +593,26 @@ impl Host for Answers<'_> {
                     None => planner::ERROR,
                 }
             }
-            // The clan's own building with the least held against it, and its factory.
-            //
-            // STAND-IN: docs/15-behaviour.md#what-the-functions-do -- neither call passes a
-            // radius, and what the handler measures over is not read: the base radius here.
+            // The clan's own strength within 250 of a building of its own: function 37 keeps
+            // the building with the least of it (`0x1000cedf`), function 67 takes the first
+            // factory on the list (`0x1000eec7`). `0x10006130` is handed the clan's own number,
+            // so what stands about a building is its guard and not who is against it.
             37 | 67 => {
-                let radius = self.planner.radius;
-                let mine: Vec<Candidate> = self
-                    .own()
-                    .into_iter()
-                    .filter(|c| {
-                        c.type_word & parkan_sim::behaviour::BUILDING_BIT != 0
-                            && (function == 37 || c.type_word == crate::play::BUILDING_PLANT)
-                    })
-                    .collect();
-                match self.least_defended(mine.into_iter(), radius) {
+                let clan = self.clan;
+                let own_about = |c: &Candidate| {
+                    self.progress.strength_near(|o| o == clan, c.at[0], c.at[1], OWN_STRENGTH_RADIUS)
+                };
+                let mine = self.own().into_iter().filter(|c| {
+                    let building = c.type_word & parkan_sim::behaviour::BUILDING_BIT != 0;
+                    building && (function == 37 || c.type_word == crate::play::BUILDING_PLANT)
+                });
+                let found = if function == 37 {
+                    mine.map(|c| (c.id, own_about(&c)))
+                        .reduce(|best, one| if one.1 < best.1 { one } else { best })
+                } else {
+                    mine.take(1).map(|c| (c.id, own_about(&c))).next()
+                };
+                match found {
                     Some((id, strength)) => {
                         self.write_strength(args, 0, strength);
                         id as u32
@@ -1124,10 +1130,11 @@ impl Progression {
         self.event(clan, HANDLER_GENERATOR_FOUND, EVENT_HERO_TELEPORTED, None)
     }
 
-    /// A building of clan `clan` taken by somebody else: its own SuperAI runs the handler one
-    /// after `Fort_Task_Complete`, `Fort_Captured` in every shipped script, with the
-    /// building's logical id in `dCurrentSender` (`0x10005d7c`). `c2m3e` answers it by raising
-    /// `PBM_BUILDING_INF_CAPTURE` on the building it has just lost.
+    /// A building of clan `clan` taken by somebody else: `MBehaviour::Capture` tells its old
+    /// SuperAI, before it writes the new one (`Behavior.dll:0x10008f87`, `0x10008fa0`), which
+    /// runs the handler one after `Fort_Task_Complete`, `Fort_Captured` in every shipped script,
+    /// with the building's logical id in `dCurrentSender` (`0x10005d7c`). `c2m3e` answers it by
+    /// raising `PBM_BUILDING_INF_CAPTURE` on the building it has just lost.
     pub fn fort_captured(&mut self, clan: i64, building: i32) -> Vec<Notice> {
         self.event(clan, HANDLER_FORT_TASK_COMPLETE, EVENT_FORT_CAPTURED, Some(building))
     }

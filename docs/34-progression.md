@@ -826,8 +826,11 @@ function 19.
 the running SuperAI's own unit list (`+0x8c`). It counts the entries whose type
 equals the argument and whose logical id is set (`0x10009cbb`, `0x10009cd2`).
 **A building is on that list.** SuperAI slot 4's event 2 (`0x10001880`) files
-it, and also counts it by type, a mine at `+0x3e0` (`0x10001974`). "= 1" is exact,
-so a second mine before the handler's next run would miss the test (*derived*).
+it, and also counts it by type, a mine at `+0x3e0` (`0x10001974`), a count nothing
+lowers and function 11 reads
+([15-behaviour.md](15-behaviour.md#function-11s-two-bars--read-and-measured)). "= 1"
+is exact, so a second mine before the handler's next run would miss the test
+(*derived*).
 
 **A builder's building is filed as it is made** (*read*, with a search). Only
 `iron3d.dll` reads the level's clan table at `+0x774`, where each clan's SuperAI is
@@ -1227,6 +1230,15 @@ for the bunker.
 5. **Hand another clan's `fn15` orders to its units** as the player clan's are
    handed: the packet is found by logical id through the areal map, whatever
    clan owns it.
+
+6. **Tell a clan what it loses.** The objective has the player take both enemies'
+   generators, and each clan's `Fort_Captured` raises a capture want. `Enm2` has
+   capturers and goes after it. `Enm1` has none, asks for its fastest design, and
+   cannot make it, the capture having taken its ore or its factory
+   ([15-behaviour.md](15-behaviour.md#the-capture-want-run--read-run-and-seen)).
+   *Seen*: Part 6 takes `Enm1`'s generator at 44:16, its mine at 44:54 and its
+   factory at 52:55; Part 6.5, a fresh start of the mission, takes the factory first,
+   at 13:00.
 
 `uv run openparkan verify` re-derives all of this from the install: the three
 formulas and the units `fn51` holds back, what each raid asks `fn71` for and

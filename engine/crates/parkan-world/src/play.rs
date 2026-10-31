@@ -3389,8 +3389,9 @@ impl Play {
             self.units[t].clan = Some(taker);
             self.reskinned.push(t);
             // A plant stops what it was making for its old owner, who gets the mind its start
-            // reserved back; the new owner's panel opens on its recent projects (*seen*, docs/36,
-            // "For an engine"; how the capture ends order 12 is not read).
+            // reserved back; `MBehaviour::Capture` empties the order list and the task stack
+            // (`Behavior.dll:0x10008f11`, `0x10008f26`), and the new owner's panel opens on its
+            // recent projects (*seen*, docs/36, "For an engine").
             if let Some(f) = self.factories.iter_mut().find(|f| f.target == t)
                 && f.abort()
                 && let Some(old) = owner
@@ -3611,6 +3612,20 @@ impl Play {
             };
             factory.settle();
             if restarted {
+                self.reserve_mind(clan);
+            }
+            self.next_in_queue(f, clan);
+        }
+    }
+
+    /// The next order on an idle factory's list (`Behavior.dll:0x10034930`): one its start
+    /// refuses is over at once, and the one behind it starts (docs/23, "retry, drop or queue").
+    fn next_in_queue(&mut self, f: usize, clan: i64) {
+        while self.factories[f].idle() && !self.factories[f].queue.is_empty() {
+            let project = self.factories[f].queue.remove(0);
+            let free = self.free_minds(clan);
+            let researched = self.technology(clan, &project.path);
+            if self.factories[f].start_project(project, false, free, researched) {
                 self.reserve_mind(clan);
             }
         }
@@ -4448,7 +4463,7 @@ impl Play {
             // A build order goes to the factory building, not to a machine's task stack.
             if o.order.code == orders::CONSTRUCT {
                 if let orders::Target::Select(mode) = o.order.target {
-                    self.ai_build(t, o.order.parameter as u32, mode);
+                    self.ai_build(t, o.order.parameter as u32, mode, o.insert);
                 }
                 continue;
             }
@@ -4505,10 +4520,15 @@ impl Play {
     /// the clan may build: the game marks them as function 43 loads the store and again each
     /// time function 41 asks for a research, which no clan's script reaches here (docs/15,
     /// "What the store holds").
-    fn ai_build(&mut self, t: usize, type_word: u32, mode: u32) -> bool {
+    ///
+    /// All nine scripts order to the end of the list. Behind a running build the order waits
+    /// its turn (`Behavior.dll:0x10017936`), its design drawn now and its budgets and mind
+    /// taken as it starts: that is how a problem whose life ran out under a build meets its
+    /// successor (docs/15, "What ends a problem").
+    fn ai_build(&mut self, t: usize, type_word: u32, mode: u32, insert: u32) -> bool {
         let Some(f) = self.factories.iter().position(|f| f.target == t) else { return false };
         let Some(clan) = self.units[t].clan else { return false };
-        if !self.factories[f].idle() {
+        if !self.factories[f].idle() && insert != orders::INSERT_TO_END {
             return false;
         }
         if !self.stores.contains_key(&clan) {
@@ -4529,6 +4549,10 @@ impl Play {
         else {
             return false;
         };
+        if !self.factories[f].idle() {
+            self.factories[f].queue.push(project);
+            return true;
+        }
         let free = self.free_minds(clan);
         let researched = self.technology(clan, &project.path);
         let started = self.factories[f].start_project(project, false, free, researched);

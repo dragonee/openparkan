@@ -773,8 +773,8 @@ CPUs" in the game's own interface (`iron3d.dll` string 3067).
   it. The clan's takt tests that action at its head: true when the factory is
   there and its order list is empty, or headed by order 1, 18 or 19
   (`ai.dll:0x10005230`–`0x1000526a`). So the takt after a bot is made the
-  problem is retired, the factory is let go — with order 9, in an AI's clan —
-  and the want is raised afresh and drawn again in that same takt: **one build
+  problem is retired, the factory is let go, a building taking no order for it
+  (`0x10003ea3`), and the want is raised afresh and drawn again in that same takt: **one build
   of a type at a time a clan** — the raise makes no second problem for the same
   type while one stands — **and the next begun within a takt of the last**. A factory
   captured or destroyed under a build is a critical unit lost, which ends the

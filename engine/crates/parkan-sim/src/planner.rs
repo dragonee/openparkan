@@ -92,6 +92,30 @@ pub fn difficulty(level: usize) -> f32 {
 /// (`ai.dll:0x100301a9`, docs/31, "The wingman menu from first person").
 pub const CAPTURER_SIZES: std::ops::RangeInclusive<u8> = 1..=2;
 
+/// Function 11's second bar (`ai.dll:0x1000c733`-`0x1000c810`): for each of seven building
+/// types, how many of it filed on the clan's list answer 1 whatever its `dMax*` says. The
+/// count only ever rises (`0x1000194f`-`0x100019a9`): the constructor's seven zeros
+/// (`0x10005814`-`0x10005838`) are the only other writes, so a clan that has once held a mine
+/// never asks for another (docs/15, "What the functions do").
+pub const FILED_BARS: [(u32, u32); 7] = [
+    (0x8000_0004, 1),
+    (0x8000_0008, 1),
+    (0x8000_0010, 1),
+    (0x8000_0040, 1),
+    (0x8010_0000, 3),
+    (0x8020_0000, 1),
+    (0x8000_0400, 1),
+];
+
+/// Function 11 (`ai.dll:0x1000c5e7`): whether a type is at its limit. `held` is how many the
+/// clan has now (`0x100060e0`), `max` the `dMax*` variable the type is bound by, if any, and
+/// `filed` how many of it have ever been filed on the clan's list. A type on neither table,
+/// every battle unit among them, answers false.
+pub fn at_limit(type_word: u32, held: usize, max: Option<usize>, filed: u32) -> bool {
+    let barred = FILED_BARS.iter().any(|&(t, bar)| t == type_word && filed >= bar);
+    barred || max.is_some_and(|max| held >= max)
+}
+
 /// The one code whose solving problem is ended by losing its units whatever its drain
 /// (`ai.dll:0x100056c8`).
 pub const PBM_MAKE_RESEARCH: u32 = 10;
@@ -101,8 +125,10 @@ pub const PBM_MAKE_RESEARCH: u32 = 10;
 /// `ORDER_ROBOT_SHUTDOWN`.
 pub const NOTHING_DOING_ORDERS: [i32; 3] = [1, 18, 19];
 
-/// The order every unit of an AI clan's problem is given as the problem lets it go
-/// (`ai.dll:0x10003e80`): `ORDER_ROBOT_REPARE`, with no target, replacing what it had.
+/// The order every robot of an AI clan's problem is given as the problem lets it go
+/// (`ai.dll:0x10003e80`): `ORDER_ROBOT_REPARE`, with no target, replacing what it had. A
+/// building's logical id is negative, and the routine's sign test passes it over
+/// (`0x10003ea3`).
 pub const RELEASE_ORDER: i32 = 9;
 
 /// How many rounds of one takt's `_Start` pass the engine will run. The game's loop has no
@@ -215,9 +241,11 @@ pub struct Candidate {
 }
 
 impl Candidate {
-    /// Whether it may capture: a size class of 1 or 2 (`ai.dll:0x100301a9`).
+    /// Whether function 14 picks it as a capturer: a battle unit, by its exact Type, of a size
+    /// class of 1 or 2 (`ai.dll:0x10008cfb`, `0x10008db9`, `0x10009050`; `0x100301a9`). A small
+    /// builder or transport may capture if it is ordered to, and no script's pick names one.
     pub fn capturer(&self) -> bool {
-        CAPTURER_SIZES.contains(&self.size_class)
+        self.type_word == ROBOT_BATTLEUNIT && CAPTURER_SIZES.contains(&self.size_class)
     }
 
     /// Whether it is a battle unit, the class `TAKE_ALL_BATTLE_UNITS` and function 38 count.
@@ -261,7 +289,7 @@ pub struct Planner {
     /// once a handler has run.
     pub left: Vec<u32>,
     /// The units problems have let go since the caller last took them, in order: an AI
-    /// clan's are each given [`RELEASE_ORDER`].
+    /// clan's robots are each given [`RELEASE_ORDER`].
     pub released: Vec<i32>,
     /// The base's centre and radius, which function 19 reads and 68 recomputes.
     pub base: [f32; 2],
@@ -525,7 +553,7 @@ impl Planner {
     /// Let go every unit the problem in `slot` counts, and drop its groups (`0x100050f0`).
     /// Each unit's record is taken off the problem and the unit handed to
     /// [`Self::released`]: `0x10003e80` gives it [`RELEASE_ORDER`] when the clan is an AI's
-    /// (the word slot 5 started the SuperAI with is 2).
+    /// (the word slot 5 started the SuperAI with is 2) and the unit is no building.
     fn release(&mut self, slot: usize) {
         let Some(p) = self.problems.get_mut(slot).and_then(Option::as_mut) else { return };
         let gone: Vec<i32> = p.counted().collect();
@@ -1196,5 +1224,45 @@ mod tests {
         assert_eq!(p.pick_unit(UNIT_ANY_CAPTURER, 0, None, &units), Some(1));
         assert_eq!(p.pick_unit(UNIT_ANY_UNIT, ROBOT_BATTLEUNIT, None, &units), Some(1));
         assert_eq!(p.pick_unit(UNIT_ANY_UNIT, 0x8000_0010, None, &units), None, "no plant here");
+    }
+
+    /// A small builder may capture if it is ordered to, but function 14 asks for the exact
+    /// Type of a battle unit (`ai.dll:0x10009050`).
+    #[test]
+    fn a_small_builder_is_no_capturer_to_function_14() {
+        let p = planner();
+        let builder = Candidate { type_word: ROBOT_BUILDER, ..candidate(1, 1.0) };
+        let warbot = Candidate { at: [500.0, 0.0], ..candidate(2, 1.0) };
+        let units = [builder, warbot];
+        assert_eq!(p.pick_unit(UNIT_ANY_CAPTURER, 0, None, &units), Some(2));
+        let to = Some([0.0, 0.0]);
+        assert_eq!(p.pick_unit(UNIT_ANY_NEAREST_CAPTURER, 0, to, &units), Some(2));
+    }
+
+    /// Function 11's two bars (`ai.dll:0x1000c5e7`): the `dMax*` against what the clan has now,
+    /// and the filed count, which nothing lowers, against each type's own number. A type on
+    /// neither table never reaches a limit.
+    #[test]
+    fn a_limit_is_the_variable_or_what_was_ever_filed() {
+        const MINE: u32 = 0x8000_0004;
+        const TOWER: u32 = 0x8010_0000;
+        const INSTITUTE: u32 = 0x8000_0400;
+        // None yet, and the variable allows one: not at its limit.
+        assert!(!at_limit(MINE, 0, Some(1), 0));
+        // One filed and lost: there are none now and the clan will not ask again.
+        assert!(at_limit(MINE, 0, Some(1), 1));
+        // A larger `dMaxMine` does not help: the second bar is a plain 1.
+        assert!(at_limit(MINE, 1, Some(5), 1));
+        // A medium tower's bar is three, which its default `dMaxTower` matches.
+        assert!(!at_limit(TOWER, 0, Some(3), 2));
+        assert!(at_limit(TOWER, 0, Some(3), 3));
+        // No variable bounds a research centre, and one filed is the end of them.
+        assert!(!at_limit(INSTITUTE, 0, None, 0));
+        assert!(at_limit(INSTITUTE, 0, None, 1));
+        // `dMaxBuilder` alone bounds a builder, as what the clan has now.
+        assert!(at_limit(ROBOT_BUILDER, 0, Some(0), 7));
+        assert!(!at_limit(ROBOT_BUILDER, 0, Some(1), 7));
+        // And every robot the scripts build answers 0.
+        assert!(!at_limit(ROBOT_BATTLEUNIT, 50, None, 50));
     }
 }

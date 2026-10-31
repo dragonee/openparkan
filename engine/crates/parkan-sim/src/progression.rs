@@ -299,6 +299,10 @@ pub struct Progress {
     pub played: BTreeMap<i64, bool>,
     /// The outcome once one is recorded: true won.
     pub outcome: Option<bool>,
+    /// How many of each building type each clan has ever had filed on its list, the seven the
+    /// SuperAI's event 2 counts among them (`ai.dll:0x1000194f`-`0x100019a9`): nothing lowers
+    /// them.
+    pub filed: BTreeMap<(i64, u32), u32>,
     next_mission_ms: f64,
     seed: u32,
 }
@@ -314,6 +318,7 @@ impl Progress {
             objectives: exempt.iter().map(|&exempt| Objective { exempt, state: 0 }).collect(),
             played: messages.into_iter().map(|id| (id, false)).collect(),
             outcome: None,
+            filed: BTreeMap::new(),
             next_mission_ms: 0.0,
             seed: 1,
         }
@@ -425,6 +430,7 @@ impl Progress {
     /// A building with a logical id, owned by clan `clan`, of `type_word`, standing at `at`. A
     /// building is on its clan's SuperAI list too (`ai.dll:0x10001880`, docs/34, "Mission 03").
     pub fn place_building(&mut self, id: i32, clan: i64, type_word: u32, at: Vec3) {
+        *self.filed.entry((clan, type_word)).or_default() += 1;
         self.buildings.push(Building {
             id,
             clan,
@@ -581,15 +587,26 @@ impl Progress {
     }
 
     /// A unit or building captured into `clan`. The game files it with the new clan's
-    /// SuperAI as slot 4's event 2 (`iron3d.dll:0x10032fd0`) and tells the old clan nothing,
-    /// so it is counted by both; the engine moves it, for the same reason `destroyed` does.
+    /// SuperAI as slot 4's event 2 (`iron3d.dll:0x10032fd0`) and tells the old clan by event 7
+    /// alone (`Behavior.dll:0x10008f87`), so until the old clan's next takt it is counted by
+    /// both; the engine moves it, for the same reason `destroyed` does.
     pub fn captured(&mut self, id: i32, clan: i64) {
         for u in self.units.iter_mut().filter(|u| u.id == id) {
             u.clan = clan;
         }
         for b in self.buildings.iter_mut().filter(|b| b.id == id) {
+            // The new clan's event 2 steps its count (`0x1000194f`); one already on the list,
+            // its own building given back to it, is not filed again (`0x100018d8`).
+            if b.clan != clan {
+                *self.filed.entry((clan, b.type_word)).or_default() += 1;
+            }
             b.clan = clan;
         }
+    }
+
+    /// How many buildings of `type_word` clan `clan` has ever had filed on its list.
+    pub fn filed(&self, clan: i64, type_word: u32) -> u32 {
+        self.filed.get(&(clan, type_word)).copied().unwrap_or(0)
     }
 
     /// The objective a script's value names, with its index, when it is on the list.

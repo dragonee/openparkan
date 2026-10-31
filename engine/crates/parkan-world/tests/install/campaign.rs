@@ -361,9 +361,9 @@ fn c03_m02s_enemy_raids_the_players_bunker_twice_on_its_own_timers() {
     p.orders.clear();
 
     // Twenty minutes of takts, the units standing where they were placed. Both enemy clans
-    // plan as well, so their build orders are counted apart from the two raids, and so is the
-    // order a problem lets its units go with: nothing builds here, so each factory has nothing
-    // doing by the takt after its order, its problem ends, and it is let go.
+    // plan as well, so their build orders are counted apart from the two raids. Nothing builds
+    // here, so each factory has nothing doing by the takt after its order, its problem ends,
+    // and it is let go with no order: a building's id is negative (`ai.dll:0x10003ea3`).
     let (mut raids, mut messages, mut builds) = (Vec::new(), Vec::new(), 0);
     let mut let_go: Vec<i32> = Vec::new();
     let planned = [orders::CONSTRUCT, parkan_sim::planner::RELEASE_ORDER];
@@ -392,9 +392,9 @@ fn c03_m02s_enemy_raids_the_players_bunker_twice_on_its_own_timers() {
     assert_eq!(raids.len(), 2, "two raids and no more: {raids:#?}");
     assert_eq!(messages, [0, 1], "each raid says its own message");
     assert!(builds > 0, "and the clans' planners ask their factories for warbots besides");
-    // The two enemy clans' Large Factories, each the one unit of its `PBM_ROBOT_NEEDED`.
-    let factories = [0x8000_0014_u32 as i32, 0x8000_0009_u32 as i32];
-    assert!(!let_go.is_empty() && let_go.iter().all(|id| factories.contains(id)), "{let_go:?}");
+    // The two enemy clans' Large Factories are the one unit of each `PBM_ROBOT_NEEDED`, and
+    // nothing else is let go here.
+    assert!(let_go.is_empty(), "{let_go:?}");
 
     // `fDifficulty` stands at `varset.var`'s own 0.5, so the first timer is 472 s and the second
     // 920; the clock steps a flat 7 s a takt, and a timer is passed once the clock is above it.
@@ -1849,7 +1849,7 @@ fn c03_m02s_enemies_build_wheeled_and_tracked_warbots_on_the_easy_level() {
 /// (docs/15, "What ends a problem" and "The planner"). Its `PBM_ROBOT_NEEDED_Start` attaches
 /// the factory as its problem's critical unit and files `ACTION_NOTHING_DOING` on it; nothing
 /// builds here, so at the next takt the action has come true, the drain retires the problem
-/// and lets the factory go with order 9, and `Problems0` raises the want afresh in that same
+/// and lets the factory go, with no order, and `Problems0` raises the want afresh in that same
 /// takt. Then the player takes `Enm1`'s generator: `Fort_Captured` raises
 /// `PBM_BUILDING_INF_CAPTURE` at 0.8, the clan has no capturer — its two warbots are medium
 /// — and that problem's handlers ask for a robot at 0.801 by `SELECT_FASTEST`. The raise
@@ -1889,9 +1889,10 @@ fn c03_m02s_enemy_1s_robot_problem_ends_with_its_factory_idle_and_a_heavier_want
     assert_eq!((first.counted().collect::<Vec<_>>(), first.life), (vec![plant], 25));
     assert_eq!(to_plant(&p), [orders::CONSTRUCT]);
 
-    // The takt after: let go, and ordered again, in that order. The record is a new one.
+    // The takt after: let go, with no order of its own, and ordered again. The record is a new
+    // one.
     takt(&mut p);
-    assert_eq!(to_plant(&p), [planner::RELEASE_ORDER, orders::CONSTRUCT]);
+    assert_eq!(to_plant(&p), [orders::CONSTRUCT]);
     assert_eq!(robot(&p).life, 25, "raised afresh, not the old one reloaded");
 
     // The generator changes hands, and its old owner's SuperAI is told.
@@ -1922,6 +1923,278 @@ fn c03_m02s_enemy_1s_robot_problem_ends_with_its_factory_idle_and_a_heavier_want
     }
     assert!(p.planner_of(enm1).unwrap().standing().any(|(_, q)| q.code == 14), "it stands");
     assert_eq!(robot(&p).p[2], SELECT_FASTEST);
+}
+
+/// What a problem's retiring gives its units (`ai.dll:0x100050f0`, `0x10003e80`): order 9,
+/// replacing, to a robot; and nothing to a building, whose logical id carries the top bit and
+/// which the routine's sign test passes over (`js` at `0x10003ea3`).
+#[test]
+#[ignore = "needs the game install"]
+fn c03_m02s_order_a_problem_lets_go_with_goes_to_its_robot_and_not_to_its_factory() {
+    use parkan_sim::orders;
+    use parkan_sim::planner::RELEASE_ORDER;
+
+    let (mut p, _) = campaign_progression_at(gamedir::C03_MISSION_02, 0);
+    let plant = 0x8000_0014_u32 as i32;
+    let enm1 = p.others.iter().position(|o| o.clan == 1).expect("Enm1 runs c3m2e");
+    let warbot = 6;
+    assert_eq!(p.progress.owner(warbot), 1);
+    p.orders.clear();
+
+    // A problem holding the clan's warbot and its factory, retired.
+    let planner = &mut p.others[enm1].planner;
+    let slot = planner.raise("PBM_TEST", 99, 0.9, 1, 0, [1, 2, 3]);
+    planner.running = Some(slot);
+    planner.attach(warbot, Some(false));
+    planner.attach(plant, Some(false));
+    planner.running = None;
+    planner.retire(slot);
+
+    p.swept.clear();
+    let mut now = 0.0;
+    while !p.swept.contains(&1) {
+        now += 100.0;
+        p.tick(now, |_| None);
+    }
+    let given: Vec<(i32, i32)> = p
+        .orders
+        .iter()
+        .filter(|o| o.order.code == RELEASE_ORDER)
+        .inspect(|o| assert_eq!(o.insert, orders::INSERT_REPLACE))
+        .map(|o| (o.id, o.order.code))
+        .collect();
+    assert_eq!(given, [(warbot, RELEASE_ORDER)], "the robot refits, and the factory is left alone");
+}
+
+/// The one way a factory is let go with a build under way, its problem's life running out under
+/// it (docs/15, "What ends a problem"): no order reaches it, so the build runs on. The want raised
+/// again makes a new problem, whose `_Start` gives order 12 to the end of the list
+/// (`Behavior.dll:0x10017936`): the design is drawn then and waits behind the build, and starts as
+/// that one completes.
+#[test]
+#[ignore = "needs the game install"]
+fn c03_m02s_factory_let_go_under_a_build_keeps_it_and_takes_the_next_order_behind_it() {
+    const PBM_ROBOT_NEEDED: u32 = 6;
+
+    let mut play = campaign_play_at(gamedir::C03_MISSION_02, Some(0));
+    let plant = 0x8000_0014_u32 as i32;
+    let factory = |play: &parkan_world::play::Play| {
+        play.factories.iter().position(|f| play.units[f.target].logical_id == plant).unwrap()
+    };
+    let tick = 1000.0 / 30.0;
+    let mut steps = 0;
+    while play.factories[factory(&play)].build.is_none() {
+        play.update_input();
+        play.tick(tick, [0.0; 2]);
+        steps += 1;
+        assert!(steps < 30 * 30, "Enm1's first build is begun on its first takt");
+    }
+    let first = play.factories[factory(&play)].build.as_ref().unwrap().project.path.clone();
+    for _ in 0..(5 * 30) {
+        play.update_input();
+        play.tick(tick, [0.0; 2]);
+    }
+    let progress = play.factories[factory(&play)].progress();
+    assert!(progress > 0.0, "the free bot's clock runs");
+
+    // Its life runs out: the problem is retired under the build.
+    let p = play.progression.as_mut().unwrap();
+    let enm1 = p.others.iter().position(|o| o.clan == 1).unwrap();
+    let planner = &mut p.others[enm1].planner;
+    let slot = planner.standing().find(|(_, q)| q.code == PBM_ROBOT_NEEDED).map(|(s, _)| s).unwrap();
+    planner.retire(slot);
+
+    // The next takt raises the want again and starts it: the factory has its build still, and
+    // the new order behind it.
+    let mut queued = None;
+    for _ in 0..(10 * 30) {
+        play.update_input();
+        play.tick(tick, [0.0; 2]);
+        let f = &play.factories[factory(&play)];
+        assert_eq!(f.build.as_ref().map(|b| b.project.path.as_str()), Some(first.as_str()));
+        if let Some(q) = f.queue.first() {
+            queued = Some(q.path.clone());
+            break;
+        }
+    }
+    let queued = queued.expect("the new problem's order waits behind the build");
+    let f = &play.factories[factory(&play)];
+    assert!(f.progress() > progress, "and the build has gone on");
+    assert_eq!(f.queue.len(), 1);
+
+    // It completes, and the order behind it starts, with the design drawn when it was given.
+    let mut started = false;
+    for _ in 0..(70 * 30) {
+        play.update_input();
+        play.tick(tick, [0.0; 2]);
+        let f = &play.factories[factory(&play)];
+        if f.queue.is_empty() {
+            assert_eq!(f.build.as_ref().map(|b| b.project.path.as_str()), Some(queued.as_str()));
+            started = true;
+            break;
+        }
+    }
+    assert!(started, "the first build completes within its 60 s");
+}
+
+/// C03 Mission 02's capture want run in play (docs/15, "What ends a problem"). The hero takes
+/// `Enm1`'s generator as the mission opens, as the player of Part 6 does at 44:16. `Fort_Captured`
+/// raises `PBM_BUILDING_INF_CAPTURE` 1 / 0; the clan has no capturer, so its handlers ask for a
+/// robot at 0.801 by `SELECT_FASTEST`, and that stands. The factory draws a small flyer, and **it
+/// is never made**: with no generator the mine's batteries are flat inside half a minute, a mine
+/// under a KPD of 0.1 zeroes what it holds (`Behavior.dll:0x1002cff6`), `Enm1` keeps no storage,
+/// and its factory's one free bot is spent. The build stands at no ore, and `ACTION_NOTHING_DOING`
+/// is false, for as long as the mission runs. So neither recording names an `Enm1` flyer. The
+/// control is the same clan with its generator: three more warbots in the same four minutes.
+#[test]
+#[ignore = "needs the game install"]
+fn c03_m02s_capture_want_stands_and_its_flyer_is_drawn_and_never_built() {
+    use parkan_sim::planner::SELECT_FASTEST;
+    const PBM_ROBOT_NEEDED: u32 = 6;
+
+    let (plant, generator, mine) = (0x8000_0014_u32 as i32, 0x8000_0004_u32 as i32, 0x8000_0006_u32 as i32);
+    const CAPTURE: u32 = 14;
+    let tick = 1000.0 / 30.0;
+    let robots = |play: &parkan_world::play::Play| {
+        play.robots.iter().filter(|(t, _)| play.units[*t].clan == Some(1)).count()
+    };
+    let run = |play: &mut parkan_world::play::Play, seconds: usize| {
+        for _ in 0..(seconds * 30) {
+            play.update_input();
+            play.tick(tick, [0.0; 2]);
+        }
+    };
+
+    // The control: left alone, the clan's factory goes on making warbots.
+    let mut left = campaign_play_at(gamedir::C03_MISSION_02, Some(0));
+    assert_eq!(robots(&left), 2, "it is placed with two");
+    run(&mut left, 240);
+    assert_eq!(robots(&left), 6, "and fills its six minds: one free bot and three paid");
+    // With no mind free its want is answered `ST_SOLVED` as it starts, so a capture now raises
+    // no build at all: the capture problem stands alone.
+    let t = left.units.iter().position(|u| u.logical_id == generator).unwrap();
+    assert!(left.stand_on_pod(t));
+    run(&mut left, 2);
+    assert_eq!(left.units[t].clan, Some(0));
+    let c = left.battle.combat.targets[t].position;
+    assert!(left.stand_at(c.x + 60.0, c.y, 0.0));
+    run(&mut left, 30);
+    let codes = |play: &parkan_world::play::Play| -> Vec<u32> {
+        let p = play.progression.as_ref().unwrap();
+        p.planner_of(1).unwrap().standing().map(|(_, q)| q.code).collect()
+    };
+    assert_eq!(codes(&left), [CAPTURE], "no mind free: no robot problem stands");
+
+    // Taken as the mission opens, while the free bot is in the factory.
+    let mut play = campaign_play_at(gamedir::C03_MISSION_02, Some(0));
+    let t = play.units.iter().position(|u| u.logical_id == generator).unwrap();
+    assert!(play.stand_on_pod(t));
+    run(&mut play, 2);
+    assert_eq!(play.units[t].clan, Some(0), "the generator is the player's");
+    let c = play.battle.combat.targets[t].position;
+    assert!(play.stand_at(c.x + 60.0, c.y, 0.0));
+    run(&mut play, 30);
+
+    let p = play.progression.as_ref().unwrap();
+    let q = p.planner_of(1).unwrap().standing().find(|(_, q)| q.code == CAPTURE).map(|(_, q)| q.clone());
+    let q = q.expect("PBM_BUILDING_INF_CAPTURE");
+    assert_eq!((q.life, q.drain), (1, 0));
+    assert!(q.actions.is_empty(), "it returned ahead of its two `fn27`");
+    let site = |play: &parkan_world::play::Play, id: i32| {
+        let t = play.units.iter().position(|u| u.logical_id == id).unwrap();
+        (play.economy.site(t).unwrap().level, play.economy.held(t))
+    };
+    assert_eq!(site(&play, mine), (0.0, 0.0), "the mine's batteries are flat and it holds nothing");
+
+    // Four minutes on: one free bot made, a flyer in the factory, and it has no ore.
+    run(&mut play, 240);
+    assert_eq!(robots(&play), 3, "the two placed, and the free bot it had begun");
+    let f = play.factories.iter().find(|f| play.units[f.target].logical_id == plant).unwrap();
+    let build = f.build.as_ref().expect("a build stands in the factory");
+    assert!(build.project.chassis_size <= 2, "the fastest designs are small: {}", build.project.path);
+    assert_eq!(build.construct.ore, 0.0, "not a grain of ore reaches it");
+    assert_eq!(f.progress(), 0.0);
+    let p = play.progression.as_ref().unwrap();
+    let standing = p.planner_of(1).unwrap();
+    assert!(standing.standing().any(|(_, q)| q.code == CAPTURE), "the capture want stands");
+    let want = standing.standing().find(|(_, q)| q.code == PBM_ROBOT_NEEDED).map(|(_, q)| q.clone());
+    let want = want.expect("and so does the build it asked for");
+    assert!(want.weight > 0.8 && want.p[2] == SELECT_FASTEST, "{} {}", want.weight, want.p[2]);
+    assert_eq!(p.progress.owner(generator), 0, "and the generator stays the player's");
+}
+
+/// Function 11's second bar counts what was ever filed, and nothing lowers it (`ai.dll:0x1000194f`,
+/// `0x1000c733`). `scream`'s `Problems0` asks it before `PBM_MINE_NEEDED`: Single.01's clan 1 is
+/// placed with a mine, so it never raises one, even once the mine is gone; Single.02's clan 1 has
+/// none filed, and asks at once (docs/15, "What the functions do").
+#[test]
+#[ignore = "needs the game install"]
+fn a_clan_that_once_held_a_mine_never_asks_for_another() {
+    const MINE: u32 = 0x8000_0004;
+    let mine_wanted = |p: &parkan_world::progress::Progression| {
+        p.planner_of(1).unwrap().standing().any(|(_, q)| q.name == "PBM_MINE_NEEDED")
+    };
+    let takts = |p: &mut parkan_world::progress::Progression, start: f64, n: usize| {
+        let mut now = start;
+        for _ in 0..n {
+            p.swept.clear();
+            while !p.swept.contains(&1) {
+                now += 100.0;
+                p.tick(now, |_| None);
+            }
+        }
+        now
+    };
+
+    let (mut held, _) = campaign_progression_at("MISSIONS/Single.01", 0);
+    assert_eq!(held.progress.filed(1, MINE), 1, "placed with one");
+    let now = takts(&mut held, 0.0, 2);
+    assert!(!mine_wanted(&held));
+    let id = held.progress.buildings.iter().find(|b| b.clan == 1 && b.type_word == MINE).unwrap().id;
+    held.progress.destroyed(id);
+    held.progress.deleted(id);
+    assert_eq!(held.progress.count_type(1, MINE), 0, "the mine is gone");
+    assert_eq!(held.progress.filed(1, MINE), 1, "and the count stands");
+    takts(&mut held, now, 3);
+    assert!(!mine_wanted(&held), "and its clan does not ask for another");
+
+    let (mut none, _) = campaign_progression_at("MISSIONS/Single.02", 0);
+    assert_eq!(none.progress.filed(1, MINE), 0);
+    takts(&mut none, 0.0, 1);
+    assert!(mine_wanted(&none), "the control: a clan that never held one asks");
+}
+
+/// Function 37 measures a clan's own strength within 250 of each of its buildings (`ai.dll:
+/// 0x1000cf9d`, the clan's own number handed to `0x10006130`), which is what `Problems0` sets
+/// against `dBuildingProtectHits`, and `PBM_BUILDING_PROTECT_Start` then gathers only the
+/// difference. So a guard keeps the want down, and an enemy about the building does nothing to
+/// it, in either direction (docs/15, "What these functions measure").
+#[test]
+#[ignore = "needs the game install"]
+fn c01_m03s_enemy_asks_to_protect_a_building_by_the_guard_it_has_and_not_by_who_is_against_it() {
+    const PBM_BUILDING_PROTECT: &str = "PBM_BUILDING_PROTECT";
+    let raised = |own: f32, others: f32| {
+        let (mut p, _) = campaign_progression_at(gamedir::C01_MISSION_03, 0);
+        let clan = p.others.iter().find(|o| o.handlers.iter().any(|h| h == "PBM_BUILDING_PROTECT_Start"));
+        let clan = clan.expect("c1m3e defines it").clan;
+        let priced: Vec<(i32, i64)> = p.progress.objects().map(|(id, c, _, _)| (id, c)).collect();
+        for (id, c) in priced {
+            p.progress.set_strength(id, if c == clan { own } else { others });
+        }
+        let mut now = 0.0;
+        p.swept.clear();
+        while !p.swept.contains(&clan) {
+            now += 100.0;
+            p.tick(now, |_| None);
+        }
+        let planner = p.planner_of(clan).unwrap();
+        let found = planner.standing().find(|(_, q)| q.name == PBM_BUILDING_PROTECT).map(|(_, q)| q.p[2]);
+        found
+    };
+    assert_eq!(raised(0.0, 0.0), Some(0), "no guard: it asks, and says it has none");
+    assert_eq!(raised(0.0, 1e6), Some(0), "an enemy about adds nothing to the guard");
+    assert_eq!(raised(1e6, 0.0), None, "a guard past the 25 it wants: it does not ask");
+    assert_eq!(raised(1e6, 1e6), None, "and an enemy about does not make it");
 }
 
 /// And the capture: the player takes the enemy's Generator, the enemy's SuperAI runs

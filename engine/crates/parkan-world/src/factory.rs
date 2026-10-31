@@ -67,6 +67,10 @@ pub struct Factory {
     /// The selected project, or none.
     pub selected: Option<usize>,
     pub build: Option<Build>,
+    /// The designs orders to the end of its list stand waiting for, each drawn as it was
+    /// ordered: an AI's `ORDER_BUILDING_CONSTRUCT` behind a running build (`Behavior.dll:
+    /// 0x10017936`, docs/15, "What ends a problem").
+    pub queue: Vec<Project>,
     pub batch: bool,
     /// Its class-26 efficiency and the level its batteries serve it at, whose product is its
     /// KPD, and its profile's `Use_Power` (docs/23, "Efficiency is a building's size").
@@ -107,6 +111,7 @@ impl Factory {
             projects: Vec::new(),
             selected: None,
             build: None,
+            queue: Vec::new(),
             batch: false,
             efficiency: 1.0,
             level: 1.0,
@@ -148,6 +153,7 @@ impl Factory {
     /// when there was one, whose reservation the old owner then frees.
     pub fn abort(&mut self) -> bool {
         let running = self.build.take().is_some();
+        self.queue.clear();
         self.batch = false;
         self.settle();
         running
@@ -543,6 +549,7 @@ mod tests {
             projects: Vec::new(),
             selected: None,
             build: None,
+            queue: Vec::new(),
             batch: false,
             efficiency: 1.0,
             level: 1.0,
