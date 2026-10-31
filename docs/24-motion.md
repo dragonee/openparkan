@@ -2092,11 +2092,20 @@ that is the authored payload, which property `0x88` hands out from
   aside and the flyer hardly moves.
 
 **When it happens** (*read*,
-[26-damage.md](26-damage.md#the-hit-test--read-and-measured)). The world's frame
-sends every object message 1, and the control system's tick moves the machine.
-Then the pass runs, then message `0x1c`, and then each record with flags set
-gets message `0x1b`. So the push lands after this frame's move and ground
-contact, and the next frame starts from it.
+[26-damage.md](26-damage.md#the-hit-test--read-and-measured); *corrected*
+2026-10-31). The world's takt (`World3D.dll:0x10006bf0`) sends every object
+message 1, and the control system's tick moves the machine. Then the pass runs,
+and **the push is the pass's last act**: for each member whose contact record's
+flags are set, last member first, it calls the object queue's slot 8 with
+message 6 and sub-code `0x1b` (`Control.dll:0x1001c2e7`–`0x1001c318`; the queue
+is what `GetQueue` hands the manager, `0x1001ce3d`). Slot 8
+(`World3D.dll:0x10006460`) is no post. It finds the object in the registry and
+sends it the message there and then (`0x10006a80`). The post is slot 7
+(`0x10006090`), whose records wait in a list the takt delivers only after
+message `0x1c` (`0x10006cf9`–`0x10006d5f`), and an earlier reading here put the
+pass's sends in that list. So the frame is **the move, the pass with its push,
+and then the ground contact**: the push lands before this frame's contact, and
+the contact holds the body where the push has left it.
 
 **The ground contact is message `0x1c`** (*read*). The control system's message
 switch (`Control.dll:0x10007cc2`, messages `0x14` to `0x1c`) sends `0x1b` to
@@ -2104,8 +2113,8 @@ slot 23 (`0x10007cda`, the push below) and `0x1c` to slot 24 (`0x10007d03`).
 Slot 24 (`0x1000cb80`) runs the ground contact (`0x1001a450`) for an agent of
 kind 4, a unit, at `0x1000cb98`, the ground contact's only caller. So:
 
-- **it runs once a frame, not once a state step:** after the move and the
-  collision pass, before the push is taken;
+- **it runs once a frame, not once a state step:** after the move, the
+  collision pass and the push;
 - **its dt is the frame's:** the machine tick keeps the milliseconds since its
   last at `+0xe8` (`0x1000bcfd`–`0x1000bd03`), and the lift's fall reads that
   × 0.001 (the float at `0x1003c018`, `0x1001b41b`).
@@ -2119,6 +2128,26 @@ kept:
   the machine's parent is of type 3 and the push points down, when it is
   taken whole (`0x1000c9eb`);
 - without bit `0x4` it is taken whole.
+
+**Where the frame is drawn** (*read*, and *seen*). After all of it. The mission
+loop calls `stdCalculateGame` (`iron3d.dll:0x1005ea69`) and then, on the same
+pass, `stdRenderGame` (`0x1005ed4e`), and the takt runs whole inside the first
+(`World3D.dll:0x10013a69`). Each of the three hands the mesh its matrix as it
+moves the body, through the agent's `IGameObject` slot 7 (`AniMesh.dll:0x10001fb0`;
+the mesh copies the answer to its `+0x164` and marks its walk due,
+`0x100072bd`–`0x100072de`): the tick its phase pose (`Control.dll:0x10005a85`),
+the push (`0x1000cb6b`, once it has added itself to all three of the body's
+matrices) and the contact (`0x10015f0f`). So **what is drawn is the contact's
+answer to the push**. A push down on a building's floor is lifted back in the
+frame it lands in, by the contact's lift straight up, and only what the push
+moved sideways shows. C02 M03's medium walker under the Small Warehouse's ceiling
+is pressed 0.28 m every frame
+([Walking into a building](#walking-into-a-building--read-and-measured)) and
+stands where its legs hold it in every frame: no dip to see, at any rate, which
+is what "Let's Play - Parkan: Iron Strategy, Part 4" has at 60 fps (1:43,
+15:13–15:15). openparkan's contact still runs once a state step, so the push stays
+in its position until the next one, and the engine takes it back out for the
+picture (`Walker::drawn`); the two give one picture.
 
 So units slide around each other's meshes, the lighter one giving way, and
 no collision costs speed or life. Every geometry step reads level 0: no `.bas`
@@ -4010,9 +4039,14 @@ patrol runs past it.
   ([Collision between objects](#collision-between-objects--read)). The
   warehouse's ceiling presses that sphere 0.28 m, not 2.85
   ([Walking into a building](#walking-into-a-building--read-and-measured)).
-  Still open: where the frame is drawn among the move, the collision pass, the
+  ~~Still open: where the frame is drawn among the move, the collision pass, the
   ground contact and the push. A stand-in draws the body where the contact last
-  held it.
+  held it.~~ — **read** 2026-10-31: after all four, and the order is the move, the
+  pass, whose last act is the push, and then the contact, so a down push on a
+  building is lifted back before the frame is drawn. The engine had the picture
+  right, and the push's place in the frame was written up wrongly here
+  ([Collision between objects](#collision-between-objects--read), "Where the frame
+  is drawn").
 - How the velocity integrator's pull toward *command × top speed*, with the
   command left at 0, combines with a velocity the Wizard writes every frame.
   A stand-in takes the written velocity as the machine's own. ~~Whether the

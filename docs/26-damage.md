@@ -749,11 +749,13 @@ steps, with no substeps:
 
 1. It sends every object message 1, the tick; a round moves and spends its
    range here (`Control.dll:0x1000cbb0`).
-2. It runs the collision pass once (`Control.dll:0x1001c040`).
+2. It runs the collision pass once (`Control.dll:0x1001c040`), whose last act
+   is message `0x1b` to every object whose contact record was filled, sent at
+   once through the queue's slot 8 (`0x1001c318`), which a round takes as its
+   collision response (`0x1000d0c0`).
 3. It sends message `0x1c`.
-4. It delivers what the pass posted: message `0x1b` to every object whose
-   contact record was filled, which a round takes as its collision response
-   (`0x1000d0c0`).
+4. It delivers what was posted to the queue (slot 7)
+   ([24-motion.md](24-motion.md#collision-between-objects--read)).
 
 **Who takes part.** Every agent has a collision object: a kind, an owner, a
 swept sphere — a start, an end and a radius — and the object's geometry. The

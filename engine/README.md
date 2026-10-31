@@ -1314,12 +1314,13 @@ C02 M03 and M04.
   bot could take, fall to one in 17 to 41 s. The lean, which only the drawn body takes, is still
   left out.
 - **A machine is drawn where the ground contact holds it** (docs/24, "Collision between
-  objects"). As read, a machine standing on a building takes a down push whole, after the
-  ground contact. *The Lost Key*'s Small Warehouse is 6.3–7.5 m high inside, and its ceiling
-  presses the 5.87 m agent sphere of the medium walker placed on its floor 2.85 m down every
-  tick: drawn after the push, the walker stood with its hull at the floor and its legs through
-  it, where the recording has it upright in every frame. It is drawn before the push lands, and
-  the simulation keeps the push, which carries units down a ramp into a building.
+  objects"). A machine standing on a building takes a down push whole, and the game's frame
+  runs the push before the ground contact and draws after both, so the push is lifted back
+  before it can show. *The Lost Key*'s Small Warehouse is 6.3–7.5 m high inside, and its ceiling
+  presses the 4.26 m node sphere of the medium walker placed on its floor 0.28 m down every
+  tick, where the recording has it upright in every frame. The engine's contact runs once a
+  state step, so it takes the push back out for the picture, and the simulation keeps it until
+  that step, which carries units down a ramp into a building.
 - **A building is named on the target panel** (docs/35, "Name and status"). Its record hands
   its behaviour the string its Type and size class pick, and the panel prints it as a unit's,
   with no status under it; the engine had named units alone, so every building's name box
@@ -1643,7 +1644,6 @@ a row here. A row leaves this table when research closes it.
 | M14 | How a unit's place comes to be on a building's map object, and which of its vertices the global path starts or ends at | a unit standing on a bridge's faces takes the bridge's nearest hall-way vertex; a goal over a bridge is refused, as the areal under it is not walkable | [24](../docs/24-motion.md#not-established) |
 | M18 | The one float `SELECT_BEST_RANGE` scores, the design record's `+0x11c`, which the store's own fill never writes; the other five arms are read | it scores every design 0, so the ranking keeps the store's order. No shipped raise passes `SELECT_BEST_RANGE`: the corpus's 108 are 65 `SELECT_BEST_COMBAT`, 42 `SELECT_FASTEST` and one `SELECT_SMALLEST` | [15](../docs/15-behaviour.md#what-each-select_-scores--read) |
 | M18 | What a strength written into a `DWORD` looks like: the result slot is four bytes and a `DWORD` destination takes them as they stand, so either the handler leaves a whole number or the script reads a float's bit pattern | the strength truncated, since every `fn44`, `fn38` and `fn35` call site assigns to a `DWORD` and then compares it against a small authored number; bit patterns would make `dTemp3 < dPlaceProtectHits` false wherever anything at all stands there | [15](../docs/15-behaviour.md#what-the-functions-do) |
-| M19 | Where the frame is drawn among the move, the collision pass, the ground contact and the push (message `0x1b`), which takes a down push whole on a building (`Control.dll:0x1000c9eb`): the recording shows *The Lost Key*'s warehouse walker upright in every frame at 60 fps, where the read push, of its node sphere under the ceiling, dips it 0.28 m a tick (2.85 m while the pair pushed its agent sphere out, which it is read not to) | the body is drawn where the ground contact last held it, the down pushes taken on a building since left out; the simulation keeps them | [24](../docs/24-motion.md#collision-between-objects--read) |
 | M19 | Mode 6 from telepresence (2) and the game menu (7), whose handlers the table carries | mode 6 opens from mode 0 and the two command views, where a tower's pod and the panel's *Manual* button are reached | [27](../docs/27-ownership.md#what-the-modes-show--read) |
 | M19 | What pops mode 6 when its tower is destroyed | the stack rolls back to the hero, as telepresence rolls back when its unit is lost | [27](../docs/27-ownership.md#what-the-modes-show--read) |
 | M15 | Whether a control pod's glass canopy keeps out a unit too tall to pass under it. The 234 `B_COMP_3G` faces are flagged `0x20`, which a mover's pair does not pass (its triangle mask is 4), and a pod waits with its canopy 5.5 to 5.8 m up: the hero, 3.77 m as the pair measures it, walks under, and a small wheeled warrior, 5.84 m, is turned back on a Small Tower's way down. No recording looked at shows a warbot at a pod | a face flagged `0x20` in a two-sided batch — those 234 and nothing else — lets every mover through; the energy bridge's `0x20` cap, in a batch that is not, is held to the read | [24](../docs/24-motion.md#a-pods-canopy-and-a-mover-too-tall-for-it--measured-and-a-stand-in) |

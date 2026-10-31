@@ -272,7 +272,8 @@ pub struct Walker {
     pub stride_scale: f32,
     /// How far pushes have dropped the body since the ground contact last held it: the parts of
     /// pushes that point down, taken whole while the machine stands on a building
-    /// ([`Walker::take_push`]). The body is drawn that much higher ([`Walker::drawn`]).
+    /// ([`Walker::take_push`]). The game's contact takes them back in the frame they land in, so
+    /// the body is drawn that much higher ([`Walker::drawn`]).
     pub dropped: f32,
 }
 
@@ -772,21 +773,19 @@ impl Walker {
     }
 
     /// Where the body is drawn at `t_ms`: between the step's start and end by the phase
-    /// (`0x10015a50`).
+    /// (`0x10015a50`), where the ground contact last held it, the down pushes taken on a building
+    /// since left out ([`Walker::dropped`]).
     ///
-    /// STAND-IN: docs/24-motion.md#collision-between-objects--read -- the body is drawn where
-    /// the ground contact last held it, before the down pushes taken on a building since have
-    /// dropped it ([`Walker::dropped`]). Read, the frame runs the move, the collision pass, the ground
-    /// contact and then the push (message `0x1b`, `Control.dll:0x1000c9eb` taking a down push
-    /// whole on a building), and where the frame is drawn among them is not read. Drawn after
-    /// the push, C02 M03's medium walker would dip under the Small Warehouse's ceiling: 6.3-7.5 m
-    /// up, it presses the walker's node sphere, 4.26 about a centre 0.67 under its origin, 0.28 m
-    /// down a tick, and the contact lifts it back. (Pushed out as its 5.87 m agent sphere, which
-    /// the pair does not hand on, it was pressed 2.85 m, its hull at the floor.) The recording
-    /// shows it upright on its legs in every frame ("Let's Play - Parkan: Iron Strategy, Part
-    /// 4", 1:43 and 15:13-15:15 at 60 fps), which the push drawn before it lands gives, and
-    /// which moves nothing the simulation holds: units still go down a ramp into a building by
-    /// that push.
+    /// That is what the game's frame draws. Its takt runs the move (message 1), the collision
+    /// pass, whose last act is to deliver the push (message `0x1b`, `Control.dll:0x1001c318`,
+    /// the queue's slot 8, at once), and only then the ground contact (message `0x1c`,
+    /// `World3D.dll:0x10006ce1`); each hands the mesh its matrix as it moves the body, and
+    /// `stdRenderGame` comes after all three (`iron3d.dll:0x1005ea69`, `0x1005ed4e`). So a down
+    /// push on a building is lifted back in the frame it lands in and is never drawn: C02 M03's
+    /// medium walker, pressed 0.28 m by the Small Warehouse's ceiling every frame, stands on its
+    /// legs in every frame of the recording (docs/24, "Collision between objects"). Here the
+    /// contact runs once a state step ([`Walker::hold`]'s stand-in), so the push stays in the
+    /// position until the next one, and is taken back out for the picture.
     pub fn drawn(&self, t_ms: f64) -> (Vec3, f32) {
         let s = self.phase(t_ms);
         let position = self.from.0.lerp(self.body.position, s) - Vec3::Z * self.dropped;
