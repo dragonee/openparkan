@@ -18,6 +18,14 @@ pub(crate) fn mission_01_play() -> (parkan_world::play::Play, parkan_formats::mi
 /// Stand the hero `distance` from `target`'s placement, facing it, on the ground.
 pub(crate) fn stand_facing(play: &mut parkan_world::play::Play, target: usize, distance: f32, around: f32) {
     assert!(play.stand_facing(target, distance, around), "somewhere level to stand");
+    // The hero is taken with its sight 24.4° up (`World3D.dll:0x1000ee8e`, docs/30); a player
+    // brings it down with the mouse, and these tests bring it down at once.
+    let rig = &mut play.hero.robot.rig;
+    if let Some(c) = rig.pitch {
+        let level = rig.channels[c].initial;
+        rig.values[c] = level;
+        rig.aim[1] = if rig.upright { 1.0 - level } else { level };
+    }
 }
 
 /// Stand a machine at `at`'s xy on the ground below it.

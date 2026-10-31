@@ -32,6 +32,10 @@ pub const ARM_FOLD: i32 = 0x22;
 pub const ITEM_STEP: f32 = 0.45;
 /// The world's gravity, which a falling round's mount solves against.
 pub const GRAVITY: f32 = 10.0;
+/// What a local game's turret multiplies its share of the aim by in property `0xf00`
+/// (`Control.dll:0x10028bd7`, the 1.1 at `0x1003cb3c`), with a ceiling of 1. Off that branch, in
+/// the shape other slot-36 readers give a network game (*inferred*), it is the share alone.
+pub const AIM_SHARE_SCALE: f32 = 1.1;
 /// A falling round's mount rises by this share of its launch angle (`0x10028401`).
 pub const LOB_SHARE: f32 = 0.83;
 /// The camera shake (`0x10023ab0`): a jolt of this squared size starts a blend.
@@ -307,6 +311,14 @@ pub struct Rig {
     /// falling round's mount solves for (`0x1001b4f0`, `0x10028200`). `None` for a turret under
     /// `CIS_MANUALCONTROL`, the player's, whose mounts take no lift.
     pub traced: Option<Vec3>,
+    /// The values the traced point asks of the yaw and pitch channels, the pitch's not held to
+    /// its channel's two ends (`0x100275e8`, `0x10027933`). `None` while the turret traces
+    /// nothing.
+    pub wanted: Option<[f32; 2]>,
+    /// The world x of the point the turret traces. A trace stores the point itself in the
+    /// target triple (`0x1002874d`, `0x10028933`), so this is what the triple's x holds then,
+    /// in place of a yaw ([`Rig::hand_over`]).
+    pub traced_x: Option<f32>,
     pub shake: Shake,
     /// The strafe offset the control takt hands the turret, in radians (`0x10005ab8`);
     /// the caller keeps it. The yaw channel plays it on top of its value ([`Rig::frame_of`]).
@@ -356,6 +368,8 @@ impl Rig {
             arms,
             center_up: 1.0,
             traced: None,
+            wanted: None,
+            traced_x: None,
             shake: Shake::default(),
             strafe: 0.0,
             channels,
@@ -367,6 +381,47 @@ impl Rig {
     /// target, as an upright turret's channel sees it.
     pub fn target(&self, axis: usize) -> f32 {
         if self.upright { 1.0 - self.aim[axis] } else { self.aim[axis] }
+    }
+
+    /// How near the channels are to what the traced point asks (`0x10027a02`-`0x10027ad2`, the
+    /// turret's `+0xf0`): 1 less the greater of the two gaps in value, doubled when the yaw
+    /// channel wraps, and never below 0. The gaps are plain differences, so a yaw either side of
+    /// the wrap reads as far off. A pitch its channel cannot reach keeps its gap for as long as
+    /// the point stays out of its reach.
+    pub fn aim_share(&self) -> f32 {
+        let Some(wanted) = self.wanted else { return 0.0 };
+        let off = |channel: Option<usize>, want: f32| channel.map_or(0.0, |c| (self.values[c] - want).abs());
+        let most = off(self.yaw, wanted[0]).max(off(self.pitch, wanted[1]));
+        let wraps = self.yaw.is_some_and(|c| self.channels[c].flags & CHANNEL_WRAP != 0);
+        (1.0 - if wraps { most * 2.0 } else { most }).max(0.0)
+    }
+
+    /// The θ the fight module takes for the turret (`Behavior.dll:0x10024c92`-`0x10024cea`): 0
+    /// once its share reaches 1 (stage 0, `0x10027aee`), else (1 − property `0xf00`) × π, the
+    /// property being the share × 1.1, held to 1 (`Control.dll:0x10028bb0`). So θ is 0 within
+    /// about 0.045 of a value on each channel, 16° of yaw and 4° of a 90° pitch. A turret that
+    /// traces nothing is at stage 2 or 3, and that is π.
+    pub fn aim_theta(&self) -> f32 {
+        if self.wanted.is_none() {
+            return std::f32::consts::PI;
+        }
+        (1.0 - (self.aim_share() * AIM_SHARE_SCALE).min(1.0)) * std::f32::consts::PI
+    }
+
+    /// The turret handed to the player: the manual controller's permission method, told bit 1
+    /// for it, sets its state to `CIS_MANUALCONTROL` and its target to (0.5, 0.5, 0) through the
+    /// component setter (`World3D.dll:0x1000ee5b`-`0x1000ee8e`), so it looks ahead at a pitch
+    /// value of 0.5 whatever it was doing. The setter adds the change of the triple's x to the
+    /// lead, wrapping (`Control.dll:0x1002ec23`), and a turret tracing a point holds the point's
+    /// world x there. Returns the lead.
+    pub fn hand_over(&mut self, lead: f32) -> f32 {
+        let held = self.traced_x.unwrap_or(self.aim[0]);
+        self.aim = [0.5, 0.5, 0.0];
+        self.traced = None;
+        self.wanted = None;
+        self.traced_x = None;
+        let v = lead + 0.5 - held;
+        v - v.floor()
     }
 
     /// One tick of `dt` seconds (`0x10027765`): the yaw and pitch, the arms, then each
@@ -504,6 +559,63 @@ mod tests {
 
     fn gun(index: usize) -> Gun {
         Gun::new(index, &component(GUN_TYPE, vec![], 0), &[])
+    }
+
+    /// A yaw channel that wraps and a pitch channel, both at the values asked.
+    fn aimed(wanted: [f32; 2]) -> Rig {
+        let mut rig = Rig::new(&Controller {
+            channels: vec![channel(0, 0.0, 4.0, 0.5, 1.0, CHANNEL_WRAP), channel(1, 0.0, 2.0, 0.111, 1.0, 0)],
+            components: vec![component(TURRET_TYPE, vec![0, 1], 0)],
+            ..Default::default()
+        });
+        rig.values = vec![0.5, 0.111];
+        rig.wanted = Some(wanted);
+        rig
+    }
+
+    #[test]
+    fn a_turrets_share_of_the_aim_is_the_greater_gap_doubled_and_its_theta_runs_out_at_a_1_1th() {
+        let rig = aimed([0.5, 0.111]);
+        assert_eq!(rig.aim_share(), 1.0);
+        assert_eq!(rig.aim_theta(), 0.0, "on the point");
+        // A yaw 0.04 off is 0.92, which × 1.1 passes 1: θ is 0 short of the point.
+        let rig = aimed([0.54, 0.111]);
+        assert!((rig.aim_share() - 0.92).abs() < 1e-5);
+        assert_eq!(rig.aim_theta(), 0.0);
+        // 0.2 off is 0.6, and 1 − 0.66 of π.
+        let rig = aimed([0.7, 0.111]);
+        assert!((rig.aim_share() - 0.6).abs() < 1e-5);
+        assert!((rig.aim_theta() - 0.34 * std::f32::consts::PI).abs() < 1e-5);
+        // Half a turn or more is nothing, and either side of the wrap reads as far.
+        assert_eq!(aimed([0.0, 0.111]).aim_share(), 0.0);
+        assert!((aimed([0.01, 0.111]).aim_share() - 0.02).abs() < 1e-5);
+        // A point under the channel's lowest keeps a gap the step cannot close: 0.05 under it
+        // is the 4.5° of a 90° pitch that first costs a Small Bunker's guns their score.
+        let rig = aimed([0.5, 0.061]);
+        assert!((rig.aim_theta() - 0.01 * std::f32::consts::PI).abs() < 1e-4, "{}", rig.aim_theta());
+        // Tracing nothing, the stage is 2 or 3.
+        let mut rig = aimed([0.5, 0.111]);
+        rig.wanted = None;
+        assert_eq!(rig.aim_theta(), std::f32::consts::PI);
+    }
+
+    #[test]
+    fn a_turret_handed_over_looks_ahead_and_the_lead_takes_only_what_the_setter_sees() {
+        // Never traced: it has looked ahead all along, so the setter sees no change of x.
+        let mut rig = aimed([0.5, 0.111]);
+        rig.aim = [0.5, 0.889, 0.5];
+        assert_eq!(rig.hand_over(0.5), 0.5, "the lead stands");
+        assert_eq!(rig.aim, [0.5, 0.5, 0.0], "and the pitch goes to the middle of its channel");
+        // Led by the player and let go: x is where the lead left it, so the gap closes.
+        let mut rig = aimed([0.5, 0.111]);
+        rig.aim = [0.7, 0.889, 0.5];
+        assert!((rig.hand_over(0.7) - 0.5).abs() < 1e-6);
+        // Tracing a point: x is the point's world x, whose fraction goes into the lead.
+        let mut rig = aimed([0.5, 0.111]);
+        rig.traced_x = Some(1234.25);
+        assert!((rig.hand_over(0.5) - 0.75).abs() < 1e-3, "0.5 + 0.5 − 1234.25, wrapped");
+        assert_eq!(rig.traced_x, None);
+        assert_eq!(rig.wanted, None);
     }
 
     #[test]

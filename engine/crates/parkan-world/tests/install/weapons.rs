@@ -607,7 +607,9 @@ fn a_small_bunker_taken_by_the_player_turns_its_flamers_on_an_enemy_holds_them_c
     assert!(!aimed);
 
     // Taken, as its pod's capture changes its clan (docs/27), it aims. At its door, 20 m out and
-    // below the lowest its sight looks, it holds its fire.
+    // below the lowest its sight looks, it holds its fire. The flyer is there before the capture:
+    // a turret within 16° of yaw and 4° of pitch has all its θ, and at 80 m it would fire at once.
+    play_for(&mut play, 0.1, |p| hold(p, 20.0, &mut fired, &mut aimed));
     play.units[bunker].clan = Some(play.player_clan);
     play_for(&mut play, 6.0, |p| hold(p, 20.0, &mut fired, &mut aimed));
     assert!(aimed, "it traces the flyer at its door");

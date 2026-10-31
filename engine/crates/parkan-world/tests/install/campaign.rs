@@ -650,16 +650,18 @@ fn c03_m02s_raider_lands_its_winged_ssm_on_the_bunker_from_afar_and_spends_none_
     );
     // The recording's missile is in the air with the raider 345 to 292 m off and strikes at the
     // second figure, which puts its launch 365 to 390 m off (*derived*, at 45 m/s with and
-    // without the raider's own 11 m/s). Here the line first clears 423 m off and each launcher
-    // fires when its 0.5 to 2 s wait next runs out. The two launchers hang a metre and a half
-    // either side of the turret the line is asked from, and the line has only just cleared the
-    // rise: one missile of the first pair may meet it. So the bars are on the first to leave
-    // and the first to land, and no more than one falls short.
+    // without the raider's own 11 m/s). Here its 7 s lock runs out 437 m off, the line first
+    // clears 425 to 423 m off, and each launcher fires when the 0.5 to 2 s wait the lock's end
+    // set, or the one that follows it if that ran out with the line still blocked, is up; the
+    // stroke is half a second. The two launchers hang a metre and a half either side of the
+    // turret the line is asked from, and the line has only just cleared the rise: either
+    // missile of the first pair may meet it. So the bars are on the first to leave and the first
+    // to land, and no more than the first pair falls short.
     assert!(from > 290.0, "the first leaves {from:.0} m off the bunker");
     assert!(from < 430.0, "and not before the line clears: {from:.0} m");
     assert!(point.distance(aimed_at) < 5.0, "it lands on the part aimed at: {point} against {aimed_at}");
     assert!(at > 250.0, "with the raider still {at:.0} m off");
-    assert!(short <= 1, "{short} fell short");
+    assert!(short <= 2, "{short} fell short");
 }
 
 /// C03 Mission 02's raider outlives its own winged SSM. A hit names the object that fired it and
@@ -1326,11 +1328,15 @@ fn c02_m04s_light_tower_taken_at_its_pod_hands_the_player_its_guns() {
 
     // Its turret follows the mouse, as a boarded bot's does (`m1.tbl`: mouse X is the turret's
     // yaw, the table a tower's chassis names none of and the reader falls back to, docs/14).
-    let before = aim(&play, tower);
+    let mut before = aim(&play, tower);
+    let mut turned = 0.0;
     for _ in 0..60 {
         tick(&mut play, [20.0, 0.0]);
+        // Tick by tick, as the yaw wraps.
+        let change = aim(&play, tower)[0] - before[0];
+        turned += (change - change.round()).abs();
+        before = aim(&play, tower);
     }
-    let turned = (aim(&play, tower)[0] - before[0]).abs();
     assert!(turned > 0.2, "the mouse turns its turret: {turned}");
 
     // Z zooms its camera, the building record's own zoom in view state 6, stepped 0.1 a frame
@@ -1382,6 +1388,10 @@ fn c02_m04s_light_tower_taken_at_its_pod_hands_the_player_its_guns() {
     assert_eq!(play.driven_target(), None);
     let back = play.eye().position;
     assert!(back.distance(hero_eye) < 1.0, "the hero's view again, on the pod: {back} and {hero_eye}");
+    // Its AI picks a target of its own and looks at it; the mouse then turns nothing of it.
+    for _ in 0..(2 * 60) {
+        tick(&mut play, [0.0; 2]);
+    }
     let still = aim(&play, tower);
     for _ in 0..60 {
         tick(&mut play, [20.0, 0.0]);

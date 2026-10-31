@@ -696,8 +696,11 @@ All of it is green (55, 255, 55) and blended (`0x10042ed0`):
 - Slot 30's stage sets 1 and 7.
 - What slot 3's `CState` modes 0 and 1 mean to the player.
 - Why the target dummies are not on the radar. The list holds radar contacts
-  only, so they are presumably never detected (*guess*: a dummy gives off no
-  signature).
+  only. ~~So they are presumably never detected (*guess*: a dummy gives off no
+  signature).~~ **Measured** against that: `l_targ` and `M_targ` weigh 8,025 and 74,538 kg,
+  seen by mass alone to 0.9988 and 0.9999 of a radar part's range
+  ([25-sensors.md](25-sensors.md#who-the-rule-hides--measured)). What keeps them off is
+  not established.
 
 ## The target panel and the player's own unit
 
@@ -1802,9 +1805,14 @@ units, goes to (x₀ + 5 + round(256 x ÷ L), y₁ − 5 − round(256 y ÷ L)).
   and runs until its state is 3 (back-edge `0x1005ef9e`), empties every clan's
   list on each pass (`0x1005e780` → `0x10039410`).
 - **So** another clan's building shows while a unit of the player's clan has
-  it in radar range, and goes when none does (*derived*). That the refill runs
-  between the emptying and the draw is *derived* from the recording, which
-  shows other clans' buildings.
+  it on its radar, and goes when none does (*derived*). A building, heavy and with
+  no shield, shows to 0.9995 of the range and more
+  ([25-sensors.md](25-sensors.md#who-the-rule-hides--measured)), a unit to 0.96 at least
+  with its shield on and to 0.33 under camouflage. That the refill runs between the
+  emptying and the draw is *derived* from the recording, which shows other clans'
+  buildings.
+- **openparkan** asks each of the player's radars at the frame, by the scan's own test,
+  where the list holds what the last scan found for its 750 ms.
 
 An exception runs when the game's `+0xea` byte is set and `0x1005a850`
 answers; that was not read. Also skipped:

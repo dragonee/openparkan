@@ -24,6 +24,10 @@ pub struct Contact {
     pub friend: bool,
     /// Never listed: a hero of the player's clan, a bridge or a ruin (`0x10091c80`).
     pub unlisted: bool,
+    /// What it gives away (properties `0x45`, `0x43` and `0x44`, docs/25, "What a target gives
+    /// away"): its mass, its area × what it asks on channels 0, 2 and 5, and its volume × what
+    /// it asks on channels 0, 3 and 4, each cut by its detection shield.
+    pub signature: [f32; 3],
 }
 
 /// The radar's answer, kept for its period (`Control.dll:0x10024390`).
@@ -32,6 +36,11 @@ pub struct Radar {
     /// Value 3, m, and value 4, ms.
     pub range: f32,
     pub period_ms: f32,
+    /// Values 0, 1 and 2: what it makes of each signature.
+    pub sensitivity: [f32; 3],
+    /// Its node's life over its maximum × its power level, which ids `0x300`-`0x302` multiply
+    /// the sensitivities by; the owner keeps it from the node and the power tick.
+    pub level: f32,
     /// Its node has no life left (slot 2, `0x10021820`), which the owner keeps from the node.
     pub broken: bool,
     contacts: Vec<usize>,
@@ -39,27 +48,44 @@ pub struct Radar {
 }
 
 impl Radar {
-    pub fn new(range: f32, period_ms: f32) -> Self {
-        Self { range, period_ms, broken: false, contacts: Vec::new(), next_ms: f64::NEG_INFINITY }
+    pub fn new(range: f32, period_ms: f32, sensitivity: [f32; 3]) -> Self {
+        Self {
+            range,
+            period_ms,
+            sensitivity,
+            level: 1.0,
+            broken: false,
+            contacts: Vec::new(),
+            next_ms: f64::NEG_INFINITY,
+        }
+    }
+
+    /// Whether a radar at `at` finds `target` now (`0x10024620`): it is alive, nearer than the
+    /// range, and for any of the three, tried in the order mass, electronics, drive, sensitivity
+    /// × life × level × signature × (1 − d²/R²) reaches 1. So a signature's reach stops short of
+    /// the rim, R·√(1 − 1/(v·s)) out, and one whose v·s is 1 or less shows nowhere.
+    pub fn sees(&self, at: Vec3, target: &Contact) -> bool {
+        let d = target.position.distance(at);
+        if self.broken || !target.alive || d >= self.range {
+            return false;
+        }
+        let falloff = 1.0 - d * d / (self.range * self.range);
+        self.sensitivity
+            .iter()
+            .zip(&target.signature)
+            .any(|(sense, signature)| sense * self.level * signature * falloff >= 1.0)
     }
 
     /// The contacts of a radar at `at` by `now_ms`: none while its node is destroyed
     /// (`0x10024390` asks slot 2 first), the last answer while it is fresh, otherwise a new scan
-    /// of the objects within range.
-    ///
-    /// STAND-IN: docs/25-sensors.md#a-scan-is-a-sphere-a-falloff-and-three-tests--read --
-    /// the three signatures a detection weighs are not computed: every live object within
-    /// the range is detected. A unit's mass alone is thousands of kilograms, which a fitted
-    /// radar's 0.05 sees out to nearly its whole range.
+    /// of the objects in [`Radar::sees`]' reach.
     pub fn scan(&mut self, now_ms: f64, at: Vec3, world: &[Contact]) -> &[usize] {
         if self.broken {
             return &[];
         }
         if now_ms >= self.next_ms {
             self.next_ms = now_ms + f64::from(self.period_ms);
-            self.contacts = (0..world.len())
-                .filter(|&i| world[i].alive && world[i].position.distance(at) < self.range)
-                .collect();
+            self.contacts = (0..world.len()).filter(|&i| self.sees(at, &world[i])).collect();
         }
         &self.contacts
     }
@@ -232,13 +258,45 @@ mod tests {
             hostile,
             friend,
             unlisted: false,
+            signature: [1.0e6; 3],
         }
+    }
+
+    /// The fitted radar parts' sensitivities (docs/25, "A radar is five values").
+    const PART: [f32; 3] = [0.05, 0.7, 25.0];
+
+    #[test]
+    fn a_signature_shows_to_its_own_share_of_the_range_and_one_too_faint_nowhere() {
+        // A T-2 with its shield on, at rest: 2,522.5 kg × 0.1 is 12.6 against the part's 0.05,
+        // seen to 0.9595 of the range and no further (docs/25, "Who the rule hides").
+        let mut radar = Radar::new(250.0, 750.0, PART);
+        let mut helicopter = unit(0.0, 239.0, false, false);
+        helicopter.signature = [252.25, 0.0, 0.0];
+        assert!(radar.sees(Vec3::ZERO, &helicopter));
+        helicopter.position.y = 241.0;
+        assert!(!radar.sees(Vec3::ZERO, &helicopter), "the rim is hidden, though it is in range");
+        // Any of the three will do: 25 × 1 sees it nearly as far as the range.
+        helicopter.signature = [0.0, 0.0, 1.0];
+        assert!(radar.sees(Vec3::ZERO, &helicopter));
+        // At 1 or less a signature is seen nowhere, and camouflage can take all three there.
+        helicopter.signature = [19.0, 1.0, 0.03];
+        helicopter.position.y = 1.0;
+        assert!(!radar.sees(Vec3::ZERO, &helicopter));
+        // A worn or starved radar is scaled by its node's life and its power level.
+        helicopter.signature = [252.25, 0.0, 0.0];
+        helicopter.position.y = 230.0;
+        assert!(radar.sees(Vec3::ZERO, &helicopter));
+        radar.level = 0.4;
+        assert!(!radar.sees(Vec3::ZERO, &helicopter), "0.4 × 12.6 is seen to 0.895 of the range");
+        radar.level = 0.0;
+        helicopter.position.y = 1.0;
+        assert!(!radar.sees(Vec3::ZERO, &helicopter), "with no power it finds nothing");
     }
 
     #[test]
     fn the_radar_sees_live_objects_within_range_and_holds_its_answer_for_its_period() {
         let mut world = vec![unit(0.0, 100.0, false, false), unit(0.0, 400.0, true, false)];
-        let mut radar = Radar::new(300.0, 750.0);
+        let mut radar = Radar::new(300.0, 750.0, PART);
         assert_eq!(radar.scan(0.0, Vec3::ZERO, &world), &[0]);
         world[1].position.y = 200.0;
         assert_eq!(radar.scan(700.0, Vec3::ZERO, &world), &[0], "still the last answer");

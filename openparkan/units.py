@@ -215,6 +215,21 @@ class NodeMass:
     root: bool
 
 
+#: A fitted radar part's three sensitivities, values 0 to 2 on all 12 (docs/25-sensors.md).
+RADAR_PART_SENSITIVITY = (0.05, 0.7, 25.0)
+
+
+def radar_reach(signature: tuple[float, float, float],
+                sensitivity: tuple[float, float, float] = RADAR_PART_SENSITIVITY) -> float:
+    """How far a radar finds a target, as a share of its range (``Control.dll:0x10024620``).
+
+    Each signature times its sensitivity, ``v``, shows out to ``sqrt(1 - 1/v)``, any of the
+    three will do, and a ``v`` of 1 or less shows nowhere.
+    """
+    best = max(s * v for s, v in zip(signature, sensitivity, strict=True))
+    return (1.0 - 1.0 / best) ** 0.5 if best > 1.0 else 0.0
+
+
 @dataclass
 class Assembly:
     """An assembly put together as ``AniMesh.dll`` and ``Control.dll`` load it.
@@ -242,6 +257,44 @@ class Assembly:
         total += sum(d.mass for d in self.devices)
         body = sum(n.density * n.volume for n in self.nodes if n.root)
         return Load(payload=self.payload, body=body, total=total)
+
+    def asks(self, camouflage: bool = False, running: bool = False) -> list[float]:
+        """What it asks a second on each power channel, whole and with full guns.
+
+        Every device draws its power figure but a gun, whose capacitor is full, and an engine,
+        which draws only while the machine goes (``Control.dll:0x1002d340``, docs/23-economy.md).
+        A device whose initial state is 0 starts off; camouflage adds its value 4.
+        """
+        asks = [0.0] * 6
+        for device in self.devices:
+            if device.type_id == control.GUN_TYPE or device.state == 0:
+                continue
+            if device.type_id == control.ENGINE_TYPE and not running:
+                continue
+            asks[device.channel] += device.power
+            if device.type_id == control.DETECT_SHIELD_TYPE and camouflage:
+                asks[device.channel] += device.values[control.CAMOUFLAGE_POWER]
+        asks[1] = 0.0  # what a battery figures there is what it gives
+        return asks
+
+    def signature(self, camouflage: bool = False,
+                  running: bool = False) -> tuple[float, float, float]:
+        """Properties ``0x45``, ``0x43`` and ``0x44``: what a radar weighs (``0x1000dcc0``).
+
+        The mass, the nodes' area x what it asks on channels 0, 2 and 5, and their volume x what
+        it asks on channels 0, 3 and 4 (``0x1002d47a``, ``0x1002d496``), each cut by its detection
+        shield and all three again while camouflage is on (``0x1002bd94``, ``0x1002c088``).
+        """
+        asks = self.asks(camouflage, running)
+        figures = [self.load.total,
+                   sum(n.area for n in self.nodes) * (asks[0] + asks[2] + asks[5]),
+                   sum(n.volume for n in self.nodes) * (asks[0] + asks[3] + asks[4])]
+        for shield in self.of_type(control.DETECT_SHIELD_TYPE):
+            for i in range(3):
+                figures[i] *= max(0.0, 1.0 - shield.values[i])
+                if camouflage:
+                    figures[i] *= max(0.0, 1.0 - shield.values[control.CAMOUFLAGE])
+        return (figures[0], figures[1], figures[2])
 
 
 class Workshop:

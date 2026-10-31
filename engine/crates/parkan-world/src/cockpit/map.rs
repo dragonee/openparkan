@@ -464,24 +464,25 @@ pub fn building_icon(type_word: u32) -> Option<[f32; 2]> {
 }
 
 /// Which objects the player may see on a map this frame (`0x1007e660`): the player's clan's,
-/// and another clan's while one of the player's live units has it within its radar's range —
-/// neither a bridge nor a ruin, and not a hostile unit shut down.
+/// and another clan's while one of the player's live units has it on its radar — neither a
+/// bridge nor a ruin, and not a hostile unit shut down.
 ///
 /// STAND-IN: docs/35-hud.md#the-panel-in-the-cockpit--read-and-seen -- the clan's id list is
-/// the units' radar contacts refilled each pass; with a scan's three signatures not computed
-/// (docs/25), every live object strictly within a radar's range is a contact.
+/// the units' target lists refilled each pass from the radar's answer, which holds for its
+/// 750 ms; here each radar is asked now, against what every target gives away now.
 pub fn known_to_player(play: &Play) -> Vec<bool> {
     let player = Some(play.player_clan);
-    let mut eyes: Vec<(glam::Vec3, f32)> = play
+    let world = play.radar_world();
+    let mut eyes: Vec<(glam::Vec3, &parkan_sim::targeting::Radar)> = play
         .robots
         .iter()
         .filter(|(t, _)| {
             play.units[*t].clan == player && play.battle.combat.targets.get(*t).is_some_and(|x| x.alive)
         })
-        .map(|(_, r)| (r.walker.body.position, r.radar.range))
+        .map(|(_, r)| (r.walker.body.position, &r.radar))
         .collect();
     if !play.hero.dead() {
-        eyes.push((play.hero.walker.body.position, play.hero.radar.range));
+        eyes.push((play.hero.walker.body.position, &play.hero.radar));
     }
     play.units
         .iter()
@@ -490,13 +491,13 @@ pub fn known_to_player(play: &Play) -> Vec<bool> {
             if u.clan == player {
                 return true;
             }
-            let Some(target) = play.battle.combat.targets.get(t).filter(|x| x.alive) else { return false };
+            let Some(contact) = world.get(t).filter(|x| x.alive) else { return false };
             let shut_down = play.hostile(u.clan)
                 && play.robots.iter().any(|(rt, r)| *rt == t && r.order.is_some_and(|o| o.code == SHUTDOWN));
             u.type_word != BUILDING_BRIDGE
                 && u.type_word != BUILDING_RUINE
                 && !shut_down
-                && eyes.iter().any(|(at, range)| target.position.distance(*at) < *range)
+                && eyes.iter().any(|(at, radar)| radar.sees(*at, contact))
         })
         .collect()
 }

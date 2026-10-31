@@ -497,9 +497,10 @@ Whenever the player's target list sets a target (`iron3d.dll:0x10090b6a`,
   (`+0x108`) — **except an unguided gun on a turret whose state word is
   `0x200`**, `CIS_MANUALCONTROL`, which gets none (`0x10028164`; value 9 below
   zero marks it unguided, below). Every turret is built in `0x200`
-  (`0x10027103`) and no turret record sets another (*measured*), and nothing
-  on the player's side changes it. So on a player's unit **only the guided
-  guns receive the target** (*derived*).
+  (`0x10027103`) and no turret record sets another (*measured*), and a take puts
+  a fighting unit's back there
+  ([30-turrets.md](30-turrets.md#a-turret-handed-to-the-player-looks-ahead--read-and-seen)).
+  So on a player's unit **only the guided guns receive the target** (*derived*).
 - **A relink restarts each gun's lock** (`0x1002a160`): state 2, the lock back to
   value 9.
 
@@ -1070,7 +1071,7 @@ that one answer.
 
     | class | word returned | property `0xf00` |
     |---|---|---|
-    | turret (1) | `+0xec`, its aim stage | computed by `0x10028bb0` (`0x1002c142`) |
+    | turret (1) | `+0xec`, its aim stage | its share of the aim × 1.1, held to 1 (`0x10028bb0`, [30-turrets.md](30-turrets.md#aiming-and-the-camera--read-and-measured)) |
     | gun (2), builder (30) | `+0x11c`, its report | `+0x17c`, 1 − lock left ÷ value 9 (`0x10029c1c`) |
     | door (12), class 11 | `+0x9c` | |
     | any other | 0 | |
@@ -1078,10 +1079,22 @@ that one answer.
     The turret's stage is set to 3 when it is given a target (`0x1002811c`), 2
     at `0x1002864d`, 1 at `0x10028730`, and 0 when its aim reaches 1
     (`0x10027aee`). The gun's takt stores report codes 2 to 8 at other points
-    (`0x100295ba`–`0x1002a167`); their meanings were not listed here. The
-    module turns the word into *θ*: 0 gives 0; 1 gives (1 − property) × π;
-    anything else gives π. When the firing unit is an animal, the gun's factor
-    is 1 (`0x10024d9e`).
+    (`0x100295ba`–`0x1002a167`), and they are the lamp's
+    ([35-hud.md](35-hud.md#the-weapons-list--read-and-measured)): 2 no target, 3 a
+    stroke, 4 waiting its interval, 5 no rounds, 6 short of charge, 7 not ready or
+    past its range, 8 off its barrel. The module turns the word into *θ*: 0 gives
+    0; 1 gives (1 − property) × π; anything else gives π. When the firing unit is
+    an animal, the gun's factor is 1 (`0x10024d9e`).
+
+    **So the turret's *θ* runs out short of the point** (*derived*). A share of
+    10 ÷ 11 × 1.1 is 1, so *θ* is 0 within 0.045 of a value on each channel: 16.4°
+    of yaw and 4.1° of a 90° pitch, 5° of the hero's. Past that it grows at 2.2π a
+    unit of value. **And a turret that cannot reach its point stops the gun**: a
+    target 4.5° under the lowest a Small Bunker's sight looks leaves it 0.05 off,
+    *θ* = 0.01π, which at 40 m on a target of *R* 6 is a factor of 0.79, under the
+    building's 0.85 (*derived*). That is a floor on a building's fire, read where
+    openparkan had stood one in as a departure, about 4° under the sight's limit
+    and not at it.
 - **Threshold** (`0x10024e7a`–`0x10024ec5`):
   - 0.45 for a unit whose chassis profile can fly (`0x10014670`, `+0xc`);
   - otherwise 0.85 when `MBehaviour+0x614` is **0.5 or more** or the unit's Type
@@ -1185,12 +1198,13 @@ drives a factor below 0. For a hero-sized target (*R* about 2) that is 0.7 m.
 So **outside the go, attack and search tasks, an AI gun fires only when
 both of these hold**:
 
-- its turret has settled (stage 0), or has almost finished aiming;
+- its turret has its share of the aim, or nearly;
 - the gun's report is 0, or 1 with its property at 1 (for a guided gun, its
-  lock has run out).
+  lock has run out). In a stroke, waiting out its interval, short of charge, not
+  ready or past its range it has no score to pass, and so leaves its timer alone.
 
-A turret still turning at 100 m to a hero needs its aim more than 99.3% of the
-way there. Every aiming pass sets the turret to `0x400` (`0x10024c51`), so an
+A turret at 100 m from a hero needs a share of 0.903, within 0.048 of a value of
+what it is asked. Every aiming pass sets the turret to `0x400` (`0x10024c51`), so an
 AI turret is out of the `0x200` in which its relink withholds a target
 (`Control.dll:0x10028164`). **An AI unit's unguided guns therefore get the
 target, and keep their range gate.**
@@ -1434,14 +1448,34 @@ with its missile in the air and 292 m off as it strikes at 13:54.2, which at the
 missile's 45 m/s, the raider closing at a steady 11.3 m/s, puts the launch 365
 to 390 m off (*derived*, with and without the raider's own speed added to the
 missile's). openparkan's raider, following all of the
-above, launches the first of its two 414 m off, within one wait of the line
-clearing, and lands one on the deflector with the raider 314 m off. The line
+above, launches its first two about 416 m off, and the line
 at its first clearing passes the rise by about 0.2 m and the two launchers
-hang 1.7 m either side of the turret it is asked from, so one missile of the
-first pair meets the rise 67 m ahead; whether the game's raider loses one the
-same way the recording does not show. What is left between 414 and the
-recording's 365 to 390 is the way the raider takes over the rise and the
-moment its wait runs out.
+hang 1.7 m either side of the turret it is asked from, so a missile of the
+first pair may meet the rise 67 m ahead; on which side, in a run of it, turns on
+a metre or two of the raider's way. Whether the game's raider loses one the
+same way the recording does not show.
+
+**What sets the launch** (*measured*, in that run; the free fire is *read*). Not the
+aiming score and not the round's range. The raider is in an attack, so its factors
+are free once its line is clear, and the launcher's gate has opened long before, at
+its value 8 of 500 m: the 7 s lock starts 498 m off and runs out **437 m** off, and
+the round would leave at once for all the range and the free fire have to say. What
+holds it is:
+
+1. the **lock's end at 437 m**, the moment the score first passes, which asks each
+   launcher's timer: each sets a wait of 0.5 to 2 s, and these two run 1.49 and 1.63 s;
+2. the **line clearing at 425 to 423 m**, which it must by the time the wait runs out,
+   else the wait is spent and another set (the timer is asked before the line, above);
+3. the **half second of its stroke**, the round appearing 416 m off.
+
+So the read allows a launch from about 420 m, a wait that runs out on the clearing,
+out to 397 m: a first wait gone just before the clearing and 2 s more, which the
+raider covers at 11 m/s with the stroke's half second. The recording's 365 to 390 m
+lies 7 to 32 m beyond that, and what is left is not the fight module's unless the
+game's lock started later than 498 m. A relink would do that: any change of the pair
+puts the lock back (`0x1002a160`), and in the recording the raider passes the hero on
+its way, where openparkan's raider holds the building from the first pick. That is
+not established.
 
 ### The lead is the turret's fastest gun — *read*, and *measured*
 
@@ -1667,20 +1701,40 @@ assembled nowhere, so "in the tree" and "assembled" are detected apart.
   ([The part the AI aims at](#the-part-the-ai-aims-at--read-and-measured),
   [The line every gun waits on](#the-line-every-gun-waits-on--read-and-measured)).
   Still open:
-  - whether a building's mesh agent, which hangs on `CBuilding`, answers the
+  - ~~whether a building's mesh agent, which hangs on `CBuilding`, answers the
     same id as the building, so that leaving the target's id out leaves its
-    faces out; the walk skips the object whose slot 9 matches and still walks
-    its children (`Terrain.dll:0x100256cf`, `0x10025abe`). openparkan leaves the
-    whole target out;
-  - that the landscape's slot-4 record's `+0x3c`, which its slot 5 compacts
-    into the word the 20 m exception reads, is the file's face dword
-    (*inferred*);
+    faces out~~ — **read**, as the same object. `CBuilding` slot 9 is its agent's
+    slot 9, through `+0x30` (`Terrain.dll:0x100573f0`), so the two cannot differ; the
+    world tree holds the `CBuilding`, whose slot 11 answers 3 (`0x10057da0`) and whose
+    interface `0x18` is its stand-in for the mesh (`0x10057c20`), and its children,
+    slot 15, are its agent's (`0x10056ae0`): the units standing on it, class 4, which
+    the query's mask does not ask. So the id leaves its faces out and nothing else
+    of it comes in, and **openparkan, which leaves the whole target out, has it
+    right**;
+  - ~~that the landscape's slot-4 record's `+0x3c`, which its slot 5 compacts
+    into the word the 20 m exception reads, is the file's face dword~~ — **read**.
+    The query answers `this + 0x18` (`Terrain.dll:0x1001b0f5`, vtable `0x1009a3c4`
+    slot 4, `0x1001a470`), and stores the face record's first dword at `this + 0x54`
+    (`0x1001a52f`–`0x1001a531`), which is that record's `+0x3c`. So word `0x20` is
+    the flags word's `0x80`, which 0 of the 275882 faces carry, and **the 20 m
+    exception never fires on shipped ground**; the same scan finds 6102 with
+    `0x2000`. openparkan asks a mesh's triangle flags only, and has it right;
   - the 25 to 50 m between openparkan's first launch on C03 M02, 414 m off, and
-    the recording's, 365 to 390 m (*derived*).
-- The turret's property `0xf00` (`Control.dll:0x10028bb0`), the share of its aim
+    the recording's, 365 to 390 m (*derived*): **narrowed**. It is the lock's end
+    and the line, not the free fire or the aiming score; the read's own reach runs
+    out to 397 m, 7 to 32 m short of the recording, and a later start of the lock
+    would cover those
+    ([What sets the launch](#the-line-every-gun-waits-on--read-and-measured)).
+- ~~The turret's property `0xf00` (`Control.dll:0x10028bb0`), the share of its aim
   the turret factor's *θ* takes at stage 1, and the gun's report codes 2 to 8:
-  openparkan stands a settled turret and a run-out lock in for them
-  ([How the AI fires](#how-the-ai-fires--read)).
+  openparkan stands a settled turret and a run-out lock in for them~~ — **read**:
+  the property is 1 − the greater of the channels' gaps, doubled for a wrapping
+  yaw, × 1.1 and held to 1
+  ([30-turrets.md](30-turrets.md#aiming-and-the-camera--read-and-measured)), and any
+  report but 0 and 1 is π ([How the AI fires](#how-the-ai-fires--read)). openparkan
+  takes both. Where the takt stores each code stays
+  [35-hud.md](35-hud.md#the-weapons-list--read-and-measured)'s stand-in: the word is
+  worked out from the gun's state now.
 - ~~A seeker's value 2: read by nothing found.~~ Answered: it is the gun's lock
   ([A guided gun waits for a lock](#a-guided-gun-waits-for-a-lock--read-and-measured)).
 - ~~What an AI turret's state word is while it fights.~~ `0x400`, set on every

@@ -105,8 +105,10 @@ pub const ANIMAL_FLIGHT_SPREAD: f32 = 50.0;
 /// loader's kind 5 (`0x1000a2f4`), is handed a `diff_*` name by nothing in the install
 /// (docs/26, "The difficulty ratio").
 pub const SPEED_MAXIMUM_FACTOR: f32 = 1.0;
-/// A turret channel this close to its target counts as settled.
-pub const AIM_SETTLED: f32 = 0.005;
+/// The channel a radar draws on (`Control.dll:0x1003ccc8`, docs/23).
+const RADAR_CHANNEL: usize = 2;
+/// The mass an unweighed building is taken to have: enough that 0.05 of it is seen to the rim.
+pub const BUILDING_SIGNATURE: f32 = 1.0e6;
 /// A plant's `Type`: its pod opens the factory screen for the player (docs/27, "Capture").
 pub const BUILDING_PLANT: u32 = 0x8000_0010;
 /// A generator's `Type` (docs/27, "Capture").
@@ -577,6 +579,8 @@ fn aim_and_fire(
         robot.target_point = None;
         robot.fire_part = None;
         robot.rig.traced = None;
+        robot.rig.wanted = None;
+        robot.rig.traced_x = None;
         return;
     };
     // The part of the target the fight module hands the turret with it (`0x100241f7`,
@@ -604,19 +608,19 @@ fn aim_and_fire(
     robot.target_point = Some(point);
     robot.fire_part = Some(part);
     robot.aim_at(point);
-    // DEPARTURE: docs/29-weapons.md#how-the-ai-fires--read -- no floor on a building's fire is
-    // read. A building's turret keeps tracing a target that stands lower than its pitch channel
-    // lets its sight look (−15° on the Small Bunker's), but its guns hold their fire, so a unit
-    // that comes within about 40 m of a bunker, or stands inside it, is not shot at by it.
+    // DEPARTURE: docs/29-weapons.md#how-the-ai-fires--read -- the read's floor stands about 4°
+    // under the lowest a turret's pitch channel looks, where the gap its channel cannot close
+    // first costs its θ ([`parkan_sim::turret::Rig::aim_theta`]); this one stands at that lowest.
+    // A building's turret keeps tracing a target lower than that (−15° on the Small Bunker's),
+    // but its guns hold their fire, so a unit that comes within about 40 m of a bunker, or
+    // stands inside it, is not shot at by it.
     if floor && let (Some(lowest), Some((origin, _))) = (robot.lowest_sight(), robot.sight()) {
         let to = point - origin;
         if to.z.atan2(to.truncate().length()) < lowest {
             return;
         }
     }
-    let settled = [robot.rig.yaw, robot.rig.pitch].iter().enumerate().all(|(axis, c)| {
-        c.is_none_or(|c| (robot.rig.values[c] - robot.rig.target(axis)).abs() < AIM_SETTLED)
-    });
+    let turret_theta = robot.rig.aim_theta();
     // The distance and the height the scores take are between the two origins (`0x10024263`–
     // `0x10024381`): how far the unit stands from its target, and how far above it.
     let distance = at.distance(victim.position);
@@ -664,17 +668,22 @@ fn aim_and_fire(
         let score = if free {
             0.5
         } else {
-            // STAND-IN: docs/29-weapons.md#how-the-ai-fires--read -- the turret's aim stage
-            // and the gun's report codes are not transcribed: θ is 0 once both channels
-            // have reached their targets and π before, and a guided gun's θ is the share
-            // of its lock left × π.
-            let turret = if settled { 1.0 } else { 1.0 - std::f32::consts::PI * distance / reach.max(1.0) };
-            let lock = if gun.gate.guided() && gun.gate.lock_s > 0.0 {
-                (gun.lock.max(0.0) / gun.gate.lock_s).min(1.0) * std::f32::consts::PI
-            } else {
-                0.0
+            // The two factors, each 1 − θ × d ÷ R (`0x10024cea`, `0x10024db4`). The turret's θ
+            // is its share of the aim's ([`Rig::aim_theta`]). The gun's comes of its report
+            // (`0x10024d54`): 0 gives 0, 1 gives what is left of its lock × π, and anything else
+            // π, so a gun in its stroke, waiting out its interval, short of charge, not ready,
+            // past its range or off its barrel has no score to pass (docs/29). An animal's gun
+            // takes no factor of its own (`0x10024d9e`).
+            let turret = 1.0 - turret_theta * distance / reach.max(1.0);
+            let theta = match gun.lamp_report(now) {
+                0 => 0.0,
+                1 if gun.gate.lock_s > 0.0 => {
+                    (gun.lock.max(0.0) / gun.gate.lock_s).min(1.0) * std::f32::consts::PI
+                }
+                1 => 0.0,
+                _ => std::f32::consts::PI,
             };
-            let own = 1.0 - lock * distance / reach.max(1.0);
+            let own = if animal { 1.0 } else { 1.0 - theta * distance / reach.max(1.0) };
             if turret <= 0.0 || own <= 0.0 {
                 continue;
             }
@@ -1303,6 +1312,7 @@ impl Play {
         }
         play.start_building_effects();
         play.join_sites();
+        play.hero_taken();
         play.pose_hero();
         Ok(Some(play))
     }
@@ -1710,14 +1720,23 @@ impl Play {
     /// is among the radar's contacts is not read: a target must have a unit record, and
     /// trees and rocks have none, so they are never listed.
     pub fn contacts(&self) -> Vec<Contact> {
+        let signatures = self.signatures();
         self.battle
             .combat
             .targets
             .iter()
             .zip(&self.units)
-            .map(|(t, u)| {
+            .enumerate()
+            .map(|(i, (t, u))| {
                 let friend = u.clan == Some(self.player_clan);
                 Contact {
+                    signature: signatures.get(&i).copied().unwrap_or_else(|| {
+                        // STAND-IN: docs/25-sensors.md#who-the-rule-hides--measured -- a building
+                        // that runs no device of its own is not weighed. 71 of the 76 assemblies
+                        // weigh 20,000 kg or more, seen to 0.9995 of the range by mass alone; a
+                        // mast and the ruins weigh nothing, and the ruins are never listed.
+                        [BUILDING_SIGNATURE, 0.0, 0.0]
+                    }),
                     position: t.position,
                     centre: t.centre,
                     radius: t.radius,
@@ -1729,6 +1748,22 @@ impl Play {
                         || u.type_word == BUILDING_BRIDGE
                         || u.type_word == BUILDING_RUINE,
                 }
+            })
+            .collect()
+    }
+
+    /// What every robot and emplacement gives away now, by target (docs/25, "What a target
+    /// gives away").
+    fn signatures(&self) -> HashMap<usize, [f32; 3]> {
+        self.robots
+            .iter()
+            .chain(&self.emplacements)
+            .filter_map(|(t, r)| {
+                let target = self.battle.combat.targets.get(*t)?;
+                let life =
+                    |p: usize, n: usize| node_share(target.parts.get(p).and_then(|x| x.life.as_ref()), n);
+                let shield = detect_shield_share(r.power.as_ref(), &life);
+                Some((*t, r.heft.signature(life, r.power.as_ref(), shield)))
             })
             .collect()
     }
@@ -2496,6 +2531,9 @@ impl Play {
                 self.let_go();
                 self.modes.pop();
                 self.hero.release_keys();
+                if matches!(self.mode(), Mode::OnFoot) {
+                    self.hero_taken();
+                }
                 return true;
             }
             // Mode 3 → 1 (`0x10063ad0`): the HQ selected and taken back at auto-driver level 0
@@ -2537,6 +2575,8 @@ impl Play {
                 if let Mode::HqCommand(h) = self.mode() {
                     self.select_unit_alone(h);
                     self.ride(h);
+                } else if matches!(self.mode(), Mode::OnFoot) {
+                    self.hero_taken();
                 }
                 return true;
             }
@@ -2712,6 +2752,15 @@ impl Play {
         unit.and_then(|t| self.machine(t)).unwrap_or(&self.hero.robot).cylinder
     }
 
+    /// The hero taken (`0x10074ff0` with 1, mask `0xfff`, word 3), as leaving a bot or a tower
+    /// does and as each level does at its start (`0x100a2a3c`, `0x100a355f`, `0x100a3d9d`): its
+    /// turret goes to the player and so looks ahead with its pitch value at 0.5, which on its
+    /// 1.92 rad channel is 24.4° up ([`parkan_sim::turret::Rig::hand_over`], docs/30).
+    fn hero_taken(&mut self) {
+        let body = &mut self.hero.robot.walker.body;
+        body.lead = self.hero.robot.rig.hand_over(body.lead);
+    }
+
     /// The driven unit let go (`0x10074ff0` with 0), back to its AI: its held keys dropped and
     /// its command cleared. Its record keeps its level; the Wizard's words go to the AI, the
     /// sensors' among them (`0x10075131`).
@@ -2767,7 +2816,7 @@ impl Play {
         if !reach.ai_moves() {
             robot.walker.drive = None;
         }
-        take_over(robot, reach == Reach::Whole);
+        take_over(robot, reach == Reach::Whole, !reach.ai_fights());
         robot.fire_target = None;
         robot.relink(if reach.ai_fights() { None } else { current });
     }
@@ -2856,7 +2905,7 @@ impl Play {
         robot.wizard.clear();
         robot.auto_driver = 0;
         robot.sensors_taken = true;
-        take_over(robot, true);
+        take_over(robot, true, true);
         robot.fire_target = None;
         robot.relink(current);
         self.driving = Some(Driving { target: t, pilot, fire_held: false, telepresence: false });
@@ -3283,6 +3332,7 @@ impl Play {
         let top = self.ground.below(place.x, place.y, 10_000.0).map_or(place.z, |h| h.point.z);
         let yaw = leave_yaw(place, at);
         self.let_go();
+        self.hero_taken();
         if let Some(at) = self.modes.iter().rposition(|m| *m == Mode::Driving(t)) {
             self.modes.truncate(at);
         }
@@ -3914,6 +3964,11 @@ impl Play {
                 let shield = self.battle.combat.hero.as_mut().and_then(|h| h.shield.as_mut());
                 let switches = self.hero.pilot.switches;
                 power.tick(dt, &mut lives, shield, &mut self.hero.robot.guns, share, switches);
+                let life =
+                    self.hero.robot.radar_node.map_or(1.0, |(p, n)| {
+                        node_share(self.hero.lives.get(p).and_then(Option::as_ref), n).0
+                    });
+                self.hero.robot.radar.level = life * power.levels[RADAR_CHANNEL];
             }
             self.hero.robot.power = Some(power);
         }
@@ -3937,6 +3992,10 @@ impl Play {
                 let Target { parts, shield, .. } = target;
                 let mut lives: Vec<Option<&mut Life>> = parts.iter_mut().map(|p| p.life.as_mut()).collect();
                 power.tick(dt, &mut lives, shield.as_mut(), &mut robot.guns, share, switches);
+                let life = robot
+                    .radar_node
+                    .map_or(1.0, |(p, n)| node_share(parts.get(p).and_then(|part| part.life.as_ref()), n).0);
+                robot.radar.level = life * power.levels[RADAR_CHANNEL];
             }
             robot.power = Some(power);
         }
@@ -4228,10 +4287,13 @@ impl Play {
 
     /// Every object a radar may find, by the same numbering `contacts` uses with the hero
     /// after the targets, so a kept answer stays good as units die.
-    fn radar_world(&self) -> Vec<Contact> {
+    pub(crate) fn radar_world(&self) -> Vec<Contact> {
         let mut world = self.contacts();
         let hero = &self.hero;
+        let life = |p: usize, n: usize| node_share(hero.lives.get(p).and_then(Option::as_ref), n);
+        let shield = detect_shield_share(hero.robot.power.as_ref(), &life);
         world.push(Contact {
+            signature: hero.robot.heft.signature(life, hero.robot.power.as_ref(), shield),
             position: hero.walker.body.position,
             centre: hero.collision_centre(),
             radius: hero.collision.1,
@@ -5285,26 +5347,39 @@ pub fn node_share(life: Option<&parkan_sim::damage::Life>, node: usize) -> (f32,
     }
 }
 
-/// A unit handed to the player (`iron3d.dll:0x10074ff0`): its turret lock, property 179, is
-/// set at auto-driver level 0 (`0x100750fd`) and clear otherwise (docs/30, "The hull follows
-/// the turret").
-///
-/// STAND-IN: docs/30-turrets.md#the-hull-follows-the-turret--read-and-measured -- the game's
-/// lead takes every change to the turret's yaw target from the unit's start; whether the AI's
-/// aiming reaches it through the same setter is not read. Here the lead starts from the
-/// turret's target at the takeover, as if it had.
-fn take_over(robot: &mut Robot, lock: bool) {
-    robot.rig.traced = None;
-    let body = &mut robot.walker.body;
-    body.turret_lock = lock;
-    body.lead = robot.rig.aim[0];
-    body.lead_step = 0.0;
+/// What a detection shield's cuts are multiplied by (`Control.dll:0x1002bd94`): its node's life
+/// over its maximum × its level, the level of channel 5 it draws on.
+fn detect_shield_share(
+    power: Option<&crate::power::Power>,
+    life: impl Fn(usize, usize) -> (f32, bool),
+) -> f32 {
+    let Some(p) = power else { return 1.0 };
+    let node = p.detection.and_then(|(_, _, node)| node);
+    node.map_or(1.0, |(part, n)| life(part, n).0) * p.levels[5]
 }
 
-/// A unit let go (control message 7 with 0, `Control.dll:0x10031a38`): the turret lock is off.
-///
-/// STAND-IN: docs/30-turrets.md#the-hull-follows-the-turret--read-and-measured -- the AI's
-/// Wizard writes the spin once it drives again; a unit it does not drive keeps no spin.
+/// A unit handed to the player (`iron3d.dll:0x10074ff0`): its turret lock, property 179, is
+/// set at auto-driver level 0 (`0x100750fd`) and clear otherwise (docs/30, "The hull follows
+/// the turret"). `turret` says whether the take gives the player its turret, as levels 0 and 1
+/// do and 2 does not: the turret then looks ahead with its pitch value at 0.5, and the setter
+/// that tells it so is what moves the lead ([`parkan_sim::turret::Rig::hand_over`]). The AI's
+/// aiming never reached the lead (`0x1002874d` writes past the setter), so a turret that was
+/// tracing a point hands the lead that point's world x, and the hull swings by it.
+fn take_over(robot: &mut Robot, lock: bool, turret: bool) {
+    robot.rig.traced = None;
+    if turret {
+        robot.walker.body.lead = robot.rig.hand_over(robot.walker.body.lead);
+    }
+    robot.walker.body.turret_lock = lock;
+}
+
+/// A unit let go (control message 7 with 0, `Control.dll:0x10031a38`): the turret lock is off,
+/// and nothing in the message writes the spin (`0x10031a58` clears the strafe angle alone). The
+/// same message sets the Wizard's mode to 0, so it follows from its next takt (`Wizard.dll:
+/// 0x10003c4a`), and with its points cleared by the take it holds: a segment from the hull's own
+/// forward axis to itself, whose spin is 0 (`0x10002ee1`-`0x10002f2d`, `0x100034c0`). So what
+/// the unit keeps is the last step's spin for as long as its next takt takes, and the engine,
+/// whose let-go runs between the takts, writes that 0 itself.
 fn let_go(robot: &mut Robot) {
     let body = &mut robot.walker.body;
     body.turret_lock = false;

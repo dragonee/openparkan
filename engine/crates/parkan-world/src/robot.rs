@@ -164,6 +164,7 @@ pub struct HeftNode {
     pub node: usize,
     pub weight: f32,
     pub area: f32,
+    pub volume: f32,
     pub flags: i32,
     pub root: bool,
 }
@@ -200,6 +201,7 @@ impl Heft {
                     node: n,
                     weight: m.density * m.volume,
                     area: m.area,
+                    volume: m.volume,
                     flags: m.flags,
                     root: p == root,
                 });
@@ -259,6 +261,29 @@ impl Heft {
     /// of the two (docs/24, "Collision between objects").
     pub fn mass(&self, life: impl Fn(usize, usize) -> (f32, bool)) -> f32 {
         self.weight(life).0
+    }
+
+    /// The three things a radar weighs (`Control.dll:0x1000dcc0`, docs/25, "What a target gives
+    /// away"): the mass, the nodes' area × what the unit asks a second on channels 0, 2 and 5,
+    /// and their volume × what it asks on channels 0, 3 and 4 (`0x1002d47a`, `0x1002d496`), each
+    /// multiplied by 1 − its detection shield's value × the shield's life and level, and by
+    /// 1 − value 3 while camouflage is on (`0x1002bd94`, `0x1002c088`), none below 0.
+    /// `shield` is that life × level; a unit with no power has nothing to ask with.
+    pub fn signature(
+        &self,
+        life: impl Fn(usize, usize) -> (f32, bool),
+        power: Option<&crate::power::Power>,
+        shield: f32,
+    ) -> [f32; 3] {
+        let mass = self.mass(life);
+        let Some(p) = power else { return [mass, 0.0, 0.0] };
+        let area: f32 = self.nodes.iter().map(|n| n.area).sum();
+        let volume: f32 = self.nodes.iter().map(|n| n.volume).sum();
+        let electronics = area * (p.asks[0] + p.asks[2] + p.asks[5]);
+        let drive = volume * (p.asks[0] + p.asks[3] + p.asks[4]);
+        let camouflage = if p.camouflaged { (1.0 - p.cuts[3]).max(0.0) } else { 1.0 };
+        let cut = |i: usize, signature: f32| signature * (1.0 - p.cuts[i] * shield).max(0.0) * camouflage;
+        [cut(0, mass), cut(1, electronics), cut(2, drive)]
     }
 }
 
@@ -736,10 +761,14 @@ impl Robot {
             if let Some(r) = c.components.iter().find(|k| k.type_id == RADAR_TYPE)
                 && (radar.is_none() || !record.eq_ignore_ascii_case(&turret_part.record))
             {
-                radar = Some(Radar::new(r.values[RADAR_RANGE], r.values[RADAR_PERIOD]));
+                radar = Some(Radar::new(
+                    r.values[RADAR_RANGE],
+                    r.values[RADAR_PERIOD],
+                    [r.values[0], r.values[1], r.values[2]],
+                ));
             }
         }
-        let radar = radar.unwrap_or_else(|| Radar::new(NO_RADAR_RANGE, NO_RADAR_PERIOD_MS));
+        let radar = radar.unwrap_or_else(|| Radar::new(NO_RADAR_RANGE, NO_RADAR_PERIOD_MS, [0.0; 3]));
         let slot = |c: &Controller| c.components.iter().find(|k| k.type_id == RADAR_TYPE).map(|k| k.node);
         let radar_node = match slot(&turret_ctl) {
             Some(n) => usize::try_from(n).ok().map(|n| (turret_index, n)),
@@ -1220,13 +1249,26 @@ impl Robot {
     /// The turret put in `CIS_POINTTRACE` on `point` (`0x10024c51`): its yaw and pitch
     /// targets set so the sight looks at it.
     ///
-    /// STAND-IN: docs/29-weapons.md#how-the-ai-fires--read -- how the turret turns a traced
-    /// point into its targets (`0x10028bb0`) is not read: each channel is moved on from its
-    /// value by the angle the sight is off, at the rate a small nudge of the channel turns
-    /// the sight, the aim being linear in the value (docs/30).
+    /// The turret asks each channel for its first value + the angle ÷ its span, the yaw's from
+    /// the point in the plane its axis turns in and the pitch's after that (`0x100275e8`,
+    /// `0x10027933`, the angle `0x10026e20`), and keeps the point itself as its target
+    /// (`0x1002874d`), which no setter sees. The pitch asked is not held to the channel's ends,
+    /// which only the step does.
+    ///
+    /// STAND-IN: docs/29-weapons.md#how-the-ai-fires--read -- `0x10026e20`'s angle between the
+    /// point and the channel's pose is not transcribed: each channel is asked its value + the
+    /// angle the sight is off by ÷ the rate a small nudge of the channel turns the sight, the
+    /// aim being linear in the value (docs/30).
     pub fn aim_at(&mut self, point: Vec3) {
         let Some((origin, direction)) = self.sight() else { return };
         self.rig.traced = Some(point - origin);
+        self.rig.traced_x = Some(point.x);
+        let mut wanted = [0.0_f32; 2];
+        for (axis, channel) in [(0, self.rig.yaw), (1, self.rig.pitch)] {
+            if let Some(c) = channel {
+                wanted[axis] = self.rig.values[c];
+            }
+        }
         let want = point - origin;
         let yaw = |d: Vec3| yaw_along(d).unwrap_or(0.0);
         let rise = |d: Vec3| d.z.atan2(d.truncate().length());
@@ -1244,9 +1286,11 @@ impl Robot {
                 continue;
             }
             let v = now + parkan_sim::machine::wrap_angle(angle(want) - angle(direction)) / rate;
+            wanted[axis] = if wraps { v.rem_euclid(1.0) } else { v };
             let v = if wraps { v.rem_euclid(1.0) } else { v.clamp(0.0, 1.0) };
             self.rig.aim[axis] = if self.rig.upright { 1.0 - v } else { v };
         }
+        self.rig.wanted = Some(wanted);
     }
 
     /// A chassis node's pose in the unit's frame, the chassis playing its frames as the
@@ -1430,6 +1474,40 @@ mod tests {
     }
 
     #[test]
+    fn a_unit_gives_away_its_mass_its_asks_and_what_its_shield_and_camouflage_leave() {
+        let node = HeftNode { part: 0, node: 0, weight: 100.0, area: 5.0, volume: 2.0, flags: 0, root: true };
+        let heft = Heft { nodes: vec![node], devices: 900.0, ..Heft::default() };
+        let mut power = crate::power::Power {
+            batteries: Vec::new(),
+            repair: None,
+            engines: Vec::new(),
+            detection: None,
+            cuts: [0.75, 0.5, 0.25, 0.5],
+            camouflaged: false,
+            asks: [1.0, 0.0, 2.0, 3.0, 4.0, 5.0],
+            levels: [1.0; 6],
+            devices: Vec::new(),
+            next_ms: 0.0,
+            last_ms: 0.0,
+        };
+        let whole = |_: usize, _: usize| (1.0, false);
+        assert_eq!(heft.signature(whole, None, 1.0), [1000.0, 0.0, 0.0], "with no power it asks nothing");
+        // Electronics is channels 0, 2 and 5 over the area; drive 0, 3 and 4 over the volume.
+        assert_eq!(
+            heft.signature(whole, Some(&power), 0.0),
+            [1000.0, 40.0, 16.0],
+            "a dead shield cuts nothing"
+        );
+        assert_eq!(heft.signature(whole, Some(&power), 1.0), [250.0, 20.0, 12.0]);
+        power.camouflaged = true;
+        assert_eq!(
+            heft.signature(whole, Some(&power), 1.0),
+            [125.0, 10.0, 6.0],
+            "all three again by value 3"
+        );
+    }
+
+    #[test]
     fn the_boarding_test_reads_the_life_of_the_node_the_first_turret_component_names() {
         let bare = Controller::default();
         // A fitted turret names its own node 1, its body, as every shipped one does.
@@ -1444,7 +1522,7 @@ mod tests {
     }
 
     fn node(part: usize, node: usize, weight: f32, area: f32, flags: i32) -> HeftNode {
-        HeftNode { part, node, weight, area, flags, root: part == 0 }
+        HeftNode { part, node, weight, area, volume: 0.0, flags, root: part == 0 }
     }
 
     /// A chassis of 1,000 kg body over nodes 0–2, the gear on 1 (left) and 2 (right), a turret

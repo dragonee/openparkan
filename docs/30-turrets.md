@@ -219,8 +219,9 @@ hero turret the four channels animate `CP_m1o1`, `Turn_m1o1` (49–53),
 - **The pitch clamp.** Mouse Y is clamped to [0, 1] by the row, so the
   channel's span is the pitch limit.
 - **The hero** tilts 0.25 × 0.006 × 1.2 × 1.92 = 0.0035 rad a filtered count,
-  at most 0.75 × 1.92 = 1.44 rad/s. Its yaw channel is never sent a value: the
-  hull turns instead.
+  at most 0.75 × 1.92 = 1.44 rad/s. Its mouse never sends its yaw channel a value:
+  the hull turns instead. Its take sends it the one
+  ([below](#a-turret-handed-to-the-player-looks-ahead--read-and-seen)).
 - **The strafe offset.** The turret's first entry also carries −(the strafe
   angle, eased across the step) ÷ the yaw span, negated when hung
   ([24-motion.md](24-motion.md#from-input-to-motion--read-and-measured)).
@@ -252,6 +253,37 @@ it holds (`0x100280e7`–`0x100280f9`).
   (`iron3d.dll:0x10091b0e`), and an AI unit's with the part its fight module
   picked, a deflector on 435 of the 458 shipped assemblies
   ([29-weapons.md](29-weapons.md#the-part-the-ai-aims-at--read-and-measured)).
+
+**What a trace does with the point** (*read*). In `CIS_POINTTRACE` the target triple is
+not a yaw and a pitch but the point itself:
+
+- **The trace stores it past the setter.** The routine `0x10028640`, which the turret's
+  takt calls first in that state (`0x10027625`), writes the traced point into `+0x9c`
+  with its own three moves: the point at `0x1002874d`, or at `0x10028933` the place where
+  a target moving at its velocity meets a round at the lead speed. Neither comes near
+  interface `0x202` slot 14. Failing, the takt writes the channels' first values there
+  instead (`0x1002763b`–`0x10027683`, 1 − each on an upright turret), and steps toward
+  them at the rate for the one tick, as if in `0x100`.
+- **It asks each channel for an angle.** The yaw channel's value is to be its first value
+  + the signed angle ÷ its span (`0x100275e8`), the angle between the point and its pose
+  in the plane the channel turns in (`0x10026e20`: two normalised differences, their dot
+  held to ±1, acos, signed by the triple product). The takt steps yaw, poses it through
+  `0x10022120`, and asks the same again for pitch (`0x10027925`–`0x10027933`). Neither
+  value is held to the channel's ends there: the wrap or the clamp is the step's.
+- **It keeps a share of the aim.** `+0xf0` is 1 − the greater of the two gaps between what
+  each channel has and what it is asked (`0x10027a02`–`0x10027a7d`), the gap doubled when
+  the yaw channel wraps, as all 58 do, and never below 0 (`0x10027aad`). The gaps are plain
+  differences, so a yaw of 0.99 asked for 0.01 reads as far off. A pitch its channel cannot
+  reach keeps its gap for as long as the point stays out of reach.
+- **The stage.** `+0xec` is 3 on a new target or a set triple (`0x10028b90`), 2 as a trace
+  starts (`0x1002864d`), 1 once it has a live point (`0x10028730`), and 0 when the share
+  comes to exactly 1 (`0x10027aee`). Every pass of the trace starts it again from 2.
+- **Property `0xf00`** (`0x10028bb0`) is that share × 1.1, held to 1 (`0x10028bd7`, the 1.1
+  at `0x1003cb3c`), where an object's slot 36's slot 12 answers −1; otherwise the share
+  alone. The one other reader of that pair, `0x1000c86d`, skips its block on −1 and goes on
+  to test the byte a mirror's message 7 sets, so −1 is *inferred* to be a game with no other
+  player in it. What that does to the fight module is
+  [29-weapons.md](29-weapons.md#how-the-ai-fires--read)'s.
 
 **Which way a count turns** (*read* chain, *derived* sign):
 
@@ -421,6 +453,43 @@ it holds (`0x100280e7`–`0x100280f9`).
 - **The eye moves** by the offset clamped to unit length, times 0.02
   (`0x10023646`, `0x10023677`): 2 cm at most.
 
+### A turret handed to the player looks ahead — *read*, and *seen*
+
+The manual controller's permission method (`World3D.dll:0x1000ed20`), told bit 1 for a
+class-1 component, sets its state to `CIS_MANUALCONTROL` (`0x1000ee5e`) and sends it
+**(0.5, 0.5, 0) through the component setter** (`0x1000ee71`–`0x1000ee8e`, slot 14).
+
+- **Who tells it.** The Wizard's refresh (`Wizard.dll:0x10003890`), which re-sends every
+  component's bits, runs on control message 7 (`0x10001d10`) and on each change of a group
+  word. So the turret goes back to the middle at every take at auto-driver level 0 or 1,
+  each step of the level that gives it the turret, the hero's take with word 3 as a level
+  starts (`iron3d.dll:0x100a2a3c`, `0x100a355f`, `0x100a3d9d`) and as a bot is left, and a
+  tower's manual control. Level 2 gives the turret to the AI, so its bits are 0 and it
+  is left alone.
+- **That is what ends a fight's `0x400`.** Every aiming pass puts an AI turret there
+  (`Behavior.dll:0x10024c51`), and this line is what takes it out.
+- **So a take opens at a pitch value of 0.5** (*derived*): on the hero's 1.92 rad channel,
+  whose level is 0.273, that is **24.4° up**. On a hung turret the node stands upside down,
+  so the 52 turrets' 35° above their level is **35° under** it on a flyer.
+
+*Seen*. At a field of view of 1.3 rad across and a frame of 4:3, a sight 24.4° up puts a
+flat horizon 90% of the way down the frame:
+
+- *Outflanking Maneuver* (`1X-DyyPw0_w`) opens at 74 s, under the objectives' panel, with
+  the rock on the horizon at 80–92% of the frame's height; *The Field Base*
+  (`DW8XuX10y0U`) at 84 s with the hill's foot at 85–90%. Both players then bring the sight
+  down with the mouse, by 81 s and by 91 s.
+- *The Constructor* (`VUOXXTEuxeQ`), a hard cut at 249.4 s into the L-2f, whose turret
+  `e_tur_bb_01` is hung (flags 0): sand and the bot's own shadow to the top of the frame, no
+  horizon, where a level sight would split it. tan 35° is 0.70 against the frame's 0.57
+  above the middle (*derived*). The bot had never fought, so that is not where its AI had
+  left it. *Unstable Equilibrium* (`CxlS0fqCI5M`) opens the same way into a flyer at 739 s.
+- A control for the sight's sign: the hero, at the same cut in *The Constructor* at 331.8 s,
+  comes out with its horizon low in the frame, not high.
+
+openparkan kept the channel's first value through a take, so its missions opened level and
+a boarded flyer looked at the horizon; it now does this.
+
 ## The hull follows the turret — *read*, and *measured*
 
 A driven machine's mouse turns its turret, not its hull: `m1.tbl` and `m2.tbl`
@@ -461,6 +530,32 @@ the turret target's x to body `+0x38` (machine `+0x1ec`) and wraps it
 (`0x1002ec23`), whether or not the lock is on. At 0.5 the turret faces the way
 the hull does.
 
+**The AI's aiming does not reach it** (*read*). The setter is interface `0x202` slot 14,
+and the trace does not call it: it writes `+0x9c` itself
+([What a trace does with the point](#aiming-and-the-camera--read-and-measured)). The other
+writers of `+0x9c` are the takt's rest (`0x10027673`), the first update (`0x100271a0`,
+`0x10027204`), the restore (`0x100280a0`) and the control takt below (`0x10005b29`), and
+of body `+0x38` the constructor's 0.5 (`0x10014297`), the integrator and the restore. The
+search is `analysis/slotcalls.py 0x202 14`: 193 calls at `+0x38` in the install, 9 of them on a pointer
+that may be the interface, and those 9 push the receiver and at most a string (the 7 in the
+fight module; `iron3d.dll:0x1007e532` and `0x1007e6f8`). Read one by one, none of
+`Behavior.dll`'s 55 at that offset, `ai.dll`'s 6 or `Wizard.dll`'s 0 hands over an index and
+a triple. The control is the same reading of `World3D.dll`'s 21, which finds the two it
+should, the row handler (`0x100101aa`) and the permission method below
+(`0x1000ee8e`).
+
+**So a turret that was tracing hands the lead a world coordinate** (*read*, *derived*).
+The take's (0.5, 0.5, 0) goes through the setter
+([A turret handed to the player looks ahead](#a-turret-handed-to-the-player-looks-ahead--read-and-seen)),
+whose "change" is 0.5 less what `+0x9c` holds, and on a turret in a trace that is the
+point's world x. The lead becomes frac(lead + 0.5 − x). The next control takt writes that
+into the target's x, so a unit taken in a fight at level 0 has its turret flung to an angle
+set by where its target stood on the map, and its hull swings round under it at up to 0.7 ×
+its yaw rate. A turret that has rested (`0x10027673`) holds 0.5 there, its yaw's first value
+on all 58, and a unit let go from a lead holds about that lead, so for those the take leaves
+the gap as it was or closes it. No recording has been found with a bot taken in mid-fight,
+so the swing is *derived* and not *seen*; openparkan follows it.
+
 **The hull's step** (*read*). The spin integrator (`0x10014780`) runs once a
 state step. Its dt is the step's length and its rates the live turn triple
 (`+0x1b0` `+0x24`):
@@ -479,6 +574,18 @@ state step. Its dt is the step's length and its rates the live turn triple
 - **The gap pays the turn out.** It gains (spin z + veer) × live turn z × dt
   ÷ 2π and wraps (`0x10014bc3`; the 1/2π is built at `0x10016550`). The step,
   in turns, goes to body `+0x3c` (`0x10014bff`).
+
+**What a unit let go keeps** (*read*). Control message 7 with 0 clears the lock and the
+strafe angle (`0x10031a58`, `IControl` slot 20, `0x10004560`, with zeros) and writes no
+spin: the triple at `+0x1d4` stands. The same message reaches the Wizard (`0x10001ced`),
+which sets its mode to 0, and its refresh sets `+0x1f7` (`0x10003c4a`), so it follows from
+its next takt, and at the end of that takt writes `(0, 0, s)` through slot 4 whatever it
+has to follow (`0x10003750`). With no points left it holds: a segment from the hull's own
+forward axis to itself, velocity 0 and flags `0x3331` (`0x10002ee1`–`0x10002f2d`), and s is
+the yaw from the forward axis to that heading (`0x100034c0`), so 0 on the takt it starts. So
+a unit let go keeps **the last step's spin for as long as its next takt takes**, and no
+unit let go goes without one. Only a mirror's mode, argument 2, stops the Wizard
+(`0x10001d63`), and that is not a letting go.
 
 **The turret holds its heading** (*read*). The control takt (`0x100059a0`)
 writes the turret's target x as gap − (1 − s) × step (`0x10005b13`), with s the
@@ -1240,6 +1347,14 @@ listed are `r_t_01`–`02`, `r_l_01`–`07`, `r_m_01`–`04`, `r_b_01`–`04`,
   the camera's **infrared**, carried over so the outer shot keeps the night sight
   the cockpit had ([The outer camera](#the-outer-camera--read-and-measured),
   [35-hud.md](35-hud.md#the-indicators--read-and-seen)).
+- ~~**Whether the AI's aiming reaches the turret lock's lead**~~ — **read**: it does not.
+  A trace stores its point in `+0x9c` past the setter, and no AI caller of slot 14 exists;
+  what moves the lead at a take is the take itself, the manual controller's (0.5, 0.5, 0)
+  through that setter, whose change on a tracing turret is 0.5 less the point's world x
+  ([The hull follows the turret](#the-hull-follows-the-turret--read-and-measured)).
+  ~~**What spin a unit let go keeps until the Wizard writes one**~~ — **read**: the last
+  step's, for one takt; the message writes none, and the Wizard follows from its next takt and holds
+  at 0 ([What a unit let go keeps](#the-hull-follows-the-turret--read-and-measured)).
 - ~~**Which box r, the unit record's `+0x98`, is the half-diagonal of**~~ —
   **read**, and **measured**: the end face of the box the unit's mesh joins
   from all its parts' header boxes, the face across the box's longest side

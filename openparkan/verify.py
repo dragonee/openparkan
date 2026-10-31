@@ -15200,6 +15200,122 @@ def check_ai_aim(check, game: Path) -> None:
           f"Small Bunker sbunk02's devices in order are {bunker}: its deflector, the last, "
           f"takes the pick at 30 over its turret's 20")
 
+    _check_fire_line_remainders(game, check, ctl)
+    _check_radar_signatures(game, check, dats)
+
+
+def _check_fire_line_remainders(game, check, ctl) -> None:
+    """The turret's share of its aim, the takeover, and what the fire line's walk leaves out."""
+    def call_to(image, va: int) -> int:
+        return va + 5 + struct.unpack("<i", image(va + 1, 4))[0]
+
+    def slot(image, table: int, n: int) -> int:
+        return struct.unpack("<I", image(table + 4 * n, 4))[0]
+
+    terrain = _image_at((game / "Terrain.dll").read_bytes())
+    world3d = _image_at((game / "World3D.dll").read_bytes())
+    wizard = _image_at((game / "Wizard.dll").read_bytes())
+    # The trace stores its point straight into the triple, with no call in between.
+    direct = (ctl(0x1002874D, 6) == bytes.fromhex("81c69c000000")
+              and ctl(0x10028754, 2) == bytes.fromhex("8906"))
+    scale = struct.unpack("<f", ctl(0x1003CB3C, 4))[0]
+    # The permission method's turret branch: slot 7 is 1, state 0x200 by slot 6, then slot 14.
+    taken = (world3d(0x1000EE56, 3) == bytes.fromhex("83f801")
+             and world3d(0x1000EE5E, 5) == bytes.fromhex("6800020000")
+             and world3d(0x1000EE71, 4) == bytes.fromhex("c7442418")
+             and struct.unpack("<f", world3d(0x1000EE75, 4))[0] == 0.5
+             and world3d(0x1000EE8E, 3) == bytes.fromhex("ff5138"))
+    setter = slot(ctl, 0x1003B544, 14)
+    follows = wizard(0x10003C4A, 2) == bytes.fromhex("8886")
+    check("Control.dll: a turret traces past the setter, and is handed over through it",
+          direct and taken and setter == 0x1002EB70 and abs(scale - 1.1) < 1e-6 and follows,
+          f"the trace stores the point in +0x9c itself (0x1002874d), where interface 0x202 slot 14 "
+          f"is {setter:#x}, the one routine that adds to the lead; World3D.dll's permission method "
+          f"sends a class-1 component state 0x200 and (0.5, 0.5, 0) through that slot "
+          f"(0x1000ee5e-0x1000ee8e); property 0xf00 is the share x {scale:.3f} (0x1003cb3c)")
+
+    # A CBuilding's id is its agent's, and it keeps its children with the agent.
+    building = 0x1009B59C
+    forwards = {n: slot(terrain, building, n) for n in (9, 11, 15)}
+    id_is_agents = terrain(forwards[9] + 7, 3) == bytes.fromhex("8b45fc") and \
+        terrain(forwards[9] + 10, 3) == bytes.fromhex("8b4830")
+    class_is_3 = terrain(forwards[11] + 7, 5) == bytes.fromhex("b803000000")
+    # The face query: the record it hands back is this + 0x18, and this + 0x54 is the face's
+    # first dword, so the record's +0x3c is that dword.
+    query = slot(terrain, 0x1009A3C4, 4)
+    first_dword = (terrain(0x1001A52F, 2) == bytes.fromhex("8b11")
+                   and terrain(0x1001A531, 3) == bytes.fromhex("895054"))
+    record = terrain(0x1001B0F5, 3) == bytes.fromhex("83c018")
+    check("Terrain.dll: a building answers its agent's id, the 20 m exception's word a face's",
+          id_is_agents and class_is_3 and query == 0x1001A470 and first_dword and record,
+          f"CBuilding slot 9 ({forwards[9]:#x}) is its agent's slot 9, through +0x30, slot 11 "
+          f"answers 3 and slot 15 ({forwards[15]:#x}) walks the agent's children; the landscape's "
+          f"face query ({query:#x}) answers this + 0x18 (0x1001b0f5), and stores the face's first "
+          f"dword at this + 0x54 (0x1001a531)")
+
+
+def _check_radar_signatures(game, check, dats) -> None:
+    """Who the radar's rule hides, over the shipped assemblies."""
+    shop = units.Workshop(game)
+    assemblies = {}
+    lightest: dict[str, float] = {}
+    for path in dats:
+        unit = objects.load_unit(path)
+        built = shop.assemble(unit)
+        name = path.relative_to(game / "UNITS").as_posix().lower()
+        if built is not None:
+            assemblies[name] = built
+            continue
+        total = 0.0
+        for i, c in enumerate(unit.components):
+            record = shop.library.get(c.ref.member.lower())
+            if record is None:
+                continue
+            total += sum(n.density * n.volume for n in shop._node_weights(record, i == 0))
+            parsed = shop.armoury.controller(c.ref.member.lower())
+            total += sum(d.mass for d in parsed.components) if parsed else 0.0
+        lightest[name] = total
+
+    def reaches(camouflage: bool, running: bool) -> list[float]:
+        return sorted(units.radar_reach(a.signature(camouflage, running))
+                      for a in assemblies.values())
+
+    rest, going, hidden, hidden_going = (
+        reaches(False, False), reaches(False, True), reaches(True, False), reaches(True, True))
+    hero = next(a for n, a in assemblies.items() if n.endswith("/tut2_p.dat"))
+    cloaks = sum(1 for a in assemblies.values()
+                 if any(d.values[control.CAMOUFLAGE] > 0
+                        for d in a.of_type(control.DETECT_SHIELD_TYPE)))
+    sense = units.RADAR_PART_SENSITIVITY
+    wins = {flag: Counter(max(range(3), key=lambda i, a=a: a.signature(False, flag)[i] * sense[i])
+                          for a in assemblies.values()) for flag in (False, True)}
+    hero_reach = units.radar_reach(hero.signature(True, False))
+    mass_alone = sorted(a.signature()[0] * sense[0] for a in assemblies.values())
+    weightless = sorted(n for n, m in lightest.items() if m == 0.0)
+    heavy = sum(1 for m in lightest.values() if m >= 20000.0)
+    check("UNITS: with its shield on no unit is hidden from a radar part but a rim of its range",
+          len(assemblies) == 382 and rest[0] > 0.95 and going[0] > 0.95 and mass_alone[0] > 1.0,
+          f"over {len(assemblies)} assemblies at a whole radar's level, seen by the best of three "
+          f"to {rest[0]:.4f} of the range at the least, {rest[len(rest) // 2]:.4f} the median, at "
+          f"rest; {going[0]:.4f} and {going[len(going) // 2]:.4f} running; by mass alone v.s runs "
+          f"from {mass_alone[0]:.1f}; the test that shows it furthest {dict(wins[False])} at rest, "
+          f"{dict(wins[True])} running; {cloaks} have a shield with camouflage")
+    # Going, only the heroes stay under 0.9.
+    under = {n for n, a in assemblies.items() if units.radar_reach(a.signature(True, True)) < 0.9}
+    check("UNITS: going, under camouflage, only the heroes stay under 0.9 of a radar part's range",
+          under and all("hero" in n or n.endswith("_p.dat") for n in under),
+          f"{len(under)} by name: {sorted(under)}")
+    check("UNITS: under camouflage the rule hides real ground, and from no unit all of it",
+          hidden[0] > 0.3 and hidden[0] < 0.4 and sum(1 for r in hidden if r < 0.9) > 30
+          and 0.3 < hero_reach < 0.5,
+          f"at rest {sum(1 for r in hidden if r == 0.0)} are unseen, the least seen to "
+          f"{hidden[0]:.3f}, {sum(1 for r in hidden if r < 0.9)} under 0.9 and "
+          f"{sum(1 for r in hidden if r < 0.95)} under 0.95; running "
+          f"{sum(1 for r in hidden_going if r < 0.9)} under 0.9; the hero {hero_reach:.3f}")
+    check("UNITS: 71 of the 76 buildings weigh 20,000 kg or more; a mast and the ruins nothing",
+          len(lightest) == 76 and heavy == 71 and len(weightless) == 5,
+          f"{heavy} of {len(lightest)} at 20,000 kg or more; none at all: {weightless}")
+
 
 #: The patrol block's constants, by offset: name and compiled default
 #: (``Behavior.dll:0x10016250``, bound by name at ``0x10016480``).

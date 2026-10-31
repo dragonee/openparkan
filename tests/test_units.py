@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from openparkan import objects, units, weapons
+from openparkan import control, objects, units, weapons
 
 
 def sheet(**overrides) -> units.Unit:
@@ -70,3 +70,33 @@ def test_the_chassis_body_does_not_eat_into_its_payload():
     assert load.spare == 19404.0
     heavy = units.Load(payload=70000.0, body=17500.0, total=121015.0)
     assert heavy.over and heavy.spare == 0.0
+
+
+def test_a_signature_shows_to_its_own_share_of_a_radars_range() -> None:
+    # Docs/25: v * s of 10 is seen at 95% of the range, 2 at 71%, and 1 or less not at all.
+    assert abs(units.radar_reach((200.0, 0.0, 0.0)) - 0.9487) < 1e-3
+    assert abs(units.radar_reach((0.0, 0.0, 2.0 / 25.0)) - 0.7071) < 1e-3
+    assert units.radar_reach((20.0, 1.0 / 0.7, 0.04)) == 0.0
+
+
+def test_a_shield_and_camouflage_cut_what_an_assembly_gives_away() -> None:
+    def device(type_id, power=0.0, values=(), mass=0.0):
+        return control.Component(
+            type_id=type_id, resource=None, index=None, entries=(), label="", offset=0, size=0,
+            values=tuple(values) + (0.0,) * (16 - len(values)), power=power, mass=mass)
+
+    node = units.NodeMass(density=10.0, volume=2.0, area=5.0, life=1.0, root=True)
+    assembly = units.Assembly(
+        payload=0.0, top_speed=1.0, nodes=[node],
+        devices=[device(control.RADAR_TYPE, power=0.1),
+                 device(control.ENGINE_TYPE, power=1.0, mass=80.0),
+                 device(control.GUN_TYPE, power=9.0),
+                 device(control.DETECT_SHIELD_TYPE, power=0.2, values=(0.9, 0.5, 0.25, 0.75, 0.4))])
+    mass, electronics, drive = assembly.signature()
+    assert abs(mass - 10.0) < 1e-6, "100 kg of body and part, 0.1 of it left"
+    assert abs(electronics - 5.0 * 0.3 * 0.5) < 1e-6, "the radar's and the shield's own ask"
+    assert drive == 0.0, "an engine at rest and a full gun ask nothing"
+    assert abs(assembly.signature(running=True)[2] - 2.0 * 1.0 * 0.75) < 1e-6
+    cloaked = assembly.signature(camouflage=True)
+    assert abs(cloaked[0] - 2.5) < 1e-6, "all three again by value 3"
+    assert abs(cloaked[1] - 5.0 * 0.7 * 0.5 * 0.25) < 1e-6, "and it asks value 4 for it"

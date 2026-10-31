@@ -3,6 +3,23 @@
 use crate::common::*;
 use parkan_formats::gamedir;
 
+/// The hero is taken as a level starts (`iron3d.dll:0x100a2a3c`), and the manual controller
+/// sends its turret (0.5, 0.5, 0) (`World3D.dll:0x1000ee8e`): a pitch value of 0.5 on its
+/// 1.92 rad channel is 24.4° up. So a mission opens looking up, the horizon 90% of the way down
+/// the frame, as *Outflanking Maneuver* does at 74 s and *The Field Base* at 84 s.
+#[test]
+#[ignore = "needs the game install"]
+fn a_mission_opens_with_the_heros_sight_24_degrees_up() {
+    let (mut play, _) = mission_01_play();
+    assert_eq!(play.hero.robot.rig.aim[1], 0.5);
+    for _ in 0..60 {
+        play.tick(1000.0 / 60.0, [0.0; 2]);
+    }
+    let look = play.eye().forward;
+    let rise = look.z.atan2(look.truncate().length()).to_degrees();
+    assert!((rise - 24.4).abs() < 2.5, "{rise}");
+}
+
 #[test]
 #[ignore = "needs the game install"]
 fn a_strafe_turns_the_hull_while_the_turret_holds_the_sight() {
@@ -393,6 +410,10 @@ fn a_driven_flyers_hull_comes_round_under_its_turret_while_the_lock_holds_and_it
         play.tick(TICK, [0.0; 2]);
     }
 
+    // Taken, its turret looks ahead at a pitch value of 0.5 (`World3D.dll:0x1000ee8e`), which on
+    // this hung one is 35° under the level: the opening of the recording's cockpit, all ground.
+    assert!((play.eye().forward.z + 35.0_f32.to_radians().sin()).abs() < 0.03, "{}", play.eye().forward);
+
     // Mouse Y tilts the sight down and back up, and the height holds.
     let z0 = play.driven().walker.body.position.z;
     let look0 = play.eye().forward.z;
@@ -406,7 +427,7 @@ fn a_driven_flyers_hull_comes_round_under_its_turret_while_the_lock_holds_and_it
             assert!((z - z0).abs() < 1e-3, "pitch moved the flyer from {z0} to {z}");
         }
         if counts > 0.0 {
-            assert!(lowest < look0 - 0.5, "the sight tilted down: {look0} to {lowest}");
+            assert!(lowest < look0 - 0.35, "the sight tilted down: {look0} to {lowest}");
         }
     }
 

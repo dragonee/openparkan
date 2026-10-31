@@ -168,6 +168,56 @@ so its `0x44` falls to what channel 0 asks — and a radar part's sensitivity to
 `0x44` is 500 times its sensitivity to mass. A shield recharging, or camouflage
 running, raises `0x43`.
 
+## Who the rule hides — *measured*
+
+The three figures can be worked out of the design files: the weigh's mass, the nodes'
+level-0 areas and volumes, and what the devices ask (`units.Assembly.signature`,
+`openparkan verify`). For a fitted radar part at its full life and level, over the 382
+shipped assemblies with a root controller, the share of the range out to which the best of
+the three shows them, with every idling device on, full guns, and an engine only when going:
+
+| the target | unseen | least | under 0.9 | under 0.95 | median |
+|---|---:|---:|---:|---:|---:|
+| its shield on, at rest | 0 | 0.9595 | 0 | 0 | 0.9972 |
+| its shield on, going | 0 | 0.9685 | 0 | 0 | 0.9998 |
+| camouflage on, at rest | 0 | 0.3333 | 43 | 57 | 0.9903 |
+| camouflage on, going | 0 | 0.3333 | 19 | 19 | 0.9991 |
+
+- **So with no camouflage the rule hides a rim.** The worst is the T-2 helicopter, 2,522.5 kg
+  and a MK1 small shield, mass 252 × 0.05 = 12.6, against 250 m: it shows to 239.9 m, 10 m
+  in. Half of them lose under 0.3% of the range. Mass alone, at 0.05, is above 1 on all 382,
+  so no unit goes unseen at any range however it asks: every shipped unit has a mass.
+- **Which test wins** at rest: drive on 175, electronics on 109, mass on 98; going, drive on
+  363. The hero, at rest, is 16.1, 15.5 and 5.7 by the three, and shows to 0.9685.
+- **Camouflage is what hides, and only from a radar part.** The hero's small MK4 under it is
+  1.08, 1.16 and 0.38 at rest, so an AI unit's 250 m radar finds it at 93 m and a 700 m one
+  at 262 m; a tower's or a bunker's radar, 0.5 on all three, still finds it to 0.95 of 500 to
+  750 m. A MK1 shield has no camouflage, which leaves 102 of the 382 assemblies that have it
+  at all. The 43 under 0.9 at rest are the 19 heroes, medium bots and the designer's own
+  preview units; **going, only the 19 heroes stay under it**: the rest's engines ask enough
+  to show them through it.
+- **A power-starved or damaged radar loses more.** The level and the life multiply all
+  three sensitivities (`0x10024620`): at 0.4 the same T-2 shows to 0.895 of the range.
+- **Buildings have no shield.** 71 of the 76 assemblies with no root controller weigh 20,000
+  kg or more, the lightest `l_bridge` at 20,000, so 1000 × and more: seen to 0.9995 of the
+  range and beyond. The other five weigh nothing and show nowhere, the power mast and the
+  four ruins. openparkan does not weigh a building and takes it for seen to the rim.
+- **The target dummies are not hidden by this.** `l_targ` and `M_targ` carry no shield and
+  weigh 8,025 and 74,538 kg, 401 and 3,727 against 0.05, seen to 0.9988 and 0.9999. So the
+  *guess* in [35-hud.md](35-hud.md#not-established-1) that they give off no signature is
+  wrong, and why they are not on the recording's radar is not established.
+- **Against the recording.** At the scale of the satellite map the rim is a pixel or less,
+  and no frame of the recordings has been set against it. The one *seen* limit is the target
+  list's: in *Outflanking Maneuver* at 164–166.3 s the hero's own SWW-2 reads 218, 223,
+  226, 238, 243 and 245 m as it draws away, and the panel turns to the next target
+  at the next third of a second. That is a current target dropped by the list's own range test
+  ([The player's target](#the-players-target--read-and-measured)), which does not ask for
+  a contact, so it neither supports nor counts against 0.96.
+
+openparkan now asks all of this: the sensitivities and the radar's level, each unit's
+signature from its weight, its last power tick's asks and its shield, and camouflage's cut,
+on the hero and on any bot the player switches it on.
+
 ## The detection shield hides all three, and camouflage hides them again — *read*, and *measured*
 
 A detection shield — `CICLS_DETECTSHIELD`, class 10, "Large detect.shld" — is
@@ -826,6 +876,9 @@ offsets above.
 - ~~What asks an AI machine's device manager to switch camouflage *on*.~~
   Answered: the unit takt's engagement check
   ([When the AI wears it](#the-detection-shield-hides-all-three-and-camouflage-hides-them-again--read-and-measured)).
+- ~~The three signatures, and who the rule hides at a radar's range.~~ **Measured**: 0 of
+  382 go unseen; a rim of at most 4% with the shield on, and down to 0.33 of the range under
+  camouflage ([Who the rule hides](#who-the-rule-hides--measured)).
 - ~~Where the radar module's list of every kept contact (`+0x3c`) is
   emptied.~~ Answered: nowhere, and its only reader is dead code
   ([above](#what-the-ai-does-with-it--read)).

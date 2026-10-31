@@ -43,6 +43,16 @@ pub struct Power {
     pub engines: Vec<(f32, Node)>,
     /// The detection shield's power figure, what camouflage adds to it, and its node.
     pub detection: Option<(f32, f32, Node)>,
+    /// The detection shield's four cuts: of the mass, the electronics and the drive, and all
+    /// three again while camouflage is on (values 0 to 3, `Control.dll:0x1002bd94`).
+    pub cuts: [f32; 4],
+    /// Whether the last tick had camouflage on.
+    pub camouflaged: bool,
+    /// What each channel's consumers asked a second in the last tick (`0x1002d47a`,
+    /// `0x1002d496` total them), and each channel's level, which a channel that asked nothing
+    /// leaves as it was.
+    pub asks: [f32; 6],
+    pub levels: [f32; 6],
     /// Every other device that draws its power figure a second while switched on and whole
     /// (`0x10021860`): its channel, its power figure and its node.
     pub devices: Vec<(u8, f32, Node)>,
@@ -87,7 +97,22 @@ impl Power {
             .filter(|(_, _, k)| !PRICED_APART.contains(&k.type_id) && k.power > 0.0 && k.index != Some(0))
             .map(|(p, _, k)| (power::channel(k.type_id), k.power, node(*p, k)))
             .collect();
-        Some(Power { batteries, repair, engines, detection, devices, next_ms: 0.0, last_ms: 0.0 })
+        let cuts = of(control::DETECT_SHIELD_TYPE)
+            .next()
+            .map_or([0.0; 4], |(_, _, k)| [k.values[0], k.values[1], k.values[2], k.values[3]]);
+        Some(Power {
+            batteries,
+            repair,
+            engines,
+            detection,
+            cuts,
+            camouflaged: false,
+            asks: [0.0; 6],
+            levels: [1.0; 6],
+            devices,
+            next_ms: 0.0,
+            last_ms: 0.0,
+        })
     }
 
     /// The batteries' fill, `Σ capacity × charge ÷ Σ capacity` (`Control.dll:0x1002b42b`): what
@@ -177,6 +202,17 @@ impl Power {
         }
 
         let (levels, used) = power::serve(supply, &draws);
+        self.camouflaged = switches.camouflage;
+        self.asks = [0.0; 6];
+        for (draw, level) in draws.iter().zip(&levels) {
+            let channel = usize::from(draw.channel).min(5);
+            if dt > 0.0 {
+                self.asks[channel] += draw.want / dt;
+            }
+            if let Some(level) = level {
+                self.levels[channel] = *level;
+            }
+        }
         if let Some((r, c, at)) = repair
             && let Some(level) = levels[at]
         {
@@ -219,6 +255,10 @@ mod tests {
             repair: Some((Repair { rate: 15.0, cost: 0.04, power: 0.1 }, Some((0, 0)))),
             engines: vec![(0.1, Some((0, 0)))],
             detection: Some((0.11, 0.3, Some((0, 0)))),
+            cuts: [0.9, 0.45, 0.01, 0.933],
+            camouflaged: false,
+            asks: [0.0; 6],
+            levels: [1.0; 6],
             devices: vec![(2, 0.08, Some((0, 1)))],
             next_ms: 0.0,
             last_ms: 0.0,
