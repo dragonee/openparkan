@@ -274,6 +274,47 @@ table would make it `SetControlCalculationMode` (a *guess*, counting from
 slot 5 = `SetTangSpeed`, `0x100044a0`). Without a countdown a T-2's rotor would
 be drawn only at each step's end, 162° apart; with one, it turns smoothly.
 
+**The faces follow the nodes, whatever turns them** — *read*, with a door for
+the control, and *measured*. The game keeps no collision solid to bring up to
+date: a node's faces stay in the node's frame and are carried through its matrix
+as they are asked for. The way from an item to its faces has no class in it.
+
+- **The item plays.** The driver calls the base item's playback directly
+  (`Control.dll:0x1002d29e`, `0x10021a30`), and it offers each channel's value to
+  the node through `IAnimation` slot 10 (`0x10021c97`,
+  `AniMesh.dll:0x10005630`). A door (class 12) and a rotor (class 26) reach that
+  one call site alike.
+- **The node goes stale.** The slot stores the value and calls `0x1000a2a0`,
+  which clears the node's `+0x110` and sets the object's `+0x1fc`. No key is
+  worked out and nothing is built.
+- **Every reader runs the walk first.** The walk (`0x10008b30`) does nothing while
+  `+0x1fc` and `+0x1fd` are clear (`0x10009018`–`0x1000902a`); otherwise it keys
+  the stale nodes, multiplies the chain and clears both (`0x10009387`). It is the
+  first call of the walk-face test (`0x1000ccc3`), the push-out (`0x1000d424`),
+  the segment query (`0x10013efe`) and the ground query (`0x10013ff1`), the four
+  ways in to a face, of its eleven callers in the module.
+- **The visitors read the matrix.** The node visitors take a slot's sphere through
+  the node's `+0x20` as they test it (`0x1000cf31`), and the gather turns each face
+  into the world (`0x1000e0c0`).
+
+So the cost is **one walk an object a frame**, on a frame in which a channel moved,
+paid by the first reader and nothing by the rest. **The door is the control:** the
+same four readers are how a door's leaf stops a mover, and `CBuilding` adds only
+the test that lets its faces go while it is open
+([24-motion.md](24-motion.md#the-ground-inside-a-building--read-in-part-and-measured)).
+The pair's face source is the agent's mesh, not `CBuilding`'s own interface `0x18`
+slot 6 (`Terrain.dll:0x1005a6c0`), whose cell walk was not followed.
+
+*Measured*: the nine class-26 records that name channels turn 3205 level-0 faces,
+every one with triangle flags 0, so they stop and push a mover like any wall:
+`fr_l_mtp`'s five records 2689 of them, the mines' 120, 108 and 108, `fr_e_brige`'s
+hub 180. A second computer turns 12 to 16 faces flagged 4, which a mover passes,
+and each tower's mast 208 or 236.
+
+openparkan keeps its faces in the world, so it works out again the faces of a node
+whose pose has moved (`Solid::follow`), which the game's walk does not have to do:
+2689 faces at most, on one building, a step.
+
 **What turns, and how fast** — *measured*, then *derived* from the read
 update:
 
@@ -358,6 +399,11 @@ class 25 at `+0xac` with `0x20` and 0 (`0x10019950`), class 10 at `+0xae` with
 `0x1000` and `0x2000`, the camouflage (`0x10019a10`), and class 15 at `+0xaf` with
 `0x20` and 0, the repair system (`0x10019a80`,
 [26-damage.md](26-damage.md#repair-a-units-own-repair-unit-switched-on-and-off--read-and-measured)).
+The class-25 setter has no caller: no call, jump or pointer in `Behavior.dll`
+reaches it, where the same search finds the two of `0x10019a10`, the three of
+`0x10019a80` and the one of `0x100199b0`. The tick sends that list its words itself,
+place by place
+([13-control.md](13-control.md#a-buildings-load-group--read-and-measured)).
 
 **Against the recording** — *seen*, and a reading corrected. "Let's Play - Parkan:
 Iron Strategy, Part 4" keeps the valley's Light Tower in the target panel from
@@ -850,6 +896,12 @@ is not a category but three state bits, which the loaded tree reads and writes
     the channel's span, which the held wheels and rollers play;
   - what a control system of agent kind 10 is: its tick skips the states and
     the devices both (`0x1000c294`).
+- ~~Whether a building's collision mesh follows the nodes its own items turn, and
+  at what cost~~ — **read**, with a door for the control: it does, whichever item
+  turns them. All four ways in to a face run the pose walk first and take the node
+  through its matrix, so the cost is one walk an object a frame in which a channel
+  moved
+  ([Every component is stepped](#every-component-is-stepped-not-only-a-device--read-and-measured)).
 - ~~What stops a tower's gun mast at the top, its record's switch word being 9,
   open and bouncing~~ — answered: the tower's own behaviour. `MBehaviour`'s place
   set files class-29 items in a list of their own (`Behavior.dll:0x100187e1`) and

@@ -2397,21 +2397,13 @@ impl Play {
     /// A placed object's faces again, once its nodes' blocks or visibility changed; a robot's
     /// are rebuilt every tick.
     pub(crate) fn rebuild_solid(&mut self, t: usize) {
-        if self.robots.iter().any(|(rt, _)| *rt == t) {
+        if self.robots.iter().any(|(rt, _)| *rt == t)
+            || t >= self.battle.combat.targets.len()
+            || t >= self.battle.wears.len()
+        {
             return;
         }
-        let (Some(target), Some(wears)) = (self.battle.combat.targets.get(t), self.battle.wears.get(t))
-        else {
-            return;
-        };
-        let building = self.battle.placed_kinds.get(t) == Some(&KIND_BUILDING);
-        let materials = &self.materials;
-        let solid =
-            Solid::from_parts(&target.parts, target.centre, target.radius, building, |part, material| {
-                let name = wears.get(part)?.get(usize::from(material & 0xFF))?;
-                materials.get(name).map(|m| (m.surface, m.damage_rate))
-            });
-        let mut solid = solid;
+        let mut solid = self.building_solid(t);
         if let Some(b) = self.buildings.iter().find(|b| b.target == t) {
             for node in solid.nodes.iter_mut().filter(|n| n.part == b.part) {
                 node.open = b.open_door_node(node.node);
@@ -2420,6 +2412,18 @@ impl Play {
         if let Some(s) = self.ground.solids.get_mut(t) {
             *s = Solid { present: s.present, mass: s.mass, ..solid };
         }
+    }
+
+    /// Target `t`'s faces, built afresh from its parts as they stand.
+    pub fn building_solid(&self, t: usize) -> Solid {
+        let target = &self.battle.combat.targets[t];
+        let wears = self.battle.wears.get(t);
+        let building = self.battle.placed_kinds.get(t) == Some(&KIND_BUILDING);
+        let materials = &self.materials;
+        Solid::from_parts(&target.parts, target.centre, target.radius, building, |part, material| {
+            let name = wears?.get(part)?.get(usize::from(material & 0xFF))?;
+            materials.get(name).map(|m| (m.surface, m.damage_rate))
+        })
     }
 
     /// Target `t`'s machine: a robot's, or the one a building that carries guns keeps for its
@@ -3339,7 +3343,7 @@ impl Play {
         }
         let mut moved = Vec::new();
         let mut fired = Vec::new();
-        let Play { buildings, emplacements, battle, .. } = self;
+        let Play { buildings, emplacements, battle, ground, .. } = self;
         for b in buildings.iter_mut() {
             let standing: Vec<Standing> =
                 children.iter().filter(|(s, _)| *s == b.target).map(|(_, c)| *c).collect();
@@ -3354,15 +3358,13 @@ impl Play {
                 let robot = emplacements.iter().find(|(t, _)| *t == b.target).map(|(_, r)| r);
                 b.pose(&mut target.parts, |p| robot.is_some_and(|r| carried_by_turret(r, p)));
             }
-            // A running item's own channels only pose the part. STAND-IN:
-            // docs/28-chassis.md#every-component-is-stepped-not-only-a-device--read-and-measured
-            // -- a mine's rotors, the Main Teleport's rings and the energy bridge's hub turn
-            // for ever, so rebuilding the collision solid for them would rebuild it every
-            // tick, on every one of them, for good. Whether the game's own collision mesh
-            // follows an animated node is not read; a door's, which it plainly does, still
-            // does here.
+            // A door's and a pod's channels bring the whole solid round, doors open and all; a
+            // running item's only move the faces of the nodes it turns. The game's own faces
+            // follow them both alike (docs/28, "Every component is stepped").
             if changed || b.doors.iter().map(|d| d.phase).ne(phases) {
                 moved.push(b.target);
+            } else if turned && let Some(solid) = ground.solids.get_mut(b.target) {
+                solid.follow(&target.parts);
             }
             fired.extend(fire);
         }
@@ -5458,7 +5460,15 @@ mod tests {
             faces.extend([face(a, b, c), face(a, c, d)]);
         }
         let (centre, radius) = (Vec3::new(0.0, 0.0, 15.0), 45.0);
-        let nodes = vec![SolidNode { centre, radius, faces: 0..faces.len(), part: 0, node: 0, open: false }];
+        let nodes = vec![SolidNode {
+            centre,
+            radius,
+            faces: 0..faces.len(),
+            part: 0,
+            node: 0,
+            open: false,
+            pose: None,
+        }];
         Solid { centre, radius, ground: true, present: true, mass: 0.0, faces, nodes }
     }
 

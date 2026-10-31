@@ -978,6 +978,7 @@ mod tests {
                 part: 0,
                 node: 0,
                 open: false,
+                pose: None,
             }],
         });
         g

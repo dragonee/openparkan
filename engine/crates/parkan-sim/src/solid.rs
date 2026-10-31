@@ -2,8 +2,9 @@
 //! up on, and what a machine collides with. See `docs/24-motion.md`, "Finding the
 //! ground" and "Collision between objects".
 //!
-//! Placed objects do not move once built, so their faces are carried into the world
-//! once, with the triangle's flags, its batch's flags and its material's surface id.
+//! A placed object's faces are carried into the world as it is built, with the triangle's
+//! flags, its batch's flags and its material's surface id, and again whenever a node of it
+//! moves ([`Solid::follow`]).
 
 use glam::Vec3;
 
@@ -149,6 +150,8 @@ pub struct SolidNode {
     /// An open door's node, whose faces let a mover through (`IBuilding` slot 17,
     /// `AniMesh.dll:0x1000dd13`).
     pub open: bool,
+    /// The pose its faces were last put in the world by ([`Solid::follow`]).
+    pub pose: Option<parkan_formats::pose::Pose>,
 }
 
 /// A placed object's faces.
@@ -230,10 +233,52 @@ impl Solid {
                     part: p,
                     node: i,
                     open: false,
+                    pose: Some(*pose),
                 });
             }
         }
         Self { centre, radius, ground, present: true, mass: 0.0, faces, nodes }
+    }
+
+    /// Put the faces of every node whose pose has moved where it stands now, leaving the rest
+    /// and everything a face carries besides its corners and normal.
+    ///
+    /// The game keeps no solid to bring up to date: its faces stay in their nodes' own frames,
+    /// and all four of its face readers run the pose walk first (`AniMesh.dll:0x1000ccc3`,
+    /// `0x1000d424`, `0x10013efe`, `0x10013ff1`) and take each node through its matrix as they
+    /// ask (`0x1000cf31`). So a rotor's faces follow it exactly as a door's do, whatever turns
+    /// them (docs/28, "Every component is stepped"). Here the faces are kept in the world, so a
+    /// turning node's are worked out again when it moves: the nine class-26 records that name
+    /// channels turn 3205 faces in all, 2689 of them on `fr_l_mtp`.
+    pub fn follow(&mut self, parts: &[Part]) {
+        for n in &mut self.nodes {
+            let Some(part) = parts.get(n.part) else { continue };
+            let Some(pose) = part.nodes.get(n.node) else { continue };
+            if n.pose.as_ref() == Some(pose) {
+                continue;
+            }
+            let mesh = &part.mesh;
+            let Some(slot) = part.slot(n.node).and_then(|s| mesh.slots.get(usize::from(s))) else {
+                continue;
+            };
+            let first = usize::from(slot.first_triangle).min(mesh.triangles.len());
+            let place = |v: [f32; 3]| vec(pose.apply(v.map(|x| f64::from(x * part.scale))));
+            for (k, f) in n.faces.clone().enumerate() {
+                let t = first + k;
+                let [a, b, c] = mesh.triangles[t].map(|v| place(mesh.positions[usize::from(v)]));
+                let normal = mesh.face_normals.get(t).map_or_else(
+                    || (b - a).cross(c - a).normalize_or_zero(),
+                    |m| {
+                        vec(parkan_formats::pose::rotate(pose.rotation, m.map(f64::from))).normalize_or_zero()
+                    },
+                );
+                let face = &mut self.faces[f];
+                (face.a, face.b, face.c, face.normal) = (a, b, c, normal);
+            }
+            let [cx, cy, cz, _] = slot.sphere;
+            n.centre = place([cx, cy, cz]);
+            n.pose = Some(*pose);
+        }
     }
 
     /// Interface `0x25` slot 2 (`AniMesh.dll:0x1000ccb0`, `0x1000cfa0`): the walkable face
@@ -665,6 +710,7 @@ mod tests {
                 part: 0,
                 node: 0,
                 open: false,
+                pose: None,
             }],
         }
     }
@@ -715,6 +761,7 @@ mod tests {
                 part: 0,
                 node: 0,
                 open: false,
+                pose: None,
             }],
         };
         // Standing 1.5 in front of it with a radius of 2: pushed back by 0.5.

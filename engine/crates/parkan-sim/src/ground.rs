@@ -745,7 +745,15 @@ pub(crate) mod tests {
                 present: true,
                 mass: 0.0,
                 faces: vec![face(a, b, c), face(a, c, d)],
-                nodes: vec![SolidNode { centre, radius: 15.0, faces: 0..2, part: 0, node: 0, open: false }],
+                nodes: vec![SolidNode {
+                    centre,
+                    radius: 15.0,
+                    faces: 0..2,
+                    part: 0,
+                    node: 0,
+                    open: false,
+                    pose: None,
+                }],
             }
         };
         g.solids.push(slab(4.0));
