@@ -20795,6 +20795,26 @@ def check_vocabulary(check, game: Path) -> None:
           f"records are named so; {drawn} of them draw on the fr_ model their "
           f"building's .bas names -- one set of models, the six towers sharing two")
 
+    # The construction sphere's 15 more on a mine looks for `mine` in the name
+    # interface 0x24 hands out for part 0 (Terrain.dll:0x1005c480,
+    # AniMesh.dll:0x100025e0): the member the agent was loaded from, the FORT
+    # record's first slot.  docs/24-motion.md, "Collision between objects".
+    in_body = sorted(f.name.lower() for f in forts
+                     if f.slots and "mine" in f.slots[0].member.lower())
+    in_name = sorted(f.name.lower() for f in forts if "mine" in f.name.lower())
+    buildings = [objects.load_unit(p) for p in sorted(game.glob("UNITS/**/*.dat"))]
+    buildings = [u for u in buildings if u.kind & 0x80000000]
+    mines = sorted(u.source.name for u in buildings if u.kind == 0x80000004)
+    named_mines = sorted(u.source.name for u in buildings
+                         if "mine" in u.components[0].ref.member.lower())
+    check("objects.rlb: a building's mine test reads its body's name, which names the mines",
+          in_body == in_name == ["fr_b_mine", "fr_l_mine", "fr_m_mine"]
+          and len(buildings) == 76 and len(mines) == 8 and named_mines == mines,
+          f"{len(in_body)} of the {len(forts)} FORT records name a body holding `mine`, "
+          f"{in_body}, the records whose own name holds it; of the {len(buildings)} "
+          f"building assemblies the {len(named_mines)} whose root names a mine are the "
+          f"{len(mines)} of Type 0x80000004")
+
     # The component classes World3D.dll's resolver leaves unnamed.
     archive_names = frozenset(p.name.lower() for p in all_archives(game))
     classes = Counter()
