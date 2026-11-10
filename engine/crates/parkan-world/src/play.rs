@@ -778,6 +778,7 @@ fn hero_target(
         shield,
         agent_sphere: (hero.walker.body.position, 0.0),
         construction: None,
+        bubble_floor: None,
         devices,
         gear,
     };
@@ -1184,6 +1185,23 @@ impl Play {
             .into_iter()
             .map(crate::basement::cut)
             .collect();
+        // Each placed building's lowest contour corner, the height its own collision pass
+        // drops a bubble contact under ([`Target::bubble_floor`]).
+        for (t, &o) in battle.objects.iter().enumerate() {
+            let object = &mission.objects[o];
+            if object.kind != KIND_BUILDING {
+                continue;
+            }
+            if let Some((inner, outer)) = crate::basement::plan(&mut assembly, &object.path) {
+                battle.combat.targets[t].bubble_floor = crate::basement::lowest_contour(
+                    &ground.land,
+                    &inner,
+                    &outer,
+                    object.position,
+                    object.rotation,
+                );
+            }
+        }
         let materials_for = |t: usize, part: usize, material: u16| {
             let name = battle.wears.get(t)?.get(part)?.get(usize::from(material & 0xFF))?;
             materials.get(name).map(|m| (m.surface, m.damage_rate))

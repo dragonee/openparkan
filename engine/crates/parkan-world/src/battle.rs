@@ -383,9 +383,11 @@ impl Battle {
         );
         // A building's construction sphere, placed: its centre through the building's matrix and
         // its radius as it is (`Terrain.dll:0x1005c56b`-`0x1005c5dd`). The 15 a mine's gets
-        // more is told from a name holding `mine`, the one its agent's interface `0x24` hands
-        // out (`0x1005c480`-`0x1005c507`); the root record's is taken for it, `fr_*_mine` on
-        // the three mines.
+        // more is told from a name holding `mine` (`0x1005c480`-`0x1005c507`): the one interface
+        // `0x24` hands out for part 0 (`AniMesh.dll:0x100025e0`), which is the member the agent
+        // was loaded from (`0x1000311f`), and `CBuilding` loads its agent from its `FORT`
+        // record's first slot (`Terrain.dll:0x10055e95`) -- `bu_l_mine` for `fr_l_mine`
+        // (docs/24, "A building's second is its construction sphere").
         let construction = (object.kind == mission::KIND_BUILDING)
             .then(|| crate::basement::plan(assembly, &object.path))
             .flatten()
@@ -393,7 +395,9 @@ impl Battle {
                 let mine = assembly_parts
                     .iter()
                     .find(|p| p.host == -1)
-                    .is_some_and(|root| root.record.to_ascii_lowercase().contains("mine"));
+                    .and_then(|root| assembly.library.get(&root.record))
+                    .and_then(|fort| fort.slots.first())
+                    .is_some_and(|agent| agent.member.to_ascii_lowercase().contains("mine"));
                 crate::construction::construction_sphere(&outer, mine)
             })
             .map(|(centre, radius)| {
@@ -422,6 +426,7 @@ impl Battle {
             shield,
             agent_sphere,
             construction,
+            bubble_floor: None,
             devices,
             gear,
         });

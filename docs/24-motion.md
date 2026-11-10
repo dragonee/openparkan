@@ -1956,10 +1956,57 @@ the read.
       2.6 on three and ±63.1 on the energy bridge, so its sphere, 39.4 on the
       three and 74.6 on the fourth, stands at the bank and holds little of the
       span, whose decks run out to y 37 to 186.
-    - **Which name `mine` is looked for in** was not followed past the agent:
-      `CBuilding` answers interfaces up to `0x18` itself and hands any other to
-      its agent (`0x10057cf6`). The three mines' records are `fr_b_mine`,
-      `fr_l_mine` and `fr_m_mine`.
+    - **The name `mine` is looked for in is the agent's own member** (*read*
+      2026-11-10). `CBuilding`'s `QueryInterface` (`0x10057d50`, then the table
+      at `0x10057d2b`) answers 0, 6, `0x11`, `0x17` and `0x18` itself and hands
+      every other id to its agent's own table (`0x10057cf6`, through `+0x34`, the
+      agent's `+0x130`, whose slot 0 looks the id up at `+0x198` and asks no
+      outer, `AniMesh.dll:0x100012d0`). The agent's constructor files its
+      sub-object `+0x134` as `0x24` (`0x10001181`), and that interface's slot 2
+      (`0x100025e0`) looks up the part whose id is the key in the agent's part
+      list (76-byte entries at `+0x6e4`, the id at `+0x48`) and hands out the
+      entry's `+0x20`. The routine asks for key 0 (`0x1005c4a7`), and part 0 is
+      the one the agent's load enters with the library and member it was loaded
+      from (`0x10003102`–`0x10003147`, the id 0 at `0x1000311f`).
+      `CBuilding` loads its agent from its `FORT` record's first slot
+      (`Terrain.dll:0x10055e95`, the record's `+0` and `+0x20`), so the name is
+      the `bu_` record's: `bu_b_mine`, `bu_l_mine`, `bu_m_mine`. *Measured*: on
+      all 34 `FORT` records the first slot's member holds `mine` exactly where
+      the record's own name does, on the three mines, and of the 76 building
+      assemblies the 8 whose root names a mine are the 8 of Type `0x80000004`.
+      The engine reads the `bu_` name now; the `fr_` name it took before agrees
+      on every shipped building.
+    - **A building's own pass drops a bubble contact under its lowest contour
+      corner** (*read* 2026-11-10). After the touch (`0x1001d703`) the resolve
+      compares the object the bubble belongs to with the manager's context entry
+      (`0x1001d7fb`–`0x1001d80c`, the pass's `+0x3c`), and where they are one,
+      asks the manager's `+0x14` slot 7 for a height and clears the contact's
+      flag 4 when the height is above the contact point's z
+      (`0x1001d846`–`0x1001d85b`). The manager's `+0x14` is what its attach
+      gets from its owner for interface `0x11` (`0x1001ce30`–`0x1001ce3b`); a
+      building's manager is made by its agent with the building as its owner
+      (`AniMesh.dll:0x10003538`, the agent's `+4`), and `CBuilding` answers
+      `0x11` with its `IBasement`, `+4` (`Terrain.dll:0x10057cb9`). Slot 7 of that
+      (`0x10056aa0`) hands out `CBuilding + 0xe0`, which the constructor sets to
+      100,000 (`0x100569c4`) and slot 6 (`0x10056a80`) overwrites. The one call
+      of slot 6 on an `IBasement` in the install is the insertion's
+      (`0x10014654`; `analysis/slotcalls.py 0x11 6` finds 4 candidates among the
+      608 calls at `+0x18`, the other three a `g_FastProc` transform, an archive
+      read and a collision object's slot 6), and it hands the building the
+      **lowest corner of the cut outer contour**, the
+      minimum kept beside the mean in the same loop (`0x10010ea8`,
+      `0x10010f55`–`0x10010f79`). A round meets a building only in the
+      building's own pass, as its visitor
+      ([Walking into a building](#walking-into-a-building--read-and-measured)),
+      so the drop holds for every bubble contact a building has: the part of the
+      construction sphere under the ground round it meets nothing, and a
+      building not yet inserted, at 100,000, has no bubble contact at all.
+      *Measured* over the 167 placed buildings: the floor is at or under the
+      base on 163, a median 1.11 m and at most 11.78 under it; three stand over
+      it by under a centimetre and Campaign 2's first bridge, on its file
+      height, by 1.00. The sphere's centre is over the floor on 136 and within a
+      millimetre of it on the other 31, so the drop takes the sphere's lower half
+      or more and leaves its dome.
 
     A round is swept against this sphere, and against a unit's first
     (`0x1001d6c4`–`0x1001d6da`): what the touch finds is the round's **bubble

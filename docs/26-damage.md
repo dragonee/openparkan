@@ -1256,6 +1256,17 @@ every value 2 of it (`0x100257b0`).
   asks nothing about a shield: every unit and building the round's sphere
   touches gives a contact, and it is the round's answer that finds a sector or
   none.
+- **Not under a building's ground** (*read* 2026-11-10). A round meets a
+  building in the building's own collision pass, and there the resolve drops a
+  bubble contact whose point lies under the building's lowest contour corner
+  (`0x1001d846`–`0x1001d85b`): the height the landscape's insertion keeps beside
+  the mean it sets the building down on and hands its `IBasement`
+  (`Terrain.dll:0x10010f55`–`0x10010f79`, `0x10014654`), 100,000 until it runs.
+  So the construction sphere's lower part, under the ground round the building,
+  stops nothing, and a building not yet in the landscape has no bubble at all.
+  Over the 167 placed buildings the height is a median 1.11 m under the base,
+  and the sphere's centre stands at it or over it on every one
+  ([24-motion.md](24-motion.md#collision-between-objects--read)).
 - **The touch** (`0x1001e9f0`), with *S* the bubble's radius plus the round's: a
   round whose start lies within *S* of the object's start makes **no contact**, so
   a shot from inside a bubble meets no shield; otherwise the first *t* ≤ 1 at which
@@ -1565,8 +1576,14 @@ shield, battery and ammunition (`Behavior.dll:0x10018100`, `0x10019372`,
   Tower shows a translucent green dome under fire ("Let's Play - Parkan: Iron
   Strategy, Part 6", 48:40), and the engine's was not set beside it.
 - Where a round's `+0x104` bit `0x2000000`, which skips
-  bubbles, is set; the height below which a building's own collision context drops
-  a contact (`0x1001d846`); whether the deflector parts' own `deflector` and
+  bubbles, is set; ~~the height below which a building's own collision context drops
+  a contact (`0x1001d846`)~~ — **read** 2026-11-10: the lowest corner of the
+  building's cut outer contour, which the landscape's insertion hands its
+  `IBasement` slot 6 (`Terrain.dll:0x10014654`) and the pass reads back through
+  slot 7 (`0x10056aa0`), 100,000 until the insertion runs; a median 1.11 m under the
+  base over the 167 placed buildings, so a bubble contact under the ground round a
+  building is dropped ([A round meets a bubble](#a-round-meets-a-bubble--read)); the
+  engine had no such drop and has it now; whether the deflector parts' own `deflector` and
   `tur_deflector*` load effects loop.
 - ~~Which of ±x, ±y is a model's front.~~ Answered: +y, sector 0
   ([Shields](#shields-a-generator-a-deflector-six-sectors--read-and-measured)).

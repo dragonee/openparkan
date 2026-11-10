@@ -2250,3 +2250,30 @@ fn every_devices_mass_sits_on_a_node_of_its_unit_and_the_total_is_the_weighs() {
     }
     assert!(carried > 0, "some unit carries a device off its node 0");
 }
+
+/// A building's construction sphere is what its controller stands the sphere's effects in and
+/// what its kill takes (`Control.dll:0x10002e6f`, `0x100033e6`): `IBuilding` slot 15 asked with
+/// 2, the centre of its ground plan's outer-ring box through the building's matrix with its own
+/// height kept, and the ring's reach + 5 from there (`Terrain.dll:0x1005c540`, docs/32, "The
+/// construction sphere"). A light tower the player puts up is a Medium Tower's `mtow01`, on the
+/// Small Tower's plan: 46.71 about (0, 5.27, 2.73) in the model, where the engine's contour
+/// sphere at the placement's height stood 2.73 lower and 0.09 smaller.
+#[test]
+#[ignore = "needs the game install"]
+fn a_light_towers_sphere_stands_at_its_construction_sphere() {
+    let (mut play, _) = mission_03_play();
+    let player = play.player_clan;
+    let spot = glam::Vec3::new(1026.1, 942.7, 0.0);
+    let at = spot.with_z(play.ground.below(spot.x, spot.y, 1.0e5).unwrap().point.z);
+    let yaw = 0.5_f32;
+    let now = play.hero.time_ms;
+    let tower = play.create_building(player, 0x8010_0000, at, yaw, now).expect("the tower stands");
+    let sphere = play.construction.spheres.iter().find(|s| s.target == tower).expect("its sphere runs");
+    let (sin, cos) = yaw.sin_cos();
+    let model = glam::Vec3::new(0.0, 5.27, 2.73);
+    let expected =
+        at + glam::Vec3::new(cos * model.x - sin * model.y, sin * model.x + cos * model.y, model.z);
+    assert!(sphere.centre.distance(expected) < 0.01, "{} against {expected}", sphere.centre);
+    assert!((sphere.radius - 46.71).abs() < 0.01, "{}", sphere.radius);
+    assert_eq!(Some((sphere.centre, sphere.radius)), play.battle.combat.targets[tower].construction);
+}

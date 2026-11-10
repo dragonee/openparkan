@@ -493,13 +493,24 @@ impl Play {
         exits
     }
 
-    /// Target `t`'s contour sphere across the ground, where it stands.
-    fn building_sphere(&mut self, t: usize) -> Option<(Vec3, f32)> {
+    /// Target `t`'s contour sphere across the ground, where it stands: `IBuilding` slot 16, the
+    /// sphere the place test and the creation measure one building against another by.
+    fn contour_sphere_at(&mut self, t: usize) -> Option<(Vec3, f32)> {
         let (at, yaw) = *self.construction.placements.get(&t)?;
         let path = self.commander.paths.get(t)?.clone();
         let (mid, r) = self.plan(&path).contour_sphere()?;
         let [x, y] = placed(mid, at, yaw);
         Some((Vec3::new(x, y, at.z), r))
+    }
+
+    /// Target `t`'s construction sphere in the world (`IBuilding` slot 15, `Terrain.dll:0x1005c540`
+    /// asked with 2): the centre of its ground plan's outer-ring box through the building's
+    /// matrix, its own height in the model kept, and the radius as [`construction_sphere`] works
+    /// it out, 15 wider on a mine. It is what the controller's action 5 stands the sphere's
+    /// effects in and its kill takes (`Control.dll:0x10002e6f`, `0x100033e6`, docs/32, "The
+    /// construction sphere"), and the building's bubble ([`parkan_sim::combat::Target::construction`]).
+    fn building_sphere(&self, t: usize) -> Option<(Vec3, f32)> {
+        self.battle.combat.targets.get(t)?.construction
     }
 
     /// A found lode strictly within 20 of `at` across the ground (`0x10072f00`).
@@ -566,7 +577,7 @@ impl Play {
                 {
                     continue;
                 }
-                if let Some((c, r)) = self.building_sphere(t)
+                if let Some((c, r)) = self.contour_sphere_at(t)
                     && c.truncate().distance(Vec3::new(cx, cy, 0.0).truncate()) < radius + r
                 {
                     return false;
@@ -844,7 +855,7 @@ impl Play {
         }
     }
 
-    /// Sphere `phases` started on building `t`, round its outer contour, 15 wider on a mine.
+    /// Sphere `phases` started on building `t`, its construction sphere ([`Self::building_sphere`]).
     /// The building's load group has made the three effects already (action 5), idle in their
     /// header's time mode 0 until a code starts them.
     ///
@@ -864,8 +875,6 @@ impl Play {
             return;
         };
         let (centre, radius) = self.building_sphere(t).unwrap_or((position, radius));
-        let mine = self.units.get(t).is_some_and(|u| u.type_word == BUILDING_MINE);
-        let radius = radius + if mine { MINE_SPHERE_EXTRA } else { 0.0 };
         let frame = sphere_frame(centre, radius);
         for (id, name) in &effects {
             let owner = Owner::Building(t, *id);
@@ -971,7 +980,7 @@ impl Play {
             let others: Vec<usize> = self.construction.placements.keys().copied().collect();
             for t in others {
                 if self.battle.combat.targets.get(t).is_some_and(|x| x.alive)
-                    && let Some((c, r)) = self.building_sphere(t)
+                    && let Some((c, r)) = self.contour_sphere_at(t)
                     && c.truncate().distance(Vec3::new(cx, cy, 0.0).truncate()) < reach + r
                 {
                     return None;
@@ -1117,6 +1126,24 @@ impl Play {
     fn place_in_landscape(&mut self, t: usize, now: f64) {
         let Some(Unplaced { cut, effects }) = self.construction.unplaced.remove(&t) else { return };
         self.battle.combat.absent.remove(&t);
+        // The insertion hands the building its lowest contour corner (`Terrain.dll:0x10014654`);
+        // until it runs the constructor's 100,000 stands there (`0x100569c4`) and every bubble
+        // contact is dropped, which the engine has by leaving the building out of the world.
+        if let (Some(&(at, yaw)), Some(path)) =
+            (self.construction.placements.get(&t), self.commander.paths.get(t).cloned())
+        {
+            let plan = self.plan(&path);
+            let floor = crate::basement::lowest_contour(
+                &self.ground.land,
+                &plan.inner,
+                &plan.outer,
+                at.to_array(),
+                yaw,
+            );
+            if let Some(target) = self.battle.combat.targets.get_mut(t) {
+                target.bubble_floor = floor;
+            }
+        }
         if let Some(cut) = cut {
             self.ground.cuts.push(cut);
         }

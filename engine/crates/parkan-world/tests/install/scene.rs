@@ -535,6 +535,58 @@ fn every_placed_buildings_basement_tiles_the_ring_between_its_contours() {
     assert!(tut_2.iter().all(|&(_, base, mean)| (base - mean).abs() < 0.01), "{tut_2:?}");
 }
 
+/// The height a building's own collision pass drops a bubble contact under
+/// (`Control.dll:0x1001d846`) is the lowest corner of its cut outer contour, the minimum the
+/// insertion keeps beside its mean (`Terrain.dll:0x10010f55`-`0x10010f79`) and hands to
+/// `IBasement` slot 6 (`0x10014654`). Measured over the 167 placed buildings: it lies at or under
+/// the building's base, its inner ring's first corner, on 163, a median 1.11 under and at most
+/// 11.78; three stand above it by under a centimetre and one bridge of Campaign 2's first
+/// mission, on its file height, by 1.00. The construction sphere's centre stands over it by more
+/// than a millimetre on 136 and within one on the other 31, buildings on level ground whose ring
+/// lies at the model's origin: the drop takes the sphere's lower half or more and leaves its
+/// dome.
+#[test]
+#[ignore = "needs the game install"]
+fn every_placed_buildings_bubble_floor_is_its_lowest_contour_corner() {
+    use parkan_formats::{landmesh, mission};
+    use parkan_world::assembly::Assembly;
+    use parkan_world::basement;
+
+    let game = gamedir::find(None).expect("a Parkan install: set PARKAN_DIR");
+    let mut assembly = Assembly::new(&game).unwrap();
+    let mut under: Vec<f32> = Vec::new();
+    let (mut over_centre, mut at_centre) = (0, 0);
+    for dir in every_mission(&game) {
+        let raw = std::fs::read(gamedir::resolve(&dir, "data.tma").unwrap()).unwrap();
+        let Ok(m) = mission::parse(&raw, &dir.display().to_string()) else { continue };
+        if !m.objects.iter().any(|o| o.kind == mission::KIND_BUILDING) {
+            continue;
+        }
+        let map = terrain::map_dir(&game, &m.map_path).unwrap();
+        let land = landmesh::load(&gamedir::resolve(&map, "Land.msh").unwrap()).unwrap();
+        for o in m.objects.iter().filter(|o| o.kind == mission::KIND_BUILDING) {
+            let Some((inner, outer)) = basement::plan(&mut assembly, &o.path) else { continue };
+            let floor = basement::lowest_contour(&land, &inner, &outer, o.position, o.rotation).unwrap();
+            under.push(o.position[2] + inner[0][2] - floor);
+            let mine = o.path.to_ascii_lowercase().contains("mine");
+            let (centre, _) = parkan_world::construction::construction_sphere(&outer, mine).unwrap();
+            let height = o.position[2] + centre.z - floor;
+            if height > 1e-3 {
+                over_centre += 1;
+            } else if height > -1e-3 {
+                at_centre += 1;
+            }
+        }
+    }
+    under.sort_by(f32::total_cmp);
+    let median = under[under.len() / 2];
+    assert_eq!(under.len(), 167);
+    assert_eq!(under.iter().filter(|&&d| d >= 0.0).count(), 163, "{under:?}");
+    assert!((under[0] + 1.0).abs() < 0.01 && under[1] > -0.01, "{under:?}");
+    assert!((median - 1.11).abs() < 0.01 && (under[166] - 11.78).abs() < 0.01, "{median} {under:?}");
+    assert_eq!((over_centre, at_centre), (136, 31), "and none under it");
+}
+
 #[test]
 #[ignore = "needs the game install"]
 fn mission_02s_large_factory_cuts_the_ground_from_under_it_and_lets_the_hero_through_its_doorway() {

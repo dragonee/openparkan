@@ -218,6 +218,14 @@ pub struct Target {
     /// It is the second sphere a building's collision object keeps
     /// (`Control.dll:0x1001ffb3`), and so a building's bubble ([`Target::bubble_sphere`]).
     pub construction: Option<(Vec3, f32)>,
+    /// The height under which a building's own collision pass drops a round's bubble contact
+    /// with it (`Control.dll:0x1001d846`): the lowest corner of its cut outer contour as the
+    /// landscape's insertion laid it on the ground (`Terrain.dll:0x10010f55`-`0x10010f79`), handed
+    /// to `IBasement` slot 6 (`0x10014654`) and read back through slot 7 (`0x10056aa0`). `None` on
+    /// anything else, which no pass drops a contact for. Every round meets a building in the
+    /// building's own pass, as its visitor (docs/24, "Walking into a building"), so this holds
+    /// for every round a building's bubble stops.
+    pub bubble_floor: Option<f32>,
     /// Its device manager's components in its own order: the root's, then each fitted part's,
     /// an internal part standing in the slot it was fitted to.
     pub devices: Vec<Device>,
@@ -882,7 +890,10 @@ impl Combat {
     }
 
     /// The bubbles a round meets over its move, nearer than `within` (squared): each live
-    /// target's but its owner's, nearest first.
+    /// target's but its owner's, nearest first. A building's own pass drops a contact whose point
+    /// lies below its [`Target::bubble_floor`]: the drop compares that height with the point's z
+    /// and clears the contact's flag 4 when the height is the greater (`Control.dll:0x1001d846`-
+    /// `0x1001d85b`), so the half of the sphere under the building's ground meets nothing.
     fn bubble_contacts(&self, r: &Round, radius: f32, within: f32) -> Vec<(usize, Vec3, f32)> {
         let skip = r.owner.unwrap_or(self.hero_index());
         let mut contacts: Vec<(usize, Vec3, f32)> = self
@@ -891,7 +902,8 @@ impl Combat {
             .filter_map(|(t, target)| {
                 let (centre, bubble) = target.bubble_sphere();
                 let (point, d2) = crate::shield::contact(r.previous, r.position, radius, centre, bubble)?;
-                (d2 < within).then_some((t, point, d2))
+                let dropped = target.bubble_floor.is_some_and(|floor| floor > point.z);
+                (d2 < within && !dropped).then_some((t, point, d2))
             })
             .collect();
         contacts.sort_by(|a, b| a.2.total_cmp(&b.2));
@@ -1193,6 +1205,7 @@ mod tests {
             shield: None,
             agent_sphere: (at + Vec3::Z, 1.5),
             construction: None,
+            bubble_floor: None,
             devices: Vec::new(),
             gear: Vec::new(),
         }
@@ -1367,6 +1380,31 @@ mod tests {
         // met √(10² − 1²) short of it.
         let at = ended(building);
         assert!((at.y - (30.0 - 99.0_f32.sqrt())).abs() < 0.02, "{at}");
+    }
+
+    /// `Control.dll:0x1001d846`-`0x1001d85b`: a building's own pass drops a bubble contact whose
+    /// point lies under the building's lowest contour corner, the float `IBasement` slot 7 reads
+    /// back (`Terrain.dll:0x10056aa0`). A round under it goes through the sphere's lower half to
+    /// the building; one over it stops on the bubble.
+    #[test]
+    fn a_buildings_bubble_takes_no_round_under_its_lowest_contour_corner() {
+        let g = floor();
+        let bullet = RoundKind { name: "bb_t_01".into(), hit_points: 99.0, ..laser() };
+        let mut building = shielded_post();
+        building.construction = Some((Vec3::new(20.0, 30.0, 0.0), 10.0));
+        building.bubble_floor = Some(0.5);
+        let run = |z: f32| {
+            let mut c =
+                Combat { kinds: vec![bullet.clone()], targets: vec![building.clone()], ..Default::default() };
+            c.fire(0, None, Vec3::new(20.0, 5.0, z), Vec3::Y, Vec3::ZERO, 1.0, None);
+            c.tick(1.0 / 60.0, &g)
+        };
+        // At 1 m the round meets the sphere 1 m up, over the floor: a shield hit.
+        assert!(run(1.0).iter().any(|e| matches!(e, Event::ShieldHit { target: 0, .. })));
+        // At 0.25 m it meets it under the floor: no contact, and it goes on to the post.
+        let under = run(0.25);
+        assert!(!under.iter().any(|e| matches!(e, Event::ShieldHit { .. })), "{under:?}");
+        assert!(under.iter().any(|e| matches!(e, Event::Struck { target: Some(0), .. })), "{under:?}");
     }
 
     #[test]

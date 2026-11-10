@@ -224,6 +224,24 @@ pub fn set_down(land: &LandMesh, inner: &[[f32; 3]], outer: &[[f32; 3]], at: [f3
     edge.iter().map(|p| p[2]).sum::<f32>() / edge.len() as f32 - base
 }
 
+/// The lowest corner of a building's cut outer contour, placed at `at` turned `yaw`: the
+/// insertion's own minimum over the corners its mean runs over (`Terrain.dll:0x10010f55`-
+/// `0x10010f79`), started at 100,000 (`0x10010ea8`) and handed to the building's `IBasement`
+/// slot 6 (`0x10014654`), which keeps it at `CBuilding + 0xe0`. The building's own collision
+/// pass drops a round's bubble contact under it (`Control.dll:0x1001d846`, docs/24, "A
+/// building's second is its construction sphere"). `None` for a plan with no rings.
+pub fn lowest_contour(
+    land: &LandMesh,
+    inner: &[[f32; 3]],
+    outer: &[[f32; 3]],
+    at: [f32; 3],
+    yaw: f32,
+) -> Option<f32> {
+    let (inner, outer) = (place(inner, at, yaw), place(outer, at, yaw));
+    let base = inner.first()?[2];
+    contour(land, &outer, base).iter().map(|p| p[2]).reduce(f32::min)
+}
+
 /// A ring's corners placed by a building's position and its turn about z.
 fn place(ring: &[[f32; 3]], at: [f32; 3], yaw: f32) -> Vec<[f32; 3]> {
     let (s, c) = yaw.sin_cos();

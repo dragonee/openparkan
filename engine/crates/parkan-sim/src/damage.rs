@@ -695,6 +695,7 @@ mod tests {
             shield: None,
             agent_sphere: (at + Vec3::Z, 1.5),
             construction: None,
+            bubble_floor: None,
             devices: Vec::new(),
             gear: Vec::new(),
         }

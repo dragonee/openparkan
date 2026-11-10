@@ -965,7 +965,14 @@ with 15 more radius on a mine (`0x1005c50c`). Its exact shape — the box's
 upper corner starting at `FLT_MIN`, so that it ends at 0 where the ring lies
 below it, and the radius taken at z 0 — and its other use, as the building's
 shield bubble, are in
-[24-motion.md](24-motion.md#collision-between-objects--read).
+[24-motion.md](24-motion.md#collision-between-objects--read). The name it finds
+`mine` in is the member its agent was loaded from, the `FORT` record's first slot
+— `bu_l_mine` for `fr_l_mine` — which on all 34 `FORT` records holds `mine` where
+the record's own name does (*read* and *measured* 2026-11-10, same page). Its
+centre keeps the ring box's height in the model, 2.73 over the placement on the
+Small Tower, and its radius is measured to that centre: the engine's dome and kill,
+which stood at the placement's height with the flat contour sphere's radius, 0.09
+smaller there, now take the construction sphere itself.
 
 So a **new building**, made the moment the builder arrives but hidden, and placed in
 the landscape only by its code-0 state, shows the sign from the start; after 5 s it sends everyone out for 30 s, the sign still up
