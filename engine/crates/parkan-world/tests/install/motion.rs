@@ -206,6 +206,27 @@ fn the_hero_crosses_mission_01s_bridge_on_its_deck() {
     assert!(path.last().unwrap().y > 800.0, "and off the far end: {}", path.last().unwrap());
 }
 
+/// The control for a unit in an interior taking no sunlight: Mission 01's bridge deck is a
+/// building's face, so the hero on it hangs on the bridge, but on an `o*` node, whose stream-1
+/// flags carry no bit 0, and the sun lights it (docs/11, "What a light does to a surface").
+#[test]
+#[ignore = "needs the game install"]
+fn the_hero_on_mission_01s_bridge_deck_hangs_on_the_bridge_and_takes_the_sun() {
+    use glam::Vec3;
+    let (mut play, _) = mission_01_play();
+    let w = &mut play.hero.walker;
+    w.body.position = Vec3::new(790.5, 690.0, 40.0);
+    w.follow_ground(&play.ground);
+    w.from = (w.body.position, w.body.yaw);
+    for _ in 0..30 {
+        play.hero.update_input();
+        play.tick(1000.0 / 60.0, [0.0; 2]);
+    }
+    let (b, _) = play.hero.walker.ground.and_then(|h| h.solid).expect("on the bridge's deck");
+    assert_eq!(play.units[b].kind, parkan_formats::mission::KIND_BUILDING);
+    assert!(!play.sunless(None), "the deck is the bridge's exterior");
+}
+
 /// What holds a machine the AI drives off a slope is where it is sent, not a brake (docs/24,
 /// "Ground and slope"). The AI's own control path, from the order on: a warbot told to go from the
 /// foot of Tut_1's 40 degree face to the plateau over it is routed by the walkable areals, every

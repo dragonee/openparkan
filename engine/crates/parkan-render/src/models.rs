@@ -94,6 +94,8 @@ const INSTANCE_FLOATS: usize = 24;
 /// Where the uniform keeps the paint and the owner, in bytes.
 const INSTANCE_PAINT_AT: u64 = 64;
 const INSTANCE_OWNER_AT: u64 = 80;
+/// Where it keeps whether the instance takes the sun's two lights: the word after the owner.
+const INSTANCE_SUNLESS_AT: u64 = 84;
 
 /// The blend modes a pipeline exists for, opaque first.
 pub const BLEND_MODES: [u8; 6] = [0, 1, 2, 3, 4, 5];
@@ -160,6 +162,8 @@ struct GpuInstance {
     matrix: Cell<Mat4>,
     /// Whose it is, which an owner-only point light is matched against; 0 on what nobody owns.
     owner: Cell<u32>,
+    /// It takes neither of the sun's two lights ([`ModelRenderer::set_instance_sunless`]).
+    sunless: Cell<bool>,
 }
 
 /// The frame uniforms of a second look at some instances, as [`ModelRenderer::view_frame`]
@@ -461,6 +465,7 @@ impl ModelRenderer {
                     visible: !i.hidden,
                     matrix: Cell::new(matrix),
                     owner: Cell::new(0),
+                    sunless: Cell::new(false),
                 }
             })
             .collect();
@@ -509,8 +514,23 @@ impl ModelRenderer {
         if let Some(i) = self.instances.get(index)
             && i.owner.replace(owner) != owner
         {
-            let word = [owner as f32, 0.0, 0.0, 0.0];
+            let word = [owner as f32];
             queue.write_buffer(&i.buffer, INSTANCE_OWNER_AT, bytemuck::cast_slice(&word));
+        }
+    }
+
+    /// Whether instance `index` takes neither of the sun's two lights. The shade's gather passes
+    /// over the light manager whose owner answers kind 7, the sky's, under bit 1 of the draw's
+    /// mode (`Terrain.dll:0x10047633`-`0x10047653`), and the mesh's draw sets that bit where its
+    /// agent's byte `+0x200` is set (`AniMesh.dll:0x10014d9d`): the agent hangs on a node of its
+    /// parent whose stream-1 flags carry bit 0 (`0x10007300`-`0x10007367`), a building's
+    /// interior (docs/11, "What a light does to a surface").
+    pub fn set_instance_sunless(&self, queue: &wgpu::Queue, index: usize, sunless: bool) {
+        if let Some(i) = self.instances.get(index)
+            && i.sunless.replace(sunless) != sunless
+        {
+            let word = [if sunless { 1.0f32 } else { 0.0 }];
+            queue.write_buffer(&i.buffer, INSTANCE_SUNLESS_AT, bytemuck::cast_slice(&word));
         }
     }
 

@@ -41,6 +41,9 @@ struct Instance {
     // The colour a view paints the instance in.
     paint: vec4<f32>,
     // x: whose it is, which an owner-only light is matched against; 0 on what nobody owns.
+    // y: 1 where it takes neither of the sun's two lights -- it hangs on a building's interior
+    // node, and the gather passes over the sky's light manager (docs/11, "What a light does to
+    // a surface").
     owner: vec4<f32>,
 };
 
@@ -191,7 +194,10 @@ fn vs_main(v: VertexIn) -> VertexOut {
     // A lit batch's power is made 0 with its diffuse (`0x1002c1a0`), so it takes no highlight.
     let power = select(look.specular.w, 0.0, look.lit.x > 0.5);
     let points = point_lights(world.xyz, out.normal, instance.owner.x, to_eye, power);
-    let lights = frame.light_colour.rgb * a + frame.second_colour.rgb * b + points.diffuse;
+    // A panel's view lights the unit with its own two lights in the frame's place, which the
+    // flag does not take away: what it passes over is the sky's manager.
+    let sun = select(1.0 - instance.owner.y, 1.0, frame.paint.x > 0.5);
+    let lights = (frame.light_colour.rgb * a + frame.second_colour.rgb * b) * sun + points.diffuse;
     // The camera's infrared greys the item's material and the scene colour into green before
     // the lights are summed (`0x1004e0ad`-`0x1004e236`); the lights' own colours it leaves.
     let scene = shade_infrared(frame.scene_colour.rgb, frame.paint.y);
@@ -225,7 +231,7 @@ fn vs_main(v: VertexIn) -> VertexOut {
         // (`Ngi32.dll:0x1001616f`) and the effects' point lights (`0x100166b5`) do, and the
         // sun's second does not -- `CSun` flags it as it makes it (`Terrain.dll:0x1007d03b`).
         highlight = material_specular
-            * (frame.light_colour.rgb * shade_highlight(n, frame.light_direction.xyz, to_eye, a, look.specular.w)
+            * (frame.light_colour.rgb * shade_highlight(n, frame.light_direction.xyz, to_eye, a, look.specular.w) * sun
                 + points.highlight);
     }
     let shaded = shade_lit(diffuse, highlight, ambient, scene);

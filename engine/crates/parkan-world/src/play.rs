@@ -1394,6 +1394,36 @@ impl Play {
         }
     }
 
+    /// Whether machine `t`, or the hero for `None`, takes neither of the sun's two lights (docs/11,
+    /// "What a light does to a surface"). Standing on a building's face makes it the building's
+    /// child at the face's node (`Terrain.dll:0x10025fc0`; the face record's `+4` is the node the
+    /// walk-face visitor found it on, `AniMesh.dll:0x1000d1d2`), and the attach (message 21, event
+    /// 6) sets the agent's byte `+0x200` from bit 0 of that node's stream-1 flags, asked of the
+    /// parent's mesh through `IAnimation` slot 29 (`0x10007300`-`0x10007367`, `0x10005b40`); the
+    /// mesh's draw then has the shade pass over the sky's light manager. Bit 0 is the interior:
+    /// 273 of the install's 1845 nodes, all `i*` nodes of 21 `fortif.rlb` buildings (*measured*).
+    pub fn sunless(&self, t: Option<usize>) -> bool {
+        let walker = match t {
+            None => Some(&self.hero.walker),
+            Some(t) => self.machine(t).map(|r| &r.walker),
+        };
+        let Some((b, face)) = walker.and_then(|w| w.ground).and_then(|h| h.solid) else { return false };
+        let Some(node) =
+            self.ground.solids.get(b).and_then(|s| s.nodes.iter().find(|n| n.faces.contains(&face)))
+        else {
+            return false;
+        };
+        let flags = self
+            .battle
+            .combat
+            .targets
+            .get(b)
+            .and_then(|x| x.parts.get(node.part))
+            .and_then(|p| p.mesh.nodes.get(node.node))
+            .map(|n| n.flags);
+        flags.is_some_and(|f| f & parkan_formats::mesh::NODE_INTERIOR != 0)
+    }
+
     /// Whether target `t` is drawn node by node -- each node at its own pose and its own damage
     /// stage -- rather than as one model built whole at its placement.
     ///

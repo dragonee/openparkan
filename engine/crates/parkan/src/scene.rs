@@ -879,6 +879,9 @@ pub fn sync(
     for (i, object) in objects.placed.iter().enumerate() {
         if let Some(&t) = target_of.get(object) {
             renderer.set_instance_owner(queue, i, target_owner(t));
+            // A unit standing in a building's interior takes no sunlight (docs/11, "What a
+            // light does to a surface").
+            renderer.set_instance_sunless(queue, i, play.sunless(Some(t)));
         }
     }
     // A dead unit is deleted its controller's +92 ms after it dies (docs/26); a building is
@@ -1171,6 +1174,7 @@ pub fn place_own_view(
     let (position, _) = hero.walker.drawn(t);
     let unit = Mat4::from_translation(position) * Mat4::from_quat(hero.walker.drawn_turn(t));
     let mount = hero.mount();
+    let hero_sunless = play.sunless(None);
     for &(instance, part, node) in &view.nodes {
         let pose = match part {
             Mount::Chassis => hero.chassis_pose(node),
@@ -1178,6 +1182,10 @@ pub fn place_own_view(
         };
         renderer.set_instance(queue, instance, unit * models::pose_matrix(&pose), first_person);
         renderer.set_instance_owner(queue, instance, HERO_OWNER);
+        // The cockpit is the hero's own mesh drawn at its own view's level: in a building's
+        // interior it takes no sunlight, as the hero does (docs/11, "What a light does to a
+        // surface").
+        renderer.set_instance_sunless(queue, instance, hero_sunless);
     }
     // From the outer camera a boarded bot is drawn whole, as any other unit.
     let driven = driven.filter(|_| !play.outer_shows());
@@ -1188,6 +1196,7 @@ pub fn place_own_view(
         renderer.set_model_phase(instance, robot.and_then(|r| r.material_phase(p, node)));
         renderer.set_instance(queue, instance, placed.unwrap_or(Mat4::IDENTITY), placed.is_some());
         renderer.set_instance_owner(queue, instance, target_owner(t));
+        renderer.set_instance_sunless(queue, instance, play.sunless(Some(t)));
     }
     for &(instance, part, node, variant) in &view.outside {
         let index = match part {
@@ -1206,6 +1215,7 @@ pub fn place_own_view(
         };
         renderer.set_instance(queue, instance, unit * models::pose_matrix(&pose), true);
         renderer.set_instance_owner(queue, instance, HERO_OWNER);
+        renderer.set_instance_sunless(queue, instance, hero_sunless);
     }
     for &(instance, t, p, node, variant) in &view.targets {
         let Some(part) = play.battle.combat.targets.get(t).and_then(|target| target.parts.get(p)) else {
@@ -1223,6 +1233,7 @@ pub fn place_own_view(
         renderer.set_model_phase(instance, robot_of(t).and_then(|r| r.material_phase(p, node)));
         renderer.set_instance(queue, instance, matrix, visible);
         renderer.set_instance_owner(queue, instance, target_owner(t));
+        renderer.set_instance_sunless(queue, instance, play.sunless(Some(t)));
     }
 }
 

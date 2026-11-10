@@ -519,6 +519,14 @@ impl Renderer {
         }
     }
 
+    /// Whether a placed object's instance takes neither of the sun's two lights: a unit standing
+    /// in a building's interior.
+    pub fn set_instance_sunless(&self, queue: &wgpu::Queue, index: usize, sunless: bool) {
+        if let Some(objects) = &self.objects {
+            objects.set_instance_sunless(queue, index, sunless);
+        }
+    }
+
     /// Where an instance's played materials stand, 0..1, in place of the world clock: a
     /// tracked chassis's belt, which its device plays (docs/28-chassis.md, "The belt is a
     /// material a channel plays"). `None` puts them back on the clock.

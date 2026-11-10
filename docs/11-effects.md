@@ -1414,8 +1414,8 @@ and the attenuation as they are.
   **Class 7 is the atmosphere** (*read*): its slot 11 is `return 7` (`0x1006faa0`), it makes
   the light manager it owns (`0x1006f062`), and the sun's two lights are made on that manager
   (`0x1007cf12`), so the manager passed over is the sky's
-  ([35-hud.md](35-hud.md#the-sky-is-the-one-object-of-kind-7--read)). Which nodes carry the
-  bit is **not read**.
+  ([35-hud.md](35-hud.md#the-sky-is-the-one-object-of-kind-7--read)). **The bit is the
+  interior**, and below is what carries it.
   Of each manager it keeps (`0x100479c0`) a light that is on
   (`+0x4c` bit 0); an owner-only one (`0x80000000`) only when the object drawn is the
   manager's owner (`0x10047a52`); one whose `0x04000000` agrees with bit 2 of the draw's
@@ -1430,6 +1430,45 @@ and the attenuation as they are.
   every point light with a range that is not 0 whose range box meets the cell's
   (`0x10047df8`–`0x10047f8d`); it drops an owner-only one outright (`0x10047c96`) and asks
   neither the mask nor `0x04000000`.
+
+**Who takes no sunlight** — *read*, and *measured*. The byte is the agent's answer to message
+21, event 6, *a parent took me* (`AniMesh.dll:0x1000729b`: sub-codes 2 to 9 through the table at
+`0x100073a8`, 6 to `0x10007300`; 7, *let go*, clears it at `0x100072ef`). It clears the byte,
+asks its own game object for its parent (slot 3) and the part it hangs on (slot 16), takes the
+parent's `IAnimation` (interface `0xb`) and asks its slot 29 (`0x10005b40`) about that node with
+the flag 2. Slot 29 fills a static block at `0x10025bc8` from the node's 0x130-byte record, and
+its `+0xc` is the word at the head of **the node's 38-byte stream-1 record** in its mesh file
+(`0x10005b90`–`0x10005ba7`: the record's `+0x12c` and `+8`, ×38) — the node flags word whose
+bit 0 [07-objects.md](07-objects.md#nodes-slots-and-levels-of-detail) reads as the interior. So
+**an agent hung on an interior node of its parent takes no sunlight**.
+
+- *Measured* over the install's 435 meshes: bit 0 is on **273 of the 1845 nodes**, in **21
+  meshes**, every one in `fortif.rlb` (273 of its 516 nodes) and every one named `i*`; none of
+  the other nine archives carries it. The control is the same scan finding bit 5 on the 28
+  cockpits ([07-objects.md](07-objects.md#flag-bit-5-marks-the-cockpit-which-only-the-units-own-view-draws))
+  and bit 2 on 201 nodes, 177 of them with bit 0 the rooms
+  ([10-sky.md](10-sky.md#the-weather--read-and-seen)).
+- **What hangs there is whatever stands on the node's floor.** The ground contact places a
+  machine on the face it holds through `PlaceObjectOnWorldFace`, which makes it the child of the
+  face's object at the face's part, the record's `+4` (`Terrain.dll:0x100262f1`–`0x10026314`,
+  [24-motion.md](24-motion.md#finding-the-ground--read)). On an `AniMesh` that part is the node
+  index the walk-face visitor found the face on — its node counter, `+0x1c`, copied to the
+  result's `+4` (`AniMesh.dll:0x10007ef0`, `0x100080ee`–`0x10008107`, `0x1000d1d2`). So a unit, an
+  animal or the hero on a building's inside floor is drawn without the sun's two lights, and one
+  on a bridge's deck, a roof or the landscape with them. Of `fortif.rlb`'s 15562 walkable level-0
+  faces, **8242** are on interior nodes (*measured*). What the landscape answers the attach with
+  is not read; a unit on open ground is sunlit in every recording. No other attach that names a
+  node was enumerated.
+- **Who passes `0x400`** (*read*, with a control). Of the install's **345** calls through a
+  `+0x2c` slot, **3** have an immediate carrying `0x400` in the twelve instructions before them,
+  all in `iron3d.dll`: `0x1003605c` with `0x5f0`, the placement ghost (`0x10035f50`, from the
+  cursor's draw at `0x100582f9`); `0x10041dd1` with `0x7f0`, a panel's view of a unit; and
+  `0x1009f187` with `0x5f0`, the designer's and the factory's model view
+  ([35-hud.md](35-hud.md#the-sky-is-the-one-object-of-kind-7--read)). The same sweep for
+  `0x800` and `0x1000` finds `CCamera::Render`'s two calls and nothing else
+  (`Terrain.dll:0x10084655`, `0x100847e8`). `CBuilding::Render` turns a `0x400` it is handed into
+  the same bit 1 (`0x10058d9e`), and a mesh hands its flags to what hangs on it as they are; the
+  world's own draws pass none.
 
 The mask turns nothing away: the manager's create takes it from a global that a static
 initialiser fills with classes 0 to 11, `0xfff` (`0x10080771`, `0x10080d70`), only slot 21
@@ -2894,8 +2933,15 @@ Read one slot either way, none of the seven name witnesses agrees.
   answers 7 at slot 11 (`Terrain.dll:0x1006faa0`), owns a light manager (`0x1006f062`), and
   the sun's two lights are made on it (`0x1007cf12`)
   ([35-hud.md](35-hud.md#the-sky-is-the-one-object-of-kind-7--read)). So an agent attached
-  under such a node, and a draw carrying `0x400`, take no sunlight. Still open: which nodes
-  carry the bit.
+  under such a node, and a draw carrying `0x400`, take no sunlight. ~~Still open: which nodes
+  carry the bit.~~ Answered: the record is the node's stream-1 record in its mesh, which slot 29
+  of the parent's `IAnimation` hands back (`AniMesh.dll:0x10005b40`), and bit 0 is the interior:
+  **273 of the install's 1845 nodes**, every `i*` node of 21 `fortif.rlb` buildings and nothing
+  else. What hangs on one is whatever stands on its floor — the ground contact makes a machine
+  the child of the node its face is on — so a unit or the hero inside a building takes no
+  sunlight; and the draws that pass `0x400` are the placement ghost, a panel's view and the
+  model views, 3 of the install's 345 calls through `+0x2c`
+  ([above](#what-a-light-does-to-a-surface--read-and-measured)).
 - ~~**What lights the masts of C03 M02's Large Factory lavender.**~~ — the sun's second
   light, on their diffuse alone; the yellow-orange of their other side is the highlight of
   the chimneys' own `smoke_fr_02` lights on `B_PLT_01`'s specular, which the engine did not

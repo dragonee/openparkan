@@ -94,6 +94,53 @@ fn standing_on_the_main_teleports_pod_puts_the_hero_on_its_room_floor_over_the_n
     assert_eq!(play.units[t].clan, Some(play.player_clan));
 }
 
+/// A unit standing in a building's interior takes no sunlight (docs/11, "What a light does to a
+/// surface"). Standing on a face makes it the building's child at the face's node, and the attach
+/// sets the agent's byte `+0x200` from bit 0 of that node's stream-1 flags
+/// (`AniMesh.dll:0x10007300`-`0x10007367`), under which the mesh's draw has the shade pass over
+/// the sky's light manager. Bit 0 is the interior: the `i*` nodes. The landscape the hero starts
+/// on is no mesh's, and a building's `o*` node carries no bit 0: the main teleport's pod floor,
+/// `o09_0_m1o1`, is one.
+#[test]
+#[ignore = "needs the game install"]
+fn the_hero_on_a_buildings_interior_floor_takes_no_sunlight_and_on_its_pod_floor_does() {
+    use parkan_formats::mesh::NODE_INTERIOR;
+    let (mut play, m) = mission_04_play();
+    tick_for(&mut play, 1.0);
+    assert!(!play.sunless(None), "on the landscape");
+    let t = object_target(&play, &m, "mtp_m_n1.dat");
+    assert!(play.stand_on_pod(t));
+    tick_for(&mut play, 4.0);
+    let (b, _) = play.hero.walker.ground.and_then(|h| h.solid).expect("on a building's floor");
+    assert_eq!(b, t, "the teleport's");
+    assert!(!play.sunless(None), "the pod floor is an exterior node");
+    // The level floor of an interior node, wide enough to stand on, in any building of the map.
+    let floor = play
+        .ground
+        .solids
+        .iter()
+        .enumerate()
+        .filter(|(b, s)| s.ground && play.units[*b].kind == parkan_formats::mission::KIND_BUILDING)
+        .flat_map(|(b, s)| s.nodes.iter().map(move |n| (b, n)))
+        .filter(|(b, n)| {
+            play.battle.combat.targets[*b].parts[n.part].mesh.nodes[n.node].flags & NODE_INTERIOR != 0
+        })
+        .flat_map(|(b, n)| n.faces.clone().map(move |f| (b, f)))
+        .find(|&(b, f)| {
+            let face = &play.ground.solids[b].faces[f];
+            let area = (face.b - face.a).cross(face.c - face.a).length() / 2.0;
+            face.normal.z > 0.99 && area > 20.0
+        })
+        .expect("an interior floor");
+    let face = play.ground.solids[floor.0].faces[floor.1];
+    let centre = (face.a + face.b + face.c) / 3.0;
+    assert!(play.stand_below(centre.x, centre.y, centre.z + 1.0, 0.0));
+    tick_for(&mut play, 1.0);
+    let (b, _) = play.hero.walker.ground.and_then(|h| h.solid).expect("on the floor");
+    assert_eq!(b, floor.0);
+    assert!(play.sunless(None), "an interior node's floor");
+}
+
 #[test]
 #[ignore = "needs the game install"]
 fn mission_04s_teleport_arc_sends_the_hero_down_only_while_the_player_holds_it_and_every_generator() {
