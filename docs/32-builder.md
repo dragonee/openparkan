@@ -1058,7 +1058,17 @@ laser (`e_gun_lc_03`, `e_gun_mc_20`).
   centre, which draw from the holders themselves
   ([23-economy.md](23-economy.md#how-ore-reaches-a-consumer--read-after-two-corrections)).
   With either missing the task cannot run. With ore aboard it heads for the
-  storage, otherwise for the mine.
+  storage, otherwise for the mine. The picks pass over a building whose place
+  hangs on a hidden node, which a new one is until 40 s, and read nothing else
+  of a building going up; **the route asks the one it heads for whether its
+  sphere still runs** (`0x20c`, `0x10032917`, `0x10032944`), and while it does
+  the transport stands in state 0, its walker cleared (`0x1003c540`), keeping the
+  mine and storage it picked; states 1 and 3 ask again each tick (`0x100324d3`,
+  `0x100325dd`). So a transport sent off in the second after a new mine shows
+  takes it and waits a second, and a mine being upgraded, which is never hidden,
+  is taken and waited on while its sphere runs; what the route does once the
+  upgrade replaces it, 50 s in, was not followed (*read* 2026-11-10,
+  [26-damage.md](26-damage.md#what-a-hidden-node-is-left-out-of--read)).
 - **The places.** Each mine model has exactly one ground-level loading place
   (hall-way flag `0x8`) and each storage one unloading place (`0x10`); no other
   building has either (*measured*, [27-ownership.md](27-ownership.md)).

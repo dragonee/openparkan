@@ -1080,6 +1080,32 @@ about the vertex's joint, and passes the building over when the bit is set:
 is asked nowhere: a sweep of slot-3 calls pushing `0xa` finds none, and the
 same sweep finds `Control.dll`'s `0xd` and `0xe` (`0x1000f97f`, `0x1000f9a1`).
 
+**Which of them also read the sphere's `0x20c`** (*read* 2026-11-10). A new
+building is shown at 40 s and its sphere's task ends at 41 s, and property
+`0x20c` reads 1 while that task runs
+([32-builder.md](32-builder.md#upgrading-a-building--read)). `push 0x20c` stands
+at 11 sites in `Behavior.dll`, in six routines: the leave check (`0x1002c100`),
+the refit task's slot 7 (`0x1002eaa0`, `M_Task_Reload`, vtable `0x10059be0`), the
+transport's tick and route (`0x10032000`, `0x10032870`), the upgrade
+(`0x10033410`) and `0x100156b0`. None is inside the four searches above.
+- **The refit's dock pick** draws its buildings from `0x100156b0` (called at
+  `0x10023c55`), which walks the world's class-3 objects and passes over one whose
+  `0x20c` reads 1 (`0x10015732`–`0x10015740`) before it keeps Outposts, plants and
+  generators of the clan or an ally. So a building going up is no dock for its
+  whole sphere, 0 to 41 s, and the hidden vertex adds nothing.
+- **The transport's mine and storage picks** read no `0x20c`; the route that
+  calls them (`0x10032870`) asks it of the building it picked — the storage with
+  ore aboard, the mine without (`0x10032917`, `0x10032944`) — and, while it reads
+  1, clears the walker (`0x1003c540`) and returns 0, so the task stays in state 0
+  and runs the route again with the mine and storage it holds; states 1 and 3 ask
+  again each tick and go back to state 0 the same way (`0x100324d3`,
+  `0x100325dd`). So in the second between 40 and 41 s a transport may **take** a
+  new mine or storage, and stands until its sphere ends; and a building an upgrade
+  is running, never hidden, is taken and waited on while its sphere runs.
+- **The factory's creation vertex** (`0x100299a0`) reads no `0x20c`. Whether a
+  production order can reach a factory whose own task is still the sphere's was
+  not read.
+
 **So a building going up**, hidden from its first plan to its code-0 state:
 - **is not drawn**;
 - **stops no ray.** The world's segment walk (`Terrain.dll:0x100250c0`) asks the
@@ -1093,7 +1119,19 @@ same sweep finds `Control.dll`'s `0xd` and `0xe` (`0x1000f97f`, `0x1000f9a1`).
   The broad phase still pairs their spheres, but the mesh gives no contact;
 - **is not stood on, and pushes no walker out**;
 - **is taken by the object pick**, whose kinds table then answers 2, and never
-  by its own kill, whose mask has no class 3.
+  by its own kill, whose mask has no class 3;
+- **is hurt by a blast** (*read* 2026-11-10). The falloff takes each node's
+  sphere from interface `0x20` slot 3 (`Control.dll:0x100100ea`) with the request
+  at `0x100436e0`, whose fourth word its initialiser sets to 1 (`0x100126f5`): the
+  one-node path (`AniMesh.dll:0x1000f3c5`), which takes the node's matrix
+  (`IAnimation` slot 4) and its level-0 slot for its current stage (`0x100124d0`,
+  from the record's mesh index `+8` and stage `+0x1c`), and answers radius 0 only
+  where there is no such slot (`0x1000f40e`–`0x1000f432`). Neither routine tests
+  the flag word: the sweep for bit 0 at `+0x14` finds its 9 sites again, the draw's
+  two among them, and none in `0x1000f3b0`–`0x1000f6c0`, `0x100124d0` or
+  `0x10005320`. With the gather, which asks the agent's sphere, and the falloff's
+  own tests — the destroyed bit and radius 0 — reading no node flag either, a
+  node hidden by action 1 takes a blast as a shown one does.
 
 ## Shields: a generator, a deflector, six sectors — *read*, and *measured*
 
@@ -1638,13 +1676,25 @@ shield, battery and ammunition (`Behavior.dll:0x10018100`, `0x10019372`,
   mesh flags carry `0x100`; a destroyed part is first knocked off and flies
   for three seconds; a dead unit is deleted the controller's `+92` ms after it
   dies ([What a damaged node, a destroyed part and a dead unit draw](#what-a-damaged-node-a-destroyed-part-and-a-dead-unit-draw--read-and-measured)).
-- Whether Behavior's hall-way searches also pass over a building whose sphere
+- ~~Whether Behavior's hall-way searches also pass over a building whose sphere
   still runs. They pass over one whose place hangs on a hidden node: the
   refit's dock pick, a factory's creation vertex, the transport's mine and its
   storage ([What a hidden node is left out of](#what-a-hidden-node-is-left-out-of--read)).
   A new building is shown at 40 s and its sphere ends at 41 s, and whether
-  those searches read its `0x20c` in that second was not read.
-- Whether a blast reaches a hidden node. A kind-3 hit hurts every object
+  those searches read its `0x20c` in that second was not read.~~ — **read**
+  2026-11-10, for three of the four: none of the four reads `0x20c` itself, but
+  the refit's dock pick draws its buildings from `0x100156b0`, which passes over
+  one whose `0x20c` reads 1 (`Behavior.dll:0x10015732`), so it is no dock for the
+  whole 41 s; and the transport's route asks the mine or storage it picked
+  (`0x10032917`, `0x10032944`) and stands in state 0 while it reads 1, so in that
+  second a transport takes the new building and waits for it, and it takes and
+  waits on a building being upgraded, which is never hidden. The engine's transport passed
+  over a building whose sphere ran and took the next; it passes over a hidden one
+  and waits now. **Narrowed** for the factory: its creation vertex reads no
+  `0x20c`, and whether a production order can reach a factory whose task is still
+  the sphere's was not read
+  ([What a hidden node is left out of](#what-a-hidden-node-is-left-out-of--read)).
+- ~~Whether a blast reaches a hidden node. A kind-3 hit hurts every object
   whose bounds reach it and then each node by its sphere (`0x10010030`). No
   `AniMesh.dll` routine that tests node flag 1 is on that way, and whether the
   life system's own walk passes a node hidden by action 1, which is not a
@@ -1652,7 +1702,14 @@ shield, battery and ammunition (`Behavior.dll:0x10018100`, `0x10019372`,
   life record's destroyed bit `0x10` on the node and on its parent and a sphere
   of radius 0 (`0x10010052`–`0x1001008d`, `0x10010101`), so what is left is what
   interface `0x20` slot 3 answers for a node hidden by action 1
-  ([What a blast reaches](#what-a-blast-reaches--read)).
+  ([What a blast reaches](#what-a-blast-reaches--read)).~~ — **read** 2026-11-10:
+  its own sphere. The falloff's request sets the fourth word 1 (`0x100126f5`), and
+  slot 3's one-node path takes the node's matrix and its current stage's level-0
+  slot and never its flag word (`AniMesh.dll:0x1000f3c5`–`0x1000f56f`,
+  `0x100124d0`), so a blast hurts a building going up as one standing; the 9-site
+  sweep for the flag, its control the draw's two, finds none on that way. The
+  engine already did so
+  ([What a hidden node is left out of](#what-a-hidden-node-is-left-out-of--read)).
 - ~~Where the test stands that makes a hit do nothing to "the target's own",
   and what it compares.~~ Answered: `Control.dll:0x1000ed4e` for a blast and
   `0x1000ee0c` for a direct hit, the target's object id against the id the hit

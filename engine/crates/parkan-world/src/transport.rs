@@ -22,6 +22,11 @@ pub const STORAGE_ROOM: f32 = 0.5;
 /// Where a transport's round stands (the task's states, `0x10032000`–`0x10032681`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Leg {
+    /// 0: the route (`0x10032870`), standing while the building it would go to is building
+    /// itself, its property `0x20c` reading 1 (`0x10032917`, `0x10032944`): its walker is
+    /// cleared (`0x1003c540`) and the route is run again the next tick, with the mine and the
+    /// storage it holds.
+    Planning,
     /// 1: to the mine's loading place.
     ToMine,
     /// 2: loading.
@@ -42,6 +47,11 @@ pub struct Round {
     pub storage: usize,
 }
 
+/// `round` back in state 0, its mine and storage kept.
+fn r_planning(round: Round) -> Round {
+    Round { leg: Leg::Planning, ..round }
+}
+
 impl Play {
     /// A building's place with any bit of `flag` in its hall way, in the world.
     fn place_of(&mut self, t: usize, flag: u32) -> Option<Vec3> {
@@ -56,13 +66,15 @@ impl Play {
     }
 
     /// The live buildings of `clan` of exactly `type_word`, nearest `at` first, across the
-    /// ground.
+    /// ground. The mine pick and the storage pick (`0x10032a00`, `0x10032c50`) pass over a
+    /// building whose loading or unloading vertex hangs on a hidden node (`0x10032ad8`,
+    /// `0x10032d28`), which a building going up is until its code-0 state shows it, 40 s in;
+    /// neither reads its property `0x20c`, which the route asks of what they picked
+    /// ([`Play::go_round`]).
     fn nearest_buildings(&self, clan: Option<i64>, type_word: u32, at: Vec3) -> Vec<usize> {
         let mut found: Vec<usize> = (0..self.units.len())
             .filter(|&t| self.units[t].clan == clan && self.units[t].type_word == type_word)
-            .filter(|&t| {
-                self.battle.combat.targets.get(t).is_some_and(|x| x.alive) && !self.building_itself(t)
-            })
+            .filter(|&t| self.battle.combat.targets.get(t).is_some_and(|x| x.alive) && self.shown(t))
             .collect();
         let d = |t: &usize| self.battle.combat.targets[*t].position.truncate().distance(at.truncate());
         found.sort_by(|a, b| d(a).total_cmp(&d(b)));
@@ -111,10 +123,7 @@ impl Play {
                 }
                 // Either one gone: plan again, or end the task ("Task Ended").
                 _ => match self.plan_round(t, &rounds) {
-                    Some(r) => {
-                        self.send(t, r);
-                        r
-                    }
+                    Some(r) => self.go_round(t, r),
                     None => {
                         self.end_transport(t);
                         rounds.remove(&t);
@@ -122,6 +131,25 @@ impl Play {
                     }
                 },
             };
+            // State 0 runs the route again with the mine and the storage it holds; states 1 and 3
+            // ask the building they walk to for `0x20c` each tick and, while it reads 1, clear the
+            // walker and go back to state 0 (`0x100324d3`, `0x100325dd`).
+            let round = match round.leg {
+                Leg::Planning => {
+                    let leg = if self.economy.held(t) > 0.0 { Leg::ToStorage } else { Leg::ToMine };
+                    let r = Round { leg, ..round };
+                    if self.building_itself(Self::bound_for(r)) { r_planning(r) } else { self.go_round(t, r) }
+                }
+                Leg::ToMine | Leg::ToStorage if self.building_itself(Self::bound_for(round)) => {
+                    self.hold_transport(t);
+                    r_planning(round)
+                }
+                _ => round,
+            };
+            if round.leg == Leg::Planning {
+                rounds.insert(t, round);
+                continue;
+            }
             let arrived = matches!(self.task_of(t), Some(Task::Transport { arrived: true, .. }));
             let most = match self.economy.most(t) {
                 m if m > 0.0 => m,
@@ -180,15 +208,33 @@ impl Play {
                     Leg::ToMine => {
                         round =
                             self.plan_round(t, &rounds).map_or(round, |r| Round { leg: Leg::ToMine, ..r });
-                        self.send(t, round);
+                        round = self.go_round(t, round);
                     }
-                    Leg::ToStorage => self.send(t, round),
-                    Leg::Loading | Leg::Unloading | Leg::Waiting => self.hold_transport(t),
+                    Leg::ToStorage => round = self.go_round(t, round),
+                    Leg::Planning | Leg::Loading | Leg::Unloading | Leg::Waiting => self.hold_transport(t),
                 }
             }
             rounds.insert(t, round);
         }
         self.economy.rounds = rounds;
+    }
+
+    /// The building a round's leg walks to: its storage on the way to the storage, else its mine.
+    fn bound_for(round: Round) -> usize {
+        if round.leg == Leg::ToStorage { round.storage } else { round.mine }
+    }
+
+    /// The route's last step (`0x10032870`): the building the leg walks to is asked for its
+    /// property `0x20c`, and while it reads 1, its sphere still running, the transport stands
+    /// in state 0 with its walker cleared (`0x10032917`–`0x1003296c`) rather than picking
+    /// another; otherwise it is sent on its way.
+    fn go_round(&mut self, t: usize, round: Round) -> Round {
+        if self.building_itself(Self::bound_for(round)) {
+            self.hold_transport(t);
+            return r_planning(round);
+        }
+        self.send(t, round);
+        round
     }
 
     fn task_of(&self, t: usize) -> Option<Task> {

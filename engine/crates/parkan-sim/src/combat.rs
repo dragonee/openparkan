@@ -399,11 +399,12 @@ pub struct Combat {
     /// numbered after the targets ([`Combat::hero_index`]), as the radar numbers it.
     pub hero: Option<Target>,
     pub fired: u64,
-    /// Targets not in the world yet, which nothing strikes or sees: a building its
+    /// Targets not in the world yet, which no round strikes and nothing sees: a building its
     /// controller has not placed in the landscape. A building made in play is hidden (node
     /// flag 1) for the same 40 s, and every segment query passes a hidden node over
     /// (`AniMesh.dll:0x10010dc0`, docs/26, "What a hidden node is left out of"); the
-    /// command-mode pick, which asks for its sphere alone, still meets it.
+    /// command-mode pick, which asks for its sphere alone, still meets it, and so does a blast,
+    /// which takes each node by its sphere and never asks the flag.
     pub absent: std::collections::HashSet<usize>,
     /// Targets whose object is deleted, `World3D.dll!KillGameObject` once a dead unit's time is
     /// up: no object answers their id, so a round one of them fired is worth nothing where it
@@ -1448,6 +1449,41 @@ mod tests {
         let events = c.tick(1.0 / 60.0, &g);
         assert!(!events.iter().any(|e| matches!(e, Event::ShieldHit { .. })));
         assert_eq!(damage_of(&events), vec![200.0]);
+    }
+
+    /// A building going up is hidden (node flag 1) and out of the landscape, and a round passes
+    /// through it (`AniMesh.dll:0x10010dc0`); but a blast takes each node by its own sphere,
+    /// interface `0x20` slot 3 asked for one node (`Control.dll:0x100100ea`, the request's fourth
+    /// word 1 at `0x100126f5`), whose one-node path reads the node's slot and matrix and never its
+    /// flag word (`AniMesh.dll:0x1000f3c5`-`0x1000f56f`). So the blast hurts it as it would a
+    /// building standing.
+    #[test]
+    fn a_blast_hurts_a_building_going_up_that_a_round_passes_through() {
+        let g = floor();
+        let shell = RoundKind {
+            name: "shell".into(),
+            top_speed: 1200.0,
+            range: 20.0,
+            radius: 0.1,
+            hit_points: 0.0,
+            hit: Some(explosion(HIT_AREA, 300.0, 10.0)),
+            range_end: Some(explosion(HIT_AREA, 300.0, 10.0)),
+            ..RoundKind::default()
+        };
+        let mut c = Combat {
+            kinds: vec![laser(), shell],
+            targets: vec![post(Vec3::new(20.0, 30.0, 0.0), 5000.0)],
+            ..Default::default()
+        };
+        c.absent.insert(0);
+        let muzzle = Vec3::new(20.0, 5.0, 1.0);
+        c.fire(0, None, muzzle, Vec3::Y, Vec3::ZERO, 1.0, None);
+        let events = c.tick(1.0 / 60.0, &g);
+        assert!(!events.iter().any(|e| matches!(e, Event::Struck { target: Some(_), .. })), "{events:?}");
+        assert!(damage_of(&events).is_empty());
+        c.fire(1, None, muzzle, Vec3::Y, Vec3::ZERO, 1.0, None);
+        let events = c.tick(1.0 / 60.0, &g);
+        assert_eq!(damage_of(&events), vec![300.0], "the whole blast, the node's sphere inside it");
     }
 
     #[test]

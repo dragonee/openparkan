@@ -2251,6 +2251,49 @@ fn every_devices_mass_sits_on_a_node_of_its_unit_and_the_total_is_the_weighs() {
     assert!(carried > 0, "some unit carries a device off its node 0");
 }
 
+/// A transport's mine pick passes over a mine whose loading vertex hangs on a hidden node
+/// (`Behavior.dll:0x10032ad8`), and reads nothing else of a building going up; the route asks
+/// what it picked for `0x20c` and, while it reads 1, stands in state 0 with its walker cleared
+/// (`0x10032917`, `0x1003c540`). A new mine is shown at 40 s and its sphere ends at 41 s: ordered
+/// in that second, Mission 03's transport takes the new mine and waits for it, where the engine
+/// passed it over and, with no other mine, ended the task.
+#[test]
+#[ignore = "needs the game install"]
+fn a_transport_ordered_as_a_new_mine_shows_takes_it_and_waits_for_its_sphere() {
+    use parkan_sim::behaviour::Task;
+    use parkan_sim::orders::{Order, TRANSPORT, Target};
+    use parkan_world::construction::BUILDING_MINE;
+    use parkan_world::transport::Leg;
+
+    let (mut play, m) = mission_03_play();
+    let player = play.player_clan;
+    let transport = object_target(&play, &m, "tut3_t.dat");
+    let generator = object_target(&play, &m, "gener01.dat");
+    play.units[generator].clan = Some(player);
+    let lode = glam::Vec3::new(1026.1, 942.7, 0.0);
+    let at = lode.with_z(play.ground.below(lode.x, lode.y, 1.0e5).unwrap().point.z);
+    let now = play.hero.time_ms;
+    let mine = play.create_building(player, BUILDING_MINE, at, 0.0, now).expect("the mine stands");
+    play_for(&mut play, 40.5, |_| {});
+    assert!(play.shown(mine) && play.building_itself(mine), "shown, its sphere still running");
+
+    let order = Order { code: TRANSPORT, parameter: -1, target: Target::NotDefined };
+    let robot = &mut play.robots.iter_mut().find(|(t, _)| *t == transport).unwrap().1;
+    robot.order = Some(order);
+    robot.behaviour.order(&order);
+    play_for(&mut play, 0.25, |_| {});
+    let task = play.robots.iter().find(|(t, _)| *t == transport).unwrap().1.behaviour.task();
+    assert!(matches!(task, Task::Transport { goal: None, .. }), "it stands: {task:?}");
+    let round = play.economy.rounds.get(&transport).copied().expect("a round, not \"Task Ended\"");
+    assert_eq!((round.leg, round.mine), (Leg::Planning, mine));
+
+    play_for(&mut play, 1.0, |_| {});
+    assert!(!play.building_itself(mine), "the sphere is over");
+    let task = play.robots.iter().find(|(t, _)| *t == transport).unwrap().1.behaviour.task();
+    assert!(matches!(task, Task::Transport { goal: Some(_), .. }), "it sets off: {task:?}");
+    assert_eq!(play.economy.rounds[&transport].leg, Leg::ToMine);
+}
+
 /// A building's construction sphere is what its controller stands the sphere's effects in and
 /// what its kill takes (`Control.dll:0x10002e6f`, `0x100033e6`): `IBuilding` slot 15 asked with
 /// 2, the centre of its ground plan's outer-ring box through the building's matrix with its own

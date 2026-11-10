@@ -463,8 +463,9 @@ the own panel's unit while aboard.
   its 2,000 are aboard (a full mine is full again each takt), walks to the storage's
   unloading place, unloads 100 a second while there is room, waits beside a full storage
   until there is more than 0.5, and goes round again; with no mine or storage the task
-  ends. On Mission 03 it carries 2,000 from the new mine to the Small Warehouse, and the
-  Ore row reads 56%.
+  ends. It passes over a building still hidden by its construction, and stands while the
+  one it heads for runs its sphere (docs/32, "Transporting ore"). On Mission 03 it carries
+  2,000 from the new mine to the Small Warehouse, and the Ore row reads 56%.
 - The cursor picks as docs/42 reads it, in the world through the command camera and on the
   open satellite map: a click selects one of the player's units or buildings (turning an
   open page to its kind), sends the selection to open ground (a Go), attacks another clan's
