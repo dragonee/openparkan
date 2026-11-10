@@ -366,8 +366,9 @@ pieces come together, each from a different file:
   is property 5, **slot 17**, and its specular as the `0xff000000` at `+0x960`
   (`0x1007cd7e`), no fog. The item is filed with flags `0xc` (`0x1007e69d`),
   pre-transformed and unlit like the sky's quad, so that colour is all it has
-  beside its texture. *Measured*: slot 17 is black on 31 of the 576 keyframes
-  that lie inside a body's window and on 53 of the 80 that lie outside one;
+  beside its texture. *Measured*: slot 17 is black on 12 of the 545 keyframes
+  that lie inside a body's window and on 72 of the 111 that lie outside every one
+  ([below](#a-black-slot-17-and-a-bodys-window--measured));
   the commonest of the rest are a mauve `(130, 115, 162)`, an orange
   `(255, 74, 0)` and a pale `(255, 235, 210)`. Its alpha is the one the flare's
   lift of the main light reads ([below](#the-lens-flare)), 255 on 197 of the 656
@@ -387,10 +388,9 @@ pieces come together, each from a different file:
 
   which is what the keyframes are written for: on C00 M01 the sun comes up an orange at 50
   of 255 and stands (255, 245, 230) at 255 by mid-morning. A black slot 17 never paints a
-  black disc (*measured*): of its 84 keyframes the 54 at 255 lie outside every body's start
-  and lifetime, and the 30 others carry an alpha of 0. (By that window, start and lifetime,
-  12 of 541 are black inside one and 72 of 115 outside; the 31 of 576 above was counted some
-  other way, which was not recovered.) The flare's two blocks take the same phase (`0x1007cbc4`, `0x1007ccc9`), which is the control: its intensity
+  black disc (*measured*): of its 84 keyframes the 54 at 255 lie outside every body's
+  window, and the 30 others carry an alpha of 0
+  ([below](#a-black-slot-17-and-a-bodys-window--measured)). The flare's two blocks take the same phase (`0x1007cbc4`, `0x1007ccc9`), which is the control: its intensity
   is an alpha on its vertices and nothing else (below), and it would do nothing otherwise.
 
   *Seen*: C02 M03's sun at briefing time 10 s, slot 17 at (228, 239, 39) and 114 of 255
@@ -405,6 +405,36 @@ pieces come together, each from a different file:
   | its left limb | (114, 161, 33) | (149, 199, 78) | (123, 170, 34) |
   | the brightest pixel in it | (162, 192, 44) | (255, 255, 255) | (163, 192, 39) |
   | the sky to the right | (106, 152, 35) | (109, 154, 38) | (109, 154, 38) |
+
+### A black slot 17 and a body's window — *measured*
+
+**A body is up from the keyframe that starts it to the keyframe that stops it.** The start
+opcode's handler makes the object and the stop's deletes it — *"Unable to delete atmosphere
+object"* is its panic (`CAtmosphere::HandleEvents`, `0x1006ffe6`–`0x1007000d`) — and the
+lifetime only paces the arc ([above](#the-body-travels-that-matrixs-arc--read)). Counted that
+way, both keyframes inside, over the 656 of the 29 files:
+
+| window | inside | black inside | outside | black outside |
+|---|---:|---:|---:|---:|
+| **start to stop**, what the object lives through | 545 | **12**, all at alpha 0 | 111 | **72**: 54 at 255, 18 at 0 |
+| start and lifetime | 541 | 12 | 115 | 72 |
+| any start opcode's window, the weather's too | 576 | 31: 24 at 0, **7 at 255** | 80 | 53 |
+
+The first is the one the claim rests on, and `openparkan verify` counts it. The second
+differs from it on four keyframes and on no black one: the 22:00 sun start and the 24:00
+stop of the two 24-hour skies, a stop that never fires and that a lifetime does not count
+([A body's lifetime](#a-bodys-lifetime)), so the object made at 22:00 is never deleted by
+it. All twelve black keyframes inside a window are its first or its last — six starts and six
+stops, none strictly between — and each carries an alpha of 0, so where a body's window opens
+or closes on black, the body comes up out of nothing or goes back to it, its colour and its
+alpha meeting 0 together.
+
+**The third is how the 31 of 576 this page once printed was counted.** The check that
+printed it asked every start opcode's window, rain, snow and lightning with the bodies, and
+the six skies that snow `DUST_ADD` or storm all day put whole days "inside"; its 7 black
+keyframes at 255 inside a window are all in a weather window and in no body's. That count is
+the control: the same scan, asked where a window does not mean a body, finds black at 255
+inside. Asked where it does, it finds none.
 
 The cell is the piece that is easy to miss and impossible to miss twice.
 `ENV_SUN_3` names `SUN1.0`, which holds **four** bodies; a quad taking the whole
@@ -2705,6 +2735,16 @@ which is what the game does.
   114 of 255: the disc's core is (143, 183, 34) in the recording and (142, 185, 34)
   in the engine now, where it was (202, 238, 147)
   ([The sun and the moon are drawn](#the-sun-and-the-moon-are-drawn)).
+- ~~**How the 31 of 576 black slot 17s inside a body's window were counted**, beside the 12
+  of 541 by start and lifetime.~~ **Recovered**, and *measured*: by every start opcode's
+  window, rain, snow and lightning with the bodies, so the six skies that snow or storm all
+  day counted whole days inside. A body is up from the keyframe that makes it to the one that
+  deletes it (`0x1006ffe6`), and by that window 12 of 545 are black, every one a first or last
+  keyframe at alpha 0, and 72 of 111 outside; start and lifetime differ from it on four
+  keyframes, none black. The claim holds under both of a body's windows: no black slot 17 a
+  body is up for carries any alpha; and the weather-window count is the control, which finds 7
+  at 255 inside, all in a weather window and in no body's
+  ([A black slot 17 and a body's window](#a-black-slot-17-and-a-bodys-window--measured)).
 - ~~**The line a room's mesh is asked along.** The room test's second half
   (`AniMesh.dll:0x10010550`) counts crossings along the direction at the mesh's
   `+0x150`, whose writer is not read; the engine takes the room's own z.~~

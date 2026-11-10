@@ -453,8 +453,9 @@ pub struct Sky {
     /// Slot 17's colour: the one colour all four vertices of a body's sprite carry. The
     /// sprite's stream block gives its diffuse as `CSun +0x95c`, property 5, with a stride of
     /// 0 (`Terrain.dll:0x1007cd98`-`0x1007cdaa`), and its specular as `0xff000000`
-    /// (`0x1007cd7e`), no fog. *Measured*: black on 31 of the 576 keyframes inside a body's
-    /// window and on 53 of the 80 outside one.
+    /// (`0x1007cd7e`), no fog. *Measured*: black on 12 of the 545 keyframes inside a body's
+    /// window, start to stop, every one of them its first or last and at alpha 0, and on 72
+    /// of the 111 outside every one (docs/10, "A black slot 17 and a body's window").
     pub body_tint: Rgb,
     /// The sun object's second light: slot 21.
     pub second_light: Rgb,

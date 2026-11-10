@@ -3213,26 +3213,46 @@ def check_sky(check, game: Path) -> None:
     # block's diffuse is CSun +0x95c, property 5, with a stride of 0
     # (Terrain.dll:0x1007cd98).  It reads as one: a colour while a body is up, black
     # while none is.  The alpha is the one the flare's lift of the main light reads.
+    # A body is up from its start opcode, which makes it, to its stop, which deletes
+    # it (CAtmosphere::HandleEvents, 0x1006ffe6-0x1007000d), both keyframes counted;
+    # a start with no stop in its section runs to the day's end.  The weather's
+    # windows are not a body's: counted with them, the six skies that snow or storm
+    # all day put whole days "inside", which is what the 31 of 576 this check once
+    # gave was.  The control is that count, which finds 7 black keyframes at 255
+    # inside a window, every one of them in a weather window alone.
     tint = Counter()
     for path in files:
         atmosphere = sky.load(path)
         for index in range(atmosphere.section_count):
-            spans = [(start.clock_seconds, stop.clock_seconds if stop is not None else 86400)
-                     for _body, start, stop in atmosphere.windows(index)]
+            windows = [(kind, start.clock_seconds,
+                        stop.clock_seconds if stop is not None else 86400)
+                       for kind, start, stop in atmosphere.windows(index)]
+            bodies = [(s, e) for kind, s, e in windows if kind in ("sun", "moon")]
+            every = [(s, e) for _kind, s, e in windows]
             for k in atmosphere.section_keyframes(index):
                 r, g, b, alpha = k.colour(sky.BODY_TINT_SLOT)
-                up = any(s <= k.clock_seconds <= e for s, e in spans)
+                black = (r, g, b) == (0, 0, 0)
+                up = any(s <= k.clock_seconds <= e for s, e in bodies)
                 tint["up" if up else "down"] += 1
-                tint["up black" if up else "down black"] += (r, g, b) == (0, 0, 0)
+                tint["up black" if up else "down black"] += black
+                tint["up black lit"] += up and black and alpha > 0
+                tint["down black 255"] += not up and black and alpha == 255
                 tint["opaque"] += alpha == 255
                 tint["faint"] += alpha <= 50
+                tint["any window black 255"] += black and alpha == 255 and any(
+                    s <= k.clock_seconds <= e for s, e in every)
     check("sky.ske: slot 17 is a body's own colour, black where none is up",
-          tint["up"] + tint["down"] == frames and tint["up black"] * 10 < tint["up"]
-          and tint["down black"] * 2 > tint["down"],
-          f"of the {tint['up']} keyframes inside a body's window {tint['up black']} are "
-          f"black, and of the {tint['down']} outside one {tint['down black']} -- the colour "
-          f"the body's sprite carries on its four vertices (Terrain.dll:0x1007cd98).  Its "
-          f"alpha is 255 on {tint['opaque']} of the {frames} and 50 or less on "
+          tint["up"] + tint["down"] == frames and tint["up"] == 545
+          and tint["up black"] == 12 and tint["down black"] == 72
+          and not tint["up black lit"] and tint["down black 255"] == 54
+          and tint["any window black 255"] == 7,
+          f"of the {tint['up']} keyframes inside a body's window, start to stop, "
+          f"{tint['up black']} are black and {tint['up black lit']} of those carry an alpha "
+          f"above 0; of the {tint['down']} outside every one {tint['down black']} are black, "
+          f"{tint['down black 255']} of them at 255 -- so a black slot 17 never paints a "
+          f"black disc (Terrain.dll:0x1007cd98).  Control: the weather's windows counted "
+          f"as a body's put {tint['any window black 255']} black keyframes at 255 inside "
+          f"one.  Its alpha is 255 on {tint['opaque']} of the {frames} and 50 or less on "
           f"{tint['faint']}")
     check("sky.ske: keyframes run in time order", ordered == sections_seen,
           f"{ordered}/{sections_seen} sections are stored sorted by time, which the "
