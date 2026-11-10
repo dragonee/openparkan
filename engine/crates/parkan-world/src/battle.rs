@@ -427,6 +427,7 @@ impl Battle {
             agent_sphere,
             construction,
             bubble_floor: None,
+            level_ratio: object_ratio,
             devices,
             gear,
         });

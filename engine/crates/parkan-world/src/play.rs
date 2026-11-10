@@ -779,6 +779,8 @@ fn hero_target(
         agent_sphere: (hero.walker.body.position, 0.0),
         construction: None,
         bubble_floor: None,
+        // The player's own, at 1 (`crate::battle::object_ratio`).
+        level_ratio: 1.0,
         devices,
         gear,
     };
@@ -5413,8 +5415,29 @@ impl Play {
                 let slot = [slots[block * SLOTS_PER_VARIANT], slots[0]].into_iter().find(|&s| s != NO_SLOT);
                 let Some(slot) = slot.and_then(|s| p.mesh.slots.get(usize::from(s))) else { return };
                 let (pose, sphere, scale) = (p.nodes[*node], slot.sphere, p.scale);
+                let lost = p.life.as_ref().and_then(|l| l.nodes.get(*node)).map_or(0.0, |n| n.lost);
                 let wear = self.owner_materials(*target);
                 self.node_blast(&exp, &pose, sphere, scale, now, wear);
+                // A blast `.exp` is a hit as a round's is (`0x10011794`): `ratio × damage + the life
+                // lost since the last stage check`, in its radius times the node's sphere's, about
+                // that sphere's centre. Queued, as the game queues it on the object, for the next
+                // frame. Only `o_tur_la_06`'s node 1 names one outside the rounds, on no shipped
+                // design (docs/26, "Whose hit it is, and whom it spares").
+                if exp.kind == parkan_formats::exp::HIT_AREA {
+                    let [cx, cy, cz, r] = sphere;
+                    let c = pose.apply([cx, cy, cz].map(|v| f64::from(v * scale)));
+                    let centre = Vec3::new(c[0] as f32, c[1] as f32, c[2] as f32);
+                    let ratio = self.battle.combat.targets[*target].level_ratio;
+                    let events = self.battle.combat.node_blast(
+                        *target,
+                        *part,
+                        *node,
+                        centre,
+                        exp.radius * r * scale,
+                        ratio * exp.damage + lost,
+                    );
+                    self.pending_events.extend(events);
+                }
             }
             _ => {}
         }

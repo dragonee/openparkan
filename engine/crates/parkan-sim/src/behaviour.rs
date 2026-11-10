@@ -2760,4 +2760,21 @@ mod tests {
         assert!(matches!(b.task(), Task::Attack { target: Some(11), .. }));
         assert_eq!(b.interrupt_ms, paused_until);
     }
+
+    /// A unit its own blast reaches is sent message `0x19` naming itself
+    /// (`Control.dll:0x1000ebdf`, before the firer test). The handler asks for the attack on that
+    /// id all the same (`Behavior.dll:0x10006560`), and the gate restarts its pause
+    /// (`0x10017aa0`-`0x10017ab0`) before it refuses a target that is the unit itself: no attack,
+    /// and a real firer's hit inside the next 2 to 5 s is refused too.
+    #[test]
+    fn a_hit_naming_the_unit_itself_takes_no_attack_and_restarts_the_pause() {
+        let firer = unit(11, 300.0, 0.0);
+        let seen = [firer];
+        let mut b = Behaviour::new(7);
+        b.hurt_now(5, &senses(&seen, 5000.0, Vec3::ZERO, true));
+        assert_eq!(b.task(), Task::Stop, "it turns on nothing");
+        assert!((7000.0..=10_000.0).contains(&b.interrupt_ms), "{}", b.interrupt_ms);
+        b.hurt_now(11, &senses(&seen, 6000.0, Vec3::ZERO, true));
+        assert_eq!(b.task(), Task::Stop, "the real firer's hit falls inside the pause");
+    }
 }

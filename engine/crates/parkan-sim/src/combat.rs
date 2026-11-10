@@ -97,6 +97,8 @@ pub struct Round {
     /// at that node's own sphere (`Control.dll:0x100247c0`). `None` steers at [`Target::aim`].
     pub part: Option<(usize, usize)>,
     expired: bool,
+    /// A blast took its life to 0 in flight: it goes off where it is at the next step.
+    blown: bool,
 }
 
 /// One mesh of a target, posed.
@@ -226,6 +228,10 @@ pub struct Target {
     /// building's own pass, as its visitor (docs/24, "Walking into a building"), so this holds
     /// for every round a building's bubble stops.
     pub bubble_floor: Option<f32>,
+    /// The level ratio its hit points were taken at (`+0x660`, docs/26, "The difficulty ratio"),
+    /// by which one of its nodes going off as a blast multiplies the `.exp` damage
+    /// (`Control.dll:0x10011794`).
+    pub level_ratio: f32,
     /// Its device manager's components in its own order: the root's, then each fitted part's,
     /// an internal part standing in the slot it was fitted to.
     pub devices: Vec<Device>,
@@ -410,6 +416,9 @@ pub struct Combat {
     /// up: no object answers their id, so a round one of them fired is worth nothing where it
     /// goes off (`Control.dll:0x10011783`, docs/26, "Whose hit it is, and whom it spares").
     pub gone: std::collections::HashSet<usize>,
+    /// The blasts that went off in a step's collision pass, for the rounds still in the air:
+    /// each centre, radius and damage, and the round it was.
+    pub bursts: Vec<(Vec3, f32, f32, u64)>,
 }
 
 /// Part `p`'s socket, as the walk from node 0 treats the node standing in for the part's node 0
@@ -553,6 +562,7 @@ impl Combat {
             target,
             part: None,
             expired: false,
+            blown: false,
         });
         Some(self.fired)
     }
@@ -802,6 +812,25 @@ impl Combat {
         let mut flying = Vec::with_capacity(rounds.len());
         for r in rounds {
             let k = self.kinds[r.kind].clone();
+            // A round a blast destroyed in the air: its node 0's stage rises and its `.exp` goes
+            // off where it is, a hit naming nothing struck (`0x10011220`, `0x10011479`).
+            //
+            // STAND-IN: docs/26-damage.md#what-a-blast-reaches--read -- when the round's life
+            // update comes after the blast, and which block entry its end runs, are not read: it
+            // goes off at its next step and ends as a hit does.
+            if r.blown {
+                events.push(Event::Exploded {
+                    kind: r.kind,
+                    point: r.position,
+                    forward: r.forward,
+                    at_range: false,
+                });
+                if let Some(e) = &k.hit {
+                    self.explode(e, &k, &r, r.position, Struck::Nothing, &mut events);
+                }
+                events.push(Event::Ended { round: r, end: RoundEnd::Hit });
+                continue;
+            }
             if r.expired {
                 events.push(Event::Exploded {
                     kind: r.kind,
@@ -887,7 +916,141 @@ impl Combat {
             }
         }
         self.rounds = flying;
+        for (point, radius, damage, from) in std::mem::take(&mut self.bursts) {
+            self.blast_rounds(point, radius, damage, Some(from));
+        }
         events
+    }
+
+    /// A blast on the rounds in the air (`0x10012e82`, `Terrain.dll:0x1001cc70`): a round is the
+    /// landscape's child from its making (`World3D.dll:0x10007d56`, the parent the gun names,
+    /// `Control.dll:0x1002a37f`), filed in the landscape's object grid as it moves
+    /// (`Terrain.dll:0x1001f57d`), and the blast's mask `0x61c` carries its class 9, so the
+    /// gather takes every round whose sphere meets the blast's. Its one node then takes the
+    /// falloff, and a round whose life that ends goes off where it is
+    /// (docs/26, "What a blast reaches"). The round that was the blast is passed over.
+    ///
+    /// STAND-IN: docs/26-damage.md#what-a-blast-reaches--read -- a round's node is taken as its
+    /// agent's sphere about its place, its collision radius; one node's slot sphere is the
+    /// header's on 63 of the 67 rounds, and the four with more nodes keep one life here.
+    fn blast_rounds(&mut self, point: Vec3, radius: f32, damage: f32, from: Option<u64>) {
+        for r in &mut self.rounds {
+            if Some(r.id) == from || r.blown || r.life <= 0.0 {
+                continue;
+            }
+            let Some(k) = self.kinds.get(r.kind) else { continue };
+            let taken = blast(damage, radius, k.radius, r.position.distance(point));
+            if taken > 0.0 {
+                r.life -= taken;
+                r.blown = r.life <= 0.0;
+            }
+        }
+    }
+
+    /// Node `node` of part `part` of target `t` going off as a blast, its stage having risen
+    /// (`Control.dll:0x10011220`, the hit made at `0x100113e0`–`0x100117c0`): `damage` in
+    /// `radius` about `point`, the node's own sphere's centre. The queue walk takes the object's
+    /// own nodes through the falloff alone -- no shield, no invulnerability, no firer test --
+    /// passing over the node that went off, a destroyed node and one whose parent is destroyed
+    /// (`0x10012f3b`–`0x10012f59`, `0x10010052`–`0x1001008d`); then everything else in reach as
+    /// any blast, the object passed over by its id and named the firer
+    /// (`0x10012f63`–`0x10012f85`, `0x10011766`), and the rounds in the air.
+    pub fn node_blast(
+        &mut self,
+        t: usize,
+        part: usize,
+        node: usize,
+        point: Vec3,
+        radius: f32,
+        damage: f32,
+    ) -> Vec<Event> {
+        let mut events = Vec::new();
+        if damage <= 0.0 {
+            return events;
+        }
+        self.falloff(t, point, radius, damage, Some((part, node)), &mut events);
+        let owner = (t != self.hero_index()).then_some(t);
+        self.blast_area(point, radius, damage, t, owner, Some(t), Struck::Nothing, &mut events);
+        self.blast_rounds(point, radius, damage, None);
+        events
+    }
+
+    /// The falloff on every node of target `t` but `skip` (`0x10010030`): a node takes the blast
+    /// by its own sphere, and nothing where it is destroyed or its parent is.
+    fn falloff(
+        &mut self,
+        t: usize,
+        point: Vec3,
+        radius: f32,
+        damage: f32,
+        skip: Option<(usize, usize)>,
+        events: &mut Vec<Event>,
+    ) {
+        let parts = self.target(t).map_or(0, |x| x.parts.len());
+        for p in 0..parts {
+            let Some(part) = self.target(t).and_then(|x| x.parts.get(p)) else { continue };
+            let spheres: Vec<(usize, f32)> = part
+                .mesh
+                .nodes
+                .iter()
+                .enumerate()
+                .filter(|&(n, _)| Some((p, n)) != skip)
+                .filter(|&(n, _)| {
+                    part.life.as_ref().is_none_or(|l| {
+                        let gone = |i: usize| l.nodes.get(i).is_some_and(|x| x.destroyed);
+                        !gone(n) && !l.parents.get(n).copied().flatten().is_some_and(gone)
+                    })
+                })
+                .filter_map(|(n, _)| {
+                    let slot = part.mesh.slots.get(usize::from(part.slot(n)?))?;
+                    let [cx, cy, cz, r] = slot.sphere;
+                    let local = Vec3::new(cx, cy, cz) * part.scale;
+                    let centre = vec(part.nodes.get(n)?.apply(arr(local)));
+                    let r = r * part.scale;
+                    Some((n, blast(damage, radius, r, (centre - point).length())))
+                })
+                .filter(|&(_, d)| d > 0.0)
+                .collect();
+            for (n, d) in spheres {
+                self.damage(t, p, n, d, events);
+            }
+        }
+    }
+
+    /// A blast on every target in reach but `skip`, the object that went off (`0x1000ebc0` on
+    /// each object the gather takes): it is told who fired, its shield stops what it can, and
+    /// what is left reaches its nodes unless it is the firer.
+    #[allow(clippy::too_many_arguments)]
+    fn blast_area(
+        &mut self,
+        point: Vec3,
+        radius: f32,
+        damage: f32,
+        firer: usize,
+        owner: Option<usize>,
+        skip: Option<usize>,
+        struck: Struck,
+        events: &mut Vec<Event>,
+    ) {
+        for t in 0..=self.targets.len() {
+            if Some(t) == skip {
+                continue;
+            }
+            let Some(target) = self.target(t) else { continue };
+            if !target.alive || (target.centre - point).length() >= target.radius + radius {
+                continue;
+            }
+            events.push(Event::Hurt { target: t, owner });
+            let carried = match struck {
+                Struck::Bubble(b, s) if b == t => Some(s),
+                _ => None,
+            };
+            let damage = self.shield_step(t, point, radius, carried, damage, events);
+            if damage <= 0.0 || t == firer {
+                continue;
+            }
+            self.falloff(t, point, radius, damage, None, events);
+        }
     }
 
     /// The bubbles a round meets over its move, nearer than `within` (squared): each live
@@ -999,39 +1162,9 @@ impl Combat {
                 }
             }
             HIT_AREA => {
-                for t in 0..=self.targets.len() {
-                    let Some(target) = self.target(t) else { continue };
-                    if !target.alive || (target.centre - point).length() >= target.radius + e.radius {
-                        continue;
-                    }
-                    let parts = target.parts.len();
-                    events.push(hurt(t));
-                    let damage = self.shield_step(t, point, e.radius, carried(t), damage, events);
-                    if damage <= 0.0 || t == firer {
-                        continue;
-                    }
-                    for p in 0..parts {
-                        let Some(part) = self.target(t).and_then(|x| x.parts.get(p)) else { continue };
-                        let spheres: Vec<(usize, f32)> = part
-                            .mesh
-                            .nodes
-                            .iter()
-                            .enumerate()
-                            .filter_map(|(n, _)| {
-                                let slot = part.mesh.slots.get(usize::from(part.slot(n)?))?;
-                                let [cx, cy, cz, r] = slot.sphere;
-                                let local = Vec3::new(cx, cy, cz) * part.scale;
-                                let centre = vec(part.nodes.get(n)?.apply(arr(local)));
-                                let r = r * part.scale;
-                                Some((n, blast(damage, e.radius, r, (centre - point).length())))
-                            })
-                            .filter(|&(_, d)| d > 0.0)
-                            .collect();
-                        for (n, d) in spheres {
-                            self.damage(t, p, n, d, events);
-                        }
-                    }
-                }
+                self.blast_area(point, e.radius, damage, firer, round.owner, None, struck, events);
+                // The rounds still in the air take it once the step's pass is over.
+                self.bursts.push((point, e.radius, damage, round.id));
             }
             _ => {}
         }
@@ -1207,6 +1340,7 @@ mod tests {
             agent_sphere: (at + Vec3::Z, 1.5),
             construction: None,
             bubble_floor: None,
+            level_ratio: 1.0,
             devices: Vec::new(),
             gear: Vec::new(),
         }
@@ -1486,6 +1620,91 @@ mod tests {
         assert_eq!(damage_of(&events), vec![300.0], "the whole blast, the node's sphere inside it");
     }
 
+    /// A round in the air is the landscape's child and filed in its object grid
+    /// (`World3D.dll:0x10007d56`, `Terrain.dll:0x1001f57d`), and a blast's mask `0x61c` carries
+    /// its class 9: a blast takes a missile flying through it, whose life it ends, and the
+    /// missile goes off where it is.
+    #[test]
+    fn a_blast_sets_off_a_missile_flying_through_it() {
+        let g = floor();
+        let shell = RoundKind {
+            name: "shell".into(),
+            top_speed: 1200.0,
+            range: 20.0,
+            radius: 0.1,
+            hit_points: 9.0,
+            hit: None,
+            range_end: Some(explosion(HIT_AREA, 1000.0, 10.0)),
+            ..RoundKind::default()
+        };
+        let missile = RoundKind {
+            name: "bm_l_01".into(),
+            top_speed: 6.0,
+            range: 1000.0,
+            radius: 0.3,
+            hit_points: 149.0,
+            hit: Some(explosion(HIT_AREA, 500.0, 5.0)),
+            range_end: None,
+            ..RoundKind::default()
+        };
+        let run = |shoot: bool| {
+            let mut c = Combat { kinds: vec![shell.clone(), missile.clone()], ..Default::default() };
+            c.fire(1, None, Vec3::new(20.0, 20.0, 3.0), Vec3::Y, Vec3::ZERO, 1.0, None);
+            if shoot {
+                c.fire(0, None, Vec3::new(20.0, 5.0, 3.0), Vec3::Y, Vec3::ZERO, 1.0, None);
+            }
+            let mut events = c.tick(1.0 / 60.0, &g);
+            events.extend(c.tick(1.0 / 60.0, &g));
+            (c, events)
+        };
+        // Alone, it flies on.
+        let (c, events) = run(false);
+        assert_eq!(c.rounds.len(), 1, "{events:?}");
+        // The shell's 1,000 in 10 m goes off 5 m from it: its 149 are gone, and at the next step
+        // it goes off where it is, with its own hit.
+        let (c, events) = run(true);
+        assert!(c.rounds.is_empty(), "{events:?}");
+        let goes = events.iter().find_map(|e| match e {
+            Event::Exploded { kind: 1, point, at_range: false, .. } => Some(*point),
+            _ => None,
+        });
+        assert!(goes.is_some_and(|p| (p.y - 20.2).abs() < 0.1), "{events:?}");
+        assert!(
+            events.iter().any(|e| matches!(e, Event::Ended { round, end: RoundEnd::Hit } if round.kind == 1))
+        );
+    }
+
+    /// A node whose `.exp` is a blast goes off as one when its stage rises (`0x10011794`): its
+    /// own object's other nodes take it through the falloff alone, its shield passing it, and
+    /// everything else in reach as any blast, the object being the firer and told nothing.
+    #[test]
+    fn a_nodes_own_blast_hurts_its_other_nodes_past_its_shield_and_its_neighbours() {
+        let mut exploding = shielded_post();
+        let second = exploding.parts[0].clone();
+        exploding.parts.push(second);
+        let mut c = Combat {
+            targets: vec![
+                exploding,
+                post(Vec3::new(24.0, 30.0, 0.0), 5000.0),
+                post(Vec3::new(60.0, 30.0, 0.0), 1.0),
+            ],
+            ..Default::default()
+        };
+        let events = c.node_blast(0, 0, 0, Vec3::new(20.0, 30.0, 1.0), 10.0, 300.0);
+        let damaged: Vec<(usize, usize, usize, f32)> = events
+            .iter()
+            .filter_map(|e| match e {
+                Event::Damaged { target, part, node, damage, .. } => Some((*target, *part, *node, *damage)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(damaged, vec![(0, 1, 0, 300.0), (1, 0, 0, 300.0)], "{events:?}");
+        assert!(!events.iter().any(|e| matches!(e, Event::ShieldHit { .. })), "its own shield passes it");
+        assert!(events.contains(&Event::Hurt { target: 1, owner: Some(0) }));
+        assert!(!events.iter().any(|e| matches!(e, Event::Hurt { target: 0, .. })), "it is not told");
+        assert_eq!(c.targets[0].shield.as_ref().unwrap().fills, [1.0; crate::shield::SECTORS]);
+    }
+
     #[test]
     fn two_laser_hits_kill_a_five_hundred_point_post_and_nothing_tunnels() {
         let g = floor();
@@ -1497,6 +1716,7 @@ mod tests {
             targets: vec![post(Vec3::new(20.0, 30.0, 0.0), 500.0)],
             absent: Default::default(),
             gone: Default::default(),
+            bursts: Vec::new(),
         };
         let muzzle = Vec3::new(20.0, 5.0, 1.0);
         for shot in 0..2 {
@@ -1613,6 +1833,7 @@ mod tests {
             targets: vec![post(Vec3::new(20.0, 16.0, 0.0), 5000.0), post(Vec3::new(20.0, 12.0, 0.0), 5000.0)],
             absent: Default::default(),
             gone: Default::default(),
+            bursts: Vec::new(),
         };
         // Fired by the nearer post, from inside it: it passes its owner and flies on.
         c.fire(0, Some(1), Vec3::new(20.0, 11.0, 1.0), Vec3::Y, Vec3::ZERO, 1.0, None);

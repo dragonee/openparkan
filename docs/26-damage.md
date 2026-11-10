@@ -609,6 +609,18 @@ What follows from the order:
   0.579 sphere. **0 of the 458 shipped designs carries either turret.** So no
   placed unit's and no building's death is a blast: a tower that dies under a
   unit standing in it plays an effect and hurts nothing.
+- **What such a node's blast does** (*read* 2026-11-10). The stage that rises
+  makes the same hit a round's does (`0x100113e0`–`0x100117c0`): centred on the
+  node's own sphere (interface `0x20` slot 3 asked for the node,
+  `0x1001158a`), its radius the `.exp`'s times that sphere's (`0x10011755`),
+  and worth `ratio × damage + the life lost since the last stage check`
+  (`0x10011794`–`0x100117b2`; the life record's `+0xc`, which the routine sets
+  to the life as it ends, `0x100118ea`). The object is its own firer
+  (`0x10011766`). The queue walk takes its other nodes through the falloff alone
+  and then everything in reach, the rounds in the air among them. So the turret's
+  node 1, shot to its last stage, would hurt its own unit past its shield and
+  everything within 43.4 m for 20,000 × the level ratio. The engine played the
+  effect alone; it deals the hit now, a frame after the stage rises.
 
 ### What a blast reaches — *read*
 
@@ -695,11 +707,42 @@ So **a blast is stopped by nothing but distance**:
   walls, not the ground between. A blast of 45 m on a Small Bunker's roof
   gives every node of a hero in the pod room, 17 m from the burst, the whole of
   it, the node's sphere lying wholly inside the blast's.
-- **The mask has the rounds' bit.** A round is an agent of class 9 with a life
-  system and hit points on its nodes, so a round the walk comes to inside a
-  blast takes it like any object, and one whose stage rises goes off where it
-  is. Whether the walk comes to a round in the air — whether one hangs in the
-  landscape's object grid — was not read.
+- **The mask has the rounds' bit, and the walk comes to a round in the air**
+  (*read* 2026-11-10). A round is an agent of class 9 with a life system and
+  hit points on its nodes, so a round the walk comes to inside a blast takes it
+  like any object, and one whose stage rises goes off where it is. And the walk
+  does come to it:
+  - **A round is the landscape's child from its making.** The gun creates it
+    through `CreateObject` 9 with the world's root for its parent — the queue's
+    slot 12, the class-1 object (`Control.dll:0x1002a368`–`0x1002a387`,
+    `World3D.dll:0x100079d0`) — and `CreateObject` adds it as that parent's child
+    (`0x10007d56`). `AddObjectToGame` then names no parent (`push 0` at
+    `Control.dll:0x1002a57e`) and adds none (`World3D.dll:0x10007f71`).
+  - **The landscape files every child in its object grid, and refiles it as it
+    moves.** A child added tells its parent event 2 (`Terrain.dll:0x1008a87c`),
+    and an agent setting its matrix tells it 0 before and 1 after
+    (`AniMesh.dll:0x1000209e`, `0x10002427`). The landscape's handler
+    (`Terrain.dll:0x1001f150`) sets aside only classes 6 and 7, and for the rest
+    switches on the event (`0x1001f576`): on 1 it takes the child out of and puts
+    it back into each cell its sphere covers (`0x1001f57d`–`0x1001f766`), on 2 it
+    files it, on 3 it drops it. No class 9 test stands on that way.
+  - **The control** is the same reading where a blast is known to reach: a unit
+    or a building `CreateObjectFromScheme` makes is given the same root for its
+    parent (`ArealMap.dll:0x100154e1`–`0x100154ec`, the queue's slot 12 again) and
+    comes into the grid the same way. And the enumeration of `Control.dll`'s world
+    calls above, which finds the sight's slot 7 once and the gather among ten
+    slot-3 calls, finds `PlaceObjectOnWorldFace`, slot 11, at two sites alone: the
+    ground contact, run for agent kind 4 (`0x1000cb90`, `0x1001b4c3`), and
+    `0x10018800`, run only while an object has no parent (`0x1000c286`,
+    `0x1001958d`). Nothing there takes a round off the landscape.
+
+  So **a blast sets off the rounds flying through it**: every round whose sphere
+  meets the blast's is told who fired and its node takes the falloff against its
+  life, its hit points at the level ratio (149 on a light bullet at 1). The firer
+  test spares none of them, a round never being any hit's firer, so (*derived*) a
+  salvo's rounds can set each other off and a missile can be brought down by a
+  blast near it. The engine took no round into a blast; it does now, a round
+  whose life a blast ends going off at its next step.
 - **Everything gathered is told who fired**, hurt or not: the message comes
   before the nodes, and the gather's sphere is the object's, not a node's.
 
@@ -1721,12 +1764,40 @@ shield, battery and ammunition (`Behavior.dll:0x10018100`, `0x10019372`,
   world gathers by class and sphere down the tree of objects, the nodes are
   tested by their spheres, and no segment query is on the way
   ([What a blast reaches](#what-a-blast-reaches--read)).
-- What a unit does when message `0x19` names itself, as it does when its own
+- ~~What a unit does when message `0x19` names itself, as it does when its own
   blast reaches it: the handler is
   [31-packages.md](31-packages.md#a-hit-pulls-a-unit-in--read)'s, and its test
-  of the firer's clan is what would let it pass. And whether a round in the air
-  hangs in the landscape's object grid, so that a blast's walk comes to it: the
-  mask has its class.
+  of the firer's clan is what would let it pass.~~ — **read** 2026-11-10: the
+  handler (`Behavior.dll:0x100064b0`) asks nothing of the id but that it is not
+  0. It asks the gate for the reason-1 attack on itself (`0x10006560`), which
+  restarts the interrupt pause if it had run out (`0x10017aa0`–`0x10017ab0`) and
+  then refuses a target that is the unit itself; it adds 0.004 to its clan's
+  decrease toward its own clan (`0x1000658c`, `ai.dll:0x10001fe0`, which tests
+  nothing but the clan's index), which the clan's takt never applies, passing
+  its own clan over ([25-sensors.md](25-sensors.md#what-moves-an-attitude-being-shot-and-nothing-else--read));
+  and it calls for help (`0x10006592`), so the clan's warriors within 400 turn
+  on the nearest hostile their clan knows within 3,000. So a unit its own blast
+  reaches turns on nothing, takes no interrupt for the next 2 to 5 s, and pulls
+  its neighbours into a fight. The engine had the first two (a unit test pins
+  them); the call for help stays the stand-in it was
+  ([31-packages.md](31-packages.md#a-hit-pulls-a-unit-in--read)). ~~And whether a
+  round in the air hangs in the landscape's object grid, so that a blast's walk
+  comes to it: the mask has its class.~~ — **read** 2026-11-10: it does. The gun
+  makes it the landscape's child (`Control.dll:0x1002a37f`,
+  `World3D.dll:0x10007d56`), and the landscape files it in the cells its sphere
+  covers as it moves (`Terrain.dll:0x1001f57d`), so a blast takes it and a round
+  whose life it ends goes off; the engine now has blasts set off rounds
+  ([What a blast reaches](#what-a-blast-reaches--read)).
+- ~~What a non-round node's blast does: node 1 of `o_tur_la_06`,
+  `explode_rbr_bomb`, 20,000 in 43.4 m, which no shipped design carries and the
+  engine played as an effect alone.~~ — **read** 2026-11-10: the hit a round's
+  is, centred on the node's sphere, its radius the `.exp`'s times that sphere's,
+  worth `ratio × damage + the life lost since the last stage check`, its own
+  object the firer; its other nodes take it through the falloff alone. Measured
+  again: of the 1,828 nodes of the 427 `.ndp` tables no round uses, 1 names a
+  blast and none a kind 2 or 4, and 0 of the 458 designs carries either turret
+  on it. The engine deals the hit now
+  ([Whose hit it is](#whose-hit-it-is-and-whom-it-spares--read-and-measured)).
 - How a knocked-off part flies: the push and spin it is given (`0x100102a0`,
   its subtree's box and mass from `0x10010760`),
   how its update integrates them, and what the world query at `0x100134c1`

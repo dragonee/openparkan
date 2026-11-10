@@ -110,7 +110,9 @@ and its animation, when seen from outside.
   node in reach, less armour — but no node of the unit that fired the round,
   whose shield still pays for its own blast, and nothing at all once the unit
   that fired it has been deleted (docs/26, "Whose hit it is, and whom it
-  spares"). A dead node takes its children with it, and
+  spares"). A blast also takes the rounds flying through it, and one whose life
+  it ends goes off; a node whose own `.exp` is a blast deals it as a round's
+  would (docs/26, "What a blast reaches"). A dead node takes its children with it, and
   node 0 takes the object; a building stays, a shell that can still be shot
   apart.
 - On Mission 01 the laser kills a target in two hits of 250.
@@ -1650,6 +1652,7 @@ a row here. A row leaves this table when research closes it.
 | M14 | The landscape's own side of a building's cut: the insertion re-triangulates each cut face and keeps its triangles outside the outer contour; and why 4 placed buildings without the start flag stand up to 0.14 off their cut contour's mean, where the insertion sets them down (the other 12 off it carry the flag, which keeps them at their file height) | the landscape is cut to the outer contour by a mask, a texel at a time, not re-triangulated, and a buried apron 2 units past the contour, sunk 0.5, covers the mask's edge; every placed building stands at its mission height, and one the console's `bcreate` makes is set down on the mean | [03](../docs/03-terrain.md#for-an-engine) |
 | M14 | Which cells a building draws: beyond 1.3 × `PortalFarDist` ÷ the field of view a doorway's room is not drawn; the field of view the game plays at; the 57 `DEFAULT` batches with no portal bit, which the game draws black | no cell is culled: every node is drawn, and each portal quad draws by its read fade, so beyond far a doorway is the black wall standing in front of the room the game leaves out; the fade takes the eye's own field of view; the 57 are left out | [24](../docs/24-motion.md#a-building-is-drawn-cell-by-cell-through-its-portals--read) |
 | M14 | What holds an animal at the height it hovers at, when the walker stands its walk points 30 to 80 m over a flyer's (`Behavior.dll:0x10040f52`–`0x10040f7c`): the player remembers the game's medusas staying where they hover until provoked, never flying (2026-09-22), where the read carries them up as they graze and 50 m up after a fight | an animal's points keep the walk's own height, at least 15 over the ground under them | [24](../docs/24-motion.md#a-flyers-walk-points--read-and-measured) |
+| M19 | When a round a blast takes in flight goes off, after the life update that finds its node 0 destroyed, and which block entry its end runs; the sphere its node takes the blast by (its one node's slot sphere, the header's on 63 of the 67 rounds) | it goes off where it is at its next step, its hit's `.exp` on nothing struck, and ends as a hit does; its node is its collision sphere about its place, and the four rounds with more nodes keep one life | [26](../docs/26-damage.md#what-a-blast-reaches--read) |
 
 ### Read since the stand-in was written
 

@@ -66,6 +66,12 @@ pub struct NodeLife {
     pub stages: u8,
     pub stage: u8,
     pub status: u32,
+    /// Its life as its stage was last worked out, the life record's `+0xc`: the stage routine
+    /// writes the life there as it ends (`0x100118ea`), a flying node excepted.
+    pub checked: f32,
+    /// What it lost between its last two stage checks, `+0xc − +8` at the check (`0x100117ac`):
+    /// the share of a rising stage's hit that is not the `.exp`'s own.
+    pub lost: f32,
 }
 
 impl NodeLife {
@@ -144,7 +150,16 @@ impl Life {
             .map(|i| {
                 let max = table.get(i).map_or(0.0, |d| d.durability) * volume_scale * level_ratio;
                 let status = if vital.get(i).copied().unwrap_or(false) { STATUS_VITAL } else { 0 };
-                NodeLife { life: max, max, destroyed: false, stages: 1, stage: 0, status }
+                NodeLife {
+                    life: max,
+                    max,
+                    destroyed: false,
+                    stages: 1,
+                    stage: 0,
+                    status,
+                    checked: max,
+                    lost: 0.0,
+                }
             })
             .collect();
         Self {
@@ -277,6 +292,9 @@ impl Life {
                 self.flights.retain(|(n, _)| *n != i);
             }
             if !self.nodes[i].flying() {
+                let n = &mut self.nodes[i];
+                n.lost = n.checked - n.life;
+                n.checked = n.life;
                 let (old, new) = (self.nodes[i].stage, self.nodes[i].stage_now());
                 if new != old {
                     rose = new > old;
@@ -525,6 +543,24 @@ mod tests {
         assert!(life.takt(4000.0).is_empty(), "once");
     }
 
+    /// The life record's `+0xc` is the life as the stage routine last ran (`0x100118ea`), and a
+    /// rising stage's hit adds `+0xc − +8`, what the node lost since (`0x100117ac`); a flying
+    /// node's routine ends before it writes (`0x10011306`).
+    #[test]
+    fn a_stage_check_keeps_the_life_and_the_next_one_what_was_lost_since() {
+        let mut life = dummy();
+        life.takt(0.0);
+        life.hit(1, 300.0);
+        life.hit(1, 150.0);
+        assert_eq!(life.takt(10.0), vec![Change::Staged(1)]);
+        assert_eq!((life.nodes[1].lost, life.nodes[1].checked), (450.0, 350.0));
+        life.takt(20.0);
+        assert_eq!(life.nodes[1].lost, 0.0, "nothing since");
+        life.hit(1, 350.0);
+        assert_eq!(life.takt(30.0), vec![Change::KnockedOff(1)]);
+        assert_eq!(life.nodes[1].checked, 350.0, "a flying node's check waits");
+    }
+
     #[test]
     fn a_damaged_parent_takes_its_child_down_where_it_stands_and_a_flying_one_carries_it() {
         let mut life = dummy();
@@ -696,6 +732,7 @@ mod tests {
             agent_sphere: (at + Vec3::Z, 1.5),
             construction: None,
             bubble_floor: None,
+            level_ratio: 1.0,
             devices: Vec::new(),
             gear: Vec::new(),
         }
