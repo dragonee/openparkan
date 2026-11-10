@@ -10,9 +10,11 @@ use glam::Vec3;
 use crate::hero::Eye;
 
 /// The view the level makes both cameras with (`0x100364a0`): the field of view across the
-/// frame, and the near plane.
+/// frame, the near plane and the far (`0x10036dba`-`0x10036dc4`, the block's `+0x14`, `+0xc`
+/// and `+0x10`).
 pub const FIELD: f32 = 1.04;
 pub const NEAR: f32 = 3.0;
+pub const FAR: f32 = 700.0;
 /// The tilt the camera is made with: 0 looks straight down, π/2 level.
 pub const TILT_START: f32 = 1.0;
 /// The keys' speed on the ground plane, m/s; up and down move at half (`0x1003714b`).
@@ -410,6 +412,7 @@ impl Camera {
             up: Vec3::new(cy * sp, sy * sp, cp),
             fov_x: self.field,
             near: NEAR,
+            far: FAR,
         }
     }
 }

@@ -122,6 +122,7 @@ impl Briefing {
             up: forward.cross(right),
             fov_x: f.fov_x() as f32,
             near: briefing::NEAR as f32,
+            far: briefing::FAR as f32,
         }
     }
 

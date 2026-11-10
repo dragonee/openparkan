@@ -137,19 +137,13 @@ pub fn body_sprites(world: &World, seconds: f64, infrared: bool) -> Vec<parkan_r
 
 pub use parkan_world::play::Play;
 
-/// How far along the sun's ray the line is asked: past every map's edge.
-///
-/// STAND-IN: docs/10-sky.md#the-lens-flare -- the ray's far end is half a length off the eye
-/// along the body's way (`Terrain.dll:0x1007dd5c`-`0x1007dd8c`), and which of the view's figures
-/// that length is (`ebp - 0x60c`) is not traced; nothing stands past this one.
-const SUN_RAY: f32 = 10_000.0;
-
 /// Whether the eye sees the body up: the sun's draw asks the world for the first face on the
-/// line from half a metre out of the eye towards it (`Terrain.dll:0x1007e4c2`), with a request
-/// of its own that shuts out no triangle flag (docs/07, "Who fills a face query's filter"), the
-/// effects' view test's. A face there takes the flare and its lift of the light away. With no
-/// world to ask, the line is clear.
-pub fn sun_line_clear(world: &World, play: Option<&Play>, seconds: f64, eye: Vec3) -> bool {
+/// sun's ray ([`parkan_sim::sky::sun_ray`], `Terrain.dll:0x1007e4c2`), half a metre out of the
+/// eye to half the camera's far plane `far` along the body's way, with a request of its own
+/// that shuts out no triangle flag (docs/07, "Who fills a face query's filter"), the effects'
+/// view test's. A face there takes the flare and its lift of the light away. With no world to
+/// ask, the line is clear.
+pub fn sun_line_clear(world: &World, play: Option<&Play>, seconds: f64, eye: Vec3, far: f32) -> bool {
     use parkan_sim::sky as atm;
     let (Some(a), Some(play)) = (world.atmosphere.as_ref(), play) else {
         return true;
@@ -157,8 +151,8 @@ pub fn sun_line_clear(world: &World, play: Option<&Play>, seconds: f64, eye: Vec
     let Some(&(body, progress)) = atm::bodies_aloft(a, seconds).first() else {
         return true;
     };
-    let toward = body.direction(progress).normalize_or_zero();
-    play.battle.combat.clear_line(&play.ground, eye + toward * 0.5, eye + toward * SUN_RAY)
+    let (from, to) = atm::sun_ray(eye, body.direction(progress).normalize_or_zero(), far);
+    play.battle.combat.clear_line(&play.ground, from, to)
 }
 
 /// The lights, fog and dome colours at `seconds` into the mission, seen from `eye`
@@ -748,6 +742,12 @@ fn point_lights(play: &Play) -> Vec<parkan_render::frame::PointLight> {
 ///
 /// `weather` is the camera the rain and the snow are kept about and drawn through, where the
 /// frame is drawn through one the game's weather would draw in.
+///
+/// STAND-IN: docs/07-objects.md#a-robot-casts-a-shadow-on-the-ground-under-it--read-and-measured
+/// -- no object casts a shadow. The game lays one under every robot (`CShade::BeginDraw`,
+/// `EndDraw`, `Terrain.dll:0x10051590`, `0x10052630`): a square twice its radius across, square
+/// to the light, dropped down it onto the landscape faces under its corners -- the four rays
+/// of `EndDraw` -- cut to those faces and faded as it rises.
 #[allow(clippy::too_many_arguments)]
 pub fn sync(
     renderer: &mut parkan_render::Renderer,

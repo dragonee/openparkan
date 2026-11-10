@@ -26,6 +26,8 @@ fn the_heros_eye_looks_level_along_its_heading_and_pitches_with_the_turret() {
     assert!(eye.forward.z.abs() < 0.02, "level: {}", eye.forward);
     assert!(eye.forward.dot(facing) > 0.999, "{} against {facing}", eye.forward);
     assert!((eye.fov_x - 1.3).abs() < 1e-6 && (eye.near - 0.1).abs() < 1e-6);
+    // Value 1 is the far plane the sun's ray reaches half of (docs/10, "The lens flare").
+    assert_eq!(eye.far, 1000.0);
     let origin = hero.walker.body.position;
     let lift = eye.position.z - origin.z;
     assert!(lift > 0.5 && lift < 3.0, "the eye {lift} above the origin");
@@ -574,7 +576,7 @@ fn mission_01s_outer_camera_stands_at_its_four_places_about_the_hero_and_goes_ba
             - glam::Vec3::new(heading.cos(), heading.sin(), 0.0) * r * back
             - glam::Vec3::Z * r * parkan_world::camera::WALKER_DROP;
         assert!(eye.position.distance(want) < 1e-3, "place {k}: {} against {want}", eye.position);
-        assert_eq!((eye.forward, eye.fov_x, eye.near), (own.forward, 1.3, 0.5));
+        assert_eq!((eye.forward, eye.fov_x, eye.near, eye.far), (own.forward, 1.3, 0.5, 700.0));
         // On the hero's right for the first two, on its left for the others.
         let right = own.forward.cross(own.up);
         assert_eq!((eye.position - own.position).dot(right) > 0.0, k < 2, "place {k}");

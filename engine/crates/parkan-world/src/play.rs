@@ -3919,6 +3919,7 @@ impl Play {
             up: Vec3::Z,
             fov_x: crate::command::FIELD,
             near: crate::command::NEAR,
+            far: crate::command::FAR,
         }
     }
 

@@ -7,6 +7,10 @@ use parkan_world::hero::Eye;
 /// own first-person view is set by the turret's camera in M3.
 pub const DEBUG_FOV_Y_DEGREES: f32 = 60.0;
 pub const NEAR: f32 = 0.1;
+/// The debug camera's far plane, which nothing draws by: a unit camera's, its value 1 on all
+/// 61 (docs/13, "The camera never asks for more than three"), for the sun's draw to reach half
+/// of (docs/10, "The lens flare").
+pub const FAR: f32 = 1000.0;
 
 pub struct FlyCamera {
     pub position: Vec3,
@@ -65,7 +69,8 @@ mod tests {
 
     #[test]
     fn the_eyes_field_of_view_is_across_the_screen() {
-        let eye = Eye { position: Vec3::ZERO, forward: Vec3::Y, up: Vec3::Z, fov_x: 1.3, near: 0.1 };
+        let eye =
+            Eye { position: Vec3::ZERO, forward: Vec3::Y, up: Vec3::Z, fov_x: 1.3, near: 0.1, far: 1000.0 };
         // A point at the edge of a 1.3-rad horizontal view lands on the screen's edge.
         let edge = Vec3::new(0.65_f32.tan(), 1.0, 0.0);
         for aspect in [4.0 / 3.0, 16.0 / 9.0] {

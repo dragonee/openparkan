@@ -56,10 +56,11 @@ impl Zoom {
     }
 }
 
-/// The outer camera's view (`0x10038b5e`, made by `0x100364a0`): its field across the frame
-/// and its near plane.
+/// The outer camera's view (`0x10038b5e`, made by `0x100364a0`): its field across the frame,
+/// its near plane and its far (`0x10038b64`-`0x10038b6e`).
 pub const OUTER_FIELD: f32 = 1.3;
 pub const OUTER_NEAR: f32 = 0.5;
+pub const OUTER_FAR: f32 = 700.0;
 /// Its four places in turn (`0x10038920`): the angle off straight behind the unit's look,
 /// positive to its right, and how far back, in the unit's bound `r`.
 pub const PLACES: [(f32, f32); 4] = [(0.4, 2.5), (0.2, 4.5), (-0.2, 4.5), (-0.4, 2.5)];
@@ -187,7 +188,14 @@ impl Outer {
                 position = point + normal * CLEAR_OFF;
             }
         }
-        Eye { position, forward: eye.forward, up: eye.up, fov_x: OUTER_FIELD, near: OUTER_NEAR }
+        Eye {
+            position,
+            forward: eye.forward,
+            up: eye.up,
+            fov_x: OUTER_FIELD,
+            near: OUTER_NEAR,
+            far: OUTER_FAR,
+        }
     }
 }
 
@@ -196,7 +204,14 @@ mod tests {
     use super::*;
 
     fn eye() -> Eye {
-        Eye { position: Vec3::new(10.0, 20.0, 5.0), forward: Vec3::X, up: Vec3::Z, fov_x: 1.3, near: 0.1 }
+        Eye {
+            position: Vec3::new(10.0, 20.0, 5.0),
+            forward: Vec3::X,
+            up: Vec3::Z,
+            fov_x: 1.3,
+            near: 0.1,
+            far: 1000.0,
+        }
     }
 
     #[test]

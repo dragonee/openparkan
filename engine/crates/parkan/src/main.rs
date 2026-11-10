@@ -800,7 +800,7 @@ fn screenshot(loaded: &scene::Loaded, game: &Path, args: &Args, out: &Path) -> R
     };
     // Where the fog is measured from and the flare gate looks along: the camera drawn, and
     // the field of view a portal quad's fade is scaled by.
-    let (eye, forward, up, field, seconds) = match (&play, args.look) {
+    let (eye, forward, up, field, far, seconds) = match (&play, args.look) {
         (_, Some([x, y, z, tx, ty, tz])) => {
             let (eye, target) = (Vec3::new(x, y, z), Vec3::new(tx, ty, tz));
             (
@@ -808,22 +808,23 @@ fn screenshot(loaded: &scene::Loaded, game: &Path, args: &Args, out: &Path) -> R
                 (target - eye).normalize_or(Vec3::Y),
                 Vec3::Z,
                 camera::debug_field(aspect),
+                camera::FAR,
                 play.as_ref().map_or(0.0, |p| p.hero.time_ms / 1000.0),
             )
         }
         (Some(p), None) => {
             let e = briefing.as_ref().map_or_else(|| p.eye(), |b| b.eye());
-            (e.position, e.forward, e.up, e.fov_x, p.hero.time_ms / 1000.0)
+            (e.position, e.forward, e.up, e.fov_x, e.far, p.hero.time_ms / 1000.0)
         }
         (None, None) => {
             let c = start_camera(loaded);
-            (c.position, c.forward(), Vec3::Z, camera::debug_field(aspect), 0.0)
+            (c.position, c.forward(), Vec3::Z, camera::debug_field(aspect), camera::FAR, 0.0)
         }
     };
     // The camera's infrared is the view's flag `0x20`, which the hero's N turns; the briefing
     // runs before any input does.
     let infrared = briefing.is_none() && play.as_ref().is_some_and(|p| p.infrared());
-    let line_clear = scene::sun_line_clear(&world, play.as_ref(), seconds, eye);
+    let line_clear = scene::sun_line_clear(&world, play.as_ref(), seconds, eye, far);
     if let Some((lighting, colours)) =
         scene::lighting(&world, seconds, eye, forward, field, infrared, line_clear)
     {
@@ -1825,20 +1826,21 @@ impl App {
             ..Default::default()
         });
         let aspect = r.config.width as f32 / r.config.height.max(1) as f32;
-        let (eye, forward, field, seconds) = match &self.play {
+        let (eye, forward, field, far, seconds) = match &self.play {
             Some(p) => {
                 let e = self.briefing.as_ref().map_or_else(|| p.eye(), |b| b.eye());
-                (e.position, e.forward, e.fov_x, p.hero.time_ms / 1000.0)
+                (e.position, e.forward, e.fov_x, e.far, p.hero.time_ms / 1000.0)
             }
             None => (
                 self.camera.position,
                 self.camera.forward(),
                 camera::debug_field(aspect),
+                camera::FAR,
                 self.started.elapsed().as_secs_f64(),
             ),
         };
         let infrared = self.briefing.is_none() && self.play.as_ref().is_some_and(|p| p.infrared());
-        let line_clear = scene::sun_line_clear(&self.world, self.play.as_ref(), seconds, eye);
+        let line_clear = scene::sun_line_clear(&self.world, self.play.as_ref(), seconds, eye, far);
         if let Some((lighting, colours)) =
             scene::lighting(&self.world, seconds, eye, forward, field, infrared, line_clear)
         {

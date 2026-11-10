@@ -562,6 +562,25 @@ pub fn flare_height_gate(height: f32) -> f32 {
     ((height - FLARE_HEIGHT_ZERO) / (FLARE_HEIGHT_FULL - FLARE_HEIGHT_ZERO)).clamp(0.0, 1.0)
 }
 
+/// How far out of the eye the sun's ray starts: half a metre (`Terrain.dll:0x1009a1fc`,
+/// `0x1007e2a0`-`0x1007e3f4`).
+pub const SUN_RAY_FROM: f32 = 0.5;
+/// How much of the camera's far plane the ray reaches along the body's way: half. The sun's
+/// draw reads the far out of the parameter block the camera's slot 7 copies it
+/// (`Terrain.dll:0x1007d9a1`, `0x10084910`; `ebp - 0x60c`, `CCamera +0x14c`), hands it with the
+/// near and the field to its own projector, which takes it as the far plane
+/// (`0x1007f290`, `0x1008bca0`), and stands the ray's end half of it off the eye against the
+/// body's travel (`0x1007dcca`-`0x1007dd8c`, `0x1007de64`).
+pub const SUN_RAY_OF_FAR: f32 = 0.5;
+
+/// The segment the sun's draw asks the world along (docs/10-sky.md, "The lens flare"): from
+/// `eye` toward a body along the unit vector `toward`, through a camera whose far plane is
+/// `far` -- 500 long from a unit's own camera, whose far is 1000, and 350 from the outer, the
+/// command and the briefing cameras, whose far is 700.
+pub fn sun_ray(eye: Vec3, toward: Vec3, far: f32) -> (Vec3, Vec3) {
+    (eye + toward * SUN_RAY_FROM, eye + toward * (SUN_RAY_OF_FAR * far))
+}
+
 /// The sun object's two directional lights' colours with the body at `toward`, seen along `view`
 /// (`docs/10-sky.md`, "What the sun does with its seven values"): the main light is
 /// `lerp(c, 5c, gate1² × gate2 × slot 17's alpha)` of slot 19 × the third float
@@ -1080,6 +1099,19 @@ mod tests {
         assert_eq!(body_colour(&sky, false), [1.0, 40.0 / 255.0, 0.0, 50.0 / 255.0]);
         // The infrared's filter takes the colour and keeps the alpha: 7 x 0.33 x 295 = 681, held.
         assert_eq!(body_colour(&sky, true), [0.0, 1.0, 0.0, 50.0 / 255.0]);
+    }
+
+    #[test]
+    fn the_suns_ray_reaches_half_the_cameras_far_plane() {
+        let eye = Vec3::new(100.0, 200.0, 30.0);
+        // A unit's own camera's far is 1000: the line stops 500 along, not past the map.
+        let (from, to) = sun_ray(eye, SUN_DIRECTION, 1000.0);
+        assert!((from - (eye + SUN_DIRECTION * 0.5)).length() < 1e-4, "half a metre out: {from}");
+        assert!((to.distance(eye) - 500.0).abs() < 1e-3, "{}", to.distance(eye));
+        assert!((to - eye).normalize().dot(SUN_DIRECTION) > 0.9999, "towards the body");
+        // The outer, the command and the briefing cameras' 700: 350.
+        let (_, to) = sun_ray(eye, MOON_DIRECTION, 700.0);
+        assert!((to.distance(eye) - 350.0).abs() < 1e-3);
     }
 
     #[test]

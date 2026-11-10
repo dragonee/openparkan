@@ -578,9 +578,34 @@ at `0x1009a1fc`) towards a point along the body's way (`0x1007dd5c`–`0x1007dd8
 (`0x1007c8d7`–`0x1007c913`) and translated into the query's filter (`0x1007e377`–`0x1007e3a1`).
 Any face takes the flare away and the lift with it: the answer's 0 goes to the same plain
 colour the infrared takes (`0x1007e4ca`, `0x1007e7d4`, `0x1007eba3`). So a sun behind a hill,
-a building or a tree throws no flare and lights the scene at its own colour. How far the
-point stands is half a figure this round did not finish tracing (`ebp − 0x60c`); the engine
-asks 10000 along, past every map's edge, a stand-in.
+a building or a tree throws no flare and lights the scene at its own colour.
+
+**The point stands half the camera's far plane off the eye** — *read*. The draw is handed the
+camera it draws for and asks its slot 7 for the camera's parameter block (`0x1007d9a1`;
+`CCamera`'s `0x10084910` copies the eight words at its `+0x13c` out, the sixth refreshed from
+the view's field of view first), and `ebp − 0x60c` is that block's fifth word, `+0x10` of the
+block, `CCamera +0x14c`. Its fourth, fifth and sixth go to the draw's own projector together
+(`0x1007f290`, into its `+0x50`, `+0x54` and `+0x58`), and the projector's point test names
+them: it takes a point only with *near* ≤ depth ≤ *far*, `+0x50` and `+0x54`, and writes its z
+as *far* (depth − *near*) ÷ (depth (*far* − *near*)) (`0x1008bca0`), the perspective depth,
+where `+0x58` is halved and its tangent taken (`0x1007f2d6`, an `fptan`) as a field of view's
+is; its defaults before the camera's are 1, 100 and 1 (`0x1007d9f2`–`0x1007da06`). So the
+length is the far plane, and the ray's end is `eye − ½ far × travel`, the body's travel a unit vector
+(`0x1007dcca`–`0x1007dd8c`, `0x1007de64`). That settles the order of a camera's three values
+too, which every page had as a *guess*: the block's `+0xc`, `+0x10`, `+0x14` are near, far and
+field. The cameras give it:
+
+| camera | made at | near, far, field | the ray's reach |
+|---|---|---|---:|
+| a unit's own, its class-4 component | `Control.dll:0x10023937`, values 0–2 | 0.1, **1000**, 1.3 on all 61 | **500** |
+| the outer camera | `iron3d.dll:0x10038b5e` | 0.5, **700**, 1.3 | **350** |
+| command mode's two | `iron3d.dll:0x10036dba` | 3, **700**, 1.04 | **350** |
+| the briefing's | `iron3d.dll:0x10031532` | 3, **700**, 1.04 | **350** |
+
+So the flare looks no further for a hill than 500 from the cockpit and 350 from behind or
+above: a ridge further off than that leaves the sun its flare. The engine asked 10000 along,
+past every map's edge, as a stand-in; it now asks half the far of the camera it draws through
+(`parkan_sim::sky::sun_ray`).
 
 **Only a scene camera's own frame gets it.** `RenderFlare` returns at any
 camera type but 0 (`0x1007d558`), and the sun's draw returns at once in a
@@ -2745,6 +2770,13 @@ which is what the game does.
   body is up for carries any alpha; and the weather-window count is the control, which finds 7
   at 255 inside, all in a weather window and in no body's
   ([A black slot 17 and a body's window](#a-black-slot-17-and-a-bodys-window--measured)).
+- ~~**How far along the body's way the sun's ray stands**: half a figure of the view's
+  (`ebp − 0x60c`), not traced, which the engine asked 10000 along.~~ **Read**: the camera's
+  far plane, the fifth word of the parameter block its slot 7 copies out (`0x10084910`,
+  `CCamera +0x14c`), which the draw's own projector tests a point's depth against and builds
+  its z from (`0x1008bca0`). The ray reaches 500 from a unit's own camera, whose far is 1000,
+  and 350 from the outer, the command and the briefing cameras, whose far is 700; the engine
+  asks the same ([The lens flare](#the-lens-flare)).
 - ~~**The line a room's mesh is asked along.** The room test's second half
   (`AniMesh.dll:0x10010550`) counts crossings along the direction at the mesh's
   `+0x150`, whose writer is not read; the engine takes the room's own z.~~

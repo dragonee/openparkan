@@ -373,6 +373,18 @@ def check_terrain(check, game: Path) -> None:
             excluded["surface 0x04"] += bool(surface & landmesh.SURFACE_NOT_GROUND_BIT)
             excluded["surface 0x02"] += bool(surface & landmesh.SURFACE_WATER_BIT)
             excluded["flags 0x2000"] += bool(flags & landmesh.FLAGS_LIQUID_BED_BIT)
+            # World flag 0x8000, the other half of a robot shadow's 0x8008, is landscape
+            # 0x200000 (Terrain.dll:0x10022da0): the surface word's 0x20.
+            excluded["surface 0x20"] += bool(surface & 0x20)
+    check("Land.msh: a robot's shadow rays shut out no shipped face",
+          faces and not excluded["flags 0x20"] and not excluded["surface 0x20"]
+          and excluded["surface 0x02"] == 3630 and excluded["flags 0x2000"] == 6102,
+          f"CShade::EndDraw's four rays (Terrain.dll:0x10052d60) exclude world flags 0x8008, "
+          f"which are the flags word's 0x20 and the surface word's 0x20: on "
+          f"{excluded['flags 0x20']} and {excluded['surface 0x20']} of the {faces} faces.  "
+          f"The same two words carry the water's 0x02 on {excluded['surface 0x02']} and the "
+          f"bed's 0x2000 on {excluded['flags 0x2000']}, so each ray takes the first landscape "
+          f"face under its corner, a liquid's sheet included")
     check("Land.msh: no face carries the two bits the ground search excludes",
           faces and not excluded["flags 0x20"] and not excluded["surface 0x04"]
           and excluded["surface 0x02"] == 3630 and excluded["flags 0x2000"] == 6102,

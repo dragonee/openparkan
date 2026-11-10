@@ -48,6 +48,11 @@ pub struct Eye {
     /// The camera's values 2 and 0: the horizontal field of view, and the near plane.
     pub fov_x: f32,
     pub near: f32,
+    /// Its value 1, the far plane: the fifth word of the block a camera's slot 6 keeps at
+    /// `CCamera +0x13c`, beside the near at the fourth and the field at the sixth
+    /// (`Terrain.dll:0x100848a0`). The sun's draw reaches half of it (docs/10, "The lens
+    /// flare"); the frame is drawn without one.
+    pub far: f32,
 }
 
 /// One external part of a robot: its mesh, the part it hangs from (or -1) and the node of
@@ -1482,6 +1487,7 @@ impl Robot {
             up,
             fov_x: self.zoom.field(values[2]),
             near: values[0],
+            far: values[1],
         })
     }
 }

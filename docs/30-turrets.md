@@ -87,7 +87,10 @@ and its `t` twin doesn't: a slip in the data, by the look of it (*guess*).
 **The camera** (class 4, constructor `0x100233d0`) creates a view with
 `World3D.dll!CreateObject` type 5 and hands it its values 0, 1 and 2
 (`0x100238b0`, *read*). By their numbers they are a near plane, a far plane
-and a field of view of 1.3 rad; the names are a *guess*.
+and a field of view of 1.3 rad; ~~the names are a *guess*~~ the near and the far are
+*read* too: the sun's draw hands the block's `+0xc` and `+0x10` to a projector that tests a
+point's depth between them and builds its z from them
+([10-sky.md](10-sky.md#the-lens-flare)).
 
 **Values 3–5 (1, 150, 1) have no reader found.** The camera class never
 touches its record past value 2. A scan of five modules for a value query

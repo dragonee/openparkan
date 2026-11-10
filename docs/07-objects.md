@@ -1114,7 +1114,10 @@ constructors are unoptimised, each store through a local of its own, so the trac
   away ([10-sky.md](10-sky.md#the-lens-flare)).
 - **The four rays of `CShade::EndDraw`** (`0x10052d60`, the world's slot 7 again), by a
   six-word constructor (`0x100551d0`, `0x10052ce1`) and two stores: {2, 0, 0, 0, 0, `0x8008`,
-  **0, 0**}. What they test is not read.
+  **0, 0**}. ~~What they test is not read.~~ **Read**: they lay a **robot's shadow** on the
+  ground. Each drops a corner of the shadow's square along the light onto the landscape, the
+  one class its mask names, and the `0x8008` it shuts out is on no shipped landscape face
+  ([A robot casts a shadow](#a-robot-casts-a-shadow-on-the-ground-under-it--read-and-measured)).
 
 **The wrappers.** The table they stand in is `QueryInterface` 1 of the landscape, at its own
 `+0x13c` (`0x1001a1d6`, id 1 through the byte table `0x1001a357`), and each takes its object on
@@ -2151,6 +2154,73 @@ setting 25 is was not read.
    no light's diffuse applies. Multiply the texture, the lightmap and that
    colour; alpha is the material's ambient alpha. Draw it opaque and fogged.
 3. Draw every other batch of the building as any model's.
+
+### A robot casts a shadow on the ground under it — *read*, and *measured*
+
+`CShade::BeginDraw` (`Terrain.dll:0x10051590`) and `CShade::EndDraw` (`0x10052630`, both
+named by their panics) bracket an object's draw with its **shadow**. The offsets below are
+of the interface the two are entered on, `+4` into the shade.
+
+**Who has one.** The object's class (its game object's slot 11, `0x100515fd`) picks the
+switch: class 4, a robot, takes `RobShadowsOn`, anything else `BldShadowsOn`
+(`0x10051609`–`0x1005163e`; the shade's settings read, `0x10046b90`, copies settings 9 and 15
+to `+0x15f4` and `+0x15f8` at `0x10046ca2` and `0x10046cb9`), and a frame takes at most `MaxShadowsQty`
+(`0x10051653`–`0x1005166a`). No `shade.cfg` ships, so the defaults stand
+([10-sky.md](10-sky.md#the-render-settings)): 1, 0 and 20 — **a robot casts a shadow and
+a building does not**. *Seen* in the recordings already cited: a hovering bot's shadow on the
+ground under it ([39-boarding.md](39-boarding.md)), and a bot's own shadow across the sand
+([30-turrets.md](30-turrets.md#aiming-and-the-camera--read-and-measured)).
+
+**Its square.** `BeginDraw` asks the object for its bounding sphere (slot 9 with 2, into
+`+0x15e4`, the radius *r* at `+0x15f0`) and asks `0x10051020` for a direction and a weight
+(into `+0x158c`), which it makes of the lights in the object's list — the records it tests
+by a type word of 3 and of 1, Direct3D's directional and point (*inferred*). It builds a
+frame of that direction (`0x10051c4e`–`0x10051ed5`): the third axis the direction negated,
+pointing back at the light; the first two perpendicular to it and to each other, each 2*r*
+long, crossed from whichever of the object's own axes lies least along the light; the
+origin the sphere's centre. `EndDraw` puts the corners of the unit square, (±½, ±½, 0),
+through that frame (`0x100527a2`–`0x100528fa`): **a square 2*r* across, square to the
+light, about the object's middle.**
+
+**The four rays** (`0x10052a32`–`0x10052d60`). For a robot whose *r* is under 10
+(`0x10052c95`–`0x10052cb6`), each corner is dropped along the light: the world's slot 7 from
+4*r* up the third axis above the corner to 100 below it (4 at `0x1009b2d8`, 100 at
+`0x1009b494`), under the filter {2, 0, 0, 0, 0, `0x8008`, 0, 0}
+([above](#the-filters-the-first-enumeration-could-not-see--read)). Class mask 2 is class 1
+alone, **the landscape**; the excluded flags `0x8008` are, by the landscape's mapping
+(`0x10022da0`: world `0x8` to `0x20`, `0x8000` to `0x200000`), the flags word's `0x20` and
+the surface word's `0x20`, which are on **0 of the 275882** faces of the 33 maps — the
+control is the same scan over the same two words, which finds the surface word's `0x02`,
+the water, on 3630, and the flags word's `0x2000`, the bed under it, on 6102 (*measured*,
+`openparkan verify`). So a ray asks for the first face of the ground under its corner, a
+liquid's sheet included, and sees nothing standing on it. A robot whose *r* is 10 or more,
+and any building with the switch on, asks no ray: the landscape hands it every face its
+bounding sphere meets (its `ITerrain`, interface 5, slot 6, `0x100539f2`).
+
+**What the hits feed.** Two things:
+
+- **The faces the shadow is laid on.** Each corner's face goes into a list at `+0x15fc`,
+  once (`0x10052f73`–`0x10052fad`), and is set against the next corner's (the table at
+  `0x1009b464`) and the neighbours the world's slot 6 hands back for it (`0x100531ab`) —
+  which fill in the faces between, *inferred*, the walk not being read here. The square is
+  then cut to the listed faces and drawn on them as a fan of at most nine vertices, (*n* −
+  2) × 3 indices (*"Verts qty in shadow exceeds upper limit!"*, `0x10054309`–`0x10054334`);
+  that the cut is a clip to each face is *inferred* from that bound.
+- **How dark it is.** A hit's answer keeps the squared distance from the ray's start at
+  `+0x20` (the landscape's face test, `0x1001e0de`), and each hit gives
+  1 − 0.0001 *d*², held to 0..1 (`0x10052dbe`–`0x10052e23`; 0.0001 at `0x1009b460`): 1 at
+  the start, 0 at 100 along. The mean over the hits, times 0.2 and the weight, held to 1
+  (`0x10053ae0`–`0x10053b1a`), is the shadow's strength (`0x100540a0`). So a robot's
+  shadow fades as it rises: a corner 100 − 4*r* over the ground along the light gives
+  nothing.
+
+So they are no lens test, no sun occlusion and no camera push: the sun's own clear line is
+another query ([10-sky.md](10-sky.md#the-lens-flare)), and these are a robot's shadow
+finding the ground.
+
+**The engine** casts no shadow at all, a stand-in. Drawing one is a pass of its own — the
+square down the light onto the faces under it, cut to them, and faded by the corners'
+height — and is queued.
 
 ### Winding is consistent, so culling is safe
 
