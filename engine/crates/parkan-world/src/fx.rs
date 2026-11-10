@@ -143,6 +143,18 @@ fn key(name: &str) -> String {
     name.to_ascii_lowercase()
 }
 
+/// The device blend mode a type-10 lump draws in, whatever its material says: 0, opaque. The
+/// lump's own draw writes it into the block it hands the shade (`Effect.dll:0x1000bdd5`, the
+/// block at the particle's `+0x16c`, `+0x5c` of it), which nothing else writes, so 57 of the
+/// 160 shipped blocks, whose `NE_Gibs_Aln` and `NE_Gibs_Anm` say 4, draw opaque as the other
+/// 78 named do (docs/07, "How a material draws is in the archive directory").
+pub const LUMP_BLEND_MODE: u8 = 0;
+
+/// The key a material's looks are kept under: a lump's apart, for its blend mode is its own.
+fn look_key(name: &str, lump: bool) -> String {
+    if lump { format!("{}#lump", key(name)) } else { key(name) }
+}
+
 impl Fx {
     pub fn open(game: &Path) -> Result<Fx> {
         let path = gamedir::resolve(game, "effects.rlb").context("no effects.rlb")?;
@@ -331,20 +343,26 @@ impl Fx {
                 cell: p.cell,
             }));
         }
-        let materials: Vec<String> = self
+        let materials: Vec<(String, bool)> = self
             .templates
             .values()
             .flatten()
             .flat_map(|t| t.emitters.iter())
             .filter(|e| e.kind != fxid::EMITTER_SOUND && (e.kind == 10 || !e.resource.member.is_empty()))
-            .map(|e| if e.kind == 10 { debris_material(e).to_string() } else { e.resource.member.clone() })
+            .map(|e| {
+                if e.kind == 10 {
+                    (debris_material(e).to_string(), true)
+                } else {
+                    (e.resource.member.clone(), false)
+                }
+            })
             .collect();
-        for m in materials {
-            if self.look_of.contains_key(&key(&m)) {
+        for (m, lump) in materials {
+            if self.look_of.contains_key(&look_key(&m, lump)) {
                 continue;
             }
             let look = store.look(&m)?;
-            let blend_mode = look.blend_mode;
+            let blend_mode = if lump { LUMP_BLEND_MODE } else { look.blend_mode };
             let phases: Vec<Phase> = match &look.animation {
                 Some(a) => a.keys.iter().map(|(phase, _)| *phase).collect(),
                 None => vec![look.still],
@@ -355,7 +373,7 @@ impl Fx {
                     self.look_index(Look { texture: p.texture, blend_mode, ambient: p.ambient, cell: p.cell })
                 })
                 .collect();
-            self.look_of.insert(key(&m), MaterialLooks { keys, animation: look.animation });
+            self.look_of.insert(look_key(&m, lump), MaterialLooks { keys, animation: look.animation });
         }
         Ok(())
     }
@@ -372,8 +390,9 @@ impl Fx {
     /// STAND-IN: docs/07-objects.md#how-a-material-reaches-the-device--read-and-measured --
     /// that the effect draw takes the entry's cell is not read. The masked colour lerp
     /// between two keys is not drawn: a sprite takes the key it is in whole.
-    fn sprite_look(&self, material: &str, phase: f32) -> Option<usize> {
-        let m = self.look_of.get(&key(material))?;
+    fn sprite_look(&self, sprite: &Sprite) -> Option<usize> {
+        let (material, phase) = (&sprite.material, sprite.phase);
+        let m = self.look_of.get(&look_key(material, !sprite.facets.is_empty()))?;
         let k = m.animation.as_ref().map_or(0, |a| a.key_at(a.time_of(phase)).0);
         m.keys.get(k).copied()
     }
@@ -429,7 +448,7 @@ impl Fx {
             buffer.clear();
             let seen = instance.test_point().is_none_or(&in_view);
             instance.sprites_at(now_ms, Some(eye), seen, level, &mut buffer);
-            out.extend(buffer.drain(..).filter_map(|s| Some((self.sprite_look(&s.material, s.phase)?, s))));
+            out.extend(buffer.drain(..).filter_map(|s| Some((self.sprite_look(&s)?, s))));
         }
         out
     }
@@ -468,7 +487,7 @@ impl Fx {
         for (_, instance) in &self.instances {
             buffer.clear();
             instance.sprites_from(now_ms, Some(eye), instance.test_point().is_none_or(&in_view), &mut buffer);
-            out.extend(buffer.drain(..).filter_map(|s| Some((self.sprite_look(&s.material, s.phase)?, s))));
+            out.extend(buffer.drain(..).filter_map(|s| Some((self.sprite_look(&s)?, s))));
         }
         out
     }

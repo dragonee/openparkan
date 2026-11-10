@@ -1115,3 +1115,34 @@ fn a_shipped_debris_block_flies_on_whole_past_the_age_its_fade_reaches_0() {
     assert_eq!(lumps.len(), 4, "L00's four, a second into 1.5");
     assert!(lumps.iter().all(|s| s.alpha == 1.0 && s.material == "L00"));
 }
+
+/// A lump draws opaque whatever its material says: its draw writes blend mode 0 into the block
+/// it hands the shade (`Effect.dll:0x1000bdd5`). `exp_b_al_las_g`'s lumps are `NE_Gibs_Aln`,
+/// which says 4, and the effect's `water_drop_r` drops, which say 4 too, keep it (docs/07,
+/// "How a material draws is in the archive directory").
+#[test]
+#[ignore = "needs the game install"]
+fn a_lump_draws_opaque_whatever_its_material_says() {
+    use glam::Vec3;
+    use parkan_sim::effects::Frame;
+    use parkan_world::fx::{Fx, LUMP_BLEND_MODE, Owner};
+    use parkan_world::textures::TextureStore;
+
+    let game = gamedir::find(None).expect("a Parkan install: set PARKAN_DIR");
+    let mut fx = Fx::open(&game).unwrap();
+    assert!(fx.start(Owner::World, "exp_b_al_las_g", Frame::along(Vec3::ZERO, Vec3::Z, 1.0), 1.0, 0.0, None));
+    fx.resolve_looks(&mut TextureStore::open(&game).unwrap()).unwrap();
+    let drawn = fx.sprites(200.0, Vec3::new(0.0, -40.0, 10.0), |_| true);
+    let mode = |lump: bool, material: &str| {
+        drawn
+            .iter()
+            .filter(|(_, s)| s.facets.is_empty() != lump && s.material.eq_ignore_ascii_case(material))
+            .map(|&(look, _)| fx.looks[look].blend_mode)
+            .collect::<Vec<_>>()
+    };
+    let lumps = mode(true, "NE_Gibs_Aln");
+    assert!(!lumps.is_empty(), "the lumps are drawn");
+    assert!(lumps.iter().all(|&m| m == LUMP_BLEND_MODE), "{lumps:?}");
+    let drops = mode(false, "water_drop_r");
+    assert!(!drops.is_empty() && drops.iter().all(|&m| m == 4), "the control keeps its own: {drops:?}");
+}

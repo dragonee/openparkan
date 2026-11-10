@@ -6706,6 +6706,35 @@ def check_effects(check, game: Path) -> None:
           f"packs (Terrain.dll:0x1004f710); and none of the {within} has an "
           f"ambient component above 1, so that routine's knee never fires")
 
+    # Which effect draws reach blend mode 0, where the fade cannot show: a sprite takes its
+    # material's mode through the shade's table (Terrain.dll:0x10028907), a type-10 lump
+    # writes 0 whatever its material says (Effect.dll:0x1000bdd5).  Mode 1 is in no
+    # material's reach: the table holds 0, 4, 2, 3, 5.
+    modes = Counter()
+    zero_effects = set()
+    for effect in library:
+        for e in effect.emitters:
+            if e.is_sound or not e.resource or not e.resource.member:
+                continue
+            m = mats.get(e.resource.member)
+            if m is None:
+                continue
+            modes["lump" if e.kind == 10 else "sprite", m.blend_mode] += 1
+            if m.blend_mode == 0:
+                zero_effects.add((effect.name, e.kind))
+    sprite_modes = {mode: n for (what, mode), n in modes.items() if what == "sprite"}
+    lump_modes = {mode: n for (what, mode), n in modes.items() if what == "lump"}
+    check("effects.rlb: no sprite draws in mode 0 or 1; the opaque draws are lumps",
+          sprite_modes == {2: 2519, 4: 923} and lump_modes == {0: 78, 4: 57}
+          and len(zero_effects) == 78 and all(kind == 10 for _, kind in zero_effects)
+          and 1 not in materials.BLEND_TRANSLATE,
+          f"of the material references of blocks that draw sprites, by device mode: "
+          f"{dict(sorted(sprite_modes.items()))}; of the type-10 lumps': "
+          f"{dict(sorted(lump_modes.items()))}, the {lump_modes.get(0, 0)} at 0 in "
+          f"{len(zero_effects)} effects, and every lump drawn in mode 0 regardless "
+          f"(Effect.dll:0x1000bdd5).  The table a material's index goes through holds "
+          f"{materials.BLEND_TRANSLATE}, so no material reaches mode 1")
+
     # An explosion's size lives in the .exp, not in the effect: the small,
     # medium and big fortification blasts share their emitter blocks exactly.
     trio = [library.get(f"exp_frt_{suffix}") for suffix in ("l", "m", "b")]

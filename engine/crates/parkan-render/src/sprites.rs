@@ -232,6 +232,12 @@ pub struct SpriteLook {
     pub cell: [f32; 4],
 }
 
+/// How a sprite in device blend mode `mode` meets the frame: the five render states of the
+/// mode's record (`Ngi32.dll:0x100346e0`, set by the render device's slot 6, `0x10008680`),
+/// which an effect sprite's item is handed unchanged (`Terrain.dll:0x10028907`,
+/// `0x100302d0`). Mode 0, `BLEND_DISABLE`, turns blending and the alpha test off: `ONE`,
+/// `ZERO`, the texel's colour over the whole quad and its alpha, the fade's with it, unread
+/// (docs/07, "How a material draws is in the archive directory").
 fn blend(mode: u8) -> wgpu::BlendState {
     use wgpu::BlendFactor as F;
     let c = |src, dst| wgpu::BlendComponent {
@@ -240,15 +246,22 @@ fn blend(mode: u8) -> wgpu::BlendState {
         operation: wgpu::BlendOperation::Add,
     };
     let (src, dst) = match mode {
+        0 => return wgpu::BlendState::REPLACE,
+        1 => (F::SrcAlpha, F::Zero),
         2 => (F::SrcAlpha, F::One),
         3 => (F::Zero, F::Src),
         5 => (F::Dst, F::Src),
-        // STAND-IN: docs/07-objects.md#how-a-material-draws-is-in-the-archive-directory -- how
-        // a sprite whose material says opaque (0) or SRCALPHA/ZERO (1) blends is not read: it
-        // is drawn alpha-blended, so its fade shows.
         _ => (F::SrcAlpha, F::OneMinusSrcAlpha),
     };
     wgpu::BlendState { color: c(src, dst), alpha: c(F::One, F::OneMinusSrcAlpha) }
+}
+
+/// Whether device blend mode `mode` alpha-tests: every mode but 0 sets `ALPHATESTENABLE` with
+/// `ALPHAFUNC` `GREATEREQUAL` against the device's reference of 1, so a texel whose alpha is
+/// 0 is dropped (`Ngi32.dll:0x100346e0`, the reference from the device's reset at
+/// `0x10006be0`).
+pub fn alpha_tests(mode: u8) -> bool {
+    mode != 0
 }
 
 pub struct SpriteRenderer {
@@ -385,7 +398,7 @@ impl SpriteRenderer {
                 let [r, g, b] = l.ambient;
                 let skin: [f32; 8] = {
                     let [fr, fg, fb, fw] = fog_override(l.blend_mode);
-                    [fr, fg, fb, fw, r, g, b, 1.0]
+                    [fr, fg, fb, fw, r, g, b, f32::from(u8::from(alpha_tests(l.blend_mode)))]
                 };
                 let toward = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                     label: Some("sprite skin"),
@@ -523,6 +536,28 @@ mod tests {
         // The same arithmetic, tested where it can run.
         assert!((crate::shade::fog(250.0, 0.0, 500.0) - 0.75).abs() < 1e-6);
         assert!((crate::shade::fog(375.0, 0.0, 500.0) - 0.4375).abs() < 1e-6);
+    }
+
+    /// A sprite in mode 0 writes its quad opaque, its alpha and its fade unread, and tests no
+    /// alpha; mode 1 writes the texel times its alpha over what was there; every mode but 0
+    /// drops a texel of alpha 0. The six records' `SRCBLEND`, `DESTBLEND` and the two enables
+    /// (`Ngi32.dll:0x100346e0`): mode 0 is 2, 1, `ALPHATESTENABLE` 0 and `ALPHABLENDENABLE`
+    /// 0; mode 1 is 5, 1, 1 and 1.
+    #[test]
+    fn an_opaque_sprite_neither_blends_nor_tests_its_alpha() {
+        use wgpu::BlendFactor as F;
+        assert_eq!(blend(0), wgpu::BlendState::REPLACE);
+        assert!(!alpha_tests(0));
+        let one = blend(1).color;
+        assert_eq!((one.src_factor, one.dst_factor), (F::SrcAlpha, F::Zero));
+        let four = blend(4).color;
+        assert_eq!((four.src_factor, four.dst_factor), (F::SrcAlpha, F::OneMinusSrcAlpha));
+        let two = blend(2).color;
+        assert_eq!((two.src_factor, two.dst_factor), (F::SrcAlpha, F::One));
+        assert!((1..6).all(alpha_tests));
+        // The shader drops what the test drops, and only where the look says it tests.
+        let text = include_str!("sprite.wgsl");
+        assert!(text.contains("if look.ambient.w > 0.5 && alpha * 255.0 < 0.5 {"));
     }
 
     /// A near additive plume is drawn after a far alpha-blended smoke, so it lies over it; a

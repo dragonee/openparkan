@@ -14,7 +14,8 @@ struct Camera {
 struct Skin {
     // The fog colour this material's blend mode draws toward; w 1 where it overrides.
     toward: vec4<f32>,
-    // The material's ambient colour, its self-light, in display space.
+    // The material's ambient colour, its self-light, in display space; w 1 where its blend
+    // mode alpha-tests, every mode but 0 (`Ngi32.dll:0x100346e0`).
     ambient: vec4<f32>,
 };
 
@@ -79,6 +80,13 @@ fn vs_main(v: VertexIn) -> VertexOut {
 @fragment
 fn fs_main(v: VertexOut) -> @location(0) vec4<f32> {
     let texel = textureSample(skin, skin_sampler, v.uv);
+    // A blending mode's alpha test, `GREATEREQUAL` against a reference of 1 of 255
+    // (`Ngi32.dll:0x10006be0`): a fragment whose alpha comes to 0 is dropped. Mode 0 tests
+    // nothing and writes the whole quad, its alpha and so the fade unread.
+    let alpha = texel.a * v.alpha;
+    if look.ambient.w > 0.5 && alpha * 255.0 < 0.5 {
+        discard;
+    }
     // The fog's share is in the specular alpha of the sprite's one colour pair, linear in the
     // *squared* distance between the fog's start and end as the world's is
     // (`Terrain.dll:0x1004bf20`, docs/11, "How an effect sprite is coloured"); effect draw flag
@@ -120,5 +128,5 @@ fn fs_main(v: VertexOut) -> @location(0) vec4<f32> {
     if camera.fog.z > 0.5 {
         lit = vec3<f32>(0.0, min((lit.r * 0.33 + lit.g * 0.33 + lit.b * 0.33) * 7.0, 1.0), 0.0);
     }
-    return vec4<f32>(mix(fog, display(texel.rgb) * lit, select(keep, 1.0, unfogged)), texel.a * v.alpha);
+    return vec4<f32>(mix(fog, display(texel.rgb) * lit, select(keep, 1.0, unfogged)), alpha);
 }

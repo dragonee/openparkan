@@ -1332,6 +1332,40 @@ testing on**, with `ALPHAFUNC = GREATEREQUAL`. The engine alpha-tests whenever
 it blends, and never when it does not. `Material.blend_function` returns the
 triple.
 
+**No material reaches mode 1.** The table holds 0, 4, 2, 3 and 5, and a mode the device
+refuses takes the last one before it that the device does take, or 0 (`0x10046ad6`–`0x10046b2c`), so `SRCALPHA`/`ZERO`
+is in no material's reach on any device.
+
+**An effect sprite takes its material's mode as it is** — *read*. `CShade::RenderEffect`
+translates the entry's index through the same table into its phase block's `+0x5c`
+(`Terrain.dll:0x10028907`, the table at the shade's `+0xbfc`), the item builder copies the
+block whole to the item's `+0x70` (`0x10028287`), and the item's render hands its `+0xcc` to
+the render device's slot 6 (`0x100302d0`–`0x100302de`), `Ngi32.dll:0x10008680`, which sets the
+record's five states. Nothing between overrides it. **Mode 0's record is `ONE`, `ZERO`,
+`ALPHAFUNC` `ALWAYS`, `ALPHATESTENABLE` 0 and `ALPHABLENDENABLE` 0**: a sprite in it writes its
+whole quad, the texels of alpha 0 too, and its alpha — where an effect's fade lands
+([11-effects.md](11-effects.md#how-an-effect-sprite-is-coloured--read-and-measured)) — reaches
+nothing, so **an opaque sprite's fade does not show**; it is there at full strength until the
+fade is exactly 0, which draws nothing (`0x1002887e`).
+
+*Measured*, over the 3577 material references of the 923 effects: **no sprite** names a
+material of mode 0 or 1 — the 3442 references of blocks of types 3, 4, 5, 7, 8 and 9 are 2519
+at mode 2 and 923 at mode 4 — and **the only effect draws in mode 0 are type-10 lumps**, 78
+blocks of 78 explosions (`exp_b_be`, `exp_Hgr_bul`, `exp_m_st_las_r`, …) on five materials,
+`L00`, `L22` and `NE_Gibs_Ice` at flags 0, `NE_Gibs_Stn` and `R_RL_06` at flags 2. A lump
+does not go through `RenderEffect` and does not keep its material's mode at all: its draw
+writes **0** into the block it hands the shade's slot 16 (`Effect.dll:0x1000bdd5`, the block at
+the particle's `+0x16c`, which nothing else in the module writes), so all 160 blocks draw
+opaque — the 57 on `NE_Gibs_Aln` and `NE_Gibs_Anm`, which say 4 over textures whose alpha is
+under 255 on 93% of their texels, and the 25 that name none among them. A lump reads no fade
+either ([11-effects.md](11-effects.md#type-10-is-a-lump-of-geometry--read-measured-and-seen)),
+so the two agree: a stone is solid until its window shuts.
+
+**The engine** drew a sprite of mode 0 or 1 alpha-blended, a stand-in, and a lump in its
+material's mode, so its `NE_Gibs_Aln` chips were see-through. It now draws mode 0 opaque with
+no alpha test and mode 1 `SRCALPHA`/`ZERO`, drops a texel of alpha 0 in every mode but 0, and
+draws every lump in mode 0 (`parkan_render::sprites`, `parkan_world::fx::LUMP_BLEND_MODE`).
+
 This is the field a renderer needs; the record's own class byte at +4, below,
 is not.
 
