@@ -347,8 +347,10 @@ pub fn draw_in(
     if map.changed_ms.is_some_and(|at| now_ms - at <= LABEL_MS) {
         let text = map.label();
         let x = x0 + INSET + 6.0;
-        let top = (y1 - INSET - 6.0 - (ink.font.line_height + 1.0)).round();
-        let (w, h) = (ink.font.advance(&text), ink.font.line_height);
+        // The font's height and 1 over the vertical scale (`0x10074695`), and the box 4 past
+        // its height below the top.
+        let top = (y1 - INSET - 6.0 - (ink.font.height() + 1.0)).round();
+        let (w, h) = (ink.font.advance(&text), ink.font.height());
         ink.painter.fill(Blend::Alpha, [x - 3.0, top - 3.0, w + 5.0, h + 7.0], argb(LABEL_BOX));
         ink.text(&text, [x, top], 0xff00_0000 | TINT);
     }

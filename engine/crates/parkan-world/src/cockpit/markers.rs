@@ -125,7 +125,7 @@ pub fn draw(cockpit: &Cockpit, ink: &mut Ink, play: &Play, view_proj: Mat4, hove
             let name = cockpit.panels.names.get(t).cloned().unwrap_or_default();
             // The font's slot 3, its header height (`Ngi32.dll:0x10010d50`), plus 2: the
             // engine's line height is that height plus 1.
-            ink.text(&name, [left + 6.0, top - (ink.font.line_height + 1.0)], NAME_GREEN);
+            ink.text(&name, [left + 6.0, top - (ink.font.height() + 2.0)], NAME_GREEN);
         }
         let y0 = c[1] + 16.0;
         if let Some(&page) = cockpit.pages.get("page9") {

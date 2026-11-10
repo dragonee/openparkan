@@ -75,9 +75,10 @@ impl Ink<'_> {
         self.text(text, [left, y], colour);
     }
 
-    /// `GAME_FONT`'s line step on the layout: its height and 2, rounded (`0x1007fe80`).
+    /// `GAME_FONT`'s line step on the layout: its height, as the font's slot `+0x0c` answers
+    /// it, and 2, rounded (`0x1007ff32`–`0x1007ff54`): one more than the glyph cell.
     pub fn line_step(&self) -> f32 {
-        (self.font.line_height + 2.0).round()
+        (self.font.height() + 2.0).round()
     }
 }
 

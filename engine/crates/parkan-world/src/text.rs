@@ -197,6 +197,14 @@ impl GameFont {
         self.glyphs.get(usize::from(glyph_index(self.encoding, c)))
     }
 
+    /// The font's height as its slot `+0x0c` answers a caller (`Ngi32.dll:0x10010d50`): the
+    /// header's word 1, one less than the cell a glyph is drawn in. It is what every interface
+    /// control that steps by the font asks for and adds its own constant to (docs/12, "Where
+    /// a caller puts the next line"): 1, which makes the cell, or 2, or half of it again.
+    pub fn height(&self) -> f32 {
+        self.line_height - 1.0
+    }
+
     /// How far a glyph moves the pen: its advance plus the font's spacing
     /// (`Ngi32.dll:0x10011118` and `0x1001113f`; the width routine at `0x10010dff`
     /// sums the same).
@@ -235,10 +243,11 @@ impl GameFont {
 
     /// Every drawn glyph of `run`, placed in whole screen pixels at its scale.
     ///
-    /// STAND-IN: docs/12-rsli.md#not-resolved -- `Ngi32.dll`'s text-out draws one line
-    /// at the y its caller names, and which of the interface's text controls stacks
-    /// lines by what is not read. Lines are set a glyph cell apart, which is what the
-    /// atlas's rows are on all eleven shipped fonts.
+    /// `Ngi32.dll`'s text-out draws one line at the y its caller names, and each of the
+    /// interface's controls steps its own lines (docs/12, "Where a caller puts the next
+    /// line"): the engine's controls place their lines one run each at their read step, so
+    /// only a run of several lines, which none of them hands in, is stacked here, a glyph
+    /// cell apart, the `height + 1` that five of the game's thirteen stacking callers take.
     pub fn layout(&self, run: &TextRun) -> Vec<Placed> {
         let s = run.scale;
         let w = self.width as f32;

@@ -547,6 +547,51 @@ fn the_reticles_dot_stands_above_the_middle_and_goes_round_toward_a_strafe() {
     }
 }
 
+/// The interface's controls step their lines by the font's height as its slot `+0x0c` answers
+/// it, the header's word 1, plus a constant of their own (docs/12, "Where a caller puts the next
+/// line"), not by the glyph cell. On the 640 × 480 `GAME_FONT`, `gf_640`, the height is 7 under
+/// a cell of 8: the message box (`0x1007ff32`) steps 9, the unit lines 9 after a first 10, the
+/// briefing's subtitles (`0x10031763`) and the research descendants (`0x10089213`) 8. At
+/// 1024 × 768 `gf_1024`'s 11 over the scale of 1.6 gives the message box and the unit box 8, as
+/// the recordings show both (docs/35, "The message box"; docs/41, "The box"), where the cell's 12
+/// would give 9.
+#[test]
+#[ignore = "needs the game install"]
+fn the_interfaces_line_steps_are_the_fonts_height_and_a_constant_of_their_own() {
+    use parkan_world::cockpit::Ink;
+    use parkan_world::hud::{Painter, Space};
+    use parkan_world::text::GameFont;
+
+    let game = gamedir::find(None).expect("a Parkan install: set PARKAN_DIR");
+    let font = GameFont::ui(&game, "GAME_FONT").unwrap();
+    assert_eq!((font.height(), font.line_height), (7.0, 8.0), "gf_640: the height under a cell of 8");
+    let ink = Ink {
+        painter: Painter::new(Space::new(640.0, 480.0)),
+        text: Vec::new(),
+        font: &font,
+        menu_runs: Vec::new(),
+        menu: &font,
+    };
+    assert_eq!(ink.line_step(), 9.0, "the message box: the height and 2");
+    let (first, step) = ((font.height() + 3.0).round(), (font.height() + 2.0).round());
+    assert_eq!((first, step), (10.0, 9.0), "the unit lines");
+    assert_eq!(
+        (font.height() + 1.0).round(),
+        font.line_height,
+        "the briefing's and the descendants' step is the cell"
+    );
+
+    // At 1024 × 768: gf_1024's header word 1 is 11.
+    let path = parkan_formats::gamedir::resolve(&game, "ui/font.lib").unwrap();
+    let archive = parkan_formats::nres::Archive::open(&path).unwrap();
+    let entry = archive.entries.iter().find(|e| e.name.eq_ignore_ascii_case("gf_1024.tft")).unwrap();
+    let tft = parkan_formats::font::parse_font(archive.read(entry).unwrap(), &entry.name).unwrap();
+    let sy = 768.0 / 480.0;
+    assert_eq!(tft.height, 11);
+    assert_eq!(((tft.height as f32 + 2.0) / sy).round(), 8.0, "8 apart, as the recordings show");
+    assert_eq!(((tft.height as f32 + 1.0 + 2.0) / sy).round(), 9.0, "the cell would set them 9 apart");
+}
+
 /// A game command as its key runs it, from the unit's own view.
 fn press_command(play: &mut parkan_world::play::Play, command: &str) {
     let eye = play.own_eye();

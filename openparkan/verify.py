@@ -7626,6 +7626,46 @@ def check_reticle_dot(check, game: Path) -> None:
           f"0x10023896): {writes}")
 
 
+#: The interface's callers that ask a font for its height and stack lines by it (docs/12,
+#: "Where a caller puts the next line"): the call's address, the bytes from it on, and the step.
+LINE_STEP_SITES = {
+    0x10031763: ("ff510c8b1740", "+1"), 0x10089213: ("ff520c40", "+1"),
+    0x1004FB8B: ("ff510c40", "+1"), 0x1006C27A: ("ff500c8b4c24108b1140", "+1"),
+    0x1006C327: ("ff500c8b1340", "+1"),
+    0x1007FF32: ("ff520c83c002", "+2"), 0x10097A47: ("ff520c83c002", "+2"),
+    0x1009FAB7: ("ff500c8b1683c002", "+2"), 0x1006A0A5: ("ff500c8b1683c002", "+2"),
+    0x1006FA09: ("ff500c8b1783c002", "+2"),
+    0x100114D3: ("ff510c8b1689442414db442414", "x1.5"),
+}
+
+
+def check_line_steps(check, game: Path) -> None:
+    """Where a caller of text-out puts the next line (docs/12): the font's slot +0x0c answers the
+    header's word 1 (Ngi32.dll:0x10010d50), and each stacking caller adds its own constant."""
+    paths = [game / "iron3d.dll", game / "Ngi32.dll"]
+    if not all(p.exists() for p in paths):
+        return
+    iron, ngi = (_image_at(p.read_bytes()) for p in paths)
+    getter = ngi(0x10010D50, 13) == bytes.fromhex("8b4424048b803c100000c20400")
+    found = {a: iron(a, len(bytes.fromhex(b))) == bytes.fromhex(b)
+             for a, (b, _) in LINE_STEP_SITES.items()}
+    # The unit lines add 2 to the kept height a few instructions on, and the debug overlay to
+    # its own copy (0x1006fc74, 0x1005a4c6).
+    unit_lines = bytes.fromhex("83c702") in iron(0x1006FC74, 24)
+    overlay = bytes.fromhex("83c302") in iron(0x1005A4C6, 24)
+    half = struct.unpack("<f", iron(0x100E4CD0, 4))[0] == 1.5 \
+        and iron(0x100114E2, 6) == bytes.fromhex("d80dd04c0e10")
+    steps = Counter(s for _, s in LINE_STEP_SITES.values())
+    steps["+2"] += unit_lines + overlay
+    check("iron3d.dll: a caller steps its lines by the font's height and a constant of its own",
+          getter and all(found.values()) and unit_lines and overlay and half
+          and steps == Counter({"+1": 5, "+2": 7, "x1.5": 1}),
+          f"slot +0x0c answers word 1 (+0x103c, Ngi32.dll:0x10010d50): {getter}; "
+          f"{sum(found.values())} of {len(found)} sites read as listed, the unit lines' and "
+          f"the overlay's +2 {unit_lines and overlay}, the list's 1.5 {half}: "
+          f"{dict(steps)} stacking callers")
+
+
 #: Mission 03's placed economy: name -> (Type, clan index, MaximumOre, CurrentOre).
 M03_ECONOMY = {
     "gener01": (0x80000002, 2, 0.0, 0.0), "sbunk01": (0x80010000, 2, 0.0, 0.0),
@@ -29706,7 +29746,7 @@ def run(game: Path) -> int:
         check_footprints,
         check_rsli,
         check_control, check_efficiency, check_building_batteries, check_unbounded_batteries,
-        check_reticle_dot, check_no_logical_id_0,
+        check_reticle_dot, check_line_steps, check_no_logical_id_0,
         check_mission_03_economy,
         check_motion, check_playback, check_ground, check_sensors, check_hit_test,
         check_collision, check_lake_and_buoys,

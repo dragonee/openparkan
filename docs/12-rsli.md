@@ -407,13 +407,53 @@ has 0 and 73, where 73 is also white.
 
 Nothing converts out of display space anywhere along that path ([05](05-engine.md)).
 
+## Where a caller puts the next line — *read*, and *measured*
+
+**Each control steps its own lines, by the font's height and a constant of its
+own.** Text-out draws one line, and the interface draws it through the GUI
+server's text call (`services.dll:0x10001cf0`), which sets the colour and calls
+the font's slot `+0x1c` once (`0x10001dce`): neither knows of a second line. A
+control that stacks lines asks the font for its height, slot `+0x0c`, which
+answers the header's word 1 (`0x10010d50`, `+0x103c`) — one less than the
+cell — adds its constant, divides by the vertical scale and rounds.
+
+*Read*, every call in `iron3d.dll` of that shape: a COM slot-3 call with the
+interface pushed alone, its answer then used as a number. There are **36**. The
+two already read elsewhere are among them, the message box's `+ 2`
+(`0x1007ff32`) and the briefing's `+ 1` (`0x10031763`), and they are the
+control: the search tells a 1 from a 2. By what they do with the height:
+
+| stacks lines by | callers |
+|---|---|
+| height + 1, the cell | 5: the briefing's subtitles (`0x10031763`); the research panel's descendants (`0x10089213`); the designer's three-line hint (`0x1004fb8b`); a pair of lines (`0x1006c27a`) and a text wrapped 640 wide by the message box's wrap (`0x1006c327`, `0x10093140`), whose screens are not named here |
+| height + 2 | 7: the message box (`0x1007ff32`); the unit lines, from height + 3 below their name (`0x1006fc74`, [37](37-designer.md)); the factory panel's two lines (`0x10097a47`); the outcome panel (`0x1009fab7`, [34](34-progression.md)); the designer's part-box rows (`0x1006fa09`); a list of up to 17 lines from y 460 up (`0x1006a0a5`); the debug overlay, in pixels (`0x1005a4c6`) |
+| 1.5 × the height | 1: a `MENU_FONT` list from y 180 (`0x100114d3`, the 1.5 at `0x100e4cd0`) |
+| one line, or a box | 13: a label at height + 1 or + 2 above something (`0x10074695`, `0x10078216`, `0x10034ce5`), the map's label box (`0x1007476f`), a tooltip box and its like at height + 8 (`0x1009b9b6`, `0x10014630`), and seven that centre a line in a box (`0x10015130`–`0x1001f9cb`) |
+| not followed | 10 (`0x10015264`, `0x10045658`, `0x10046006`, `0x10059754` — which keeps the height in a control's `+0x58` — `0x100661d0`, `0x10069d97`, `0x1006b4e7`, `0x1006bbb7`, `0x1009a02e`, `0x1009a452`) |
+
+Two controls step by a figure that is not the font's at all: the objectives
+screen by 20 ([35](35-hud.md)) and the wingman panel by 19. **So the cell is
+the step of 5 of the 13 that stack by the height, and height + 2 of 7.**
+
+*Seen*, twice, at 1024 × 768, where `gf_1024`'s height is 11 and the scale 1.6:
+the message box's lines are 8 apart ([35](35-hud.md#the-message-box--read-and-measured))
+and the unit box's 8 ([41](41-commander.md#the-box)), round(13 ÷ 1.6); the
+cell's 12 would set them 9 apart. The engine had read "the font's height" in
+these places as the cell, and set every one of its stacked lines a pixel too far
+apart; its controls ask for the height now, and add their own constant.
+
 ## Not resolved
 
-- **Where a caller of text-out puts the next line.** The font offers its height
+- ~~**Where a caller of text-out puts the next line.** The font offers its height
   and the routine draws one line; which of the interface's text controls stacks
   lines by the height, by the height plus one, or by something of its own is not
   read. On all eleven fonts the atlas's row pitch is the cell height, so a line
-  set at the cell leaves no gap.
+  set at the cell leaves no gap.~~ **Read**: each control adds a constant of its
+  own to the height the font's slot `+0x0c` answers, which is one less than the
+  cell: of the 36 such calls in `iron3d.dll`, 5 stack lines at height + 1, the
+  cell, 7 at height + 2 and 1 at 1.5 × the height, 13 place one line or a box,
+  and 10 are not followed
+  ([Where a caller puts the next line](#where-a-caller-puts-the-next-line--read-and-measured)).
 - **The fixed-pitch and justified modes.** Text-out takes a cell width and a
   flag (`0x10010e63`–`0x10010eae`, `[esp+0x13]`) and will centre each glyph in a
   cell of at least header word 0; which callers pass them is not read.

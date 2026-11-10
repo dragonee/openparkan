@@ -284,7 +284,7 @@ pub fn panel(
             // The name, the designer's unit lines from the same pen (`0x1006fc00`), and the
             // unit turning in a 115 × 115 preview at (236, 22) (`0x1009e1b0`).
             ink.text(&project.name, [61.0, 31.0], NAME_COLOUR);
-            let height = ink.font.line_height;
+            let height = ink.font.height();
             let (first, line_step) = ((height + 3.0).round(), (height + 2.0).round());
             for (i, (label, line)) in crate::designs::BOX_LABELS.iter().zip(&project.lines).enumerate() {
                 let y = 31.0 + first + line_step * i as f32;

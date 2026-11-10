@@ -936,7 +936,7 @@ fn unit_box(cockpit: &mut Cockpit, ink: &mut Ink, play: &Play, t: usize) {
     let text = name_status(cockpit, play, t);
     ink.text(&text, UNIT_NAME, YELLOW);
     if let Some(lines) = play.unit_lines(t) {
-        let height = ink.font.line_height;
+        let height = ink.font.height();
         let (first, step) = ((height + 3.0).round(), (height + 2.0).round());
         let [x, y0] = UNIT_LINES;
         for (i, (label, line)) in crate::designs::BOX_LABELS.iter().zip(lines.iter()).enumerate() {

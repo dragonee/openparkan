@@ -237,7 +237,8 @@ pub fn panel(
             if !unlocks.is_empty() {
                 let words = cockpit.string(STRING_DESCENDANTS).to_owned();
                 ink.text(&words, DESCENDANTS_AT, DESCENDANT_COLOUR);
-                let line = ink.font.line_height + 1.0;
+                // The font's height and 1 over the vertical scale (`0x10089213`): the cell.
+                let line = (ink.font.height() + 1.0).round();
                 for (k, &u) in unlocks.iter().take(DESCENDANTS_SHOWN).enumerate() {
                     let text = tree.tree.items.get(u).map(label).unwrap_or_default();
                     ink.text(&text, [DESCENDANT_X, DESCENDANTS_TOP + k as f32 * line], DESCENDANT_COLOUR);

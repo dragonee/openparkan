@@ -1418,7 +1418,8 @@ fn draw_session(
         } else {
             // The row draw (`0x1006ea50`): the label at x, the value right-aligned to end at
             // x + 90 + 35, the unit at x + 128, x being X₀ + 15.
-            let step = (text_height + 2.0).round();
+            // The font's height and 2 (`0x1006fa09`).
+            let step = (ink.font.height() + 2.0).round();
             for (i, line) in lines.iter().enumerate() {
                 let y = 415.0 + step * i as f32;
                 let x = x0 + 15.0;
@@ -1562,7 +1563,8 @@ fn draw_session(
         (Some(_), Some(rating)) => {
             ink.text(&s.name, [220.0, 331.0], YELLOW);
             let lines = rating.lines(s.designer.offence_range, s.designer.defence_range);
-            let (first, step) = ((text_height + 3.0).round(), (text_height + 2.0).round());
+            let height = ink.font.height();
+            let (first, step) = ((height + 3.0).round(), (height + 2.0).round());
             for (i, (label, line)) in crate::designs::BOX_LABELS.iter().zip(lines.iter()).enumerate() {
                 let y = 331.0 + first + step * i as f32;
                 ink.text(cockpit.string(*label), [220.0, y], GREEN);
@@ -1574,7 +1576,8 @@ fn draw_session(
             }
         }
         _ => {
-            let step = (text_height + 1.0).round();
+            // The font's height and 1 (`0x1004fb8b`): the cell.
+            let step = (ink.font.height() + 1.0).round();
             for (i, id) in HINT.iter().enumerate() {
                 let text = cockpit.string(*id).to_owned();
                 let w = ink.font.advance(&text);

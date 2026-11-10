@@ -161,9 +161,10 @@ impl Briefing {
         let mut lines = Vec::new();
         let text = self.subtitle();
         if self.subtitles && !text.is_empty() {
-            // Line i at 410 + i × round((GAME_FONT's height + 1) ÷ the vertical scale), the
-            // height taken on the 640 × 480 font the layout is drawn in.
-            let step = (game.line_height + 1.0).round();
+            // Line i at 410 + i × round((GAME_FONT's height + 1) ÷ the vertical scale)
+            // (`0x10031763`), the height its slot `+0x0c` answers on the 640 × 480 font the
+            // layout is drawn in: the glyph cell.
+            let step = (game.height() + 1.0).round();
             let width = WRAP_SHARE * space.width / space.scales()[0];
             let wrapped = game.lines(&TextRun { wrap: Some(width), ..TextRun::new(text, [0.0; 2]) });
             for (i, line) in wrapped.iter().enumerate() {

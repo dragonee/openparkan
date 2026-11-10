@@ -326,7 +326,8 @@ pub fn outcome_panel(
     for line in panel.lines.iter().filter(|l| !l.is_empty()) {
         lines.push(run(line, y, [lr, lg, lb, 1.0]));
         left = left.min(320.0 - game.advance(line) / 2.0);
-        y += game.line_height + 2.0;
+        // The font's height and 2 (`0x1009fab7`).
+        y += game.height() + 2.0;
     }
     let x0 = (left - 30.0).max(0.0);
     let [x_min, y_max] = at(x0, 35.0);

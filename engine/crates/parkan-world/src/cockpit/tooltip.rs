@@ -85,7 +85,7 @@ pub fn draw(
     font: &GameFont,
     below: f32,
 ) -> (Vec<Batch>, TextRun) {
-    let [x0, y0, x1, y1] = place(space, cursor, font.advance(text), font.line_height, below);
+    let [x0, y0, x1, y1] = place(space, cursor, font.advance(text), font.height(), below);
     let mut painter = Painter { pin: Pin::TOP_LEFT, layer: Layer::Tip, ..Painter::new(space) };
     painter.fill(Blend::Alpha, [x0, y0, x1 - x0, y1 - y0], argb(FILL));
     let w = 1.0 / space.scale();
