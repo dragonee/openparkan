@@ -1324,6 +1324,14 @@ draws power × dt + value 2 × min(value 1 × condition × dt, value 0 × (6 −
 fills)) (`0x10025700`), and its charge is level × draw − power × dt, a point for
 every value 2 of it (`0x100257b0`).
 
+A battery's store pays for what it gives at its condition: slot 6 takes level ×
+given ÷ (capacity × condition) off its charge (`0x10022ab0`–`0x10022acf`), and one
+whose capacity is below 0 neither caps what it gives nor drains
+([23-economy.md](23-economy.md#a-battery-no-capacity-holds--read-and-measured)).
+In the engine a building's own batteries now serve its efficiency, its repair and
+its guns on the power tick; its shield and deflector take the level they are served
+at and draw on no battery, which is all that is left of the stand-in.
+
 ### A round meets a bubble — *read*
 
 - **Which objects.** The pair resolve (`Control.dll:0x1001d630`) sweeps the
@@ -1822,6 +1830,13 @@ shield, battery and ammunition (`Behavior.dll:0x10018100`, `0x10019372`,
 - ~~Whether vegetation and rock carry node life.~~ Answered: they do, through
   the same control system as a robot, and the placement's scale cubes it
   ([Vegetation and rock](#vegetation-and-rock-carry-node-life--read-and-measured)).
-  What the low-life mark at `+0x594` is worth — the effects `+0x4f4` and
+  ~~What the low-life mark at `+0x594` is worth — the effects `+0x4f4` and
   `+0x4f8` it starts and stops, and whether the burn is per tick or per second —
-  is read only in outline.
+  is read only in outline.~~ — **read** 2026-11-10, in
+  [13-control.md](13-control.md#critical-damage-block-entries-6-and-7--read-and-measured)
+  ("The life update, read through"): the mark is 0.3 of the total for a tree or a
+  stone and 0.2 for anything else, moved to the life left as the object goes
+  critical, when entry 6 (`+0x4f4`) runs, and entry 7 (`+0x4f8`) runs as it
+  recovers; the burn is per second, 0.1 × the mark × the seconds elapsed
+  (`0x10012c1c`–`0x10012c37`), a constant rate that ends it in 10 s (*derived*)
+  unless something gives it life back.
