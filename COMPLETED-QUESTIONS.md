@@ -898,6 +898,75 @@ read's θ lets the bunker fire at once at 80; a taken tower's turn, totalled tic
 sum passed by an accident of the wrap; the Light Tower's, its repair switched on by hand; the bridge's
 *takes no damage*, gone; and the factory's and the raid's, above. The merged tree passed every check: 404 tests, 1112 of 1112 checks, 655 engine tests and 271 install tests, 240 of them `parkan-world`'s, `ruff` clean, once nine lint errors the branches' `verify.py` checks brought in were fixed.
 
+The sixteenth round was worked on **2026-11-10**, twelve lines in four areas of three: the sky and
+the draw ([10-sky](docs/10-sky.md), [07-objects](docs/07-objects.md)); effects
+([11-effects](docs/11-effects.md), [13-control](docs/13-control.md)); damage and construction
+([26-damage](docs/26-damage.md), [32-builder](docs/32-builder.md), [24-motion](docs/24-motion.md));
+and power and the cockpit's figures ([23-economy](docs/23-economy.md),
+[41-commander](docs/41-commander.md), [35-hud](docs/35-hud.md), [12-rsli](docs/12-rsli.md)). Seven of
+the twelve stood behind a stand-in row, four of those rows with no line in this queue. **Eleven
+closed and one narrowed** — a type-10 lump, whose material is read and in the engine and whose
+lighting and tumble are not — and two more went with them, not sent to an agent, both **stale**: the
+design state's `+0x370`, answered in [38-designs](docs/38-designs.md) since 2026-09-21, and the
+constructor's page item names, answered there since 2026-09-14, which
+[28-chassis](docs/28-chassis.md)'s own list still asked and which the coordinator re-read and struck
+(`a32487d`). Seven lines hold what the answers left.
+
+Seven results are **negatives carrying their controls**. The bits `0x8008` maps to are on 0 of
+275882 land faces, against the water's `0x02` on 3630 and the bed's `0x2000` on 6102. No sprite block
+names a mode-0 or mode-1 material, against the 78 lump blocks the same scan finds at mode 0. None of
+`static.rlb`'s 72 damage tables carries running gear, against 12 of `bases.rlb`'s 24. The blast's
+one-node path reads no shown flag, against the sweep's 9 sites, the draw's two among them. None of
+the four hall-way searches reads `0x20c` itself, against the refit's source and the transport's
+route, which do. No design of 458 carries the one non-round node that names a blast, the node itself
+the control. And 3 of 345 draws pass `0x400`, against `CCamera::Render`'s two for `0x800` and
+`0x1000`.
+
+**The engine changed on every branch.** The sun's ray reaches half the camera's far plane, 500 or
+350 where it asked 10000. An opaque effect draw writes its whole quad, and every lump draws so. A
+unit indoors takes no sunlight. A plant shot under three tenths of its life catches fire, and a fire
+burns on its owner's life fraction. A nameless lump wears its owner's own skin. A building's sphere
+stands where the read has it and its bubble takes no round under its lowest corner, a transport waits
+for a mine going up, a blast sets off the rounds in its reach, and a node's own blast deals its hit.
+A −1 battery is an endless source, a store pays for what it gives at its condition, and a building's
+guns run on its batteries. The reticle's dot stands off the middle, as every recorded frame has it,
+and stacked lines stand a pixel closer. Six stand-in rows are gone and four came in — a robot's
+shadow, the spin, the life update's pace and a round a blast takes in flight — 133 to 131.
+
+**This round corrects twelve premises.** [10-sky](docs/10-sky.md)'s 31 of 576 black keyframes
+inside a body's window was the verifier's own count over every start opcode's window, the weather's
+included, and this queue's recount, 12 of 541 by start and lifetime, took the wrong window too: a
+body is up from its start to its stop, and the lifetime only paces its arc. Every doc had a camera's
+values 0 and 1 as near and far by guess, [30-turrets](docs/30-turrets.md) saying so, and they are
+read. [35-hud](docs/35-hud.md) had the dot's two coordinates swapped. [11-effects](docs/11-effects.md)
+and the lump's stand-in row had a nameless block picking at random from its manager's whole list: it
+counts its owner's own list 0 and lands on the last a little under half the time. The engine drew a
+lump in its material's blend, and all 160 draw opaque. The time modes' row had nothing burning and a
+shot tree never catching fire. The engine's store drained over its capacity alone, so the hero's idle
+draw at half life cost 2.40 a second where it costs 4.80; it dropped a −1 battery, and its battery arc
+followed a Tiny Tower's fitted 31,000. [29-weapons](docs/29-weapons.md) had a building's guns on its
+clan's power, and they are on its own batteries. The engine took the font's height for the glyph
+cell, which stood every line it stacks a pixel too far from the last. The wreck's burn's row had its
+rate read only in outline. And [26-damage](docs/26-damage.md) had the hall-way searches passing over
+a building only by its hidden node: the refit's passes over one going up for its whole 41 s, and the
+transport's takes it and waits.
+
+**Which way this round's checks ran**: every coordinator spot-check confirmed — the camera's block
+fetched to `ebp − 0x61c`, its 0.5 and the outer camera's 700; the dot's `[+0]` and `[+0x10]` and its
+24.0, and Part 1's frame at 700 s with the dot about (−14, −19) from the middle; the 273 interior
+nodes, counted again from the raw stream-1 words; the bubble floor's minimum loop and its
+constructor's 100,000; and the page rows' `+0xc4`. One looked wrong first and is recorded with them:
+`IBasement` slot 7 reads `+0xdc` where the constructor writes `+0xe0`, until the vtable's store at
+`+4` put the interface four bytes in. Two branches came at the lump from either side, the sky's
+keying its blend and the effects' its material, both in `parkan_world::fx`, and merged without a
+conflict on a note from the coordinator; the damage branch folded in two of its neighbours' facts,
+the store's condition and the wreck's burn, on another. One branch reported no rebase needed while
+`main` had moved, and rebased cleanly. **Not confirmed by any frame**: a robot's shadow, which the
+engine does not draw, and the dot's side for each strafe key. Outside the briefs' docs, a sentence of
+[30-turrets](docs/30-turrets.md) and one of [29-weapons](docs/29-weapons.md) moved. The merged tree
+passed every check: 404 tests, 1121 of 1121 checks, 673 engine tests and 284 install
+tests, `ruff` clean.
+
 ## Sky and rendering
 
 [10-sky](docs/10-sky.md#not-resolved), [02-texm](docs/02-texm.md),
@@ -1441,6 +1510,83 @@ sum passed by an accident of the wrap; the Light Tower's, its repair switched on
 - [x] ~~[M1] Whether slot 17's alpha reaches a body's sprite: the sprite's four vertices carry slot 17's colour (`Terrain.dll:0x1007cd98`), alpha and all, 50 of 255 or less on 249 of the 656 keyframes, and what the device does with it is not checked against a frame ([10-sky](docs/10-sky.md#the-sun-and-the-moon-are-drawn)).~~ — closed 2026-10-31, read and seen, **and the engine was wrong**: it reaches the blend, both of it. `CSun`'s constructor gives the sprite's block render phase 2 (`0x1007cabf`), the item hands that to `SetPhase` (`0x10030386`), and in `Ngi32.dll`'s records for that phase (`0x10034cb0`, `0x10034b30`) the stage multiplies colour and alpha by the vertex's. So under blend 4 the disc is the texture × slot 17's rgb at the texture's alpha × slot 17's. The control is the flare's two blocks, which take the same phase (`0x1007cbc4`, `0x1007ccc9`) and whose intensity is a vertex alpha and nothing else. No black disc is ever painted: of the 84 black keyframes the 54 at 255 lie outside every body's window and the other 30 carry an alpha of 0. *Seen* at C02 M03's briefing, 10 s in, slot 17 (228, 239, 39) at 114 (Part 4, 0:42): the disc's core is (143, 183, 34) in the recording, (202, 238, 147) in the engine before and (142, 185, 34) after; the brightest pixel (162, 192, 44), white, and (163, 192, 39); the sky, the control, (106, 152, 35) and (109, 154, 38). `parkan_sim::sky::body_colour`; the stand-in and its row are gone.
 - [x] ~~[M1] The one stretched pose key: `o_tur_ba_09`'s `BTHQ_m1o1` at frame 47 of 102, a turn of 116.57° stretched √5, whether a controller ever plays it; and a scale's other ways in, the placements `Control.dll` gives a unit's parts, `SetScale`'s callers on a unit and two stores at `+0x6a`.~~ — closed 2026-10-31 for all but the frame, which stays queued: **no controller plays it.** Both records naming that turret give the node one channel of frames 42 to 46 and have no states. All eleven keys that are no unit quaternion stand one frame past their node's channel: of 15 pairs of key and record **0 are reachable**, and the frame before each, the control, is reached on 15 of 15. `SetScale`: of 117 calls at `+0x3c` 39 have its shape, those on interface `0x18` are `World3D.dll`'s four adders, no module imports the three mirror adders, and of `AddNewObjectToGame`'s six callers only the two type-10 scenery sites hand a real scale (`iron3d.dll:0x100a4334`, `0x100a43e4`). `Control.dll`'s nine `PlaceObject` calls multiply no axis — six translations, two a camera's, one the walker's turn about a pivot. The two other `+0x6a` stores are no frame (`ai.dll:0x10002a5e`, a static identity; `Behavior.dll:0x10036311`, a 7 beside a `0xf`). The engine was right to leave the stretch out; the stand-in and its row are gone ([10-sky](docs/10-sky.md#the-lit-colour-is-the-games-own--read-and-measured), [04-missions](docs/04-missions.md)).
 - [x] ~~The face filters the enumeration could not see: 20 values loaded from a field among the 159 non-stack arguments at the six face-query slots, and the landscape's two translating wrappers (`Terrain.dll:0x1001e280`, `0x1001e400`) with no caller found.~~ — closed 2026-10-31, read: **none of the 20 is a filter.** A query takes its object in `ecx` and these all push theirs: 11 a string at a font's slot 6, 3 an item at `IItemManager` slot 6, 4 a light at the light manager's slot 6, 1 an effect instance at slot 8, 1 a surface at `SetRenderTarget`. `analysis/filters.py receivers` sorts by it, and the 28 known blocks are its control: 23 in `ecx`, 5 not followed, 0 pushed. The wrappers sit in `QueryInterface` 1 and pop seven words: slot 11 has one caller of 344 calls at its offset (`0x1001a413`, the face under a point for `PlaceBuilding`), slot 5 has none of 658, the same search finding slot 11's as the control. The sort turned up two filters the listing passed over, that makes 34: the sun's ray (`0x1007e4c2`), and four rays of `CShade::EndDraw`, queued. **The engine agreed on what every filter carries and lacked the sun's ray**: a face on it sends the draw to the plain colour, with no flare and no lift of the main light (`0x1007e7d4`, `0x1007eba3`), now `scene::sun_line_clear`; that is on the read, set against no recording ([07-objects](docs/07-objects.md#the-filters-the-first-enumeration-could-not-see--read)).
+- [x] ~~Two counts of slot 17's black keyframes that do not agree:
+  [10-sky](docs/10-sky.md#the-sun-and-the-moon-are-drawn)'s 31 of 576 inside a body's window and 53
+  of 80 outside it, quoted in `parkan_sim::sky` too, come out 12 of 541 and 72 of 115 by start and
+  lifetime.~~ — closed 2026-11-10, measured, **and neither pair was a body's window.** The first was
+  the verifier's own count, which asked every start opcode's window — rain, snow and lightning as
+  well as the sun and the moon — so the six skies that snow `DUST_ADD` or storm all day counted
+  whole days as inside; it reproduces exactly. The second took the lifetime for the window, and the
+  lifetime only paces the arc: the start opcode makes the body and the stop deletes it
+  (`CAtmosphere::HandleEvents`, `Terrain.dll:0x1006ffe6`–`0x1007000d`, *"Unable to delete atmosphere
+  object"*). From start to stop, **12 of 545** keyframes are black inside a body's window, every one
+  a window's first or last (six starts, six stops) and every one at alpha 0, and **72 of 111**
+  outside, 54 at 255 and 18 at 0; the four between the two counts are the two 24-hour skies' 22:00
+  sun start and its 24:00 stop, which never fires, none of them black. **The claim stands**: a black
+  slot 17 never paints a black disc. The weather's windows are the control, putting 7 black
+  keyframes at 255 inside a window, all of them weather's and none a body's. The engine changed only
+  its comment, and `verify` pins every number
+  ([10-sky](docs/10-sky.md#a-black-slot-17-and-a-bodys-window--measured)).
+- [x] ~~[M1] What the four rays of `CShade::EndDraw` (`Terrain.dll:0x10052d60`) test, with the
+  filter {2, 0, 0, 0, 0, `0x8008`, 0, 0}, and the sun's ray's far end, half a figure of the view's
+  (`ebp - 0x60c`) that is not traced, so the engine asks 10000 along.~~ — closed 2026-11-10, read
+  and measured, **and the engine was wrong on the ray.** **`ebp − 0x60c` is the camera's far
+  plane.** The draw fetches the camera's eight-word parameter block into `ebp − 0x61c` through
+  camera slot 7 (`0x1007d991`–`0x1007d9a1`; `CCamera` `0x10084910` copies its `+0x13c`), and the
+  word is the block's `+0x10`, which the draw's own projector takes for the far plane, accepting a
+  point with near ≤ depth ≤ far and writing z = far(d − near) ÷ (d(far − near)) (`0x1007f290`,
+  `0x1008bca0`); the ray ends ½ × far along the body's way (`0x1007dcca`–`0x1007dd8c`, the 0.5 at
+  `0x1009a1fc`). So it reaches **500** from a unit's own camera, far 1000 on all 61 camera
+  components (`Control.dll:0x10023937`), and **350** from the outer, command and briefing cameras,
+  far 700 (`iron3d.dll:0x10038b5e`, `0x10036dba`, `0x10031532`), and the read settles which of a
+  camera's values 0 and 1 is near and which far, which every doc had as a guess. *Re-read by the
+  coordinator*: the block's address, the 0.5 and the outer camera's 700. **The four rays lay a
+  robot's shadow.** `BeginDraw` (`0x10051590`) gates class 4 on `RobShadowsOn` (1) and everything
+  else on `BldShadowsOn` (0), at most `MaxShadowsQty` (20) a frame, and no `shade.cfg` ships; for
+  *r* < 10 `EndDraw` drops each corner of a 2*r* square along the light from 4*r* above to 100
+  below, and the hits give the faces the square is laid on and its strength, the mean of 1 − 0.0001
+  *d*² × 0.2 × the light's weight, so the shadow fades as the robot rises. The filter's mask is the
+  landscape alone, and `0x8008` maps to bits on **0 of 275882** faces, against the water's `0x02` on
+  3630 and the bed's `0x2000` on 6102. The engine takes each camera's far now and asks half of it;
+  **it casts no shadow**, a stand-in queued with the three parts of the read that are *inferred*
+  ([10-sky](docs/10-sky.md#the-lens-flare),
+  [07-objects](docs/07-objects.md#a-robot-casts-a-shadow-on-the-ground-under-it--read-and-measured)).
+- [x] ~~[M4] How a sprite whose material says opaque blends~~ (a stand-in row with no line here) —
+  closed 2026-11-10, read and measured, **and the engine was wrong, though no shipped sprite reaches
+  it.** An effect sprite keeps its material's mode: `RenderEffect` turns the index through the
+  shade's table at `+0xbfc` (`Terrain.dll:0x10028907`) into the phase's `+0x5c`, the item copies it
+  (`0x10028287`), and the render hands it to the device's slot 6 (`0x100302d0`),
+  `Ngi32.dll:0x10008680`, which sets the record's five states. **Mode 0 is ONE/ZERO with blending
+  and the alpha test off**: the whole quad is written, its alpha-0 texels too, so an opaque sprite's
+  fade does not show — it draws whole until its fade is exactly 0, and then not at all. Mode 1,
+  SRCALPHA/ZERO, no material reaches: the table holds 0, 4, 2, 3 and 5. *Measured* over the 3577
+  references of the 923 effects, **no sprite block names a mode-0 or mode-1 material** — types 3, 4,
+  5, 7, 8 and 9 are 2519 at mode 2 and 923 at mode 4 — and the control, the same scan, finds mode 0
+  on the 78 type-10 blocks that name `L00`, `L22`, `NE_Gibs_Ice`, `NE_Gibs_Stn` or `R_RL_06`.
+  **Every lump draws in mode 0 whatever its material says**: `Effect.dll:0x1000bdd5` writes 0 into
+  the block it hands slot 16, so all 160 draw opaque, the 57 on `NE_Gibs_Aln` and `NE_Gibs_Anm`,
+  whose materials say 4, and the 25 nameless among them. The engine drew modes 0 and 1
+  alpha-blended; mode 0 replaces now, mode 1 is SRCALPHA/ZERO, every other mode drops alpha-0
+  texels, and a lump has a look of its own at mode 0
+  ([07-objects](docs/07-objects.md#how-a-material-draws-is-in-the-archive-directory)).
+- [x] ~~Which nodes carry bit 0 at their record's `+0xc`, under which a hung part takes no
+  sunlight.~~ — closed 2026-11-10, read and measured, **and the engine was wrong for every unit
+  indoors.** The record is the node's 38-byte stream-1 record: the attach
+  (`AniMesh.dll:0x10007300`–`0x10007367`, message 21, event 6) asks its parent's `IAnimation` slot
+  29 (`0x10005b40`) about the node it hangs on, and slot 29's block carries the node's flags word at
+  `+0xc` (`0x10005b90`–`0x10005ba7`). **Bit 0 is the interior**: it is on **273 of the install's
+  1845 nodes**, in 21 meshes, every one an `i*` node of `fortif.rlb` — *counted again by the
+  coordinator from the raw stream-1 words, without the toolkit's parser* — against bit 5 on the 28
+  cockpits and bits 0 and 2 together on 177 rooms. What hangs there is whatever stands on the node's
+  floor: `PlaceObjectOnWorldFace` makes a machine the child of its face's object at the face
+  record's `+4`, which on an `AniMesh` is the walk-face visitor's node counter (`0x10007ef0`,
+  `0x100080ee`–`0x10008107`, `0x1000d1d2`), and 8242 of `fortif.rlb`'s 15562 walkable level-0 faces
+  lie on interior nodes. `0x400` is passed by **3 of the install's 345** calls through `+0x2c`, all
+  in `iron3d.dll` — the placement ghost, a panel's view and the model views — where the same sweep
+  for `0x800` and `0x1000` finds `CCamera::Render`'s two. Those three were already sunless here; a
+  unit or the hero on a building's interior floor took the sun and now does not, the hero's cockpit
+  with it. What the landscape answers the attach with is queued
+  ([11-effects](docs/11-effects.md#what-a-light-does-to-a-surface--read-and-measured)).
 
 ## Effects and sound
 
@@ -1765,6 +1911,27 @@ sum passed by an accident of the wrap; the Light Tower's, its repair switched on
 - [x] ~~[M4] What a burst's fade below 0 draws: type-10 debris is not dropped at an age of 1, 118 of its 160 blocks fade to 0 there and below it after, and the renderer draws nothing at 0.~~ — closed 2026-10-31, **its premise corrected: nothing shipped hands the renderer a fade below 0, because a type-10 particle reads no fade.** It is a class of its own, `0x1ec` bytes, vtable `Effect.dll:0x1001eb90`, whose draw `0x1000bd10` hands the shade a triangle list and reads neither the fade nor the phase. The renderer would take one: its test is for exactly 0 (`Terrain.dll:0x10028886`) and the Shader wraps the rest into the alpha's byte (`0x1004f86b`), so −0.5 is 128. 0 of the 3571 fading blocks end outside 0..1, a type-7 group is dropped at 1, and a stream's slot stays under 1 by the ring's stepping, that last argued from the read. A lump is a tetrahedron, octahedron, cube, icosahedron, rod or plate. *Seen*: Part 8 at 3:45.2–3:45.6 has a solid textured lump changing outline among small dark chips, which settles the geometry and the spin and **not the fade**, which of the 923 effects that blast was not being established. The engine was wrong: `burst` is type 7 alone, and `debris` draws triangles, the 25 nameless blocks with them ([11-effects](docs/11-effects.md#type-10-is-a-lump-of-geometry--read-measured-and-seen)).
 - [x] ~~[M4] An instance's level, its remainders: a moving stream's share of its instance's sphere, a light's sphere, and the atmosphere's owner class.~~ — closed 2026-10-31, read, **the engine right on all three**, comments only. A moving stream's radius adds half the distance from its middle to where it is now, a quarter of the way it has come (`Effect.dll:0x1001198b`–`0x10011a2d`). A light answers no sphere: its constructor zeroes the words (`0x100076e8`, `0x100091a7`–`0x100091b0`), nothing in its load or update writes them, and a radius of 0 is passed over (`0x10008676`), the control being the same field's writes at `0x10002bc0` and `0x10011a2d`. The atmosphere hands itself to `CreateFxManager` and answers 7 (`Terrain.dll:0x1006faa0`), the shade's entry for which is the robots' arm (`0x10048291`). The row narrows to the window's width ([11-effects](docs/11-effects.md#an-instances-level--read-and-measured)).
 - [x] ~~[M4] What *seen* is for a unit's own effect manager, so the 198 effects carrying `0x800`, 147 lights and 29 looped sounds among them, stop with their owner unseen: which cells the landscape walks, the mesh's sphere, which flags `CBuilding::Render` adds, and whether a gun on a turret counts the camera as its own.~~ — closed 2026-10-31 for the read, **and it corrects the line and [11-effects](docs/11-effects.md): they do not stop.** The instance's update has one caller, its tick (`Effect.dll:0x1000629e`), and that has one, the manager's (`0x10003e90`), and a light's and a sound's draw slot is the bare `ret` at `0x100026f0`, so `0x800` withholds a draw alone, on the 535 blocks that have one: an unseen owner's lights and loops go on every 100 ms. Cells are those in the rectangle round the camera's five points, each seen unless its box, −100 to 500 in z, lies wholly past one plane; `CBuilding::Render` adds 3 outside the planes and `0x48` inside; a second manager draw, per part and keyed by node, has no plane test (`AniMesh.dll:0x1001044b`), which is what the doc's *the only manager call* had missed; and a gun does not count the camera its own, 0 of `guns.rlb`'s 124 control files and of `weapon.rlb`'s 66 carrying one against all 58 of `turrets.rlb`'s. The engine had the lights and sounds right and now holds back an unseen owner's `0x800` sprites; the remainder is queued ([11-effects](docs/11-effects.md#which-draw-reaches-a-units-own-manager--read-and-measured)).
+- [x] ~~[M4] The owner values of time modes 9–14: the spin over the top spin, and one minus the
+  owner's life fraction (property `0x31`), which nothing set, so nothing burned and a shot tree
+  never caught fire~~ (a stand-in row with no line here) — closed 2026-11-10, read and measured,
+  **and the engine was wrong: a plant shot under three tenths of its life catches fire.** Property
+  `0x31` is the control system's `+0x590 ÷ +0x58c` (`Control.dll:0x1000df55`), a tree's as a
+  machine's; the spin is property `0x24`, `+0x1d4` (`0x1000de98`), over the frame's turn rate.
+  **Block entries 6 and 7 reach a tree**: the control tick sends kind 10 straight to the life update
+  (`0x1000c294` → `0x1000c74a` → `0x10012a40`) every 250 ms ± a quarter, and only after a change of
+  life (`+0x598`); with two or more running-gear nodes their fractions decide, and otherwise the
+  object is critical under 0.3 of its total for kind 10 and 0.2 for anything else. Onset runs entry
+  6, sets condition byte 14 and moves the mark to the life left; recovery runs entry 7. The 8
+  mode-14 effects are exactly the 8 flagged `0x40`, and 8 of the 32 entry-6 controllers are the
+  burning plants', each switching on its `tree_flame` and its sound. **0 of `static.rlb`'s 72**
+  `.ndp` tables carry running gear, against **12 of `bases.rlb`'s 24**. The engine ran neither entry
+  and fed no life fraction; `parkan_sim::critical` now switches the fires on and off for trees,
+  stones, buildings and the hero's chassis and hands each effect its owner's life fraction, and C03
+  M01's plant catches fire at *t* ≈ 0.75, within its flag-1 jitter. The wreck's burn was read on the
+  way, a tenth of the onset life a second. The spin and the life update's pace are read and wait on
+  the engine, queued as a line of their own
+  ([11-effects](docs/11-effects.md#how-an-effect-runs--read),
+  [13-control](docs/13-control.md#critical-damage-block-entries-6-and-7--read-and-measured)).
 
 ## Motion, ground and controls
 
@@ -2148,6 +2315,30 @@ sum passed by an accident of the wrap; the Light Tower's, its repair switched on
 - [x] ~~[M14] The walker's local path and its obstacle contours: how it goes round a hole and whether it widens it, how a walker in one walks out and what it does with a goal in one, sub-areals, a mesh of several parts, `MWalker::ClearMoverReachedPoint`, a unit's place on a building and the start vertex, who calls `MHallWay` slot 11, and how a walker goes off a non-walkable areal and when its search fails.~~ — closed 2026-10-31 in those pieces, what was left requeued, **and it corrects the line**: `ClearMoverReachedPoint` (`Behavior.dll:0x1003cfd0`) is the branch the shipped game does not take, `Behavior.ini`'s `UseWizard` being 1 (`0x1000349d`), so `0x1003c5c0` runs, the same five steps and then a plan again: a point dropped more than 10 across the ground from the machine has `0x1003f3a0` call `SetTarget` on the held goal. The local path (`0x10038e00`) rounds the nearest contour the line hits by the shorter way, standing off a corner by the sum of the two edges' unit normals, √2 at a right angle, and reads nothing of the unit, so it does not widen. A goal in a hole is refused (`0x10043220`, `0x1002092e`). A walker in one walks, once idle, to the nearest corner + 5 × the outward normals at 7 m/s (`0x1003e81d`). Off a non-walkable areal it goes straight at 12 m/s, an animal at 20 (`0x1003e7c1`). A failed search answers 0 with the queues empty, and the next takt stops the Wizard (`0x1003d31e`). The place is the last passed point's `+0x30`/`+0x34` or the teleport's, the search starting from `+0x88`/`+0x8c`. *Who calls slot 11* was already answered, `OnAddStatic` and `OnRemoveStatic`; and the several parts do not arise, all 401 placed scenery objects having exactly one. The engine was wrong in several places: it plans again off its track, refuses goals in holes, walks out, and stands √2 off a corner where it took the unit's radius ([24-motion](docs/24-motion.md#dropping-the-points-a-unit-has-passed--read), [24-motion](docs/24-motion.md#walking-out--read)).
 - [x] ~~[M19] Where the frame is drawn among move, pass, contact and push, the recording showing C02 M03's walker upright where the push presses it 0.28 m a tick.~~ — closed 2026-10-31, read, **and it corrects the order in [24-motion](docs/24-motion.md) and [26-damage](docs/26-damage.md): the push comes before the contact, not after it.** The pass's last act is message `0x1b`, sent at once through the queue's slot 8 (`Control.dll:0x1001c2e7`–`0x1001c318`, `World3D.dll:0x10006460`), and the list delivered after message `0x1c` holds slot 7's posts, which the pass does not use. So the takt runs the move, the pass with its push, and the contact (`0x10006ce1`), each handing the mesh its matrix, and `stdRenderGame` follows `stdCalculateGame` on the same pass (`iron3d.dll:0x1005ea69`, `0x1005ed4e`). What is drawn is the contact's answer to the push, and a down push on a building is lifted back in the frame it lands in, as the frames already cited have it. The engine's picture was right and its reason wrong; no behaviour changed, and the row is gone ([24-motion](docs/24-motion.md#collision-between-objects--read)).
 - [x] ~~[M17] Whether a building's collision mesh follows the nodes its own items turn: three mines' rotors, the Main Teleport's rings, `fr_e_brige`'s hub.~~ — closed 2026-10-31, read and measured: **it follows them, whichever item turns them, and the game keeps no solid.** The driver offers each channel through `IAnimation` slot 10 (`Control.dll:0x10021c97`, `AniMesh.dll:0x10005630`), marking the node stale and setting the object's `+0x1fc` (`0x1000a2a0`), and all four ways in to a face run the pose walk first (`0x1000ccc3`, `0x1000d424`, `0x10013efe`, `0x10013ff1`), one walk per object per frame a channel moved. The door's channel goes through the same call site, the control. The nine class-26 records turn 3,205 level-0 faces, 2,689 of them on `fr_l_mtp`. **The engine was wrong**: rotors, rings, the hub and a tower's raised mast stayed where they were first posed. `Solid::follow` re-places only the faces of nodes that moved, pinned to agree with a solid built afresh to 1 mm ([28-chassis](docs/28-chassis.md#every-component-is-stepped-not-only-a-device--read-and-measured)).
+- [x] ~~The construction sphere's leftovers: which name the `mine` test that adds 15 to the radius
+  looks in; the engine's own `construction::building_sphere`, flat at the placement's z; and the
+  height under which a building's own collision context drops a bubble contact
+  (`Control.dll:0x1001d846`).~~ — closed 2026-11-10, read and measured, **and the engine was wrong
+  on two of the three.** **The name is the body's.** `CBuilding`'s `QueryInterface`
+  (`Terrain.dll:0x10057d50`) answers ids 0, 6, `0x11`, `0x17` and `0x18` itself and hands the rest
+  to its agent, whose interface `0x24` (`AniMesh.dll:0x10001181`) gives part 0's member name
+  (`0x100025e0`, set at `0x1000311f`), and the agent is loaded from the `FORT` record's first slot
+  (`Terrain.dll:0x10055e95`): `bu_l_mine`, not `fr_l_mine`. On all 34 `FORT` records the first slot
+  names `mine` exactly where the record does, so the engine's `fr_*_mine` agreed on every shipped
+  building; it reads the `bu_` name now. **The dome's frame and the kill take the read construction
+  sphere**, 46.71 about (0, 5.27, 2.73) on the Small Tower, 2.73 higher and 0.09 wider than the
+  engine's flat one. **A building's bubble takes no round under its cut outer contour's lowest
+  corner.** The pass's manager `+0x14` is `CBuilding`'s `IBasement`, whose slot 7
+  (`Terrain.dll:0x10056aa0`) reads `CBuilding+0xe0`, set to 100,000 by the constructor
+  (`0x100569c4`) and overwritten through slot 6 by the landscape insertion (`0x10014654`, the slot's
+  one call in the install) with the minimum its loop keeps beside the mean
+  (`0x10010f55`–`0x10010f79`). *Checked by the coordinator*, after the accessor's `+0xdc` looked
+  like a mismatch: the interface sits at `+4`, its vtable `0x1009b57c` stored there. Over the 167
+  placed buildings the floor stands a median 1.11 m under the base, at or under it on 163; the
+  engine had no drop and has `Target::bubble_floor`
+  ([26-damage](docs/26-damage.md#a-round-meets-a-bubble--read),
+  [24-motion](docs/24-motion.md#collision-between-objects--read),
+  [32-builder](docs/32-builder.md#upgrading-a-building--read)).
 
 ## Turrets, weapons and camera
 
@@ -2473,6 +2664,58 @@ sum passed by an accident of the wrap; the Light Tower's, its repair switched on
 - [x] ~~[M5] How the HUD draws the aim point, the guns and the player's target; and what plays `TARGET_READY` and `TARGET_ZOOM`.~~ — closed 2026-10-31: **already in the engine.** The reticle, the weapons list and the target panel are `cockpit/radar.rs::reticle` and its neighbours from `0b35ccd` ([35-hud](docs/35-hud.md#the-reticle--read), [25-sensors](docs/25-sensors.md#not-established)), and the guided lock's corners play both sounds from `2caf7ce` ([35-hud](docs/35-hud.md#the-guided-lock--read)). The line had stood stale since 2026-09-15. What the reticle's dot is placed by is queued alone.
 - [x] ~~The fire line's remainders: whether a building's mesh agent answers the building's id; whether the landscape's slot-4 record `+0x3c` is the file's face dword; the 25 to 50 m between the engine's 414 m launch on C03 M02 and the recording's 365–390; and the turret's property `0xf00`.~~ — closed 2026-10-31, what is left queued, **and the 25 to 50 m were never there.** `CBuilding` slot 9 is its agent's through `+0x30` (`Terrain.dll:0x100573f0`), so leaving the target's id out leaves its faces out, and the engine was right. Slot 4's record is `this + 0x18` (`0x1001b0f5`) and the face's first dword goes to `this + 0x54` (`0x1001a531`), so `+0x3c` is that dword, *inferred* until now, and the 20 m exception never fires on ground, 0 of 275882 faces carrying `0x80` against 6102 with `0x2000`. Property `0xf00` is 1 less the greater channel gap, doubled for a wrapping yaw, × 1.1, held to 1 (`Control.dll:0x10028bb0`), so θ is 0 within 16.4° of yaw and 4.1° of a 90° pitch and any report but 0 and 1 is π, which the engine now takes. **The raid:** the target panel of Part 6 reads the raider's range second by second, 457 m at 820 s to 292 at 833; one orange light leaves it at 824.5 s and two from 824.6, about **405 m** off, and they strike at 834.2 s about 290 m off, which is 42 m/s. The 365–390 was derived with both speeds wrong, the raider's being 12.7 m/s and not 11.3. And the merged tree showed **the engine let a round keep its shooter's velocity**, where the integrator holds each axis of a body's frame to its top speed in free flight too (`Control.dll:0x100158c4`–`0x100158f2`, `0x10016810`), 65 of the 66 rounds having a top of 0 across and up: a winged SSM left at 57 m/s skewed by the raider's swing, and over 24 draws 16 lost at least one missile to the rise. Now the test's draw leaves 414 m off and lands with the raider 286 m off, none short. One raid has been watched ([29-weapons](docs/29-weapons.md#how-the-ai-fires--read), [29-weapons](docs/29-weapons.md#the-rounds-start)).
 - [x] ~~[M13] Whether the AI's aiming reaches the turret lock's lead, and what spin a unit let go keeps until the Wizard writes one.~~ — closed 2026-10-31, read and seen. **It does not**: a trace stores its point in `+0x9c` itself (`Control.dll:0x1002874d`, `0x10028933`), past interface `0x202` slot 14 (`0x1002eb70`), and none of `Behavior.dll`'s 55 calls at `+0x38`, `ai.dll`'s 6 or `Wizard.dll`'s 0 hands over an index and a triple, the same reading of `World3D.dll`'s 21 finding the two it should. **What moves the lead at a take is new**: the manual controller's permission method, told bit 1 for a turret, sends (0.5, 0.5, 0) through that setter (`World3D.dll:0x1000ee5e`–`0x1000ee8e`) at every take at level 0 or 1, as a mission opens, on leaving a bot, and at a tower's pod. So **the hero opens with its sight 24.4° up**, seen at 74 s of Outflanking Maneuver and 84 s of The Field Base with the horizon about 90% down the frame, and a hung flyer 35° under the level, seen at 249.4 s of The Constructor; this corrects docs/29's *nothing on the player's side changes*. A unit let go keeps its last step's spin for one takt: message 7 with 0 writes no spin (`0x10031a58`) and starts the Wizard (`0x10003c4a`), whose hold writes 0. The engine was wrong on the lead and on a turret's pitch at every take, `Rig::hand_over` now; the let-go zero was right ([30-turrets](docs/30-turrets.md#a-turret-handed-to-the-player-looks-ahead--read-and-seen)).
+- [x] ~~[M9] What the camera view's interface 6, property 0, holds, which places the reticle's
+  dot.~~ — closed 2026-11-10, read and seen, **and the engine was wrong.** The view is the camera
+  object the class-4 component makes as World3D kind 5, its parent the unit and no node
+  (`Control.dll:0x10023910`); property 0 is `CGameObject::GetPlacement`'s placement in the parent,
+  `+0x1c` with no parent node (`Terrain.dll:0x1008aeae`), which the component writes every tick
+  (`Control.dll:0x10023879`, `0x10023896`). So `[+0]` and `[+0x10]` are the camera's look in the
+  unit's own frame, and the dot stands at (320 − 24·`[+0]`, 240 − 24·`[+0x10]`)
+  (`iron3d.dll:0x10042f27`, `0x10042f54`, `0x10043065`; 24.0 at `0x100e5e88`, re-read by the
+  coordinator) — [35-hud](docs/35-hud.md) had `a` and `b` swapped. Looking down the unit's own axis
+  the dot stands 24 above the middle, and it goes round as the hull turns under the turret. *Seen*
+  in Part 1, a frame every 5 s from 400 to 1240 s: of 168 frames, 132 show the dot, every one 23.0
+  to 25.1 game pixels from the middle — 82 straight above, 37 up-left and 6 up-right at 45°, 3 at
+  90° and 4 on their way round — and none in the middle; the coordinator's own frame at 700 s has it
+  about (−14, −19). The engine kept it in the middle and now places it by `Robot::look_in_frame`.
+  Which strafe key sends it which way is queued ([35-hud](docs/35-hud.md#the-reticle--read)).
+- [x] ~~What the design state's `+0x370` is — the string all three readers of a design's `Type` test
+  before anything else, answering `0x20000000`, an animal, when it begins with lower-case `a`.~~ —
+  **stale**, answered in [38-designs](docs/38-designs.md#not-established) since `55aa79d`
+  (2026-09-21) and never ticked here: it is the destination panel's Chassis tab string (`+0x36c`,
+  its text at `+0x370`), which holds the designer's kind string; the factory lays the designer out
+  with `"r"`, so the test finds `a` in the animal designer alone, which nothing opens.
+  [30-turrets](docs/30-turrets.md) is corrected there.
+- [x] ~~Where the unit constructor's page item names (`+0xc4`) come from.~~ — **stale**, answered in
+  [38-designs](docs/38-designs.md#fitting--read-and-measured) since `a11a504` (2026-09-14), while
+  [28-chassis](docs/28-chassis.md#not-established)'s own list still asked it. Re-read by the
+  coordinator and struck there (`a32487d`): choosing a chassis makes each row with the row
+  constructor (`iron3d.dll:0x10046610`) and assigns into its `+0xc4` a node's label for the turret
+  page (`0x10051e8a`) and, past the `i_brn_` slots, a controller slot's label for the armour and
+  internal pages (`0x10052066`).
+- [x] ~~The blast's remainders: whether a round in the air hangs in the landscape's object grid,
+  whose class the blast's mask `0x61c` carries; what a unit's behaviour does when message `0x19`
+  names itself; and a non-round node's blast — node 1 of `o_tur_la_06`, `explode_rbr_bomb`, 20,000
+  in 43.4 m.~~ — closed 2026-11-10, read and measured, **and the engine was wrong on two of the
+  three.** **A flying round hangs in the grid**: the gun creates it through `CreateObject` 9 with
+  the world root for its parent (`Control.dll:0x1002a368`–`0x1002a387`, attached at
+  `World3D.dll:0x10007d56`), each matrix set tells the parent events 0 and 1
+  (`AniMesh.dll:0x1000209e`, `0x10002427`), and the landscape's handler files every child but
+  classes 6 and 7 in the cells its sphere covers (`Terrain.dll:0x1001f150`, event 1 at
+  `0x1001f57d`); the control is the units a scheme makes, given the same root
+  (`ArealMap.dll:0x100154e1`). So a blast takes the rounds in its reach, and one whose life it ends
+  goes off; the engine now does, when it goes off a stand-in queued. **Message `0x19` naming the
+  unit itself** restarts the interrupt pause and is refused as a target (`Behavior.dll:0x100064b0`,
+  `0x10017aa0`–`0x10017ab0`), adds 0.004 to the decrease toward its own clan, which the clan takt
+  never applies (`ai.dll:0x10001fe0`), and calls for help (`0x10006592`); the engine already
+  restarted the pause and took no attack, now pinned, and the call for help stays the M14 stand-in.
+  **A node's own blast is a round's hit** (`0x100113e0`–`0x100117c0`): centred on the node's sphere,
+  its radius the `.exp`'s times that sphere's, worth ratio × damage plus the life lost since the
+  last stage check (`0x10011794`), the object its own firer and its other nodes taking it through
+  the falloff alone. Of the 1,828 nodes in the 427 non-round tables **1** names a blast and none a
+  kind 2 or 4, and **0 of the 458** designs carries the turret; the engine played the effect alone
+  and now deals the hit ([26-damage](docs/26-damage.md#what-a-blast-reaches--read),
+  [26-damage](docs/26-damage.md#whose-hit-it-is-and-whom-it-spares--read-and-measured)).
 
 ## Damage, sensors and ownership
 
@@ -3085,6 +3328,24 @@ sum passed by an accident of the wrap; the Light Tower's, its repair switched on
   it stands in [16-research](docs/16-research.md) to marking a tree as carrying debugging information,
   whose one reader found is the warning `FULL_RESEARCH_TREE` silences, and **no shipped archive sets
   it** — near enough a settled negative that an agent's time went to the briefings instead.
+- [x] ~~[M5] Where a caller of text-out puts the next line: the font gives its height and the
+  routine draws one line~~ (a stand-in row with no line here) — closed 2026-11-10, read, measured
+  and seen, **and the engine was wrong.** Text-out draws one line and the GUI server calls it once a
+  line (`services.dll:0x10001dce`); a control that stacks lines asks the font's slot `+0x0c`, which
+  answers header word 1 (`Ngi32.dll:0x10010d50`), **one less than the glyph cell**, and adds a
+  constant of its own. Of the **36** calls of that shape in `iron3d.dll`, 5 step by height + 1, the
+  cell — the briefing's subtitles, the research box's descendants, the designer's hint and two more;
+  7 by height + 2 — the message box, the unit lines, the factory panel, the outcome panel, the part
+  box, a 17-line list and the debug overlay; 1 by 1.5 × the height, a `MENU_FONT` list; 13 place one
+  line or a box; and 10 are not followed. The control is the two sites already read, the message
+  box's + 2 (`0x1007ff32`) and the briefing's + 1 (`0x10031763`), both found, so the search tells +
+  1 from + 2. The objectives screen and the wingman panel step by fixed figures and ask no font.
+  *Seen*: the message box's and the unit box's lines are 8 apart at 1024 × 768, round((11 + 2) ÷
+  1.6), where the cell would give 9. The engine took the font's height for the cell, so its stacked
+  lines stood a pixel too far apart in seven controls and two boxes stood a pixel too tall;
+  `GameFont::height()` is header word 1 now, each control adds its read constant, and the stand-in
+  row is gone. The ten not followed, and the rows the engine still centres by the cell, are queued
+  ([12-rsli](docs/12-rsli.md#where-a-caller-puts-the-next-line--read-and-measured)).
 
 ## Mission 02, *The Constructor*
 
@@ -3270,6 +3531,45 @@ Added on 2026-09-15 against `950af7e`, after M12 made the mission winnable end t
   1, 2, 3 and 4. What is left is queued: a quick save's own bytes, what a save keeps of the
   interface, and what `Run` does when a slot's file is gone
   ([39-boarding](docs/39-boarding.md#the-game-menu--read), [17-saves](docs/17-saves.md)).
+- [x] ~~A *Tiny Tower*'s battery of capacity −1: how the power tick spends a −1 battery on a unit~~,
+  and with it the stand-in's ~~[M4] how a building's gun capacitor refills~~ — closed 2026-11-10,
+  read and measured, **and the engine was wrong on both.** **A −1 battery is no store.** Its slot 5
+  (`Control.dll:0x100229a0`) skips the store's cap when value 0 is 0 or less (`0x100229f4` →
+  `0x10022a4f`) and gives output × charge × condition × dt every tick; slot 6 skips the drain when
+  value 0 is below 0 (`0x10022a80`); the fill setter passes it over (`0x1002bb0e`), so its charge
+  stays the constructor's 1 (`0x100218ee`); and the fill, id 1, answers 1 as its walk meets one
+  (`0x1002b46f`). It is an endless source at its output rate. *Measured*: every negative capacity in
+  the install is −1, and **0 of 411** unit batteries and **0 of 182** building batteries hold 0; the
+  17 Tiny Towers give 1,000 a second beside a fitted 31,000 at 34.5, the 7 animals 250, the 15
+  bunkers 15 to 25 and the 2 generators 55. A store pays for what it gives at its condition, slot 6
+  taking level × given ÷ (capacity × condition) off its charge (`0x10022ab0`–`0x10022acf`), where
+  the engine divided by the capacity alone. **A building's guns are served on the same tick from its
+  own batteries**, on channel 4: 27 of the 76 building assemblies carry guns, every one with a
+  capacitor of 0.1, placed 31 times in 16 missions. The engine dropped the −1 battery and served
+  every building gun at a level of 1; it keeps the battery, reads it full and serves a building's
+  guns from its batteries at their node's condition, and the stand-in row is gone
+  ([23-economy](docs/23-economy.md#a-battery-no-capacity-holds--read-and-measured),
+  [41-commander](docs/41-commander.md#the-box)).
+- [x] ~~What a building going up is still reached by: what interface `0x20` slot 3 answers for a
+  node hidden by action 1, and whether Behavior's hall-way searches pass over a building in the
+  second between its showing at 40 s and its sphere's end at 41 s.~~ — closed 2026-11-10, read,
+  **the engine right on the blast and wrong on the transport.** **Slot 3 answers a hidden node with
+  its own sphere**: the falloff's request (`0x100436e0`) sets its fourth word to 1 (`0x100126f5`),
+  which takes the one-node path (`AniMesh.dll:0x1000f3c5`), reading the node's matrix and its
+  stage's level-0 slot (`0x100124d0`) and never the flag word; the sweep for that flag finds the
+  same 9 sites as before, the draw's two among them, and none on this path. So a blast hurts a
+  building going up as one standing, as the engine had it, now pinned. **None of the four hall-way
+  searches reads `0x20c` itself.** The refit takes its buildings from `0x100156b0`, which passes
+  over one whose `0x20c` reads 1 (`Behavior.dll:0x10015732`), so a building going up is no dock for
+  its whole 41 s, as the engine had it. The transport's mine and storage picks pass over a hidden
+  vertex alone, and its route then asks the building it picked for `0x20c` (`0x10032917`,
+  `0x10032944`) and, while that reads 1, clears the walker (`0x1003c540`) and waits, asking again
+  each tick (`0x100324d3`, `0x100325dd`). So between 40 and 41 s a transport takes the new mine and
+  waits for it, where the engine passed it over and, with no other mine, ended its task; it waits
+  now, pinned on Mission 03 at 40.5 s. Whether a production order reaches a factory whose task is
+  still the sphere's is queued
+  ([26-damage](docs/26-damage.md#what-a-hidden-node-is-left-out-of--read),
+  [32-builder](docs/32-builder.md#transporting-ore--read-and-measured)).
 
 ## Mission 04, *Teleport*
 

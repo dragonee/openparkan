@@ -52,12 +52,13 @@ remainder a closed line names stays here as a line of its own.
   stone and not the landscape is not established. Not followed either: the callers of
   `Control.dll:0x10004690`, which is handed a whole matrix, the one way in the nine `PlaceObject`
   calls leave ([10-sky](docs/10-sky.md#the-lit-colour-is-the-games-own--read-and-measured)).
-- [ ] Which nodes carry bit 0 at their record's `+0xc`, under which a hung part takes no
-  sunlight. Left 2026-10-10, when the manager the gather passes over under bit 1 of the draw's
-  mode was read as the sky's ([COMPLETED-QUESTIONS](COMPLETED-QUESTIONS.md#sky-and-rendering)): an agent attached to such a
-  node, and a draw whose argument carries `0x400` (`AniMesh.dll:0x10014d9d`), take neither of
-  the sun's two lights. Which shipped nodes carry the bit is not counted
-  ([11-effects](docs/11-effects.md#not-resolved)).
+- [ ] What the landscape answers a unit's attach with, and any attach that names a node other than
+  the ground's. Left 2026-11-10, when the interior's bit closed
+  ([COMPLETED-QUESTIONS](COMPLETED-QUESTIONS.md#sky-and-rendering)): a machine standing on a building's
+  face is attached to the face's node, and on the 273 interior nodes it takes no sunlight; what the
+  landscape hands back is not read, though a unit on open ground is sunlit in every recording, and no
+  other attach naming a node was enumerated
+  ([11-effects](docs/11-effects.md#what-a-light-does-to-a-surface--read-and-measured)).
 - [ ] C03 M02's Large Factories' roofs, and the mine's glow. *Seen 2026-10-03 and not
   investigated*: in the briefing frames that settled the masts ("Part 6", -yNnsqudMzw, briefing
   time 49–62 s) each Large Factory's roof is violet-blue under its antenna in the recording and
@@ -82,32 +83,40 @@ remainder a closed line names stays here as a line of its own.
   every emblem into the arrow after a quick load, and whether to is the player's call. Not
   re-checked for a load before it: docs/07's own sighting of a captured warbot's arrow (Part 6,
   7:30) ([07-objects](docs/07-objects.md#in-a-network-game-and-after-a-load--read-and-seen)).
-- [ ] What the four rays of `CShade::EndDraw` (`Terrain.dll:0x10052d60`) test, with the filter {2,
-  0, 0, 0, 0, `0x8008`, 0, 0}, and the sun's ray's far end, half a figure of the view's (`ebp -
-  0x60c`) that is not traced, so the engine asks 10000 along. Both turned up 2026-10-31 as the
-  filter line closed ([COMPLETED-QUESTIONS](COMPLETED-QUESTIONS.md#sky-and-rendering)), the sun's ray in the engine on the read
-  alone and set against no recording
-  ([07-objects](docs/07-objects.md#the-filters-the-first-enumeration-could-not-see--read),
-  [10-sky](docs/10-sky.md)).
+- [ ] **[M2] A robot's shadow.** Read 2026-11-10, when the four rays of `CShade::EndDraw` closed
+  ([COMPLETED-QUESTIONS](COMPLETED-QUESTIONS.md#sky-and-rendering)): a robot lays a 2*r* square, square to
+  the light, down onto the landscape faces under its corners, faded by how far they drop. **The
+  engine casts no shadow**, which wants a render pass of its own. Left in the read: that the
+  direction comes from the object's lights, that the faces between the corners are filled in by a
+  walk not read, and that the cut is a clip to each face, all three *inferred*; and no recording's
+  shadow has been set against it
+  ([07-objects](docs/07-objects.md#a-robot-casts-a-shadow-on-the-ground-under-it--read-and-measured)).
 - [ ] The plant in C02 M03's briefing shot. *Seen 2026-10-31, not investigated*: at briefing time
   10 s (Part 4, Qqs8_i9IeUU, 0:42) the engine draws the plant at the middle of the frame pale white
   where the recording fogs it into the sky.
-- [ ] Two counts of slot 17's black keyframes that do not agree: [10-sky](docs/10-sky.md#the-sun-and-the-moon-are-drawn)'s
-  31 of 576 inside a body's window and 53 of 80 outside it, quoted in `parkan_sim::sky` too, come
-  out 12 of 541 and 72 of 115 by start and lifetime. How the first pair was counted is not
-  recovered.
 
 ## Effects and sound
 
 [11-effects](docs/11-effects.md#not-resolved)
 
-- [ ] [M4] A type-10 lump's remainders, left 2026-10-31 when the fade's line closed on a premise
-  corrected ([COMPLETED-QUESTIONS](COMPLETED-QUESTIONS.md#effects-and-sound)): it is a triangle list and reads no fade. Its
-  lighting, which the engine shades a facet at a time where the game lights its vertices once; the
-  tumble, one fixed angle a draw, which the engine takes at 60 draws a second; the manager's list the
-  25 nameless blocks pick from, `NE_Gibs_Stn` here; and the fall's clock, which the game adds as the
-  group is drawn. And no recording shows a 1 → 0 block, so that it holds whole to the end of its
+- [ ] [M4] A type-10 lump's remainders. *Narrowed 2026-11-10* ([COMPLETED-QUESTIONS](COMPLETED-QUESTIONS.md#the-rounds)):
+  the material a nameless block wears is read and in the engine, and every lump draws in blend mode
+  0 whatever its material says. **Left**: its lighting, which the game does once at its first draw,
+  vertex by vertex through the shade's lighter over the list its owner's draw gathered (shade slot
+  32, the shader's slot 3 at `Terrain.dll:0x1004c480`), where the engine shades a facet at a time;
+  its tumble, an angle and an axis each lump draws as it is made and turns by once a draw, at a
+  frame rate no file sets, which the engine takes at 60 draws a second; the fall's clock, which the
+  game adds as the group is drawn; that a part merged into a unit wears its chassis's list 0, which
+  is *inferred*; and no recording shows a 1 → 0 block, so that it holds whole to the end of its
   window rests on the read ([11-effects](docs/11-effects.md#type-10-is-a-lump-of-geometry--read-measured-and-seen)).
+- [ ] [M4] Two figures of an effect's owner that are read and wait on the engine, left 2026-11-10
+  when the owner values of time modes 9–14 closed ([COMPLETED-QUESTIONS](COMPLETED-QUESTIONS.md#effects-and-sound)):
+  the spin, `+0x1d4` over the frame's turn rate, which none of the 923 effects in modes 9–13 reads
+  and the 31 in mode 15 read only on robots' and animals' chassis load groups, which the engine does
+  not run; and the life update's pace, every 218.75 to 281.25 ms (`Control.dll:0x1000c74a`), where
+  the engine checks at every tick under the same gate
+  ([11-effects](docs/11-effects.md#how-an-effect-runs--read),
+  [13-control](docs/13-control.md#critical-damage-block-entries-6-and-7--read-and-measured)).
 - [ ] The scale a stream particle's own matrix carries. By the read the matrix is built from
   the way the effect moved and the frame's third axis, and carries that axis's length on two
   of its axes (`Effect.dll:0x10011daf`–`0x10011e73`), which would make a chimney's plume 2.6
@@ -162,16 +171,6 @@ remainder a closed line names stays here as a line of its own.
   patrol point near the map's edge, the edge's push *inferred*, and should move on when the loop's
   timer runs out, which 150 s does not reach. C02 M01's 4 stood so before the round
   ([24-motion](docs/24-motion.md#what-a-wall-does-to-a-walk--measured-and-a-stand-in)).
-- [ ] **The construction sphere's leftovers**, from the second sphere's line, closed
-  2026-10-10 ([COMPLETED-QUESTIONS](COMPLETED-QUESTIONS.md#motion-ground-and-controls)): which name the `mine` test that adds
-  15 to the radius looks in — interface `0x24`'s, not followed past the agent; the engine takes
-  the root record's `fr_*_mine` — and the engine's own `construction::building_sphere`, which
-  the dome's frame and the kill still take flat at the placement's z, its centre off the read
-  one by the ring's box-centre z (2.73 on the Small Tower) and its radius by under 0.1. Also
-  not read: the height under which a building's own collision context drops a bubble contact
-  (`Control.dll:0x1001d846`, a compare against a float from the manager's `+0x14` slot 7)
-  ([26-damage](docs/26-damage.md#a-round-meets-a-bubble--read),
-  [32-builder](docs/32-builder.md#upgrading-a-building--read)).
 - [ ] **Whether the walk-face query reads a door's faces.** *Seen on the engine, not read*: a large
   walker that reaches the Large Factory's front leaf while it is still sinking is lifted 5.6 m onto
   the leaf's top by its feet's up pass, whose bound is 7.5, and rides it down for about a second
@@ -211,10 +210,11 @@ remainder a closed line names stays here as a line of its own.
 [29-weapons](docs/29-weapons.md#not-established), [30-turrets](docs/30-turrets.md#not-established),
 [28-chassis](docs/28-chassis.md#not-established), [25-sensors](docs/25-sensors.md#not-established)
 
-- [ ] [M9] What the camera view's interface 6, property 0, holds, which places the reticle's dot.
-  Left 2026-10-31 when the HUD's line closed as already in the engine
-  ([COMPLETED-QUESTIONS](COMPLETED-QUESTIONS.md#turrets-weapons-and-camera)). The engine keeps the dot in the middle
-  ([35-hud](docs/35-hud.md#the-reticle--read)).
+- [ ] Which way the reticle's dot swings for each strafe key. Left 2026-11-10 when the dot's line
+  closed ([COMPLETED-QUESTIONS](COMPLETED-QUESTIONS.md#turrets-weapons-and-camera)): it stands 24 from the
+  middle toward the camera's look in its unit, and Part 1 shows it up-left and up-right at 45° as the
+  hull turns under the view, but no frame says which key sent it which way; the engine's W+A puts it
+  up-left, derived from its own motion model ([35-hud](docs/35-hud.md#the-reticle--read)).
 - [ ] What the view lights' line left, closed 2026-10-10
   ([COMPLETED-QUESTIONS](COMPLETED-QUESTIONS.md#turrets-weapons-and-camera)): what the phase at the shade's `+0x1928` sets on
   the device (2 where the device answers for it, `Terrain.dll:0x1004115b`); the class of
@@ -234,21 +234,6 @@ remainder a closed line names stays here as a line of its own.
   (c) The game-message switch on the id-class nibble gives 1, 3, 4, 7 and 11 a case and drops 2 to the
   default — weaker, since it drops 10 too. A class computed at runtime would still escape all three
   ([30-turrets](docs/30-turrets.md)).
-- [ ] What the design state's `+0x370` is — the string all three readers of a design's `Type` test
-  before anything else, answering `0x20000000`, an animal, when it begins with lower-case `a`
-  (`iron3d.dll:0x1004f318`, `0x100514fb`, `0x100544f9`, each `cmp byte ptr [ecx], 0x61`; the boundary
-  confirmed by five start offsets converging on it). *Raised 2026-09-20* out of the formats agent's
-  part-category work, **and it corrects a claim in [30-turrets](docs/30-turrets.md)**, which read that
-  string as the chassis's name ("a chassis whose name starts with `a`"). It is not: *measured over all
-  **29** trees, which carry an identical set of **27** chassis part ids, **all 27 upper case** —
-  `A_L_01`..`A_L_05` being the five animal ones — so **0 of the 783** examined begin with lower-case
-  `a`*, and the test could never fire on a chassis id. The likely candidate is the designer's own kind
-  prefix, spelled `r_`, `fr_` and `a_` and handed to the layout at `0x1004dff0`, but **no store into
-  `+0x370` was found in `iron3d.dll`**, so that is *inferred*, not read — and that missing store is the
-  next place to look. It makes no difference to a robot design, where the base part is a chassis and the
-  `Type` comes from the turret either way ([38-designs](docs/38-designs.md#not-established),
-  [30-turrets](docs/30-turrets.md)).
-- [ ] Where the unit constructor's page item names (`+0xc4`) come from.
 - [ ] [M8] The fire line's remainders, left 2026-10-31 ([COMPLETED-QUESTIONS](COMPLETED-QUESTIONS.md#turrets-weapons-and-camera)):
   the angle routine `Control.dll:0x10026e20`, which a nudge stands in for, and where the takt stores
   each report code. **Whether a raid's first pair ever falls short**: the one raid watched, Part 6
@@ -267,7 +252,9 @@ remainder a closed line names stays here as a line of its own.
   itself in that play is unchecked. Part 6's Light Tower, on the target panel across 40 s of fire
   (2928–2968 s), keeps its teal arc nearly full, which fits and does not discriminate. A marked
   building keeps its clan and stays in the lists, a stand-in; the wreck's burn, the one thing that
-  kills a generator, is not modelled and its rate is only outlined; and *a burnt-out generator shuts
+  kills a generator, is not modelled, its rate read since 2026-11-10 as a tenth of the life it went
+  critical at a second, out in 10 s ([13-control](docs/13-control.md#critical-damage-block-entries-6-and-7--read-and-measured));
+  and *a burnt-out generator shuts
   the teleport for good* is *derived*, no recording looked for
   ([26-damage](docs/26-damage.md#not-established), [27-ownership](docs/27-ownership.md#teleport-in-0x8000--read)).
 - [ ] Why the target dummies are not on the recording's radar. `docs/35`'s guess that a dummy gives
@@ -279,12 +266,13 @@ remainder a closed line names stays here as a line of its own.
   raid shows; and the tower's own death is ruled out, since every node of a building names a kind-1
   explosion, an effect alone. Which gun's blast it was at 21:53.5 of "Let's Play - Parkan: Iron
   Strategy, Part 4" is still not established.
-- [ ] The blast's remainders: whether a round in the air hangs in the landscape's object grid, whose
-  class the blast's mask `0x61c` carries; what a unit's behaviour does when message `0x19` names
-  itself, which a firer inside its own blast is sent before the test that spares it; and a
-  non-round node's blast — node 1 of `o_tur_la_06`, `explode_rbr_bomb`, 20,000 in 43.4 m, which no
-  shipped design carries and the engine plays as an effect alone
-  ([26-damage](docs/26-damage.md#not-established)).
+- [ ] [M19] A round a blast takes in flight. Read 2026-11-10, when the blast's remainders closed
+  ([COMPLETED-QUESTIONS](COMPLETED-QUESTIONS.md#turrets-weapons-and-camera)): a flying round hangs in the
+  landscape's object grid, so a blast in reach takes it and one whose life it ends goes off. **Left**:
+  when it goes off — after the life update that finds its node 0 destroyed — and which block entry
+  its end runs; the sphere its node takes the blast by, its one node's slot sphere, the header's on
+  63 of the 67 rounds; and the four rounds with more nodes, which the engine gives one life
+  ([26-damage](docs/26-damage.md#what-a-blast-reaches--read)).
 
 ## AI, scripts, packages and economy
 
@@ -361,6 +349,15 @@ remainder a closed line names stays here as a line of its own.
   keeps on the stack, and the flag keeps a building at its file height
   ([04-missions](docs/04-missions.md#the-start-flag-keeps-a-building-at-its-file-height--read-and-measured)).)
 - [ ] What the landscape, camera and atmosphere component constructors read.
+- [ ] The ten text-out callers not followed, and the rows that centre a line. Left 2026-11-10 when
+  where a caller puts the next line closed ([COMPLETED-QUESTIONS](COMPLETED-QUESTIONS.md#files-and-formats)):
+  of the 36 calls in `iron3d.dll` that ask the font's height and draw, 10 are not followed
+  (`0x10015264`, `0x10045658`, `0x10046006`, `0x10059754`, `0x100661d0`, `0x10069d97`,
+  `0x1006b4e7`, `0x1006bbb7`, `0x1009a02e`, `0x1009a452`); and the engine centres a line in a row
+  by the glyph cell in seven places — the commander's, the factory's, the map's, the game menu's,
+  the research box's, the wingmen's and the designer's — where the game's centring reads take the
+  height, one less, and were not set against those sites one by one
+  ([12-rsli](docs/12-rsli.md#where-a-caller-puts-the-next-line--read-and-measured)).
 
 ## Mission 02, *The Constructor*
 
@@ -419,8 +416,12 @@ remainder a closed line names stays here as a line of its own.
   a bot is not; and what `Run` does when a slot's file is gone. The engine's quick save is the play
   kept in memory, in no slot, and the game menu's save page is not built
   ([17-saves](docs/17-saves.md#not-established), [14-controls](docs/14-controls.md)).
-- [ ] A *Tiny Tower*'s battery of capacity −1: `Power::load` drops a negative battery, so the engine's battery arc follows the tower's fitted 31,000, where the game's id 1 answers 1 whenever any capacity is negative (`Control.dll:0x1002b42b`). How the power tick spends a −1 battery on a unit is not read ([41-commander](docs/41-commander.md#the-box), [23-economy](docs/23-economy.md)).
-- [ ] What a building going up is still reached by: what interface `0x20` slot 3 answers for a node hidden by action 1, which is not a destroyed node — a blast takes each node by that sphere (`0x10010030`), and nothing else in its walk asks whether the node is shown (narrowed 2026-10-01); and whether Behavior's hall-way searches pass over a building in the second between its showing at 40 s and its sphere's end at 41 s ([26-damage](docs/26-damage.md#not-established)).
+- [ ] Whether a production order reaches a factory whose own task is still its construction sphere's.
+  Left 2026-11-10 when what a building going up is still reached by closed
+  ([COMPLETED-QUESTIONS](COMPLETED-QUESTIONS.md#mission-03-the-field-base)): the factory's creation vertex
+  (`Behavior.dll:0x100299a0`) reads no `0x20c`, unlike the refit's dock pick, which passes such a
+  building over, and the transport's route, which takes it and waits
+  ([26-damage](docs/26-damage.md#what-a-hidden-node-is-left-out-of--read)).
 - [ ] Whether the HQ camera's ride holds while an HQ patrols. Since a lone go leaves a patrol of 150, Mission 03's HQ ride test measures only while the go runs: once over, the patrolling HQ put the engine's camera 14 m behind the ride's figure, which nothing now checks ([40-command-mode](docs/40-command-mode.md#an-hqs-command-mode-mode-3--read-and-seen)).
 - [ ] What Alt+F toggles under `Iron_3D.ini`'s `DEBUG_KEYS_ON` (`0x10059d30`, `0x100717e3`), which the install does not set ([40-command-mode](docs/40-command-mode.md#not-established)).
 
