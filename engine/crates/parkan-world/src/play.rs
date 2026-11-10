@@ -2177,9 +2177,48 @@ impl Play {
         true
     }
 
+    /// The materials of every owner whose explosion can play a lump that names none, which it
+    /// then wears (docs/11, "Type 10 is a lump of geometry"): list 0 of a target's, the hero's
+    /// and a round's own material manager.
+    fn preload_owner_materials(&mut self) {
+        let mut lists: Vec<Rc<[String]>> = Vec::new();
+        for t in 0..self.battle.explosions.len() {
+            let plays = self.battle.explosions[t].iter().flatten().flatten().cloned().collect::<Vec<_>>();
+            if plays.iter().any(|e| self.fx.plays_nameless_lump(e)) {
+                lists.extend(self.owner_materials(t));
+            }
+        }
+        let hero: Vec<Explosion> = self.hero.blasts.iter().flatten().flatten().cloned().collect();
+        if hero.iter().any(|e| self.fx.plays_nameless_lump(e)) {
+            lists.extend(self.hero_materials());
+        }
+        for k in 0..self.battle.combat.kinds.len() {
+            let kind = &self.battle.combat.kinds[k];
+            let plays: Vec<Explosion> = kind.hit.iter().chain(kind.range_end.iter()).cloned().collect();
+            if plays.iter().any(|e| self.fx.plays_nameless_lump(e)) {
+                lists.extend(self.battle.kinds.get(k).map(|l| l.wear.clone()));
+            }
+        }
+        for list in &lists {
+            self.fx.preload_materials(list.iter());
+        }
+    }
+
+    /// Target `t`'s own materials as its manager's material manager holds them: list 0, its first
+    /// part's wear (docs/11, "What an explosion plays").
+    fn owner_materials(&self, t: usize) -> Option<Rc<[String]>> {
+        self.battle.wears.get(t)?.first().map(|w| w.clone().into())
+    }
+
+    /// The hero's own materials, its first part's wear.
+    fn hero_materials(&self) -> Option<Rc<[String]>> {
+        self.hero.parts.first().map(|p| p.mesh.wear.materials.clone().into())
+    }
+
     /// Give the rounds models and pooled instances among `objects`, and resolve the
     /// effects' looks in `store`.
     pub fn draw_rounds(&mut self, store: &mut TextureStore, objects: &mut Objects) -> Result<()> {
+        self.preload_owner_materials();
         self.fx.resolve_looks(store)?;
         if let Some(weather) = self.weather.as_mut() {
             for (i, fall) in [Fall::Snow, Fall::Rain].into_iter().enumerate() {
@@ -4038,7 +4077,8 @@ impl Play {
         let mesh = self.hero.parts[p].mesh.clone();
         let Some(slot) = mesh.mesh.slots.get(usize::from(mesh.mesh.nodes[n].slot_index[0])) else { return };
         let node = self.hero.placement().compose(&self.hero.part_pose(p, n));
-        self.node_blast(&exp, &node, slot.sphere, 1.0, now);
+        let wear = self.hero_materials();
+        self.node_blast(&exp, &node, slot.sphere, 1.0, now, wear);
     }
 
     /// The hero's target follows the hero: its nodes where it stands, struck while it is alive
@@ -5323,12 +5363,15 @@ impl Play {
                     Some(t) => (self.struck_class(*t, *part, round, *point), -round.forward),
                 };
                 // Placement 7 turns the effect to the struck face; a round's `.exp` radius is its size.
-                self.fx.explode(&exp, surface, Frame::along(*point, axis, 1.0), exp.radius, now);
+                // Its lumps that name no material wear the round's own.
+                let wear = self.battle.kinds.get(round.kind).map(|k| k.wear.clone());
+                self.fx.explode(&exp, surface, Frame::along(*point, axis, 1.0), exp.radius, now, wear);
             }
             Event::Exploded { kind, point, forward, at_range: true } => {
                 // Placement 0 on a round: along its second axis, the way it flies (docs/29).
                 if let Some(exp) = self.battle.combat.kinds[*kind].range_end.clone() {
-                    self.fx.explode(&exp, None, Frame::along(*point, *forward, 1.0), exp.radius, now);
+                    let wear = self.battle.kinds.get(*kind).map(|k| k.wear.clone());
+                    self.fx.explode(&exp, None, Frame::along(*point, *forward, 1.0), exp.radius, now, wear);
                 }
             }
             Event::Staged { target, part, node } if *target == self.battle.combat.hero_index() => {
@@ -5352,7 +5395,8 @@ impl Play {
                 let slot = [slots[block * SLOTS_PER_VARIANT], slots[0]].into_iter().find(|&s| s != NO_SLOT);
                 let Some(slot) = slot.and_then(|s| p.mesh.slots.get(usize::from(s))) else { return };
                 let (pose, sphere, scale) = (p.nodes[*node], slot.sphere, p.scale);
-                self.node_blast(&exp, &pose, sphere, scale, now);
+                let wear = self.owner_materials(*target);
+                self.node_blast(&exp, &pose, sphere, scale, now, wear);
             }
             _ => {}
         }
@@ -5360,13 +5404,21 @@ impl Play {
 
     /// A destroyed node's explosion, on the node posed at `node` with its slot's `sphere`.
     /// Placement 0 is the node's second axis; a node's size is the radius × its sphere's.
-    fn node_blast(&mut self, exp: &Explosion, node: &Pose, sphere: [f32; 4], scale: f32, now: f64) {
+    fn node_blast(
+        &mut self,
+        exp: &Explosion,
+        node: &Pose,
+        sphere: [f32; 4],
+        scale: f32,
+        now: f64,
+        owner: Option<Rc<[String]>>,
+    ) {
         let [cx, cy, cz, r] = sphere;
         let c = node.apply([cx, cy, cz].map(|v| f64::from(v * scale)));
         let centre = Vec3::new(c[0] as f32, c[1] as f32, c[2] as f32);
         let y = parkan_formats::pose::rotate(node.rotation, [0.0, 1.0, 0.0]);
         let axis = Vec3::new(y[0] as f32, y[1] as f32, y[2] as f32);
-        self.fx.explode(exp, None, Frame::along(centre, axis, 1.0), exp.radius * r * scale, now);
+        self.fx.explode(exp, None, Frame::along(centre, axis, 1.0), exp.radius * r * scale, now, owner);
     }
 
     /// The effects' point lights drawn on the landscape this frame (`Terrain.dll:0x1002a130`,

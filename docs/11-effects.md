@@ -707,8 +707,36 @@ tetrahedra, gone at the first level, with a larger one the odd time: the big lum
 shows among a spray of chips is what the odds give. *Measured*: +4 is 0x10 on **143** of the
 160 and 0x20 on **17**: all 5 blocks of the metal `R_RL_06`, and 12 that name no material. The
 material named is `NE_Gibs_Aln`, `NE_Gibs_Ice`, `NE_Gibs_Anm` or `NE_Gibs_Stn` on 105
-of them, the ground's `L00` or `L22` on 25, `R_RL_06` on 5, and **no name on 25**. A block with
-no name takes a uniform pick of its manager's whole material list (`0x10001ad4`–`0x10001b4f`).
+of them, the ground's `L00` or `L22` on 25, `R_RL_06` on 5, and **no name on 25**.
+
+**A block with no name wears its owner's own materials** — *read*, and *measured*. An earlier
+reading here had it take a uniform pick of its manager's whole list. The load looks the name up
+(`0x10006400`: an empty name or library answers −1), and on −1 asks the manager's `+0x10`
+how many materials its list 0 holds (slot `0x28` with 0, `0x10001ad4`). That `+0x10` is the
+interface `0xd` the manager asked its owner for as it was set up (`0x10003fbc`), **the owner's
+own material manager**, its model's wear ([below](#what-an-explosion-plays--read-and-measured)).
+The draw is one 16-bit u from the bursts' generator (`0x10023688`), and the index is
+(u ÷ 65536 − ½) × (count − 1), rounded to the nearest by `fistp` and compared unsigned with
+count − 1, so **an index under 0 is held to the last** (`0x10001ad7`–`0x10001b53`). The last
+material is drawn a little under half the time and the first half of the list shares the rest;
+the second half but the last is never drawn. It is drawn once, before the particles, and every
+particle of the block wears it — opaque, whatever the material's own mode says, as every lump is
+drawn ([07-objects.md](07-objects.md#how-a-material-draws-is-in-the-archive-directory)).
+
+Whose manager that is: an `.exp`'s effect is made on the exploding object's own manager, the
+control system's `+0x3c` (`Control.dll:0x100117d9`, `0x100117f7`), so a lump wears **the
+exploding object's** skin. *Measured*: the 25 nameless blocks are in 25 effects, of which 23 are
+named by 32 `.exp` files — `explode_tree`, `explode_tree_30` and `explode_stone` in `static.rlb`,
+`explode_rbr_b` and `_l` in `system.rlb`, `explode_rbr_bomb` in `turrets.rlb`, the animals'
+six `selfexp_anl_*` and twenty of `weapon.rlb`'s rounds' — and those are named by the node tables
+of **309** records: 80 `STAT` trees and stones, 27 `BTLU` chassis and animals, 18 `BULL` rounds, and
+126 `EXTO` and 58 `INTO` parts. A stone's list is its two or three `STONE0x` or `B_RU0x`, a tree's
+its bark and leaves (`s_tree_31`'s one `TOK31`, `s_tree_04`'s `TF1` and `TF2`), a chassis's its
+paint (`r_l_01`: `R_NSS_PG`, then `R_ENG_PG` the last), and a round's its own skin, nothing but
+`R_PG30` and `R_PG31` on 16 of the 18. A part's
+nodes are merged into its unit's model, so its explosion plays on the unit's manager, and whose
+wear the unit's list 0 is — the first part the merge loads, taken to be the chassis — is
+*inferred*. `exp_aim_l` and `exp_m_wing_pizdec3` are named by no `.exp`.
 
 **Each is its own stone.** Each vertex is the table's plus a displacement of ± half of itself
 on each axis, a fresh one every vertex — every 3 on a rod, so its four rings move whole, and
@@ -719,14 +747,32 @@ every 2 on a plate, so its two faces do — and all of it times the shape's scal
 angle uniform in ±(π ÷ 4) ÷ its scale, makes the quaternion and keeps it as a matrix
 (`0x1000c1ba`–`0x1000c2f4`; π ÷ 2 is the static at `0x1000ce90`), and **every call of slot 0
 multiplies it in** (`0x1000bc24`–`0x1000bc49`). So a lump turns by one small fixed angle at
-each draw, however long that draw took: a cube up to 22.5°, about one axis. Its tumbling
-follows the frame rate.
+each draw, however long that draw took: a cube up to 22.5°, about one axis. The angle and the
+axis are the lump's own, drawn once as it is made; no constant of the module sets a rate. Its
+tumbling follows the frame rate, and the mission loop is not capped
+([14-controls.md](14-controls.md#a-row-that-stays-down--read)), so how many draws a second the
+game made is the machine's and in no file of the game's.
 
 **It is lit once.** On its first draw it copies the material's four colours and asks the
-shade for its colours through slot 32 (`0x100290a0`, `0x1000be08`), the shade's lighter with
-the lights gathered there, and keeps them (`0x1000be5f`–`0x1000bead`): the draw flags it files
-with, `0x404`, do not ask for lighting again (`0x10028500`). So what a lump's facet looks like
-is fixed as it leaves.
+shade for its colours through slot 32 (`0x100290a0`, `0x1000be08`), and keeps them
+(`0x1000be5f`–`0x1000bead`): the draw flags it files with, `0x404`, do not ask for lighting
+again (`0x10028500`). So what a lump's facet looks like is fixed as it leaves. **Slot 32 is the
+shade's lighter over the list it last gathered** (*read*): it takes the shade's current list
+through its own slot 24 (`+0x60`, `0x100290df`; the list at `shade+0x1914`), builds the frame
+from the matrix it is handed (`0x100291a0` with 2), and calls the shader component's slot 3
+(`0x1004c480`, which names itself `CShade::ShadeIndexedStrided()` in its panics as slot 8 does)
+with the block at `shade+0xb58`, the frame, the list and its count, and the four words it was
+handed (`0x10029133`–`0x1002916f`). That walks the whole list by type, as slot 8 does, through
+`g_FastProc`'s `+0x48` and `+0x4c` (`0x1004d4b4`, `0x1004d5f2`), which `Ngi32.dll` fills from the
+same builds' tables as `+0xc4` and `+0xc8` (`0x10016230` and `0x10015e90` beside `0x100164f0`
+and `0x10016070`), and ends each vertex through `+0x50` and `+0x54`, the scene colour's floor
+and the bytes ([above](#what-a-light-does-to-a-surface--read-and-measured)). So a lump's vertex
+takes the sum a mesh's does — the sun's two lights and the effects' in reach — over the list in
+force at its first draw. A lump is drawn inside its manager's draw, which an agent's mesh makes
+after its own nodes and after its one gather for the draw (`AniMesh.dll:0x10014dd0`), so it is
+lit with **its owner's lights** (*derived*): without the sun's two inside a building, by the rule
+above. That the `+0x48` and `+0x4c` builds fall off as `+0xc4` and `+0xc8` do is *inferred*, from
+the record fields they read (the range `+0x30`, the position `+0x18`); they are not read through.
 
 *Seen*: "Let's Play - Parkan: Iron Strategy, Part 8" (Q5lESz4E-dw), 3:45.2–3:45.6, where a
 blast throws stones against the sky at 4K: a solid faceted lump with a material on it, its
@@ -3056,3 +3102,16 @@ Read one slot either way, none of the seven name witnesses agrees.
   The renderer would wrap it into the alpha's byte, and type 10, the one particle past its age
   of 1, is a lump of geometry whose draw reads no fade and whose +104 nothing reads
   ([Type 10 is a lump of geometry](#type-10-is-a-lump-of-geometry--read-measured-and-seen)).
+  ~~Still open beside it: what lights a lump, how far it turns at a draw, and which list a block
+  that names no material draws from.~~ Answered in part: it is lit once, at its first draw, by
+  the shade's lighter over the list in force — its owner's draw's — through the shader
+  component's slot 3; it turns by an angle and about an axis of its own, drawn as it is made; and
+  a nameless block wears **its owner's own** materials, list 0 of the material manager its
+  manager took from the owner, the last of them a little under half the time and one of the first
+  half otherwise — not a uniform pick, and not the effects' list. The 25 nameless blocks are
+  played by the explosions of 309 records, trees, stones, chassis, animals, rounds and parts
+  ([Type 10 is a lump of geometry](#type-10-is-a-lump-of-geometry--read-measured-and-seen)).
+  Still open: how many draws a second the game made, which no file sets; whether a group's fall
+  clock, stepped at each draw by the last update's step, ever runs ahead of the update's own; and
+  no recording shows a block whose fade runs 1 → 0, so that it holds whole to the end rests on the
+  read.

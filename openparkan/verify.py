@@ -4292,6 +4292,115 @@ def check_debris_and_the_pass(check, game: Path) -> None:
           f"files with a camera are {dict(cameras)}")
 
 
+def check_owners_of_effects(check, game: Path) -> None:
+    """Who takes no sunlight, whose materials a nameless lump wears, and what lights a fire."""
+    paths = {n: game / n for n in ("AniMesh.dll", "Effect.dll", "Control.dll")}
+    if not all(p.exists() for p in paths.values()):
+        return
+    a_at, e_at, c_at = (_image_at(p.read_bytes()) for p in paths.values())
+
+    # Bit 0 of a node's stream-1 flags: the attach tests it at +0xc of what IAnimation slot 29
+    # answers, the word slot 29 reads off the node's 38-byte record.
+    attach = (a_at(0x10007361, 4) == bytes.fromhex("f6400c01")
+              and struct.unpack_from("<I", a_at(0x1002057C + 4 * 29, 4))[0] == 0x10005B40
+              and a_at(0x10005BA3, 4) == bytes.fromhex("668b1c4a"))
+    bits: Counter[int] = Counter()
+    rooms = nodes = 0
+    where: Counter[str] = Counter()
+    unnamed = 0
+    for library in all_archives(game):
+        try:
+            archive = NResArchive.open(library)
+        except NotAnNResArchive:
+            continue
+        for entry in archive:
+            if not entry.name.lower().endswith(".msh"):
+                continue
+            try:
+                m = objmesh.parse(archive.read(entry), entry.name)
+            except (ValueError, struct.error):
+                continue
+            for n in m.nodes:
+                nodes += 1
+                for b in (0, 2, 5):
+                    bits[b] += bool(n.flags >> b & 1)
+                rooms += n.flags & 5 == 5
+                if n.flags & 1:
+                    where[library.name] += 1
+                    unnamed += not n.name.lower().startswith("i")
+    check("MESH: bit 0 of a node's flags hangs what stands on it out of the sun",
+          attach and bits[0] == 273 and nodes == 1845 and dict(where) == {"fortif.rlb": 273}
+          and unnamed == 0 and bits[5] == 28 and rooms == 177,
+          f"AniMesh.dll:0x10007361 tests bit 0 at +0xc of slot 29's answer (0x10005b40), the "
+          f"node's stream-1 word; {bits[0]} of {nodes} nodes carry it, {dict(where)}, "
+          f"{unnamed} not named i*; the control: bit 5 on {bits[5]}, bits 0 and 2 on {rooms}")
+
+    # A nameless type-10 block: its manager's +0x10 is the owner's interface 0xd, and the pick
+    # holds an index under 0 to the last.
+    pick = (e_at(0x10003FBD, 5) == bytes.fromhex("ba0d000000")
+            and e_at(0x10001AD4, 3) == bytes.fromhex("ff5228")
+            and e_at(0x10001B49, 2) == bytes.fromhex("3bd8"))
+    library = effects.EffectLibrary(game / "effects.rlb")
+    nameless = {fx.name.lower() for fx in library for e in fx.emitters
+                if e.kind == 10 and not (e.resource.member and e.resource.library)}
+    blocks = sum(1 for fx in library for e in fx.emitters
+                 if e.kind == 10 and not (e.resource.member and e.resource.library))
+    exps: dict[str, set[str]] = {}
+    for path in all_archives(game):
+        try:
+            archive = NResArchive.open(path)
+        except NotAnNResArchive:
+            continue
+        for entry in archive:
+            if entry.name.lower().endswith(".exp"):
+                try:
+                    x = effects.parse_explosion(archive.read(entry), entry.name)
+                except (ValueError, struct.error):
+                    continue
+                named = {r.member.lower() for r in x.slots if r and r.member.lower() in nameless}
+                if named:
+                    exps[entry.name.lower()] = named
+    played = set().union(*exps.values()) if exps else set()
+    check("effects.rlb: a lump that names no material wears its owner's own",
+          pick and blocks == 25 and len(nameless) == 25 and len(exps) == 32 and len(played) == 23,
+          f"the manager's +0x10 is the owner's 0xd (Effect.dll:0x10003fbd), whose list 0 the pick "
+          f"counts (0x10001ad4) and holds to its last (0x10001b49); {blocks} nameless blocks in "
+          f"{len(nameless)} effects, {len(played)} of them played by {len(exps)} .exp files")
+
+    # A mode-14 fire is made off and switched on by entry 6; a tree's tick goes to its life update.
+    fires = {fx.name.lower() for fx in library if fx.mode == 14}
+    off = {fx.name.lower() for fx in library if fx.flags & 0x40}
+    tick = c_at(0x1000C294, 10) == bytes.fromhex("837d500a0f84ac040000")
+    entry6: Counter[str] = Counter()
+    for name in ("animals", "bases", "static", "fortif", "turrets", "guns", "weapon", "intsys"):
+        archive = NResArchive.open(game / f"{name}.rlb")
+        for e in archive:
+            if e.name.lower().endswith(".ctl"):
+                c = control.parse(archive.read(e))
+                entry6[name] += bool(c.group(6))
+    gear: Counter[str] = Counter()
+    tables: Counter[str] = Counter()
+    for name in ("static", "bases"):
+        archive = NResArchive.open(game / f"{name}.rlb")
+        for e in archive:
+            if not e.name.lower().endswith(".ndp"):
+                continue
+            blob = archive.read(e)
+            count = struct.unpack_from("<I", blob, 0)[0]
+            tables[name] += 1
+            stride = (len(blob) - 4) // max(count, 1)
+            gear[name] += any(struct.unpack_from("<I", blob, 4 + i * stride)[0] & 0x70
+                              for i in range(count))
+    check("effects.rlb: a burning plant's fire is switched on by its life update",
+          tick and fires == off and len(fires) == 8 and sum(entry6.values()) == 32
+          and entry6["static"] == 8 and gear["static"] == 0 and tables["static"] == 72
+          and gear["bases"] == 12,
+          f"Control.dll:0x1000c294 sends kind 10 to the life update; the {len(fires)} mode-14 "
+          f"effects are the {len(off)} flagged 0x40; {sum(entry6.values())} controllers set entry "
+          f"6, {dict(+entry6)}; running gear on {gear['static']} of {tables['static']} static "
+          f"tables, the control {gear['bases']} of {tables['bases']} in bases.rlb")
+
+
 def check_blend_depth(check, game: Path) -> None:
     """What a blended batch writes: the alpha test's reference and the item's depth states."""
     paths = {n: game / n for n in ("Ngi32.dll", "Terrain.dll", "Effect.dll")}
@@ -29735,6 +29844,7 @@ def run(game: Path) -> int:
         check_material_draw,
         check_sky,
         check_render_state, check_shade, check_light_highlights, check_debris_and_the_pass,
+        check_owners_of_effects,
         check_blend_depth,
         check_minimap_agreement, check_arealmap,
         check_grid, check_missions, check_scale, check_objects, check_poses, check_lod,

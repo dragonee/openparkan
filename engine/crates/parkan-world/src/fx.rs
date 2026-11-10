@@ -115,6 +115,9 @@ pub struct Fx {
     /// 0x100420c9`, `0x1004690b`), and its look once resolved.
     pub light_template: Option<String>,
     pub light_look: Option<usize>,
+    /// Materials an owner hands its explosions, which a type-10 block that names none may draw
+    /// with ([`Fx::preload_materials`]).
+    owner_materials: Vec<String>,
 }
 
 /// The wear the shade's light template is material 0 of (`Terrain.dll:0x100420c9`).
@@ -170,6 +173,7 @@ impl Fx {
             looks: Vec::new(),
             light_template: light_template(game),
             light_look: None,
+            owner_materials: Vec::new(),
         })
     }
 
@@ -280,16 +284,48 @@ impl Fx {
 
     /// The effect an `.exp` plays on `surface` (`Control.dll:0x100117d0`): slot surface + 1
     /// for surface 0..10, and slot 0 when that is unset or does not load.
-    pub fn explode(&mut self, e: &Explosion, surface: Option<u8>, frame: Frame, size: f32, now_ms: f64) {
+    ///
+    /// `owner` is the exploding object's own materials: a node's damage stage makes the effect on
+    /// the object's own manager (`Control.dll:0x100117d9`), whose material manager is the
+    /// object's (`Effect.dll:0x10003fbc`), so a lump that names no material wears one of them.
+    pub fn explode(
+        &mut self,
+        e: &Explosion,
+        surface: Option<u8>,
+        frame: Frame,
+        size: f32,
+        now_ms: f64,
+        owner: Option<Rc<[String]>>,
+    ) {
         let by_surface = surface.filter(|&s| s < SURFACES).and_then(|s| e.slots.get(usize::from(s) + 1));
-        if let Some(slot) = by_surface.filter(|r| !r.member.is_empty())
-            && self.start(Owner::World, &slot.member.clone(), frame, size, now_ms, None)
-        {
-            return;
+        let started = match by_surface.filter(|r| !r.member.is_empty()) {
+            Some(slot) => self.start(Owner::World, &slot.member.clone(), frame, size, now_ms, None),
+            None => false,
+        } || match e.slots.first().filter(|r| !r.member.is_empty()) {
+            Some(slot) => self.start(Owner::World, &slot.member.clone(), frame, size, now_ms, None),
+            None => false,
+        };
+        if started && let Some((_, instance)) = self.instances.last_mut() {
+            instance.owner_materials = owner;
         }
-        if let Some(slot) = e.slots.first().filter(|r| !r.member.is_empty()) {
-            let name = slot.member.clone();
-            self.start(Owner::World, &name, frame, size, now_ms, None);
+    }
+
+    /// Whether an `.exp` can play a type-10 block that names no material.
+    pub fn plays_nameless_lump(&mut self, e: &Explosion) -> bool {
+        let names: Vec<String> =
+            e.slots.iter().filter(|r| !r.member.is_empty()).map(|r| r.member.clone()).collect();
+        names.iter().any(|name| {
+            self.template(name)
+                .is_some_and(|fx| fx.emitters.iter().any(|em| em.kind == 10 && em.resource.member.is_empty()))
+        })
+    }
+
+    /// Materials an owner may hand its explosions, to be given looks with the effects' own.
+    pub fn preload_materials<'a>(&mut self, names: impl IntoIterator<Item = &'a String>) {
+        for name in names {
+            if !self.owner_materials.iter().any(|m| m.eq_ignore_ascii_case(name)) {
+                self.owner_materials.push(name.clone());
+            }
         }
     }
 
@@ -351,17 +387,25 @@ impl Fx {
             .filter(|e| e.kind != fxid::EMITTER_SOUND && (e.kind == 10 || !e.resource.member.is_empty()))
             .map(|e| {
                 if e.kind == 10 {
-                    (debris_material(e).to_string(), true)
+                    (debris_material(e, None, 0).to_string(), true)
                 } else {
                     (e.resource.member.clone(), false)
                 }
             })
             .collect();
-        for (m, lump) in materials {
+        // The materials owners hand their explosions are worn by lumps alone, and an owner's
+        // material that does not load leaves its lumps the effects' own.
+        let owners: Vec<String> = self.owner_materials.clone();
+        let owned = owners.into_iter().map(|m| (m, true, true));
+        for (m, lump, owned) in materials.into_iter().map(|(m, lump)| (m, lump, false)).chain(owned) {
             if self.look_of.contains_key(&look_key(&m, lump)) {
                 continue;
             }
-            let look = store.look(&m)?;
+            let look = match store.look(&m) {
+                Ok(look) => look,
+                Err(_) if owned => continue,
+                Err(e) => return Err(e),
+            };
             let blend_mode = if lump { LUMP_BLEND_MODE } else { look.blend_mode };
             let phases: Vec<Phase> = match &look.animation {
                 Some(a) => a.keys.iter().map(|(phase, _)| *phase).collect(),

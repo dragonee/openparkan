@@ -1958,6 +1958,45 @@ fn c03_m01s_plant_catches_fire_under_three_tenths_of_its_life() {
     assert!(play.fx.owned(Owner::Building(plant, 2)).all(|i| i.on), "and its sound");
 }
 
+/// A lump that names no material wears its owner's own. A node's damage stage makes its `.exp`'s
+/// effect on the exploding object's own manager (`Control.dll:0x100117d9`), whose material manager
+/// is the object's interface `0xd` (`Effect.dll:0x10003fbc`), and a type-10 block with no name
+/// takes one of that manager's list 0 for all its particles (`0x10001acc`–`0x10001b53`, docs/11,
+/// "Type 10 is a lump of geometry"). `s_tree_31`'s node plays `explode_tree_30.exp`, whose
+/// `exp_tree_30` throws such lumps: they wear the plant's skins, not a stone's.
+#[test]
+#[ignore = "needs the game install"]
+fn c03_m01s_plant_blown_apart_throws_lumps_of_its_own_materials() {
+    use parkan_formats::mission::KIND_VEGETATION;
+    use parkan_sim::combat::Event;
+    use parkan_world::fx::Owner;
+
+    let mut play = campaign_play(gamedir::C03_MISSION_01);
+    let plant = (0..play.units.len())
+        .find(|&t| {
+            play.units[t].kind == KIND_VEGETATION
+                && play.commander.paths[t].to_ascii_lowercase().ends_with("s_tree_31")
+        })
+        .expect("the plant by the bridge");
+    let wear = play.battle.wears[plant][0].clone();
+    assert!(!wear.is_empty());
+    play.pending_events.push(Event::Staged { target: plant, part: 0, node: 0 });
+    play_for(&mut play, 0.05, |_| {});
+    let now = play.hero.time_ms;
+    let (_, blast) = play
+        .fx
+        .instances
+        .iter()
+        .find(|(o, i)| *o == Owner::World && i.effect.name.eq_ignore_ascii_case("exp_tree_30"))
+        .expect("the plant's explosion");
+    assert_eq!(blast.owner_materials.as_deref(), Some(&wear[..]), "the plant's own list");
+    let mut sprites = Vec::new();
+    blast.sprites(now, true, &mut sprites);
+    let lumps: Vec<&String> = sprites.iter().filter(|s| !s.facets.is_empty()).map(|s| &s.material).collect();
+    assert!(!lumps.is_empty(), "lumps in the air");
+    assert!(lumps.iter().all(|m| wear.contains(m)), "{lumps:?} of {wear:?}");
+}
+
 /// The smoke and fire a load group hangs on a building, a tree or a stone run their streams
 /// at the pace their blocks give, as every other effect's do: each manager is handed the one
 /// game clock, once a pass (docs/11, "Who hands a manager its time"), and in "Let's Play -

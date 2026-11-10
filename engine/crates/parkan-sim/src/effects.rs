@@ -400,9 +400,10 @@ pub struct Facet {
     ///
     /// STAND-IN: docs/11-effects.md#type-10-is-a-lump-of-geometry--read-measured-and-seen --
     /// the game's lump is lit once, vertex by vertex, as it is first drawn, through the shade's
-    /// lighter (slot 32, `Terrain.dll:0x100290a0`) and the normals of the shape's table. Here
-    /// each facet takes one figure from how its own normal, as the frame stood before any spin,
-    /// faces up: fixed, as the game's is.
+    /// lighter (slot 32, `Terrain.dll:0x100290a0`) and the normals of the shape's table, over the
+    /// list of lights its owner's draw last gathered: the sun's two, unless the owner hangs in a
+    /// building's interior, and the effects' in reach. Here each facet takes one figure from how
+    /// its own normal, as the frame stood before any spin, faces up: fixed, as the game's is.
     pub shade: f32,
 }
 
@@ -658,6 +659,11 @@ pub struct Instance {
     /// Where a bolt starts: where the effect was when it started, or the manager's target
     /// point, which its owner hands it every tick when the header asks ([`FX_TARGET_POINT`]).
     pub start_point: Vec3,
+    /// Its owner's own materials, list 0 of the material manager its manager took from the
+    /// owner (`Effect.dll:0x10003fbc`): a type-10 block that names none draws one of them
+    /// ([`debris_material`]). An explosion's is the exploding object's: a node's damage stage
+    /// makes it on the object's own manager (`Control.dll:0x100117d9`, `0x100117f7`).
+    pub owner_materials: Option<std::rc::Rc<[String]>>,
     seed: u32,
     /// Which arm of the shade's level its manager's owner puts it on ([`Arm`]): the caller
     /// that starts it on a building says so.
@@ -1083,17 +1089,32 @@ pub const DEBRIS_SPIN: f32 = std::f32::consts::FRAC_PI_4;
 /// the recordings run at 60 a second.
 pub const DEBRIS_DRAWS_A_SECOND: f32 = 60.0;
 
-/// What a block that names no material draws with, where the game draws a uniform pick of its
-/// material manager's whole list (`Effect.dll:0x10001ad4`–`0x10001b4f`).
-///
-/// STAND-IN: docs/11-effects.md#type-10-is-a-lump-of-geometry--read-measured-and-seen -- the
-/// looks a manager here holds are the ones the effects name, so the 25 blocks with no name
-/// take the stone's.
+/// What a block that names no material draws with where its owner has no materials of its own.
+/// Every explosion the engine plays hands its effect the exploding object's own list, so this is
+/// left to an owner it does not know.
 pub const DEBRIS_ANY_MATERIAL: &str = "NE_Gibs_Stn";
 
-/// The material a type-10 block's particles draw with.
-pub fn debris_material(e: &Emitter) -> &str {
-    if e.resource.member.is_empty() { DEBRIS_ANY_MATERIAL } else { &e.resource.member }
+/// Which of `count` materials a block that names none draws every one of its particles with: the
+/// load asks its manager's material manager -- the owner's own, interface `0xd`
+/// (`Effect.dll:0x10003fbc`) -- how many its list 0 holds (slot `0x28` with 0, `0x10001ad4`),
+/// draws a 16-bit `u` from the bursts' generator and takes (u ÷ 65536 − ½) × (count − 1) rounded
+/// to the nearest; an index under 0, unsigned past the last, is held to the last
+/// (`0x10001ad7`–`0x10001b53`). So the last material is drawn about half the time and the first
+/// half of the list shares the rest. `None` with no list at all.
+pub fn debris_pick(count: usize, u: u16) -> Option<usize> {
+    let last = count.checked_sub(1)?;
+    let x = (f64::from(u) / 65536.0 - 0.5) * last as f64;
+    let i = x.round_ties_even();
+    Some(if i < 0.0 { last } else { (i as usize).min(last) })
+}
+
+/// The material a type-10 block's particles draw with: the one it names, or one of its owner's
+/// own ([`debris_pick`]) drawn once for the instance.
+pub fn debris_material<'a>(e: &'a Emitter, owner: Option<&'a [String]>, u: u16) -> &'a str {
+    if !e.resource.member.is_empty() {
+        return &e.resource.member;
+    }
+    owner.and_then(|list| list.get(debris_pick(list.len(), u)?)).map_or(DEBRIS_ANY_MATERIAL, String::as_str)
 }
 
 /// A lump's vertices as a particle keeps them: each table vertex plus a displacement of ±half of
@@ -1234,6 +1255,7 @@ impl Instance {
             spin: 0.0,
             life: 1.0,
             start_point: frame.origin,
+            owner_materials: None,
             seed,
             rng: Rng::new(seed),
             jitter: 0.0,
@@ -2054,6 +2076,8 @@ impl Instance {
         let mut lumps = Rng::new(stream_seed(detail_seed(self.seed), index as u32));
         let table = word(e, 4);
         let axes = self.frame.axes.map(|a| a * self.scale);
+        // One draw for the block, at its load, before any particle's (`Effect.dll:0x10001ad7`).
+        let pick = Rng::new(stream_seed(light_seed(self.seed), index as u32)).next16();
         for group in 0..groups {
             let since = p - burst_spawn(life, group, groups);
             let age = since / life;
@@ -2101,7 +2125,7 @@ impl Instance {
                     })
                     .collect();
                 out.push(Sprite {
-                    material: debris_material(e).to_string(),
+                    material: debris_material(e, self.owner_materials.as_deref(), pick).to_string(),
                     centre,
                     along: Vec3::ZERO,
                     width: 0.0,
@@ -3362,6 +3386,45 @@ mod tests {
         fx.sprites(100.0, false, &mut out);
         assert_eq!(out.len(), 2);
         assert!(out.iter().all(|s| s.material == DEBRIS_ANY_MATERIAL));
+    }
+
+    /// `Effect.dll:0x10001ad7`–`0x10001b53`: (u ÷ 65536 − ½) × (count − 1), rounded to the
+    /// nearest, and an index under 0 held to the last. A tree's three materials: the last for
+    /// the lower half of the draws, the first for most of the upper, the middle one from 3/4 on.
+    #[test]
+    fn a_nameless_lump_takes_its_owners_last_material_half_the_time_and_one_of_its_first_half_else() {
+        assert_eq!(debris_pick(0, 1234), None);
+        assert_eq!(debris_pick(1, 0), Some(0));
+        assert_eq!(debris_pick(1, 65535), Some(0));
+        assert_eq!(debris_pick(3, 0), Some(2), "(0 − ½) × 2 = −1: the last");
+        assert_eq!(debris_pick(3, 16384), Some(0), "−½ rounds to the even 0");
+        assert_eq!(debris_pick(3, 32768), Some(0));
+        assert_eq!(debris_pick(3, 49152), Some(0), "½ rounds to the even 0");
+        assert_eq!(debris_pick(3, 49153), Some(1));
+        assert_eq!(debris_pick(3, 65535), Some(1), "never the last from above");
+        let n = 10;
+        let mut seen = vec![0usize; n];
+        for u in 0..=u16::MAX {
+            seen[debris_pick(n, u).unwrap()] += 1;
+        }
+        assert!(seen[n - 1] > 28000 && seen[n - 1] < 30000, "about half: {seen:?}");
+        assert!(seen[5..n - 1].iter().all(|&c| c == 0), "the upper half never: {seen:?}");
+        assert!(seen[..5].iter().all(|&c| c > 0), "{seen:?}");
+    }
+
+    /// A block that names no material takes one of its owner's, the same for every particle.
+    #[test]
+    fn a_nameless_lump_draws_its_owners_material_the_same_for_every_particle() {
+        let frame = Frame::along(Vec3::ZERO, Vec3::X, 1.0);
+        let mut nameless = debris_block(2, 0x10);
+        nameless.resource.member.clear();
+        let mut fx = Instance::new(effect(TIME_ONCE, 4.0, 0, vec![nameless]), frame, 1.0, 0.0, None, 3);
+        fx.owner_materials = Some(vec!["BARK".to_string(), "LEAF".to_string()].into());
+        let mut out = Vec::new();
+        fx.sprites(100.0, false, &mut out);
+        assert_eq!(out.len(), 2);
+        assert!(out.iter().all(|s| s.material == out[0].material));
+        assert!(["BARK", "LEAF"].contains(&out[0].material.as_str()), "{}", out[0].material);
     }
 
     /// `hero_laser_bullet`'s red bolt: 20 sprites at most, one per 50, 0.4 wide, fading 1 → 0.

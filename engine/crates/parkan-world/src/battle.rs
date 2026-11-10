@@ -48,6 +48,9 @@ pub struct Loaded {
     /// Its controller's `+92`: the ms it stays in the world once its flight is over
     /// (docs/29-weapons.md, "A beam outlives its round").
     pub death_ms: f64,
+    /// Its model's materials: what a lump of its explosion that names none wears (docs/11, "Type
+    /// 10 is a lump of geometry").
+    pub wear: std::rc::Rc<[String]>,
 }
 
 /// An effect a round's load group creates (action 4): its name, the three control points it
@@ -456,6 +459,11 @@ impl Battle {
         });
         let radius =
             find("msh").and_then(|m| assembly.mesh(&m)).and_then(|m| m.mesh.sphere).map_or(0.1, |(_, r)| r);
+        let wear: std::rc::Rc<[String]> = find("msh")
+            .and_then(|m| assembly.mesh(&m))
+            .map(|m| m.wear.materials.clone())
+            .unwrap_or_default()
+            .into();
         self.combat.kinds.push(RoundKind {
             name: record.to_owned(),
             top_speed: controller.triples[TRIPLE_TOP_SPEED][1],
@@ -496,6 +504,7 @@ impl Battle {
             points,
             ends,
             death_ms: f64::from(controller.death_ms),
+            wear,
         });
         self.pools.push(Vec::new());
         let k = self.combat.kinds.len() - 1;
