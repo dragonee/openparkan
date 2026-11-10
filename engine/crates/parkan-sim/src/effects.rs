@@ -641,19 +641,19 @@ pub struct Instance {
     /// The owner's speed over its top speed, which modes 5–8 read and mode 15 takes the
     /// larger of (properties `0x21` and `0x11`, `Effect.dll:0x10005d56`).
     pub speed: f32,
-    /// Its spin over its top spin, the same way, for modes 9–12 and 15 (`0x10005e2e`).
+    /// Its spin over its top spin, the same way, for modes 9–12 and 15 (`0x10005e2e`): property
+    /// `0x24`, the control system's angular velocity `+0x1d4` (`Control.dll:0x1000de98`), over
+    /// the frame's turn rate, triple 4, which property `0x11`'s record holds at `+0x24`.
     ///
     /// STAND-IN: docs/11-effects.md#how-an-effect-runs--read -- nothing sets it: no shipped
-    /// effect is in modes 9–12, and the 31 in mode 15 are dust and engine plumes whose
-    /// speed term is the one that moves.
+    /// effect is in modes 9–13, and the 31 in mode 15 hang on robots' and animals' chassis
+    /// load groups, which the engine does not run.
     pub spin: f32,
     /// The owner's life over its life at load, property `0x31`, which mode 14 takes one
-    /// minus (`0x10005f2d`). 1 is undamaged, and a mode-14 effect then holds *t* at 0.
-    ///
-    /// STAND-IN: docs/11-effects.md#how-an-effect-runs--read -- nothing sets it: the eight
-    /// mode-14 effects are the burning trees' and wrecks' fires, which a load group makes
-    /// switched off (header flag 0x40) for a machine's critical damage, block entry 6, to
-    /// switch on, and that entry is not run (docs/13-control.md#critical-damage-block-entries-6-and-7--read-and-measured).
+    /// minus (`0x10005f2d`): its control system's `+0x590 ÷ +0x58c` (`Control.dll:0x1000df55`).
+    /// 1 is undamaged, and a mode-14 effect then holds *t* at 0. The world hands it to every
+    /// effect a tree's, a building's and the hero's load group made
+    /// ([`crate::critical::life_fraction`]).
     pub life: f32,
     /// Where a bolt starts: where the effect was when it started, or the manager's target
     /// point, which its owner hands it every tick when the header asks ([`FX_TARGET_POINT`]).

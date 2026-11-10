@@ -1075,6 +1075,42 @@ group switches effects on (action 18) that the entry-7 group switches off
 Entry 9 runs on control message 12 (`0x10007cab`); entries 1, 5 and 8 are
 read by nothing, and no shipped controller sets 1, 5, 8 or 9.
 
+**The life update, read through** (`0x10012a40`):
+
+- **Who runs it.** Its one caller is the control tick (`0x1000c7f5`), every 250 ms jittered by a
+  quarter either way ([23-economy.md](23-economy.md#how-often-and-where-it-settles--read-with-a-derived-settle-point)),
+  handed the time since the last as **seconds** (× 0.001, `0x1000c7e6`). The tick sends an agent
+  of kind 10 — a tree or a stone — straight there, past the states and the devices
+  (`0x1000c294` → `0x1000c74a`). So **a tree's entries 6 and 7 run as a machine's do**.
+- **Only after a change.** It returns at once unless the control system's byte `+0x598` is set,
+  and clears it (`0x10012a83`–`0x10012a95`). That a loss of life sets it, the burn's own among
+  them, is *inferred*, from the burn's update testing it straight after (`0x10012c3c`).
+- **The running gear's test needs two nodes of it.** The gear's life fractions are summed over
+  the nodes whose `.ndp` flags carry `0x70` (`0x10012ab2`–`0x10012ad4`), and with **more than one**
+  such node the machine is critical when the sum is *n* / 2 − 1 or less (`0x10012ad6`–`0x10012b04`);
+  with one or none it is critical when its life left, `+0x590`, is under the mark `+0x594`
+  (`0x10012bdc`–`0x10012bed`), which the load makes 0.3 of the total for kind 10 and 0.2 for
+  anything else ([26-damage.md](26-damage.md#vegetation-and-rock-carry-node-life--read-and-measured)).
+  *Measured*: **0 of `static.rlb`'s 72** tables carry `0x70` on any node, nor `r_h_02`'s 10, where
+  12 of `bases.rlb`'s 24 do and 3 of `animals.rlb`'s 5; so a tree, a stone and the hero take the
+  life test.
+- **Becoming critical** (byte 14 clear): entry 6 runs (`+0x4f4` through `0x10002800`), the byte is
+  set and **the mark moves to the life left** (`0x10012bfb`–`0x10012c16`) — only then. Then, at
+  this update and every one after it while critical, the burn: a loss of 0.1 (`0x100424b0`,
+  written at load) × the mark × the seconds (`0x10012c1c`–`0x10012c37`), a tenth a second of the
+  life it had as it went critical.
+- **Recovering** — not critical, byte set: entry 7 runs (`+0x4f8`) and the byte is cleared
+  (`0x10012b0a`–`0x10012b20`). With the mark moved, that is a gain back over the life it caught
+  fire at.
+
+So a plant shot under three tenths of its life catches fire at once, its `tree_flame` switched on
+by entry 6, and burns out in ten seconds (*derived*) unless something gives it life back, its fire
+running on as it goes
+([11-effects.md](11-effects.md#how-an-effect-runs--read)). openparkan runs entries 6 and 7 for a
+tree's, a stone's, a building's and the hero's load-group effects and hands every one its owner's
+life fraction; the burn's loss is not modelled
+([26-damage.md](26-damage.md#hit-points--read-and-measured)).
+
 ### What the loader is handed
 
 `LoadControlSystem` takes **three `(archive, member)` pairs** from the agent's

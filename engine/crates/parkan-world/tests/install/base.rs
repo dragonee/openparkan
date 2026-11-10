@@ -1906,6 +1906,58 @@ fn c03_m01s_burning_plant_and_volcanoes_play_their_trees_load_groups() {
     assert!(named(&mut play, t).is_empty(), "its effects outlive it: {:?}", named(&mut play, t));
 }
 
+/// A shot plant catches fire. `s_tree_31`'s load group makes `tree_flame_30` and its sound under
+/// ids 1 and 2, switched off (header flag `0x40`), and its block entry 6 switches both on. A tree
+/// is an agent of kind 10, whose control tick goes straight to its life update
+/// (`Control.dll:0x1000c294`), and that runs entry 6 once its life is under 0.3 of its total
+/// (`0x10012bdc`–`0x10012c04`, docs/13, "Critical damage: block entries 6 and 7"). The fire is
+/// time mode 14: *t* is one minus the plant's life fraction, property `0x31`, so it burns three
+/// quarters of the way on at a quarter of its life, its light past the 0.65 its window opens at.
+#[test]
+#[ignore = "needs the game install"]
+fn c03_m01s_plant_catches_fire_under_three_tenths_of_its_life() {
+    use parkan_formats::mission::KIND_VEGETATION;
+    use parkan_world::fx::Owner;
+
+    let mut play = campaign_play(gamedir::C03_MISSION_01);
+    let plant = (0..play.units.len())
+        .find(|&t| {
+            play.units[t].kind == KIND_VEGETATION
+                && play.commander.paths[t].to_ascii_lowercase().ends_with("s_tree_31")
+        })
+        .expect("the plant by the bridge");
+    let fire = |play: &mut parkan_world::play::Play| {
+        let now = play.hero.time_ms;
+        play.fx
+            .owned(Owner::Building(plant, 1))
+            .map(|i| (i.effect.name.clone(), i.on, i.t(now), i.effect.header.jitter))
+            .next()
+            .expect("the load group's fire")
+    };
+    let full: f32 = play.battle.combat.targets[plant]
+        .parts
+        .iter()
+        .filter_map(|p| p.life.as_ref())
+        .map(|l| l.full())
+        .sum();
+    play_for(&mut play, 0.1, |_| {});
+    let (name, on, _, _) = fire(&mut play);
+    assert_eq!((name.as_str(), on), ("tree_flame_30", false), "made switched off");
+    // A third of its life lost: not yet.
+    play.battle.combat.ground_loss(plant, full * 0.65);
+    play_for(&mut play, 0.1, |_| {});
+    assert!(!fire(&mut play).1, "at 0.35 of its life it does not burn");
+    // Under 0.3 it does, its sound with it, at t = 1 - 0.25, moved by the header's flag-1 jitter
+    // of up to half its spread, 0.1 (docs/11, "The jitter, flag 1").
+    play.battle.combat.ground_loss(plant, full * 0.1);
+    play_for(&mut play, 0.1, |_| {});
+    let (_, on, t, spread) = fire(&mut play);
+    assert!(on, "under 0.3 of its life entry 6 switches the fire on");
+    assert_eq!(spread, 0.1);
+    assert!((t - 0.75).abs() <= spread / 2.0 + 1e-4, "t is one minus its life fraction: {t}");
+    assert!(play.fx.owned(Owner::Building(plant, 2)).all(|i| i.on), "and its sound");
+}
+
 /// The smoke and fire a load group hangs on a building, a tree or a stone run their streams
 /// at the pace their blocks give, as every other effect's do: each manager is handed the one
 /// game clock, once a pass (docs/11, "Who hands a manager its time"), and in "Let's Play -

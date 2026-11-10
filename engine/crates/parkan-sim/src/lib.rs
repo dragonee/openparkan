@@ -9,6 +9,7 @@ pub mod behaviour;
 pub mod briefing;
 pub mod combat;
 pub mod construct;
+pub mod critical;
 pub mod damage;
 pub mod device;
 pub mod economy;

@@ -22,6 +22,10 @@ pub const ENTRY_LOAD: usize = 0;
 pub const ENTRY_HIT: usize = 2;
 pub const ENTRY_EDGE: usize = 3;
 pub const ENTRY_RANGE: usize = 4;
+/// Block entries 6 and 7: the groups run as the control system becomes critically damaged and
+/// as it recovers (`Control.dll:0x10012bfb`, `0x10012b12`, docs/13, "Critical damage").
+pub const ENTRY_CRITICAL: usize = 6;
+pub const ENTRY_RECOVERED: usize = 7;
 pub const NO_GROUP: i32 = -1;
 /// A section-5 record's int 3 is its action; 27 explodes a node with the named `.exp`.
 pub const ACTION_AT: usize = 3;
@@ -51,6 +55,7 @@ pub const REF_ELSE: u32 = 0x1000_0000;
 /// 7 the liquid bed's flag; 14 critical damage; 15 a copy of `+0x618`.
 pub const CONDITIONS: usize = 16;
 pub const COND_BED: usize = 7;
+pub const COND_CRITICAL: usize = 14;
 pub const ACT_EFFECT_TIME_POINT: i32 = 14;
 pub const TRIPLE_AT: [usize; 6] = [20, 32, 44, 56, 68, 80];
 /// Triples by index: acceleration (live copy doubled), top speed, turn rate.

@@ -9,7 +9,7 @@ use anyhow::{Context, Result};
 use glam::{Mat4, Vec2, Vec3};
 use parkan_formats::control::{
     ACT_EFFECT_NODE, ACT_EFFECT_POINTS, ACT_EFFECT_TIME_POINT, ACT_START_EFFECT, COND_BED, CONDITIONS,
-    ENTRY_LOAD, run_group,
+    ENTRY_CRITICAL, ENTRY_LOAD, ENTRY_RECOVERED, run_group,
 };
 use parkan_formats::controls::{
     CMD_ENTER_STATE, CMD_JAMES_AIM_TARGET, CMD_JAMES_OUTER_CAMERA, CMD_JAMES_SELECT_ENEMY,
@@ -303,6 +303,9 @@ pub struct Play {
     pub materials: Library,
     pub turret_effects: Vec<TurretEffect>,
     pub chassis_effects: Vec<NodeEffect>,
+    /// The hero's control system's life update, which runs its chassis's block entries 6 and 7
+    /// (docs/13, "Critical damage: block entries 6 and 7"); made at the first update.
+    pub hero_damage: Option<parkan_sim::critical::Critical>,
     /// Mission objects that have died, not yet taken out of the drawing.
     pub killed: Vec<usize>,
     /// Sounds started and not yet played.
@@ -1238,6 +1241,7 @@ impl Play {
             materials,
             turret_effects,
             chassis_effects,
+            hero_damage: None,
             killed: Vec::new(),
             cues: Vec::new(),
             units,
@@ -1432,6 +1436,79 @@ impl Play {
     pub fn drawn_by_node(&self, t: usize) -> bool {
         self.battle.combat.targets.get(t).is_some_and(|x| x.parts.iter().any(|p| p.life.is_some()))
             || self.buildings.iter().any(|b| b.target == t && b.plays_nodes())
+    }
+
+    /// Each control system's life update as it bears on its effects (docs/13, "Critical damage:
+    /// block entries 6 and 7"): every effect its load group made reads its owner's life fraction,
+    /// property `0x31`, which a time-mode-14 fire runs on (`Effect.dll:0x10005f2d`); and as the
+    /// owner becomes critical block entry 6 runs, and as it recovers entry 7, each over the
+    /// condition bytes with byte 14 as it stood before. A tree's and the hero's switch on the
+    /// fires their load groups made switched off -- `tree_flame`, `smoke_fr_01` -- and
+    /// switch them off again. A tree is of agent kind 10, critical under 0.3 of its life, and
+    /// the hero under 0.2. Neither has running gear: 0 of `static.rlb`'s 72 tables carry
+    /// `.ndp` flags `0x70`, nor any of `r_h_02`'s 10 rows.
+    ///
+    /// STAND-IN: docs/13-control.md#critical-damage-block-entries-6-and-7--read-and-measured --
+    /// the game asks at its life update, every 218.75 to 281.25 ms (`Control.dll:0x1000c74a`);
+    /// here at every tick, under the same gate, a life changed since the last.
+    fn critical_damage(&mut self) {
+        use parkan_formats::control::COND_CRITICAL;
+        use parkan_sim::critical::{Critical, Turn, life_fraction};
+        let lives = |parts: &mut dyn Iterator<Item = &parkan_sim::damage::Life>| {
+            parts.fold((0.0f32, 0.0f32), |(t, f), l| (t + l.total(), f + l.full()))
+        };
+        let mut switches: Vec<(Owner, bool)> = Vec::new();
+        for i in 0..self.building_effects.len() {
+            let t = self.building_effects[i].0.target;
+            let Some(target) = self.battle.combat.targets.get(t) else { continue };
+            let (total, full) = lives(&mut target.parts.iter().filter_map(|p| p.life.as_ref()));
+            if full <= 0.0 {
+                continue;
+            }
+            let scenery = matches!(self.units.get(t).map(|u| u.kind), Some(KIND_VEGETATION | KIND_ROCK));
+            let b = &mut self.building_effects[i].0;
+            let fraction = life_fraction(total, full);
+            for e in &b.effects {
+                for instance in self.fx.owned(Owner::Building(t, e.id)) {
+                    instance.life = fraction;
+                }
+            }
+            let state = b.damage.get_or_insert_with(|| Critical::new(full, scenery));
+            let Some(turn) = state.update(total, None) else { continue };
+            let mut conditions = [false; CONDITIONS];
+            conditions[COND_CRITICAL] = turn == Turn::Recovered;
+            let group = if turn == Turn::Critical { &b.critical } else { &b.recovered };
+            switches.extend(
+                crate::building_fx::switches(group, &conditions)
+                    .into_iter()
+                    .map(|(id, on)| (Owner::Building(t, id), on)),
+            );
+        }
+        let (total, full) = lives(&mut self.hero.lives.iter().flatten());
+        if full > 0.0 {
+            let fraction = life_fraction(total, full);
+            for e in &self.chassis_effects {
+                for instance in self.fx.owned(Owner::Chassis(e.id)) {
+                    instance.life = fraction;
+                }
+            }
+            let state = self.hero_damage.get_or_insert_with(|| Critical::new(full, false));
+            if let Some(turn) = state.update(total, None) {
+                let mut conditions = self.ground_conditions();
+                conditions[COND_CRITICAL] = turn == Turn::Recovered;
+                let entry = if turn == Turn::Critical { ENTRY_CRITICAL } else { ENTRY_RECOVERED };
+                let group: Vec<parkan_formats::control::Reference> =
+                    self.hero.walker.controller.group(entry).into_iter().cloned().collect();
+                switches.extend(
+                    crate::building_fx::switches(&group, &conditions)
+                        .into_iter()
+                        .map(|(id, on)| (Owner::Chassis(id), on)),
+                );
+            }
+        }
+        for (owner, on) in switches {
+            self.fx.switch(owner, on);
+        }
     }
 
     /// A building's load-group effects follow the nodes they hang on, and an effect on a door's
@@ -2307,6 +2384,7 @@ impl Play {
             }
         }
         self.follow_building_effects();
+        self.critical_damage();
         self.follow_gun_effects(now);
         self.follow_shield_flashes();
         self.tick_views();

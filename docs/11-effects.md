@@ -327,9 +327,9 @@ record's id.
 | 3 | 1 − mode 1 |
 | 4 | **the animation value of an owner's mesh node** (action 14), through the owner's interface `0xb`, slot 9 — [below](#time-mode-4-is-a-nodes-animation-value--read-and-measured) |
 | 5 | **|v| ÷ |limits|**: the owner's velocity, property `0x21`, over the limits record property `0x11` returns, whose `+0x18`, `+0x1c`, `+0x20` are the top speed per axis (`0x10005d56`, `0x10005d8e`). 6, 7, 8 are the same axis by axis |
-| 9–12 | the same for **spin** (property `0x24` over the same record's `+0x24`, `+0x28`, `+0x2c`; `0x10005e2e`) |
+| 9–12 | the same for **spin** (property `0x24` over the same record's `+0x24`, `+0x28`, `+0x2c`; `0x10005e2e`). The owner's interface `0xa` is its control system's (`AniMesh.dll:0x100032f5`): `0x24` is the spin it integrates, `+0x1d4`, z the yaw (`Control.dll:0x1000de98`), `0x21` the velocity `+0x1c8` (`0x1000dde5`), and `0x11` its frame's parameter block (`+0x46c`, `0x1000dd5c`), whose `+0x18` and `+0x24` are the frame's triples 3 and 4, the top speed and **the turn rate** ([13-control.md](13-control.md#the-212-byte-frame)) |
 | 13 | 1 − the value of the **attach point** the instance hangs on (interface at `+0x24`, point id at `+0x58`, slot 3; `0x10005f06`) |
-| 14 | 1 − the owner's **life fraction**, property `0x31` — its control system's total life over its total at load ([35-hud.md](35-hud.md#total-health-the-teal-arc--read)) (`0x10005f2d`) |
+| 14 | 1 − the owner's **life fraction**, property `0x31` — its control system's total life over its total at load, `+0x590 ÷ +0x58c` (`Control.dll:0x1000df55`, [35-hud.md](35-hud.md#total-health-the-teal-arc--read)) (`0x10005f2d`); a tree's and a stone's as a machine's, since their agents carry a control system |
 | 15 | the larger of modes 5 and 9 (`0x10005f50`) |
 | 16, 17 | mode 4 that only rises (or drops to 0) / only falls (or jumps to 1): the value is kept only when it moved the right way, or when it is exactly 0 for 16 and 1 for 17, and otherwise the previous one stands (`0x10006063`, `0x10006087`, against the record's `+0x34`) |
 
@@ -346,6 +346,20 @@ and engine glows, and **mode 14 is damage**: `aim_fire_S`, `smoke_fr_01`,
 `smoke_rtr_01`, `tree_flame`, `tree_flame_06`, `tree_flame_30` and the two
 `tree_flame_sound*` — a tree's or a wreck's fire runs *forward* as the thing
 burns down, since *t* is 1 − its life.
+
+**What lights a mode-14 fire** (*read*, and *measured*). All eight carry flag `0x40`, and they
+are the only 8 of the 923 that do: a load group makes them switched off. Block entry 6 switches
+them on as their owner's control system becomes critically damaged and entry 7 off as it
+recovers, and that is reachable for a tree: an agent of kind 10 goes from its control tick
+straight to the life update (`Control.dll:0x1000c294` → `0x1000c74a` → `0x10012a40`), which runs
+entry 6 once its life is under 0.3 of its total
+([13-control.md](13-control.md#critical-damage-block-entries-6-and-7--read-and-measured)). Of the
+32 controllers with an entry 6, 8 are the burning plants' — `s_tree_a_04`, `_05`, `_30`, `_31`,
+`_40` to `_43`, the controllers of `s_tree_04`, `_05`, `_30`, `_31`, `_40` to `_43` — and each
+switches on its `tree_flame` and its sound, ids 1 and 2. So a plant shot under three tenths of its
+life catches fire at *t* above 0.7, past the 0.65 its light's window opens at, and burns on
+toward 1 as it loses the rest. The 31 mode-15 effects hang on robots' and animals' chassis, where
+the spin is the turn of the machine; none of the 923 is in modes 9 to 13.
 
 **Every emitter has a window** of *t*, a `(low, high)` pair — the first thing
 each class's update compares — and does nothing outside it (table below). So an
@@ -3008,6 +3022,12 @@ Read one slot either way, none of the seven name witnesses agrees.
   14 one minus the owner's **life fraction** and 15 the larger of 5 and 9 — and of
   those, only 5, 14 and 15 are used, on 46, 8 and 31 effects, modes 6–13 on none
   ([The jitter, flag 1, and the dead flag 8](#the-jitter-flag-1-and-the-dead-flag-8--read-and-measured)).
+  ~~Still open: what answers the spin and the life fraction for the owners that carry them, and
+  what runs a fire's switch.~~ Answered: the owner's control system — the spin `+0x1d4` over the
+  frame's turn rate, the life left `+0x590` over the life at load `+0x58c` — a tree's as a
+  machine's; and block entry 6, which a tree's life update runs under 0.3 of its life, switches
+  the eight mode-14 fires on, all of them made off by flag `0x40`
+  ([How an effect runs](#how-an-effect-runs--read)).
 - ~~**A phase's animated texture frames**: whether a phase ever advances past frame
   0, and what drives it.~~ Answered: the phase's fractional part **is** the
   fraction of its material's animation track the sprite draws at, through the

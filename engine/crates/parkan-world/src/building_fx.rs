@@ -5,12 +5,14 @@
 
 use glam::Vec3;
 use parkan_formats::control::{
-    ACT_EFFECT_NODE, ACT_EFFECT_POINTS, ACT_START_EFFECT, CONDITIONS, Controller, ENTRY_LOAD, run_group,
+    ACT_EFFECT_NODE, ACT_EFFECT_OFF, ACT_EFFECT_ON, ACT_EFFECT_POINTS, ACT_START_EFFECT, CONDITIONS,
+    Controller, ENTRY_CRITICAL, ENTRY_LOAD, ENTRY_RECOVERED, Reference, run_group,
 };
 use parkan_formats::cpt::{self, ControlPoint};
 use parkan_formats::mission::{self, Mission};
 use parkan_formats::pose::rotate;
 use parkan_sim::combat::Part;
+use parkan_sim::critical::Critical;
 use parkan_sim::effects::Frame;
 
 use crate::assembly::Assembly;
@@ -51,6 +53,27 @@ pub struct BuildingEffects {
     pub effects: Vec<Placed>,
     /// Action 10's starts: an id and the time mode it is started in.
     pub starts: Vec<(i32, u32)>,
+    /// Block entries 6 and 7, run as its control system becomes critically damaged and as it
+    /// recovers: a burning plant's fire is made switched off by the load group and switched on
+    /// by entry 6 (docs/13, "Critical damage: block entries 6 and 7").
+    pub critical: Vec<Reference>,
+    pub recovered: Vec<Reference>,
+    /// Its life update's state, made at the first update from the life it then has.
+    pub damage: Option<Critical>,
+}
+
+/// What a group switches on and off over `conditions` (actions 18 and 19 on id v4,
+/// `Effect.dll:0x10007a30`): each id, and whether it goes on.
+pub fn switches(group: &[Reference], conditions: &[bool; CONDITIONS]) -> Vec<(i32, bool)> {
+    let records: Vec<&Reference> = group.iter().collect();
+    run_group(&records, conditions)
+        .into_iter()
+        .filter_map(|r| match r.action() {
+            ACT_EFFECT_ON => Some((r.values[4], true)),
+            ACT_EFFECT_OFF => Some((r.values[4], false)),
+            _ => None,
+        })
+        .collect()
 }
 
 fn read(assembly: &mut Assembly, library: &str, member: &str) -> Option<Vec<u8>> {
@@ -109,7 +132,18 @@ impl BuildingEffects {
                 _ => {}
             }
         }
-        (!effects.is_empty()).then_some(BuildingEffects { target, part: p, points, effects, starts })
+        let critical = controller.group(ENTRY_CRITICAL).into_iter().cloned().collect();
+        let recovered = controller.group(ENTRY_RECOVERED).into_iter().cloned().collect();
+        (!effects.is_empty()).then_some(BuildingEffects {
+            target,
+            part: p,
+            points,
+            effects,
+            starts,
+            critical,
+            recovered,
+            damage: None,
+        })
     }
 
     /// Control point `i` in the world: where it is on its node, as the node is posed now, and
