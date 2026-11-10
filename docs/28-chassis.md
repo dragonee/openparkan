@@ -862,9 +862,16 @@ is not a category but three state bits, which the loaded tree reads and writes
 
 - What enforces a turret's size and a part's slot — narrowed: nothing in the
   load path. The robot constructor lists parts by name prefix
-  ([What the label is not](#what-the-label-is-not--read-as-a-search)). Open:
-  where its page items' names (`+0xc4`) come from, and so whether the internal
-  pages key on the slot labels.
+  ([What the label is not](#what-the-label-is-not--read-as-a-search)).
+  ~~Open: where its page items' names (`+0xc4`) come from, and so whether the
+  internal pages key on the slot labels.~~ Answered since 2026-09-14 in
+  [38-designs.md](38-designs.md#fitting--read-and-measured), and
+  re-read 2026-11-10: choosing a chassis makes each row with the row
+  constructor (`iron3d.dll:0x10046610`) and assigns its name into the row's
+  `+0xc4` — a node's label for the turret page (`0x10051e8a`), a controller
+  slot's label for the armour and internal pages (`0x10052066`, after the
+  `i_brn_` slots are passed over). So the internal pages do key on the slot
+  labels.
 - ~~The order parts load in, and which same-class record wins~~ — answered:
   the `.dat` pre-order, root first; the last would win and no assembly has
   two ([The order parts load in](#the-order-parts-load-in-and-what-a-slot-keeps--read-and-measured)).
