@@ -58,8 +58,9 @@ to `charge ÷ value 1`. There is no other writer of `+0x120` than the parse
 (full, `0x1002967f`), a shot (`0x1002a06a`) and a dock's rearm.
 
 - **Whose batteries.** Its carrier's, through the control system every agent
-  but a projectile shares — a bot's own fitted battery, a building's clan
-  power ([23-economy.md](23-economy.md#bots-spend-power-through-the-same-code-priced-by-part--read-and-measured)).
+  but a projectile shares — a bot's own fitted battery, a building's own
+  batteries, which its clan's generators refill, or a bunker's −1, which needs
+  none ([23-economy.md](23-economy.md#a-battery-no-capacity-holds--read-and-measured)).
   Weapons are served on the last channel, after the engines, the repair, the
   devices and the shield, so they get what is left.
 - **Against which clock.** The power tick, **250 ± 31 ms**

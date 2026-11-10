@@ -7548,6 +7548,56 @@ def check_building_batteries(check, game: Path) -> None:
           + "; without the parts the walk gives the root's own back")
 
 
+def check_unbounded_batteries(check, game: Path) -> None:
+    """A battery of capacity below 0 (docs/23, "A battery no capacity holds"): its slot 5 skips
+    the store's cap (Control.dll:0x100229f4), its slot 6 skips the drain (0x10022a80), the fill
+    answers 1 at it (0x1002b46f) and the setter writes no charge into it (0x1002bb0e). Counted
+    over every robot, animal and building assembly under UNITS, with the guns a building carries."""
+    ctl_path = game / "Control.dll"
+    if not ctl_path.exists() or not (game / "objects.rlb").exists():
+        return
+    ctl = _image_at(ctl_path.read_bytes())
+    compare = "d81d8cb10310dfe0f6c4"          # fcomp [0.0]; fnstsw ax; test ah, ...
+    read = (ctl(0x100229F4, 13) == bytes.fromhex(compare + "41754e")      # <= 0: uncapped
+            and ctl(0x10022A4F, 9) == bytes.fromhex("d94424105e83c408c2")
+            and ctl(0x10022A80, 13) == bytes.fromhex(compare + "017545")   # < 0: no drain
+            and ctl(0x1002B467, 13) == bytes.fromhex(compare + "017560")   # < 0: answers 1
+            and ctl(0x1002BB0E, 13) == bytes.fromhex(compare + "41750e")   # <= 0: not written
+            and ctl(0x100218EE, 3) == bytes.fromhex("89504c"))            # +0x4c starts at 1
+
+    workshop = units.Workshop(game)
+    unit_negative: Counter[tuple] = Counter()
+    unit_zero = unit_batteries = 0
+    for dat in sorted(game.glob("UNITS/**/*.dat")):
+        unit = objects.load_unit(dat)
+        if not unit.kind or unit.is_building:
+            continue
+        assembled = workshop.assemble(unit)
+        stores = [(d.values[0], round(d.power, 3)) for d in (assembled.devices if assembled else [])
+                  if d.type_id == control.POWER_STORE_TYPE]
+        unit_batteries += len(stores)
+        unit_zero += sum(c == 0 for c, _ in stores)
+        if any(c < 0 for c, _ in stores):
+            kind = "robot" if unit.kind & 0x1000000 else "animal"
+            unit_negative[(kind, tuple(sorted(stores)))] += 1
+    buildings = building_batteries(game)
+    building_negative = Counter(tuple(new) for _, new, _ in buildings.values()
+                                if any(c < 0 for c, _ in new))
+    building_zero = sum(c == 0 for _, new, _ in buildings.values() for c, _ in new)
+    check("Control.dll: a battery of capacity -1 gives its output for ever and reads full",
+          read and unit_zero == 0 and building_zero == 0
+          and unit_negative == Counter({("robot", ((-1.0, 1000.0), (31000.0, 34.5))): 17,
+                                        ("animal", ((-1.0, 250.0),)): 7})
+          and building_negative == Counter({((-1.0, 15.0),): 7, ((-1.0, 20.0),): 5,
+                                            ((-1.0, 25.0),): 3, ((-1.0, 55.0),): 2}),
+          f"value 0 at or below 0 skips the store's cap (0x100229f4) and below 0 the drain "
+          f"(0x10022a80), answers id 1 with 1 (0x1002b46f) and takes no charge from the setter "
+          f"(0x1002bb0e): {read}; of {unit_batteries} robot and animal batteries "
+          f"{unit_zero} have a capacity of 0, and {dict(unit_negative)} carry -1; of the "
+          f"{len(buildings)} building assemblies {sum(building_negative.values())} carry one, "
+          f"alone, {dict(building_negative)}, and no building battery has a capacity of 0")
+
+
 #: Mission 03's placed economy: name -> (Type, clan index, MaximumOre, CurrentOre).
 M03_ECONOMY = {
     "gener01": (0x80000002, 2, 0.0, 0.0), "sbunk01": (0x80010000, 2, 0.0, 0.0),
@@ -29627,7 +29677,8 @@ def run(game: Path) -> int:
         check_actions,
         check_footprints,
         check_rsli,
-        check_control, check_efficiency, check_building_batteries, check_no_logical_id_0,
+        check_control, check_efficiency, check_building_batteries, check_unbounded_batteries,
+        check_no_logical_id_0,
         check_mission_03_economy,
         check_motion, check_playback, check_ground, check_sensors, check_hit_test,
         check_collision, check_lake_and_buoys,

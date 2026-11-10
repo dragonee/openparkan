@@ -1114,9 +1114,8 @@ impl Robot {
                             .is_some()
                     });
             }
-            if self.power.is_none() {
-                g.recharge();
-            }
+            // The capacitor fills on the power tick alone, from the batteries: a unit's own
+            // (`Play::tick_power`), a building's its site's (`Play::tick_economy`).
             shots.extend(g.tick(self.time_ms).into_iter().map(|s| (i, s)));
             if self.gun_parts.get(i).is_some_and(Option::is_some) {
                 continue;

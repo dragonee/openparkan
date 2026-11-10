@@ -106,7 +106,9 @@ fn the_heros_laser_kills_a_small_target_in_two_hits() {
 /// second of its 4,080; walking costs nothing more, every state of its chassis carrying an engine
 /// factor of 0 (docs/24); camouflage adds its 0.3; G switches its repair system on, which heals its
 /// nodes at 15 × its node's condition a second for 0.04 a point and 0.1 idle, and off again; and a
-/// laser shot's 5.5 is drawn back into its capacitor from the battery, served after the rest.
+/// laser shot's 5.5 is drawn back into its capacitor from the battery, served after the rest. The
+/// battery sits on node 0, and what it gives comes off its charge over its capacity × that node's
+/// condition (`Control.dll:0x10022ab0`–`0x10022acf`): hurt, the same draws empty it faster.
 #[test]
 #[ignore = "needs the game install"]
 fn the_heros_battery_pays_for_its_shield_repair_camouflage_and_laser_but_not_its_walking() {
@@ -177,17 +179,31 @@ fn the_heros_battery_pays_for_its_shield_repair_camouflage_and_laser_but_not_its
     let hurt = total(&play);
     let unrepaired = rate(&mut play, 3.0);
     assert!((total(&play) - hurt).abs() < 1e-3, "nothing heals it while repair is off");
-    assert!((unrepaired - idle).abs() < 0.05, "hurt, it idles as before: {unrepaired} against {idle}");
+    // Node 0, the battery's, at half its life: the same idle draws cost it twice the charge.
+    let node_0 = |play: &Play| {
+        let n = &play.hero.lives[0].as_ref().unwrap().nodes[0];
+        n.life / n.max
+    };
+    assert!((node_0(&play) - 0.5).abs() < 1e-3);
+    assert!(
+        (unrepaired - idle / 0.5).abs() < 0.1,
+        "hurt, its idle costs it twice: {unrepaired} against {idle}"
+    );
     press(&mut play, "CICLS_REPAIRSYS");
     assert!(play.hero.pilot.switches.repair, "G switches repair on");
     let before = total(&play);
+    let c0 = node_0(&play);
     let repairing = rate(&mut play, 10.0);
+    let c1 = node_0(&play);
     let healed = total(&play) - before;
     assert!((86.0..98.0).contains(&healed), "{healed} in 10 s");
-    assert!(
-        (repairing - idle - (0.1 + 0.04 * healed / 10.0)).abs() < 0.05,
-        "at 0.04 a point and 0.1: {repairing}"
-    );
+    // Its points come at 15 × node 0's condition and the charge they cost is over the same
+    // condition, so the repair costs 15 × 0.04 = 0.6 of charge a second however fast it heals;
+    // the idle draws and the repair's 0.1 cost what they draw over the condition, which grows
+    // from c0 to c1 as e^(15 t ÷ 380): on average (1 ÷ c0 − 1 ÷ c1) ÷ ln(c1 ÷ c0).
+    let over = (1.0 / c0 - 1.0 / c1) / (c1 / c0).ln();
+    let expected = 15.0 * 0.04 + (idle + 0.1) * over;
+    assert!((repairing - expected).abs() < 0.1, "at 0.04 a point and 0.1: {repairing} against {expected}");
     press(&mut play, "CICLS_REPAIRSYS");
     assert!(!play.hero.pilot.switches.repair);
     let off = total(&play);
@@ -222,6 +238,131 @@ fn the_heros_battery_pays_for_its_shield_repair_camouflage_and_laser_but_not_its
         "full again: {refilled} of {capacitor}, {drawn} after firing"
     );
     assert!(play.battery(None).unwrap() < 1.0 - (idle * 50.0) / 4080.0);
+}
+
+/// A *Tiny Tower*'s battery of −1 (docs/23, "A battery no capacity holds"): C01 M03's two
+/// `12tower.dat`s carry the Small Tower chassis `R_B_06`'s −1 at 1,000 a second beside their
+/// fitted `i_pws_b_03`, 31,000 at 34.5. The device manager's id 1 answers 1 as its walk meets the
+/// −1 (`Control.dll:0x1002b46f`), so the panel's arc reads full whatever the fitted one holds; and
+/// the −1 gives its 1,000 × its condition every power tick, held to no store (`0x100229f4`), and
+/// is never drained (`0x10022a80`). So with the fitted one flat, the tower's shield, radar and
+/// guns are served whole, where the fitted one alone would serve them nothing.
+#[test]
+#[ignore = "needs the game install"]
+fn a_tiny_towers_minus_one_battery_reads_full_and_serves_it_with_its_fitted_battery_flat() {
+    use parkan_formats::mission;
+    use parkan_world::play::Play;
+
+    let game = gamedir::find(None).expect("a Parkan install: set PARKAN_DIR");
+    let dir = gamedir::resolve(&game, gamedir::C01_MISSION_03).unwrap();
+    let m = mission::parse(&std::fs::read(dir.join("data.tma")).unwrap(), "Mission.03").unwrap();
+    let mut play = Play::load(&game, &m).unwrap().expect("a hero");
+    let towers: Vec<usize> = (0..play.robots.len())
+        .filter(|&r| m.objects[play.battle.objects[play.robots[r].0]].path.ends_with("12tower.dat"))
+        .collect();
+    assert_eq!(towers.len(), 2);
+    for &r in &towers {
+        let robot = &mut play.robots[r].1;
+        let power = robot.power.as_mut().expect("a tower has power");
+        let mut figures: Vec<(f32, f32)> =
+            power.batteries.iter().map(|(b, _)| (b.capacity, b.output)).collect();
+        figures.sort_by(|a, b| a.0.total_cmp(&b.0));
+        assert_eq!(figures, [(-1.0, 1000.0), (31_000.0, 34.5)], "R_B_06's −1 beside the fitted battery");
+        for (b, _) in power.batteries.iter_mut().filter(|(b, _)| b.capacity > 0.0) {
+            b.charge = 0.0;
+        }
+        assert!(!robot.guns.is_empty());
+        for g in &mut robot.guns {
+            g.charge = 0.0;
+        }
+    }
+    for &r in &towers {
+        assert_eq!(play.battery(Some(play.robots[r].0)), Some(1.0), "the arc reads full");
+    }
+    play_for(&mut play, 1.0, |_| {});
+    for &r in &towers {
+        let (t, robot) = &play.robots[r];
+        let power = robot.power.as_ref().unwrap();
+        assert!(power.levels.iter().all(|&l| l == 1.0), "every channel served whole: {:?}", power.levels);
+        assert!(robot.guns.iter().all(|g| g.charge > 0.0), "the guns' capacitors refill");
+        let unbounded = power.batteries.iter().find(|(b, _)| b.capacity < 0.0).unwrap().0;
+        assert_eq!(unbounded.charge, 1.0, "the −1 is never drained");
+        assert_eq!(play.battery(Some(*t)), Some(1.0));
+    }
+}
+
+/// Play on to the frame building `t`'s next power tick runs.
+fn to_power_tick(play: &mut parkan_world::play::Play, t: usize) {
+    let last = play.economy.site(t).unwrap().last_power_ms;
+    while play.economy.site(t).unwrap().last_power_ms == last {
+        play.update_input();
+        play.tick(1000.0 / 60.0, [0.0; 2]);
+    }
+}
+
+/// A building's guns are served from its batteries on its power tick, the tick a unit runs
+/// (docs/23, "Bots spend power through the same code"): Mission 03's Small Bunker carries the
+/// bunkers' battery of −1, 15 a second on its root's node 0, and two `e_gun_fc_08`s of 0.1 a
+/// capacitor. Emptied, the two are full again at its next tick, and the battery, which no
+/// capacity holds, is never drained and reads full.
+#[test]
+#[ignore = "needs the game install"]
+fn a_small_bunkers_guns_draw_on_its_minus_one_battery_which_is_never_drained() {
+    let (mut play, _) = mission_03_play();
+    let (bunker, _) = play.emplacements[0];
+    let site = play.economy.site(bunker).expect("the bunker is a site").clone();
+    assert_eq!((site.battery.capacity, site.battery.output, site.battery_node), (-1.0, 15.0, Some(0)));
+    play_for(&mut play, 0.5, |_| {});
+    for g in &mut play.emplacements[0].1.guns {
+        g.charge = 0.0;
+    }
+    to_power_tick(&mut play, bunker);
+    let charges: Vec<f32> = play.emplacements[0].1.guns.iter().map(|g| g.charge).collect();
+    assert_eq!(charges, [0.1, 0.1], "a whole battery serves them in full");
+    let site = play.economy.site(bunker).unwrap();
+    assert_eq!((site.battery.charge, site.level), (1.0, 1.0), "never drained");
+    assert_eq!(play.battery(Some(bunker)), Some(1.0));
+}
+
+/// A Light Tower's guns share what its batteries give with the rest of its draws, at one level
+/// (`Control.dll:0x1002dca0`): C02 M04's `mtow02.dat` holds three fitted `i_pws_f_01`s, 8 each at
+/// 500 a second, and two `e_gun_fc_01`s of 0.1. Held at 0.05% of full, with its clan's
+/// distribution held off, its batteries give 24 × 0.0005 = 0.012 a tick; its efficiency takes
+/// 0.01 a second of it first, and the two emptied capacitors, wanting 0.2, close the share of
+/// their lack that the rest makes: about 5%, where a level of 1 would fill them.
+#[test]
+#[ignore = "needs the game install"]
+fn a_light_towers_guns_on_a_flat_battery_close_the_share_of_their_lack_it_gives() {
+    use parkan_formats::mission;
+
+    let game = gamedir::find(None).expect("a Parkan install: set PARKAN_DIR");
+    let dir = gamedir::resolve(&game, gamedir::C02_MISSION_04).unwrap();
+    let m = mission::parse(&std::fs::read(dir.join("data.tma")).unwrap(), "Mission.04").unwrap();
+    let mut play = campaign_play(gamedir::C02_MISSION_04);
+    let tower = object_target(&play, &m, "mtow02.dat");
+    let e = play.emplacements.iter().position(|(t, _)| *t == tower).expect("the tower carries guns");
+    let site = play.economy.site(tower).expect("the tower is a site").clone();
+    assert_eq!((site.battery.capacity, site.battery.output, site.repairing), (24.0, 1500.0, false));
+    assert_eq!(play.emplacements[e].1.guns.iter().map(|g| g.capacitor).collect::<Vec<_>>(), [0.1, 0.1]);
+    play_for(&mut play, 0.5, |_| {});
+    if let Some(clan) = play.units[tower].clan {
+        play.economy.steps.insert(clan, (f64::INFINITY, 0.0));
+    }
+    to_power_tick(&mut play, tower);
+    play.economy.site_mut(tower).unwrap().battery.charge = 0.0005;
+    for g in &mut play.emplacements[e].1.guns {
+        g.charge = 0.0;
+    }
+    let from = play.economy.site(tower).unwrap().last_power_ms;
+    to_power_tick(&mut play, tower);
+    let step = ((play.economy.site(tower).unwrap().last_power_ms - from) / 1000.0) as f32;
+    let given = 24.0 * 0.0005;
+    let share = (given - 0.01 * step) / 0.2;
+    for g in &play.emplacements[e].1.guns {
+        assert!((g.charge - 0.1 * share).abs() < 1e-5, "{} against {}", g.charge, 0.1 * share);
+    }
+    let site = play.economy.site(tower).unwrap();
+    assert!(site.battery.charge < 1e-6, "all it held is spent: {}", site.battery.charge);
 }
 
 #[test]

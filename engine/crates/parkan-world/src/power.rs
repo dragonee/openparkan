@@ -69,7 +69,10 @@ fn node(p: usize, k: &Component) -> Node {
 impl Power {
     /// The power of the unit built from `path`, from every component it ends up with, a fitted
     /// part's in its slot (docs/28, "A fitted part takes over its slot"); `None` for a unit with
-    /// no battery that holds anything.
+    /// no battery at all, which only the two target dummies are, and they carry no gun (0 of the
+    /// 382 robot and animal designs under `UNITS` carry a gun without a battery, *measured*). A
+    /// battery no capacity holds, the Small Tower chassis's −1 at 1,000 a second or an animal's
+    /// at 250, is kept: it gives its output every tick and is never drained ([`Battery`]).
     ///
     /// A device whose initial state (record `+0x18`) is 0 starts switched off (`0x10021d86`);
     /// every other starts on, and a repair system is switched by its owner.
@@ -78,7 +81,7 @@ impl Power {
         let slots = crate::shields::slots(assembly, kind, path, &classes);
         let batteries: Vec<(Battery, Node)> = slots
             .iter()
-            .filter(|(_, _, k)| k.type_id == control::BATTERY_TYPE && k.values[BATTERY_CAPACITY] > 0.0)
+            .filter(|(_, _, k)| k.type_id == control::BATTERY_TYPE)
             .map(|(p, _, k)| (Battery::new(k.values[BATTERY_CAPACITY], k.power), node(*p, k)))
             .collect();
         if batteries.is_empty() {
@@ -116,16 +119,22 @@ impl Power {
     }
 
     /// The batteries' fill, `Σ capacity × charge ÷ Σ capacity` (`Control.dll:0x1002b42b`): what
-    /// the device manager answers as id 1, and the panel's battery arc.
+    /// the device manager answers as id 1, and the panel's battery arc. A battery of capacity
+    /// below 0 answers 1 at once, as the walk meets it (`0x1002b46f`), so a *Tiny Tower* reads
+    /// full whatever its fitted 31,000 holds.
     pub fn fill(&self) -> f32 {
+        if self.batteries.iter().any(|(b, _)| b.unbounded()) {
+            return 1.0;
+        }
         let capacity: f32 = self.batteries.iter().map(|(b, _)| b.capacity).sum();
         let held: f32 = self.batteries.iter().map(|(b, _)| b.capacity * b.charge).sum();
         if capacity > 0.0 { held / capacity } else { 0.0 }
     }
 
-    /// Every battery set to `fill` of full, as id 1 writes it (`0x1002bae6`).
+    /// Every battery set to `fill` of full, as id 1 writes it (`0x1002bae6`): every one whose
+    /// capacity is above 0 (`0x1002bb16`).
     pub fn set_fill(&mut self, fill: f32) {
-        for (b, _) in &mut self.batteries {
+        for (b, _) in self.batteries.iter_mut().filter(|(b, _)| b.capacity > 0.0) {
             b.charge = fill.clamp(0.0, 1.0);
         }
     }
@@ -149,7 +158,9 @@ impl Power {
     /// the shield what [`Shield::want`] says and each gun what its capacitor lacks. The channels
     /// are served in their order ([`power::serve`]), the shield takes its group's level for its
     /// recharge, the repair's points go to `lives` (by part), each gun's capacitor fills, and the
-    /// batteries drain by what was used. A device on a destroyed node draws nothing.
+    /// batteries drain by what was used, each by its share of what they gave over its capacity ×
+    /// its condition (`0x10022a60`). One no capacity holds gives its output × its condition and
+    /// is not drained ([`Battery`]). A device on a destroyed node draws nothing.
     pub fn tick(
         &mut self,
         dt: f32,
@@ -168,8 +179,9 @@ impl Power {
             }
         };
         let whole = |lives: &[Option<&mut Life>], node: Node| condition(lives, node) > 0.0;
+        let conditions: Vec<f32> = self.batteries.iter().map(|(_, n)| condition(lives, *n)).collect();
         let supplies: Vec<f32> =
-            self.batteries.iter().map(|(b, n)| b.supply(dt, condition(lives, *n))).collect();
+            self.batteries.iter().zip(&conditions).map(|((b, _), c)| b.supply(dt, *c)).collect();
         let supply: f32 = supplies.iter().sum();
 
         let mut draws = Vec::new();
@@ -231,8 +243,8 @@ impl Power {
             }
         }
         if supply > 0.0 {
-            for ((b, _), give) in self.batteries.iter_mut().zip(&supplies) {
-                b.drain(used * give / supply);
+            for (((b, _), give), c) in self.batteries.iter_mut().zip(&supplies).zip(&conditions) {
+                b.drain(used * give / supply, *c);
             }
         }
     }
@@ -346,5 +358,65 @@ mod tests {
             Switches::default(),
         );
         assert_eq!((laser.charge, shield.level), (before, 0.0), "nothing from a flat battery");
+    }
+
+    /// `Control.dll:0x100229a0`, `0x10022a60`, `0x1002b42b`: a *Tiny Tower* carries the Small
+    /// Tower chassis's battery of −1 at 1,000 a second beside its fitted `i_pws_b_03`, 31,000 at
+    /// 34.5. The −1 gives 1,000 × its condition a second and is never drained; the fitted one
+    /// gives 34.5 × its charge and drains by its share of what was used; and id 1 answers 1
+    /// whatever the fitted one holds, so the panel's arc reads full.
+    #[test]
+    fn a_tiny_towers_minus_one_battery_serves_its_guns_and_reads_full() {
+        let (mut power, mut shield, mut life) = hero();
+        power.batteries =
+            vec![(Battery::new(31_000.0, 34.5), Some((0, 0))), (Battery::new(-1.0, 1000.0), Some((0, 0)))];
+        power.batteries[0].0.charge = 0.25;
+        assert_eq!(power.fill(), 1.0, "id 1 answers 1 at the −1");
+        let mut values = [0.0; 16];
+        values[..4].copy_from_slice(&[-1.0, 50.0, 0.01, 2000.0]);
+        let record = Component {
+            type_id: control::GUN_TYPE,
+            resource: ResourceRef::default(),
+            index: None,
+            entries: Vec::new(),
+            label: String::new(),
+            values,
+            power: 0.0,
+            node: 0,
+            mass: 0.0,
+            flags: 0,
+            group: -1,
+            started: -1,
+            stopped: -1,
+            weights: [0.0; 2],
+        };
+        let mut gun = Gun::new(0, &record, &[]);
+        gun.charge = 0.0;
+        shield.fills = [0.0; SECTORS];
+        // A quarter second: the −1 gives 250 and the fitted one 34.5 × 0.25 × 0.25, so the shield's
+        // recharge and a gun lacking 50 are both served whole, which the fitted one alone, at
+        // 2.16, could not do.
+        power.tick(
+            0.25,
+            &mut [Some(&mut life)],
+            Some(&mut shield),
+            std::slice::from_mut(&mut gun),
+            0.0,
+            Switches::default(),
+        );
+        assert_eq!((gun.charge, shield.level), (50.0, 1.0));
+        let given = 250.0 + 34.5 * 0.25 * 0.25;
+        let used = 50.0 + (0.08 + 0.11 + 2.0 + 15.0 * 0.04 + 0.2) * 0.25;
+        let drained = 0.25 - power.batteries[0].0.charge;
+        assert!((drained - used * (34.5 * 0.25 * 0.25) / given / 31_000.0).abs() < 2e-7, "{drained}");
+        assert_eq!(power.batteries[1].0.charge, 1.0, "the −1 is never drained");
+        assert_eq!(power.fill(), 1.0);
+        // A dock's top-up reads 1 and writes it into the fitted battery alone.
+        power.set_fill(power.fill() + 0.1);
+        assert_eq!((power.batteries[0].0.charge, power.batteries[1].0.capacity), (1.0, -1.0));
+        // Without its −1 the arc would read what the fitted one holds.
+        power.batteries[0].0.charge = 0.25;
+        power.batteries.pop();
+        assert_eq!(power.fill(), 0.25);
     }
 }

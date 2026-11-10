@@ -297,7 +297,11 @@ selected units, and none unless the game's `+0x08` is 4):
     Of the 374 robot designs under `UNITS` that is **17**, every one a walking
     warrior on the *Small Tower* chassis `R_B_06`, whose own battery is −1; and
     **28** of the 267 robots the missions place
-    ([35-hud.md](35-hud.md#name-and-status--read-and-seen));
+    ([35-hud.md](35-hud.md#name-and-status--read-and-seen)). The same battery
+    makes the device manager's id 1 answer 1, and gives its 1,000 a second
+    undrained, so a *Tiny Tower*'s battery arc reads full whatever its fitted
+    31,000 holds
+    ([23-economy.md](23-economy.md#a-battery-no-capacity-holds--read-and-measured));
   - *measured*, over the 296 units the 29 missions place: size classes 1 to 4,
     13, 140, 75 and 68 of them, and `ChassisType` 1 to 4, 58 flying,
     127 walking, 58 wheeled and 53 tracked. None falls outside the tables. The

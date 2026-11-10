@@ -330,17 +330,6 @@ impl Gun {
         }
     }
 
-    /// Top the capacitor up, as a full power tick would.
-    ///
-    /// STAND-IN: docs/23-economy.md#bots-spend-power-through-the-same-code-priced-by-part--read-and-measured
-    /// -- a building's guns draw what their capacitors lack from its batteries on its power
-    /// tick, and the building's economy is not modelled: a gun on a building, or on a unit with
-    /// no battery, is served at a level of 1. A unit with a battery runs the read tick,
-    /// [`Gun::want`] and [`Gun::serve`].
-    pub fn recharge(&mut self) {
-        self.serve(1.0, 0.0);
-    }
-
     /// Run every event due by `now_ms` (`Control.dll:0x1002d260`); returns the rounds
     /// that left.
     pub fn tick(&mut self, now_ms: f64) -> Vec<Shot> {
@@ -520,13 +509,14 @@ mod tests {
         Gun::new(0, &record, &channels)
     }
 
-    /// Fire with the button held for `ms`, at 60 ticks a second; the shot times.
+    /// Fire with the button held for `ms`, at 60 ticks a second, each a power tick served in
+    /// full; the shot times.
     fn hold(g: &mut Gun, ms: f64) -> Vec<f64> {
         g.state = CONTINUE_FIGHT;
         let mut out = Vec::new();
         let mut t = 0.0;
         while t <= ms {
-            g.recharge();
+            g.serve(1.0, 0.0);
             out.extend(g.tick(t).into_iter().map(|s| s.t_ms));
             t += 1000.0 / 60.0;
         }

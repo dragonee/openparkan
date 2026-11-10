@@ -82,6 +82,10 @@ pub struct Site {
     pub efficiency: f32,
     pub level: f32,
     pub battery: Battery,
+    /// The root node its batteries sit on, whose life over its maximum is their condition.
+    /// *Measured*: all 182 batteries of the 74 building assemblies that carry any are on the
+    /// root controller and each building's on one node, 0 on all but the two generators, 17.
+    pub battery_node: Option<usize>,
     /// What a task at work set with `SetPowerUsage`.
     pub usage: f32,
     pub next_power_ms: f64,
@@ -274,6 +278,7 @@ impl Economy {
             figure("Transfer_Ore_OnBoard"),
         );
         let (mut efficiency, mut capacity, mut output, mut repair) = (None, 0.0_f32, 0.0_f32, None);
+        let mut battery_node = None;
         let controller = |assembly: &mut Assembly, record: &str| {
             let slot = assembly.library.record_slot(assembly.library.get(record), "ctl", 0)?;
             assembly
@@ -306,13 +311,16 @@ impl Economy {
                     }
                     control::BATTERY_TYPE => {
                         // A battery with a negative capacity makes the whole building read full
-                        // (`Control.dll:0x1002b42b`).
+                        // (`Control.dll:0x1002b42b`) and gives its output, held to no store.
+                        // None ships beside a battery that has a capacity: the 17 buildings that
+                        // carry one, 15 bunkers and 2 generators, carry it alone.
                         if k.values[control::BATTERY_CAPACITY] < 0.0 || capacity < 0.0 {
                             capacity = -1.0;
                         } else {
                             capacity += k.values[control::BATTERY_CAPACITY];
                         }
                         output += k.power;
+                        battery_node = battery_node.or(usize::try_from(k.node).ok());
                     }
                     control::REPAIR_TYPE => {
                         let system = Repair {
@@ -345,6 +353,7 @@ impl Economy {
             efficiency: efficiency.unwrap_or(1.0),
             level: 1.0,
             battery: Battery::new(capacity, output),
+            battery_node,
             usage: 0.0,
             next_power_ms: now + POWER_TICK_MS + jitter,
             last_power_ms: now,
@@ -416,35 +425,51 @@ impl Play {
     pub fn tick_economy(&mut self, now: f64, dt: f32) {
         self.join_sites();
         self.building_takts(now);
-        // A building's power tick (`Control.dll:0x1002d340`): its efficiency component draws
-        // 0.01 and its usage a second from its batteries, and KPD's level is what they serve;
-        // then, on channel 0, its repair system what [`Repair::want`] says, and its points go to
-        // the building's nodes, destroyed ones and all (docs/26, "Repair").
+        // A building's power tick (`Control.dll:0x1002d340`), the tick a unit runs: its batteries
+        // give at their node's condition; its efficiency component draws 0.01 and its usage a
+        // second, first, and KPD's level is what they serve; then, on channel 0, its repair
+        // system what [`Repair::want`] says, and its points go to the building's nodes,
+        // destroyed ones and all (docs/26, "Repair"); and on channel 4 its guns, each what its
+        // capacitor lacks (`0x10029a40`), all at one level (`0x1002dca0`).
         for i in 0..self.economy.sites.len() {
             if now < self.economy.sites[i].next_power_ms {
                 continue;
             }
             let jitter = self.economy.power_jitter();
-            let Play { economy, battle, .. } = self;
+            let Play { economy, battle, emplacements, .. } = self;
             let site = &mut economy.sites[i];
             let step = ((now - site.last_power_ms) / 1000.0) as f32;
             site.last_power_ms = now;
             site.next_power_ms = now + POWER_TICK_MS + jitter;
-            let efficiency = (EFFICIENCY_POWER + site.usage) * step;
-            let target = battle.combat.targets.get_mut(site.target).filter(|x| x.alive);
-            let (Some((system, node)), Some(target)) = (site.repair, target) else {
-                site.level = site.battery.serve(&[efficiency], step).0[0];
-                continue;
-            };
-            let root = target.parts.first().and_then(|p| p.life.as_ref());
-            let condition = node.map_or(1.0, |n| crate::play::node_share(root, n).0);
-            let mut lives: Vec<&mut Life> = target.parts.iter_mut().filter_map(|p| p.life.as_mut()).collect();
-            let lack = power::lack(lives.iter().map(|l| &**l), true);
-            let want = system.want(site.repairing, step, condition, lack);
-            let (levels, _) = site.battery.serve(&[efficiency, want], step);
+            let target = battle.combat.targets.get_mut(site.target);
+            let root = target.as_ref().and_then(|x| x.parts.first()).and_then(|p| p.life.as_ref());
+            let condition = site.battery_node.map_or(1.0, |n| crate::play::node_share(root, n).0);
+            let mut wants = vec![(EFFICIENCY_POWER + site.usage) * step];
+            // The repair system, with its node's condition and the building's own lives.
+            let mut repair = None;
+            if let (Some((system, node)), Some(target)) = (site.repair, target.filter(|x| x.alive)) {
+                let root = target.parts.first().and_then(|p| p.life.as_ref());
+                let condition = node.map_or(1.0, |n| crate::play::node_share(root, n).0);
+                let lives: Vec<&mut Life> = target.parts.iter_mut().filter_map(|p| p.life.as_mut()).collect();
+                let lack = power::lack(lives.iter().map(|l| &**l), true);
+                wants.push(system.want(site.repairing, step, condition, lack));
+                repair = Some((system, condition, lack, lives));
+            }
+            let guns = emplacements.iter_mut().find(|(t, _)| *t == site.target).map(|(_, r)| &mut r.guns);
+            if let Some(guns) = &guns {
+                wants.push(guns.iter().map(|g| g.want(step)).sum());
+            }
+            let (levels, _) = site.battery.serve(&wants, step, condition);
             site.level = levels[0];
-            let points = system.points(site.repairing, levels[1], step, condition, lack);
-            power::restore(&mut lives, points, true);
+            if let Some((system, condition, lack, mut lives)) = repair {
+                let points = system.points(site.repairing, levels[1], step, condition, lack);
+                power::restore(&mut lives, points, true);
+            }
+            if let (Some(guns), Some(&level)) = (guns, levels.last()) {
+                for g in guns.iter_mut() {
+                    g.serve(level, step);
+                }
+            }
         }
         for f in &mut self.factories {
             if let Some(site) = self.economy.sites.iter().find(|s| s.target == f.target) {

@@ -844,7 +844,10 @@ is the device getter's id 1 on the control system's `+0x38`: the batteries'
 fill ([14-controls.md](14-controls.md#the-join-with-the-controller--read)).
 - The fill is the sum of every battery's charge (value `0x200`) over the sum of
   their capacities (value 0) (`0x1002b42b`).
-- It is 1 if any capacity is negative.
+- It is 1 if any capacity is negative (`0x1002b46f`). That is a *Tiny
+  Tower*'s, a bunker's, a generator's and an animal's −1, which is never
+  drained, so their arc reads full whatever a fitted store beside it holds
+  ([23-economy.md](23-economy.md#a-battery-no-capacity-holds--read-and-measured)).
 - **With no capacity the query fails**, and the property hands back 0
   (`0x1000dff8`), so a unit with no battery shows **an empty arc** (*derived*).
 

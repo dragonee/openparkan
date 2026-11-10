@@ -339,7 +339,9 @@ the fill is `Σ capacity × charge / Σ capacity` (`Control.dll:0x1002b42b`) and
 the capacity `Σ capacity` (`0x1002b4e9`), capacity being a battery's first
 value. Topping a building up writes the new fill into every battery's charge
 (`0x1002bae6`). A battery with a negative capacity makes the whole building
-read full: that is a generator's (`fr_l_gener`, −1).
+read full: that is a generator's and a bunker's (−1), which gives its output
+every second and is never drained
+([below](#a-battery-no-capacity-holds--read-and-measured)).
 
 **Every controller tick spends the batteries** (*read*,
 `Control.dll:0x1002d340`, `dt` in seconds). Each component reports a flow
@@ -413,8 +415,8 @@ figures.
   | 3 × (6.5, 17) | 19.5 held, 51 a second | 24 held, 1,500 a second | 20 |
   | 4 × (5, 13) | 20 held, 52 a second | 32 held, 2,000 a second | 13 |
 
-- **The other 21 keep their root's own**: the generators' −1, which reads
-  full, the bunkers' and the ruins'.
+- **The other 21 keep their root's own**: the generators' and the bunkers'
+  −1, which reads full, and the ruins'.
 - **Efficiency is untouched.** On all 76 the class-26 values come out the same
   with the parts fitted as without, so `KPD` is still the root's own value.
 - **Mission 03's:** the Large Factory (`lplant01`) holds 32 and the Small
@@ -607,7 +609,7 @@ Each class prices its own draw in its vtable slot 5, read per class:
 | fight shield (9) | `power` plus `value 2 ×` the recharge it does: `min(value 1 × condition, value 0 × 6 − the six sectors' strength)` (`0x10025700`) |
 | detect shield (10) | `power`, plus value 4 while it is in mode `0x1000` (`0x100264b0`) |
 | repair (15) | `power` plus `value 1 ×` the hit points it restores, at most `value 0 × condition` a second (`0x10022b20`) |
-| battery (19) | a source: `min(output × charge × condition, capacity × charge × condition)` (`0x100229a0`) |
+| battery (19) | a source: `min(output × charge × condition, capacity × charge × condition)` (`0x100229a0`), and with a capacity of 0 or less the first alone ([below](#a-battery-no-capacity-holds--read-and-measured)) |
 
 The numbers make the split plain (*measured*). A building's fight shield
 recharges 80 a second of 8,000 a sector at 0.00015 a point; a bot's large
@@ -623,6 +625,69 @@ weapons, served fourth, get what is left.
 (`0x100229a0`), so a robot's whole supply is its battery's 5–34.5 a second, not
 the chassis's 250. A small battery's 5–6.8 does not cover a small red laser at
 full rate (7.1 a second) on its own.
+
+**A store pays for what it gives at its condition** (*read*). Slot 6 of a
+battery (`Control.dll:0x10022a60`) takes the tick's level × what it gave, over
+its capacity × its condition, off its charge (`0x10022ab0`–`0x10022acf`): the
+condition that cut what it gave cuts what it holds as fast. So the same draws
+empty a store on a node at half its life twice as fast, and one that gives all
+it holds is emptied however hurt it is. *Measured* on the hero standing with
+every node at half its life: its idle draws come off its 4,080 at 4.80 a
+second against 2.40 whole.
+
+### A battery no capacity holds — *read*, and *measured*
+
+**A capacity below 0 is not a store.** The battery's slot 5 compares its value
+0 with 0 and, at 0 or less, skips the store's cap (`0x100229f4` →
+`0x10022a4f`): it gives its output × its charge × its condition × `dt`
+however short or long the tick. Its slot 6 skips the drain when value 0 is
+below 0 (`0x10022a80`), and the setter that writes a fill into the batteries
+passes over any whose value 0 is 0 or less (`0x1002bb0e`). Its charge is
+therefore the 1 every component is made with (`0x100218ee`; only a saved
+game's stream loads another, `0x10022077`), and it gives its whole output
+every second, for ever. The rest of the tick is unchanged: what it gives joins
+the supply, the channels are served in their order, and channel 1's level,
+what was used over what was given, drains any store beside it by its share.
+The fill answers 1 the moment its walk meets one (`0x1002b46f`–`0x1002b4db`),
+so the panel's battery arc reads full
+([35-hud.md](35-hud.md#battery-the-orange-arc--read)).
+
+*Measured*, over every assembly under `UNITS`: every negative capacity shipped
+is −1, and none is 0 (0 of 411 robot and animal batteries, 0 of 182 building
+ones).
+
+| who | the −1's output a second | beside it |
+|---|---:|---|
+| the 17 robots on the *Small Tower* chassis `R_B_06`, the *Tiny Tower*s | 1,000 | the fitted `i_pws_b_03`, 31,000 at 34.5 |
+| the 7 animals | 250 | nothing |
+| the 7 small bunkers | 15 | nothing |
+| the 5 medium bunkers | 20 | nothing |
+| the 3 large bunkers | 25 | nothing |
+| the 2 generators, `fr_l_gener` | 55 | nothing |
+
+So a *Tiny Tower* is never short (*derived*): its idle draws, fight and
+detection shields, radar, deflector and a running repair system, come to 6.3
+to 6.6 a second and its fight shield's recharge to at most 4.8 more, against
+1,000 + 34.5 × the fitted store's charge. The fitted store gives about 3% of what is used and
+drains by that, slowly; a dock tops it up to full, the dock reading the fill's
+1 and writing it back (`Behavior.dll:0x10019372`). A bunker's 15 to 25 serve
+its efficiency, shield, repair and guns whole while the node they sit on lives,
+and fall with that node's life.
+
+**A building's guns draw on its batteries in the same tick** (*read*, and
+*measured*). A building's control system is the one a robot has
+(`LoadControlSystem`, [above](#bots-spend-power-through-the-same-code-priced-by-part--read-and-measured)),
+its class-2 guns on channel 4, served after its efficiency (3), its repair
+system and doors (0) and its shield and deflector (2 and 5), each asking what
+its capacitor lacks (`0x10029a40`). 27 of the 76 building assemblies carry
+guns, 2 or 3 `e_gun_fc_*` each: the 15 bunkers on their −1, and 12 towers on
+three or four fitted `i_pws_f_01`s of 8 at 500. Every one has a capacitor of
+0.1, a shot taking 0.01, so what binds is a tower whose batteries its clan
+cannot refill: at 0.05% of its 24 they give 0.012 a tick, its efficiency takes
+0.0025 of it, and two empty guns close the 5% of their lack the rest makes. All
+182 building batteries sit on the root controller, and each building's on one
+node, 0 on all but the two generators, 17, whose life over its maximum is
+their condition. The placed buildings with guns are 31, in 16 missions.
 
 ## The bot limit is the clan's mind count — *read*, and *measured*
 
@@ -1444,6 +1509,16 @@ construction slows research.
   shipped clan's own pick
   ([36-factory.md](36-factory.md#what-the-start-refuses--read),
   [15-behaviour.md](15-behaviour.md#what-each-clan-may-build--measured)).
+- ~~How a building's gun capacitor refills, and how the power tick spends a
+  battery of capacity −1, a *Tiny Tower*'s.~~ **Read**, and *measured*: a
+  building's guns are served on its own power tick from its batteries, on
+  channel 4 after its efficiency, repair, shield and deflector, as a unit's are;
+  and a battery below 0 is held to no store (`Control.dll:0x100229f4`), gives
+  its output × its condition every second and is never drained (`0x10022a80`)
+  nor written (`0x1002bb0e`), and the fill answers 1 at it (`0x1002b46f`). Every
+  one shipped is −1: the 17 *Tiny Tower*s' at 1,000, beside a fitted 31,000;
+  the animals' at 250; the bunkers' at 15 to 25 and the generators' at 55
+  ([A battery no capacity holds](#a-battery-no-capacity-holds--read-and-measured)).
 - **The 13 s a recorded transport round takes** beyond two walks at full speed:
   its held speed on Tut_3's slopes and the distance between its two places are
   not measured.

@@ -3946,7 +3946,7 @@ impl Play {
     /// (docs/23). A unit's is set on its own power tick ([`Play::tick_power`]).
     ///
     /// STAND-IN: docs/26-damage.md#power--read -- a building's shield and deflector draws are not
-    /// taken from its batteries, which serve the efficiency alone.
+    /// taken from its batteries, which serve its efficiency, its repair system and its guns.
     fn power_shields(&mut self) {
         for t in 0..self.battle.combat.targets.len() {
             let Some(level) = self.economy.site(t).map(|site| site.level) else { continue };

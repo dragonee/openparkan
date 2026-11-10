@@ -80,9 +80,17 @@ impl ShiftJitter {
     }
 }
 
-/// A building's batteries, its class-19 components together: their capacity, their output a
-/// second, and their charge 0..1. A negative capacity reads full whatever is drawn (a
-/// generator's); none at all serves every draw.
+/// A battery, or a building's class-19 components together: their capacity, their output a
+/// second, and their charge 0..1.
+///
+/// A capacity below 0 is a battery no capacity holds (`Control.dll:0x100229a0`, slot 5): its
+/// value 0 at 0 or less, the store's cap is skipped (`0x100229f4`) and it gives its output ×
+/// charge × condition a tick whatever the tick's length; its drain is skipped for value 0 below
+/// 0 (`0x10022a80`, slot 6), and the setter writes no charge into it (`0x1002bb0e`). Its charge
+/// is the 1 every component is made with (`0x100218ee`), so it gives its output every second,
+/// for ever, and reads full (`0x1002b472`). *Measured*: every one shipped is −1: the Small Tower
+/// chassis `R_B_06`'s, 1,000 a second; the animals', 250; the generators', 55; and the
+/// bunkers', 15 to 25. A capacity of exactly 0 ships nowhere.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Battery {
     pub capacity: f32,
@@ -95,25 +103,26 @@ impl Battery {
         Self { capacity, output, charge: 1.0 }
     }
 
+    /// Whether no capacity holds it: a capacity below 0.
+    pub fn unbounded(&self) -> bool {
+        self.capacity < 0.0
+    }
+
     /// One power tick of `dt` seconds with the efficiency drawing `need` a second
-    /// (`Control.dll:0x1002d340`): the batteries give `min(output × charge × dt, capacity ×
-    /// charge)`, and the level the draw is served at is what they give over what it wants,
-    /// held to 1 (`0x1002dca0`); the charge falls by what was used. Returns the level and the
-    /// charge used.
+    /// (`Control.dll:0x1002d340`), the batteries whole: the level the draw is served at and the
+    /// charge used ([`Battery::serve`]).
     pub fn spend(&mut self, need: f32, dt: f32) -> (f32, f32) {
-        let (levels, used) = self.serve(&[need * dt], dt);
+        let (levels, used) = self.serve(&[need * dt], dt, 1.0);
         (levels[0], used)
     }
 
-    /// One power tick of `dt` seconds with draws wanting `wants` of charge over it, one channel
-    /// group each in the order they are served (`0x1002d3c1`–`0x1002d439`): each gets `min(1,
-    /// what is left ÷ what it wants)` of what it wants from what the batteries give, and the
-    /// charge falls by what was used. Returns each draw's level and the charge used.
-    pub fn serve(&mut self, wants: &[f32], dt: f32) -> (Vec<f32>, f32) {
-        if self.capacity <= 0.0 {
-            return (vec![1.0; wants.len()], 0.0);
-        }
-        let give = (self.output * self.charge * dt).min(self.capacity * self.charge);
+    /// One power tick of `dt` seconds at `condition`, with draws wanting `wants` of charge over
+    /// it, one channel group each in the order they are served (`0x1002d3c1`–`0x1002d439`):
+    /// the batteries give [`Battery::supply`], each group gets `min(1, what is left ÷ what it
+    /// wants)` of what it wants (`0x1002dca0`), and the charge falls by what was used
+    /// ([`Battery::drain`]). Returns each group's level and the charge used.
+    pub fn serve(&mut self, wants: &[f32], dt: f32, condition: f32) -> (Vec<f32>, f32) {
+        let give = self.supply(dt, condition);
         let mut left = give;
         let levels = wants
             .iter()
@@ -124,33 +133,40 @@ impl Battery {
             })
             .collect();
         let used = give - left;
-        self.charge = (self.charge - used / self.capacity).max(0.0);
+        self.drain(used, condition);
         (levels, used)
     }
 
-    /// What a unit's battery gives over `dt` seconds at `condition`, its node's life over its
-    /// maximum (`Control.dll:0x100229a0`): `min(output × charge × condition × dt, capacity ×
-    /// charge × condition)`.
+    /// What it gives over `dt` seconds at `condition`, its node's life over its maximum
+    /// (`Control.dll:0x100229a0`): `min(output × charge × condition × dt, capacity × charge ×
+    /// condition)`, and for a battery no capacity holds the first alone.
     pub fn supply(&self, dt: f32, condition: f32) -> f32 {
-        if self.capacity <= 0.0 || condition <= 0.0 {
+        if condition <= 0.0 {
             return 0.0;
         }
-        (self.output * self.charge * condition * dt).min(self.capacity * self.charge * condition)
+        let flow = self.output * self.charge * condition * dt;
+        if self.capacity <= 0.0 { flow } else { flow.min(self.capacity * self.charge * condition) }
     }
 
-    /// `used` of what it gave taken from its charge, served last (`0x1002d439`).
-    pub fn drain(&mut self, used: f32) {
-        if self.capacity > 0.0 {
-            self.charge = (self.charge - used.max(0.0) / self.capacity).max(0.0);
+    /// `used` of what it gave at `condition` taken from its charge, served last (`0x1002d439`):
+    /// the battery's slot 6 takes `used ÷ (capacity × condition)` off it (`0x10022ab0`–
+    /// `0x10022acf`), so at a condition under 1 a store gives less and empties as fast. A battery
+    /// no capacity holds is not drained (`0x10022a80`), nor one at a condition of 0, which gave
+    /// nothing.
+    pub fn drain(&mut self, used: f32, condition: f32) {
+        if self.capacity > 0.0 && condition > 0.0 {
+            self.charge = (self.charge - used.max(0.0) / (self.capacity * condition)).max(0.0);
         }
     }
 
-    /// What the batteries lack of full (`Control.dll:0x1002b42b`, `0x1002b4e9`).
+    /// What the batteries lack of full (`Control.dll:0x1002b42b`, `0x1002b4e9`): nothing for one
+    /// no capacity holds, which reads full.
     pub fn lack(&self) -> f32 {
         if self.capacity <= 0.0 { 0.0 } else { self.capacity * (1.0 - self.charge) }
     }
 
-    /// Topped up by `share` of what they lack (`0x1002bae6`).
+    /// Topped up by `share` of what they lack (`0x1002bae6`), which writes no charge into one no
+    /// capacity holds.
     pub fn top_up(&mut self, share: f32) {
         if self.capacity > 0.0 {
             self.charge += (1.0 - self.charge) * share.clamp(0.0, 1.0);
@@ -262,9 +278,40 @@ mod tests {
         assert!((b.lack() - 20.0).abs() < 0.01);
         b.top_up(0.5);
         assert!((b.charge - 0.5).abs() < 1e-3);
-        // A generator reads full whatever it gives.
-        let mut g = Battery::new(-1.0, 0.0);
-        assert_eq!((g.spend(1.0, 1.0), g.lack()), ((1.0, 0.0), 0.0));
+    }
+
+    /// `Control.dll:0x100229a0`, `0x10022a60` and `0x1002bae6`: a battery of capacity −1 gives
+    /// its output × its condition every second, held to no store, and nothing drains it, tops it
+    /// up or writes its charge. A generator's 55 a second serves a quarter-second's 0.01 in full
+    /// and goes on doing so; a draw past what it gives in a tick is served at the share it gives.
+    #[test]
+    fn a_battery_of_negative_capacity_gives_its_output_for_ever_and_is_never_drained() {
+        let mut g = Battery::new(-1.0, 55.0);
+        assert!(g.unbounded());
+        for _ in 0..10_000 {
+            assert_eq!(g.spend(EFFICIENCY_POWER, 0.25).0, 1.0);
+        }
+        assert_eq!((g.charge, g.lack()), (1.0, 0.0), "never drained, reads full");
+        // A tick gives 55 × 0.25, whatever the capacity of 1 would hold.
+        let (levels, used) = g.serve(&[10.0, 10.0], 0.25, 1.0);
+        assert!((levels[1] - 3.75 / 10.0).abs() < 1e-6 && (used - 13.75).abs() < 1e-4, "{levels:?}");
+        // At half its node's life it gives half.
+        assert!((g.supply(0.25, 0.5) - 6.875).abs() < 1e-5);
+        g.top_up(1.0);
+        assert_eq!(g.charge, 1.0);
+        // One giving nothing serves nothing: no capacity is not "every draw in full".
+        let mut none = Battery::new(-1.0, 0.0);
+        assert_eq!(none.spend(1.0, 1.0).0, 0.0);
+    }
+
+    /// `0x10022ab0`–`0x10022acf`: a store's drain is what it gave over its capacity × its
+    /// condition, so a store at half its node's life that gives all it holds is emptied.
+    #[test]
+    fn a_damaged_store_gives_less_and_empties_as_fast() {
+        let mut b = Battery::new(8.0, 500.0);
+        let (levels, used) = b.serve(&[10.0], 0.25, 0.5);
+        assert!((used - 4.0).abs() < 1e-5 && (levels[0] - 0.4).abs() < 1e-6);
+        assert_eq!(b.charge, 0.0);
     }
 
     #[test]
