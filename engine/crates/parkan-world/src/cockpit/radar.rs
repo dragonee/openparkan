@@ -261,12 +261,26 @@ fn indicators(ink: &mut Ink, play: &Play, page6: u16, ui_menu: u16, ui_menu3: u1
     }
 }
 
+/// How far the reticle's dot stands from the screen's middle for a camera looking along its
+/// unit's own frame's axis (`iron3d.dll:0x100e5e88`).
+pub const DOT_REACH: f32 = 24.0;
+
+/// The reticle's dot's top-left corner for a camera whose look, in its unit's own frame, is
+/// `look` (`0x10043065`–`0x100430ea`): a 2 × 2 square about `(320 − 24 x, 240 − 24 y)`, each
+/// edge rounded to the pixel. `x` and `y` are `[+0]` and `[+0x10]` of the camera's placement
+/// in its unit, its property 0: the first column, the way the camera looks
+/// (docs/35, "The reticle"). Looking along the unit's forward axis, y, the dot stands 24 above
+/// the middle; the camera turned on its unit by φ, it stands 24 from the middle at φ, so it
+/// shows which way the unit's own frame points against the view.
+pub fn reticle_dot(look: glam::Vec3) -> [f32; 2] {
+    let edge = |middle: f32, v: f32| middle - (DOT_REACH * v + 1.0).round_ties_even();
+    [edge(320.0, look.x), edge(240.0, look.y)]
+}
+
 /// The reticle (`0x10042ed0`): a circle, four corner arcs and two tick strips about the screen's
-/// middle, and a dot.
-///
-/// STAND-IN: docs/35-hud.md#the-reticle--read -- what the camera view's property 0 the dot is
-/// placed by is not read: the dot stays in the middle.
-pub fn reticle(cockpit: &Cockpit, ink: &mut Ink) {
+/// middle, and a dot placed by the shown unit's camera's look in the unit's own frame
+/// ([`reticle_dot`], [`crate::robot::Robot::look_in_frame`]).
+pub fn reticle(cockpit: &Cockpit, ink: &mut Ink, play: &Play) {
     let Some(page9) = cockpit.pages.get("page9").copied() else { return };
     ink.painter.pin = Pin::CENTRE;
     let green = argb(RETICLE);
@@ -285,12 +299,28 @@ pub fn reticle(cockpit: &Cockpit, ink: &mut Ink) {
     let strip = piece([168.0, 0.0, 82.0, 15.0]);
     p.piece(strip, [232.0, 233.0, 314.0, 248.0], green);
     p.piece(strip, [408.0, 233.0, 326.0, 248.0], green);
-    p.fill(Blend::Alpha, [319.0, 239.0, 2.0, 2.0], argb(GREEN));
+    let look = play.driven().look_in_frame().unwrap_or(glam::Vec3::ZERO);
+    let [x, y] = reticle_dot(look);
+    p.fill(Blend::Alpha, [x, y, 2.0, 2.0], argb(GREEN));
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `iron3d.dll:0x10043065`–`0x100430ea`: the dot's box runs from `320 − round(24 x + 1)` to
+    /// `320 − round(24 x − 1)` across and the same about 240 by y. A camera looking down its
+    /// unit's forward axis has (0, 1): the dot sits 24 above the middle, as the recording shows
+    /// it standing through most of Part 1; a camera looking down the unit's −x has (−1, 0), and
+    /// the dot is 24 right of the middle.
+    #[test]
+    fn the_reticles_dot_stands_24_from_the_middle_toward_the_units_own_axis() {
+        assert_eq!(reticle_dot(glam::Vec3::Y), [319.0, 215.0]);
+        assert_eq!(reticle_dot(glam::Vec3::ZERO), [319.0, 239.0], "no look, the middle");
+        assert_eq!(reticle_dot(-glam::Vec3::X), [343.0, 239.0]);
+        let h = std::f32::consts::FRAC_1_SQRT_2;
+        assert_eq!(reticle_dot(glam::Vec3::new(h, h, 0.0)), [302.0, 222.0]);
+    }
 
     #[test]
     fn a_contact_ahead_is_straight_up_and_one_to_the_left_is_left() {

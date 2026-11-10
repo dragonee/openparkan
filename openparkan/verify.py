@@ -7598,6 +7598,34 @@ def check_unbounded_batteries(check, game: Path) -> None:
           f"alone, {dict(building_negative)}, and no building battery has a capacity of 0")
 
 
+def check_reticle_dot(check, game: Path) -> None:
+    """The reticle's dot (docs/35, "The reticle"): the camera view's interface 6, property 0, is
+    the camera object's placement in its parent (Terrain.dll:0x1008aeae), which the camera
+    component writes as type 0 (Control.dll:0x10023879, 0x10023896); the dot's x takes its
+    [+0] and its y its [+0x10], each 24 from the middle (iron3d.dll:0x10042f54, 0x10043065)."""
+    paths = [game / name for name in ("iron3d.dll", "Terrain.dll", "Control.dll")]
+    if not all(p.exists() for p in paths):
+        return
+    iron, terrain, ctl = (_image_at(p.read_bytes()) for p in paths)
+    query = iron(0x10042F09, 23) == bytes.fromhex("ba060000008bc8ff168b4424088b108d4c240c516a0050")
+    columns = iron(0x10042F27, 5) == bytes.fromhex("8b108b4010")
+    stored = iron(0x10042F54, 8) == bytes.fromhex("8954243489442430")
+    dot = (iron(0x10043065, 18) == bytes.fromhex("d9442410d80d885e0e108b10d94424146a00")
+           and struct.unpack("<f", iron(0x100E5E88, 4))[0] == 24.0
+           and struct.unpack("<f", iron(0x100E59CC, 4))[0] == 1.0)
+    placement = terrain(0x1008AEAE, 17) == bytes.fromhex("8b74240c8b4e0c83f9ff750a83c61c8933")
+    writes = (ctl(0x10023869, 19) == bytes.fromhex("8b5b388d9424f4000000526a008b0b53ff511c")
+              and ctl(0x10023886, 17) == bytes.fromhex("8b5b388d8c2494000000516a008b0353ff"))
+    check("iron3d.dll: the reticle's dot is the camera's look in its unit, 24 from the middle",
+          query and columns and stored and dot and placement and writes,
+          f"interface 6 slot 8 asked for property 0 (0x10042f1d): {query}; its [+0] and [+0x10] "
+          f"kept for x and y (0x10042f27, 0x10042f54): {columns and stored}; the box about "
+          f"(320 - 24 x, 240 - 24 y), 2 wide (0x10043065, 24.0, 1.0): {dot}; property 0 is the "
+          f"placement in the parent, +0x1c with no parent node (Terrain.dll:0x1008aeae): "
+          f"{placement}; the camera component writes it as type 0 (Control.dll:0x10023879, "
+          f"0x10023896): {writes}")
+
+
 #: Mission 03's placed economy: name -> (Type, clan index, MaximumOre, CurrentOre).
 M03_ECONOMY = {
     "gener01": (0x80000002, 2, 0.0, 0.0), "sbunk01": (0x80010000, 2, 0.0, 0.0),
@@ -29678,7 +29706,7 @@ def run(game: Path) -> int:
         check_footprints,
         check_rsli,
         check_control, check_efficiency, check_building_batteries, check_unbounded_batteries,
-        check_no_logical_id_0,
+        check_reticle_dot, check_no_logical_id_0,
         check_mission_03_economy,
         check_motion, check_playback, check_ground, check_sensors, check_hit_test,
         check_collision, check_lake_and_buoys,

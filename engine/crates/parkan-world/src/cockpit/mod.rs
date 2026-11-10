@@ -324,7 +324,7 @@ impl Cockpit {
         if !self.map.open {
             voices.extend(weapons::draw(self, &mut ink, play));
         }
-        radar::reticle(self, &mut ink);
+        radar::reticle(self, &mut ink, play);
         wingmen::draw(self, &mut ink, play);
         map::draw(self, &mut ink, play, now_ms);
         ink.painter.pin = Pin::TOP;

@@ -683,13 +683,50 @@ All of it is green (55, 255, 55) and blended (`0x10042ed0`):
 
 - **The corner arcs** are one art, mirrored into the four corners.
 - **The tick strips** are the same art twice, the second mirrored.
-- **A dot.** Last comes a 2 × 2 filled green (0, 255, 0) square at
-  `(320 − 24·b, 240 − 24·a)`. `a` and `b` are `[+0]` and `[+0x10]` of the
-  camera view's interface 6, property 0.
+- **A dot.** Last comes a 2 × 2 filled green (0, 255, 0) square about
+  `(320 − 24·a, 240 − 24·b)`, each edge rounded, where `a` and `b` are `[+0]`
+  and `[+0x10]` of the camera view's interface 6, property 0
+  (`0x10042f1d`–`0x10042f58`; the box `0x10043065`–`0x100430ea`, 24 at
+  `0x100e5e88`, the half-width 1 at `0x100e59cc`). This page once had the two
+  the other way about; the box's first corner is `320 − round(24 a − 1)` across.
+
+**The dot shows which way the unit points against the view** (*read*, and
+*seen*). The view is the unit's first class-4 component's camera object, made in
+`World3D.dll` as kind 5 with the unit's object for its parent and no node
+(`Control.dll:0x10023910`). Property 0 of any game object is its placement in
+its parent, the matrix at its `+0x1c` when it hangs on no node
+(`CGameObject::GetPlacement`, `Terrain.dll:0x1008aeae`); 1 is the same matrix
+read against the parent's node and 2 the world matrix. The camera component
+writes property 0 on every tick (`Control.dll:0x10023879`, and `0x10023896` in
+its other mode), with the look it builds from its nodes and, in mode `0x200`,
+its own two free-look turns. So `[+0]` and `[+0x10]` are the first column's x
+and y, the way the camera looks in the unit's own frame, as the world matrix's
+are the radar's heading ([The radar](#the-radar--read-and-seen)):
+looking down the unit's forward axis, y, the dot stands 24 above the middle,
+and the camera turned on its unit by φ, at 24 from the middle and φ round. On
+foot that is the hull's walk against the turret: a strafe turns the hull
+half a right angle while walking and a right angle standing, and the
+turret holds the view
+([24-motion.md](24-motion.md#from-input-to-motion--read-and-measured)).
+
+*Seen*, in "Let's Play - Parkan: Iron Strategy, Part 1" (9_rcJkRzgZQ), a frame
+every 5 s from 400 s to 1240 s, the solid green square looked for round the
+reticle at about 4.45 video pixels to the game's: of 168 frames, 132 show the
+dot, every one 23.0 to 25.1 from the middle — 82 straight above, 37 up and to
+the left and 6 up and to the right at 45°, 3 level beside it at 90° and 4
+between, on their way round — and **none in the middle**. The 35 without one
+are not the cockpit, and one more found a green patch 234 pixels across, not a
+dot. Which strafe key sent it to which side is not seen.
 
 ### Not established
 
-- What the camera's property 0 holds, so what the reticle's dot shows.
+- ~~What the camera's property 0 holds, so what the reticle's dot shows.~~
+  **Read**, and *seen*: the camera object's placement in its unit, which the
+  camera component writes every tick (`Control.dll:0x10023879`,
+  `Terrain.dll:0x1008aeae`); the dot stands at 24 from the middle toward the
+  way the camera looks in the unit's frame, above it looking straight ahead, and
+  goes round as the hull turns under the turret. Part 1's recording never shows
+  it in the middle ([The reticle](#the-reticle--read)).
 - In which view states the three widgets are drawn.
 - The game object's byte `+0xe5`, which silences the radar's ping.
 - Where text's `(x, y)` sits on a glyph: the font's slot 7 takes it as given.

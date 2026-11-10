@@ -1463,6 +1463,16 @@ impl Robot {
         mount.compose(&mesh.world_pose_by(node, local))
     }
 
+    /// The way the camera looks in the unit's own frame: the first column of the placement the
+    /// camera component writes into its camera object as property 0, the placement in its
+    /// parent object (`Control.dll:0x10023879`, `0x10023896`; `Terrain.dll:0x1008aeae`), which
+    /// the reticle's dot is placed by (`iron3d.dll:0x10042f20`, docs/35, "The reticle"): the
+    /// eye's look, free look and all, turned back by the unit's own turn.
+    pub fn look_in_frame(&self) -> Option<Vec3> {
+        let eye = self.eye()?;
+        Some(self.walker.drawn_turn(self.time_ms).inverse() * eye.forward)
+    }
+
     /// The first-person eye (`Control.dll:0x100234c0`): `CameraCenter`'s position plus
     /// the shake, `TargetDirect`'s vector for the look and `CameraCenter`'s own vector
     /// for the up, turned by free look ([`view`]), with the field its zoom has reached.

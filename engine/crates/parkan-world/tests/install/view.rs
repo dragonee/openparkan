@@ -499,6 +499,54 @@ fn leaving_the_window_lets_shift_up_and_the_free_look_centres_on_foot_and_aboard
     assert!(play.driven().guns.iter().all(|g| g.state == parkan_sim::guns::STATE_OFF), "the guns stop");
 }
 
+/// The reticle's dot is placed by the camera's placement in its unit, property 0 of the camera
+/// object (docs/35, "The reticle"): `(320 − 24 x, 240 − 24 y)` by the first column, the way the
+/// camera looks in the unit's own frame. The hero standing looks down its frame's y, so the dot
+/// stands above the middle, 24 × the cosine of the sight's pitch from it, where Part 1's recording
+/// holds it through most of its walking; walking with a strafe key the hull turns half a right
+/// angle under the turret, and the dot goes 45° round toward the strafe, as the recording
+/// shows it going round to (±17, −18).
+#[test]
+#[ignore = "needs the game install"]
+fn the_reticles_dot_stands_above_the_middle_and_goes_round_toward_a_strafe() {
+    use parkan_world::cockpit::radar::reticle_dot;
+
+    let (mut play, _) = mission_01_play();
+    let tick = |play: &mut parkan_world::play::Play, n: usize| {
+        for _ in 0..n {
+            play.update_input();
+            play.tick(1000.0 / 60.0, [0.0; 2]);
+        }
+    };
+    // The dot's centre from the screen's middle, as a distance and an angle clockwise from up;
+    // and the distance a level look would put it at, 24 × the look's share across the ground.
+    let dot = |play: &parkan_world::play::Play| {
+        let look = play.driven().look_in_frame().expect("the hero's camera");
+        let [x, y] = reticle_dot(look);
+        let [dx, dy] = [x + 1.0 - 320.0, y + 1.0 - 240.0];
+        (dx.hypot(dy), dx.atan2(-dy).to_degrees(), 24.0 * look.truncate().length())
+    };
+    tick(&mut play, 30);
+    let (r, angle, level) = dot(&play);
+    assert!((r - level).abs() <= 1.0 && angle.abs() < 1.0, "standing: {r} at {angle}°, {level}");
+    assert!(level > 20.0);
+    for (key, side) in [("SCAN_A", -1.0), ("SCAN_D", 1.0)] {
+        play.key("SCAN_W", true);
+        play.key(key, true);
+        tick(&mut play, 90);
+        let (r, angle, level) = dot(&play);
+        assert!(
+            (r - level).abs() <= 1.5 && (angle - side * 45.0).abs() < 4.0,
+            "W and {key}: {r} at {angle}°"
+        );
+        play.key(key, false);
+        play.key("SCAN_W", false);
+        tick(&mut play, 90);
+        let (_, angle, _) = dot(&play);
+        assert!(angle.abs() < 1.0, "the hull back under the turret: {angle}°");
+    }
+}
+
 /// A game command as its key runs it, from the unit's own view.
 fn press_command(play: &mut parkan_world::play::Play, command: &str) {
     let eye = play.own_eye();
